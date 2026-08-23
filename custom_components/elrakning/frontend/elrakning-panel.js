@@ -165,7 +165,7 @@ class ElrakningPanel {
     this._chartDebugCopyText = "";
     this._meterPowerHistory = { date: null, points: [] };
     this._meterPowerVisible = { import: true, export: true };
-    this._priceLayerVisible = { spot: false, electricity: true, grid: false };
+    this._priceLayerVisible = { spot: true, electricity: true, grid: false };
     this._providerConfigured = false;
     this.priceData = {
       source: "nord_pool",
@@ -228,7 +228,7 @@ class ElrakningPanel {
             <button type="button" class="chart-legend-toggle" data-chart-layer="grid" aria-pressed="false">
               <span class="chart-legend-swatch grid" aria-hidden="true"></span>Elnät
             </button>
-            <button type="button" class="chart-legend-toggle" data-chart-layer="spot" aria-pressed="false">
+            <button type="button" class="chart-legend-toggle active" data-chart-layer="spot" aria-pressed="true">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Spotpris
             </button>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="import" aria-pressed="true">
