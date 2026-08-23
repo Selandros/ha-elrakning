@@ -165,7 +165,8 @@ class ElrakningPanel {
     this._chartDebugCopyText = "";
     this._meterPowerHistory = { date: null, points: [] };
     this._meterPowerVisible = { import: true, export: true };
-    this._priceLayerVisible = { spot: true, electricity: true, grid: false };
+    this._spotBarsVisible = true;
+    this._priceComparisonVisible = { electricity: true, grid: false };
     this._providerConfigured = false;
     this.priceData = {
       source: "nord_pool",
@@ -220,14 +221,16 @@ class ElrakningPanel {
               </div>
             </div>
           </div>
-          <div class="price-chart" aria-live="polite"></div>
-          <div class="price-chart-legend" data-meter-legend hidden>
-            <button type="button" class="chart-legend-toggle active" data-chart-layer="electricity" aria-pressed="true">
+          <div class="price-comparison-controls" aria-label="Prisjämförelse">
+            <button type="button" class="chart-legend-toggle active" data-price-layer="electricity" aria-pressed="true">
               <span class="chart-legend-swatch electricity" aria-hidden="true"></span>Elhandel
             </button>
-            <button type="button" class="chart-legend-toggle" data-chart-layer="grid" aria-pressed="false">
+            <button type="button" class="chart-legend-toggle" data-price-layer="grid" aria-pressed="false">
               <span class="chart-legend-swatch grid" aria-hidden="true"></span>Elnät
             </button>
+          </div>
+          <div class="price-chart" aria-live="polite"></div>
+          <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="spot" aria-pressed="true">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Spotpris
             </button>
@@ -889,6 +892,14 @@ class ElrakningPanel {
           margin-top: 1px;
         }
 
+        .price-comparison-controls {
+          align-items: center;
+          display: flex;
+          gap: 12px;
+          justify-content: flex-end;
+          margin: -4px 0 8px;
+        }
+
         .chart-legend-toggle {
           align-items: center;
           background: transparent;
@@ -905,6 +916,11 @@ class ElrakningPanel {
         .chart-legend-toggle.active {
           color: var(--primary-text-color);
           opacity: 1;
+        }
+
+        .chart-legend-toggle:disabled {
+          cursor: default;
+          opacity: .35;
         }
 
         .chart-legend-toggle[data-chart-layer="import"] {
@@ -1015,27 +1031,6 @@ class ElrakningPanel {
 
         .chart-meter-export {
           stroke: var(--grid-export-color);
-        }
-
-        .chart-price-layer {
-          fill: none;
-          stroke-linecap: round;
-          stroke-linejoin: round;
-          stroke-width: 1.5;
-          vector-effect: non-scaling-stroke;
-        }
-
-        .chart-price-layer.spot {
-          stroke: var(--secondary-text-color);
-          stroke-dasharray: 4 3;
-        }
-
-        .chart-price-layer.electricity {
-          stroke: var(--primary-color);
-        }
-
-        .chart-price-layer.grid {
-          stroke: var(--accent-color);
         }
 
         .price-marker-label {
@@ -1171,17 +1166,21 @@ class ElrakningPanel {
           this.renderPriceChart();
           return;
         }
-        if (!(layer in this._priceLayerVisible)) return;
-        this._priceLayerVisible[layer] = !this._priceLayerVisible[layer];
-        if (this._priceLayerVisible.electricity || this._priceLayerVisible.grid) {
-          this._priceLayerVisible.spot = true;
-        }
-        for (const priceLayer of Object.keys(this._priceLayerVisible)) {
-          const priceButton = this.host.querySelector(`[data-chart-layer="${priceLayer}"]`);
-          if (!priceButton) continue;
-          priceButton.classList.toggle("active", this._priceLayerVisible[priceLayer]);
-          priceButton.setAttribute("aria-pressed", String(this._priceLayerVisible[priceLayer]));
-        }
+        if (layer !== "spot") return;
+        this._spotBarsVisible = !this._spotBarsVisible;
+        button.classList.toggle("active", this._spotBarsVisible);
+        button.setAttribute("aria-pressed", String(this._spotBarsVisible));
+        this.renderPriceChart();
+      });
+    }
+    for (const button of this.host.querySelectorAll("[data-price-layer]")) {
+      button.addEventListener("click", () => {
+        const layer = button.dataset.priceLayer;
+        if (!(layer in this._priceComparisonVisible) || button.disabled) return;
+        this._priceComparisonVisible[layer] = !this._priceComparisonVisible[layer];
+        button.classList.toggle("active", this._priceComparisonVisible[layer]);
+        button.setAttribute("aria-pressed", String(this._priceComparisonVisible[layer]));
+        this.updatePriceSummary();
         this.renderPriceChart();
       });
     }
@@ -2156,7 +2155,6 @@ class ElrakningPanel {
     } catch {
       this.priceSnapshot = { error: "data_unavailable", periods: [] };
     }
-    this.updatePriceSummary();
     this.priceData = {
       source: "nord_pool",
       mode: this.priceSnapshot.mode || "spot_price",
@@ -2164,6 +2162,8 @@ class ElrakningPanel {
       periods: Array.isArray(this.priceSnapshot.periods) ? this.priceSnapshot.periods : [],
       error: this.priceSnapshot.error || null,
     };
+    this._updatePriceComparisonControls();
+    this.updatePriceSummary();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
   }
 
@@ -2309,23 +2309,44 @@ class ElrakningPanel {
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
   }
 
-  _activePriceLayer() {
-    return ["electricity", "grid", "spot"].find((layer) => this._priceLayerVisible[layer]) || null;
+  _periodCustomerPrice(period) {
+    const value = Number(period.customer_price ?? period.price);
+    return Number.isFinite(value) ? value * 100 : null;
   }
 
-  _priceLayerValue(period, layer) {
+  _comparisonPrice(period) {
     const spotExVat = Number(period.spot_price_ex_vat);
-    const customerPrice = Number(period.customer_price ?? period.price);
-    if (layer === "spot") {
-      return Number.isFinite(spotExVat) ? spotExVat * 125 : customerPrice * 100;
+    const fallbackSpot = Number(period.price);
+    const spot = Number.isFinite(spotExVat) ? spotExVat : fallbackSpot;
+    if (!Number.isFinite(spot)) return null;
+    let subtotal = spot;
+    if (this._priceComparisonVisible.electricity) {
+      const electricity = Number(period.electricity_cost_ex_vat);
+      if (Number.isFinite(electricity)) subtotal += electricity;
     }
-    if (layer === "electricity") {
-      return customerPrice * 100;
+    if (this._priceComparisonVisible.grid) {
+      const grid = Number(period.grid_cost_ex_vat);
+      if (Number.isFinite(grid)) subtotal += grid;
     }
-    const gridExVat = Number(period.grid_cost_ex_vat);
-    return Number.isFinite(gridExVat) && Number.isFinite(spotExVat)
-      ? (spotExVat + gridExVat) * 125
-      : (Number.isFinite(spotExVat) ? spotExVat * 125 : customerPrice * 100);
+    return subtotal * 125;
+  }
+
+  _hasGridPriceData() {
+    return this.priceData.periods.length > 0
+      && this.priceData.periods.every((period) => Number.isFinite(Number(period.grid_cost_ex_vat)));
+  }
+
+  _updatePriceComparisonControls() {
+    const button = this.host.querySelector('[data-price-layer="grid"]');
+    if (!button) return;
+    const available = this._hasGridPriceData();
+    button.disabled = !available;
+    button.title = available ? "Visa elnätskostnad i prisjämförelsen" : "Elnätspris saknas";
+    if (!available) {
+      this._priceComparisonVisible.grid = false;
+      button.classList.remove("active");
+      button.setAttribute("aria-pressed", "false");
+    }
   }
 
   updatePriceSummary() {
@@ -2333,29 +2354,40 @@ class ElrakningPanel {
       ? this.priceSnapshot.periods
       : [];
     const now = new Date();
-    const current = periods.find((period) => {
+    const currentPeriod = periods.find((period) => {
       const start = new Date(period.start);
       const end = new Date(period.end);
       return start <= now && now < end;
     });
-    const lowest = periods.reduce((result, period) => (
-      !result || Number(period.price) < Number(result.price) ? period : result
+    const comparison = periods.map((period) => ({ period, value: this._comparisonPrice(period) }))
+      .filter((item) => Number.isFinite(item.value));
+    const lowestItem = comparison.reduce((result, item) => (
+      !result || item.value < result.value ? item : result
     ), null);
-    const highest = periods.reduce((result, period) => (
-      !result || Number(period.price) > Number(result.price) ? period : result
+    const highestItem = comparison.reduce((result, item) => (
+      !result || item.value > result.value ? item : result
     ), null);
-    const average = periods.length
-      ? { price: periods.reduce((sum, period) => sum + Number(period.price), 0) / periods.length }
+    const current = currentPeriod && Number.isFinite(this._comparisonPrice(currentPeriod))
+      ? { ...currentPeriod, price: this._comparisonPrice(currentPeriod) / 100 }
       : null;
-    const prices = periods.map((period) => Number(period.price) * 100);
+    const lowest = lowestItem ? { ...lowestItem.period, price: lowestItem.value / 100 } : null;
+    const highest = highestItem ? { ...highestItem.period, price: highestItem.value / 100 } : null;
+    const average = comparison.length
+      ? { price: comparison.reduce((sum, item) => sum + item.value, 0) / comparison.length / 100 }
+      : null;
+    const prices = periods.map((period) => this._periodCustomerPrice(period)).filter(Number.isFinite);
     const colorBands = priceColorBands(prices);
-    const currentIndex = periods.indexOf(current);
+    const currentIndex = periods.indexOf(currentPeriod);
     const currentCategory = currentIndex >= 0
       ? priceCategory(prices[currentIndex], colorBands)
       : null;
     const analysis = this.host.querySelector("[data-price-analysis]");
     if (analysis) {
-      const upcoming = generateUpcomingPriceAnalysis(periods, currentIndex, now);
+      const analysisPeriods = periods.map((period) => ({
+        ...period,
+        price: this._periodCustomerPrice(period) / 100,
+      }));
+      const upcoming = generateUpcomingPriceAnalysis(analysisPeriods, currentIndex, now);
       analysis.replaceChildren();
       if (upcoming.status) {
         const status = document.createElement("span");
@@ -2402,20 +2434,14 @@ class ElrakningPanel {
     }
 
     const periods = this.priceData.periods;
-    const activePriceLayer = this._activePriceLayer();
-    const visiblePriceLayers = Object.keys(this._priceLayerVisible)
-      .filter((layer) => this._priceLayerVisible[layer]);
-    const prices = activePriceLayer
-      ? periods.map((period) => this._priceLayerValue(period, activePriceLayer))
-      : [];
-    const visibleLayerPrices = visiblePriceLayers.flatMap((layer) => (
-      periods.map((period) => this._priceLayerValue(period, layer))
-    )).filter(Number.isFinite);
+    this._updatePriceComparisonControls();
+    const prices = periods.map((period) => this._periodCustomerPrice(period));
     const average = prices.length
       ? prices.reduce((sum, price) => sum + price, 0) / prices.length
       : 0;
-    const minimum = visibleLayerPrices.length ? Math.min(...visibleLayerPrices) : 0;
-    const maximum = visibleLayerPrices.length ? Math.max(...visibleLayerPrices) : 0;
+    const finitePrices = prices.filter(Number.isFinite);
+    const minimum = finitePrices.length ? Math.min(...finitePrices) : 0;
+    const maximum = finitePrices.length ? Math.max(...finitePrices) : 0;
     const range = maximum - minimum;
     const colorBands = priceColorBands(prices);
     const priceRanks = new Map();
@@ -2445,16 +2471,16 @@ class ElrakningPanel {
       dayDuration,
     };
     const now = new Date();
-    const currentPeriod = activePriceLayer && periods.find((period) => {
+    const currentPeriod = periods.find((period) => {
       const start = new Date(period.start);
       const end = new Date(period.end);
       return start <= now && now < end;
     });
-    const lowestPeriod = activePriceLayer && periods.reduce((lowest, period) => (
-      this._priceLayerValue(period, activePriceLayer) < this._priceLayerValue(lowest, activePriceLayer) ? period : lowest
+    const lowestPeriod = periods.reduce((lowest, period) => (
+      this._periodCustomerPrice(period) < this._periodCustomerPrice(lowest) ? period : lowest
     ), periods[0]);
-    const highestPeriod = activePriceLayer && periods.reduce((highest, period) => (
-      this._priceLayerValue(period, activePriceLayer) > this._priceLayerValue(highest, activePriceLayer) ? period : highest
+    const highestPeriod = periods.reduce((highest, period) => (
+      this._periodCustomerPrice(period) > this._periodCustomerPrice(highest) ? period : highest
     ), periods[0]);
     const markerGroups = new Map();
     [[currentPeriod, "Nu"], [lowestPeriod, "Lägst"], [highestPeriod, "Högst"]]
@@ -2498,16 +2524,7 @@ class ElrakningPanel {
     const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
       new Date(point.timestamp).getTime() <= timestamp ? point : latest
     ), null);
-    const priceLayerPath = (layer) => periods
-      .map((period) => `${x(period.start)},${y(this._priceLayerValue(period, layer))}`)
-      .join(" ");
-    const priceLayerLines = activePriceLayer
-      ? visiblePriceLayers
-        .filter((layer) => layer !== activePriceLayer)
-        .map((layer) => `<polyline class="chart-price-layer ${layer}" points="${priceLayerPath(layer)}" />`)
-        .join("")
-      : "";
-    const bars = activePriceLayer ? periods.map((period, index) => {
+    const bars = this._spotBarsVisible ? periods.map((period, index) => {
       const price = prices[index];
       const top = price >= 0 ? y(price) : zeroY;
       const bottom = price >= 0 ? zeroY : y(price);
@@ -2543,7 +2560,7 @@ class ElrakningPanel {
       ? Math.min(...prices.map((price) => price >= 0 ? y(price) : zeroY))
       : plot.top + plotHeight;
     const markerLabelY = Math.max(16, highestBarTop - 10);
-    const priceMarkers = activePriceLayer ? [...markerGroups.entries()].map(([, group]) => {
+    const priceMarkers = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
       const markerX = (x(group.period.start) + x(group.period.end)) / 2;
       const label = group.labels.join("/");
       const labelWidth = label.length * 8.5;
@@ -2564,10 +2581,9 @@ class ElrakningPanel {
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       ${bars}
-      ${priceLayerLines}
       ${meterAxis}
       ${meterLines}
-      ${activePriceLayer ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
+      ${this._spotBarsVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       ${priceMarkers}
       ${hourLabels}
     </svg><div class="chart-tooltip" hidden></div>`;
@@ -2627,7 +2643,8 @@ class ElrakningPanel {
       const start = new Date(period.start);
       const end = new Date(period.end);
       const time = `${this.formatTime(start)}–${this.formatTime(end)}`;
-      const value = `${this.formatPrice(Number(period.price) * 100)} öre/kWh`;
+      const comparisonPrice = this._comparisonPrice(period);
+      const value = `${Number.isFinite(comparisonPrice) ? this.formatPrice(comparisonPrice) : "–"} öre/kWh`;
       const index = this.priceData.periods.indexOf(period);
       const details = this._debugEnabled ? this._chartTooltipDetails?.get(index) : null;
       const tooltipText = details ? createPriceDebugText({ time, value, details }) : "";
@@ -2654,7 +2671,7 @@ class ElrakningPanel {
     };
     svg.addEventListener("mousemove", (event) => {
       if (event.sourceCapabilities?.firesTouchEvents) return;
-      if (!this._activePriceLayer()) {
+      if (!this._spotBarsVisible) {
         clearBarHover();
         tooltip.hidden = true;
         return;
@@ -2699,7 +2716,7 @@ class ElrakningPanel {
       }
     };
     svg.addEventListener("click", (event) => {
-      if (!this._debugEnabled || !this._activePriceLayer() || !insidePlot(event.clientX, event.clientY)) return;
+      if (!this._debugEnabled || !this._spotBarsVisible || !insidePlot(event.clientX, event.clientY)) return;
       const hit = periodAt(event.clientX);
       if (!hit) return;
       show(hit.period, event);
@@ -2733,7 +2750,7 @@ class ElrakningPanel {
       this._chartTouch = null;
       if (!state || !touch) return;
       if (state.moved || Math.abs(chart.scrollLeft - state.scrollLeft) > 3) return;
-      if (!this._activePriceLayer() || !insidePlot(touch.clientX, touch.clientY)) {
+      if (!this._spotBarsVisible || !insidePlot(touch.clientX, touch.clientY)) {
         clearPinnedTooltip();
         return;
       }
