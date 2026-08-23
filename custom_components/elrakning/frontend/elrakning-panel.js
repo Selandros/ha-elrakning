@@ -1027,7 +1027,7 @@ class ElrakningPanel {
         }
 
         .price-chart {
-          min-height: 400px;
+          min-height: 350px;
           overflow-x: auto;
           position: relative;
           -webkit-overflow-scrolling: touch;
@@ -1244,7 +1244,7 @@ class ElrakningPanel {
 
         .chart-svg {
           display: block;
-          height: 400px;
+          height: 350px;
           min-width: 720px;
           width: 100%;
         }
@@ -2995,7 +2995,7 @@ class ElrakningPanel {
     colorBands?.sorted.forEach((price, index) => priceRanks.set(price, index + 1));
     this._chartTooltipDetails = new Map();
     const width = 960;
-    const height = 400;
+    const height = 350;
     const plot = { left: 42, right: 8, top: 42, bottom: 30 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
