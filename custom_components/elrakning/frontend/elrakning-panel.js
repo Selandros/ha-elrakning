@@ -296,6 +296,24 @@ class ElrakningPanel {
             <button type="button" class="chart-legend-toggle active" data-chart-layer="export" aria-pressed="true">
               <span class="chart-legend-swatch export" aria-hidden="true"></span>Export
             </button>
+            <button type="button" class="chart-legend-toggle chart-legend-preview active solar">
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Solproduktion
+            </button>
+            <button type="button" class="chart-legend-toggle chart-legend-preview active consumption">
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Förbrukning
+            </button>
+            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-export">
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Export till nätet
+            </button>
+            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-import">
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Import från nätet
+            </button>
+            <button type="button" class="chart-legend-toggle chart-legend-preview active charging">
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning
+            </button>
+            <button type="button" class="chart-legend-toggle chart-legend-preview active discharging">
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning
+            </button>
           </div>
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisprognos laddas …</p>
         </section>
@@ -950,7 +968,7 @@ class ElrakningPanel {
           display: flex;
           flex-wrap: wrap;
           gap: 12px;
-          height: 22px;
+          min-height: 22px;
           justify-content: center;
           margin-top: 1px;
         }
@@ -1058,6 +1076,65 @@ class ElrakningPanel {
 
         .chart-legend-toggle[data-chart-layer="spot"] {
           color: var(--secondary-text-color);
+        }
+
+        .chart-legend-preview {
+          cursor: pointer;
+          opacity: 1;
+        }
+
+        .chart-legend-preview .chart-legend-swatch {
+          border-radius: 999px;
+          height: 7px;
+          width: 7px;
+        }
+
+        .chart-legend-preview.solar {
+          color: var(--success-color);
+        }
+
+        .chart-legend-preview.solar .chart-legend-swatch {
+          background: var(--success-color);
+        }
+
+        .chart-legend-preview.consumption {
+          color: var(--error-color);
+        }
+
+        .chart-legend-preview.consumption .chart-legend-swatch {
+          background: var(--error-color);
+        }
+
+        .chart-legend-preview.grid-export {
+          color: var(--grid-export-color);
+        }
+
+        .chart-legend-preview.grid-export .chart-legend-swatch {
+          background: var(--grid-export-color);
+        }
+
+        .chart-legend-preview.grid-import {
+          color: var(--grid-import-color);
+        }
+
+        .chart-legend-preview.grid-import .chart-legend-swatch {
+          background: var(--grid-import-color);
+        }
+
+        .chart-legend-preview.charging {
+          color: color-mix(in srgb, var(--error-color) 75%, var(--primary-text-color));
+        }
+
+        .chart-legend-preview.charging .chart-legend-swatch {
+          background: color-mix(in srgb, var(--error-color) 75%, var(--primary-text-color));
+        }
+
+        .chart-legend-preview.discharging {
+          color: color-mix(in srgb, var(--error-color) 55%, var(--primary-color));
+        }
+
+        .chart-legend-preview.discharging .chart-legend-swatch {
+          background: color-mix(in srgb, var(--error-color) 55%, var(--primary-color));
         }
 
         .chart-legend-swatch {
