@@ -810,8 +810,12 @@ class ElrakningPanel {
         }
 
         .price-section {
+          --solar-color: #77C2A1;
+          --consumption-color: #EA7671;
           --grid-import-color: #F2A373;
           --grid-export-color: #72AAF6;
+          --charging-color: #844A54;
+          --discharging-color: #E06681;
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
           border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
           border-radius: var(--ha-card-border-radius, 12px);
@@ -1089,35 +1093,35 @@ class ElrakningPanel {
         }
 
         .chart-legend-preview.solar {
-          color: #56C7A0;
+          color: var(--solar-color);
         }
 
         .chart-legend-preview.solar .chart-legend-swatch {
-          background: #56C7A0;
+          background: var(--solar-color);
         }
 
         .chart-legend-preview.consumption {
-          color: #FF6363;
+          color: var(--consumption-color);
         }
 
         .chart-legend-preview.consumption .chart-legend-swatch {
-          background: #FF6363;
+          background: var(--consumption-color);
         }
 
         .chart-legend-preview.charging {
-          color: #A55E63;
+          color: var(--charging-color);
         }
 
         .chart-legend-preview.charging .chart-legend-swatch {
-          background: #A55E63;
+          background: var(--charging-color);
         }
 
         .chart-legend-preview.discharging {
-          color: #EF5C83;
+          color: var(--discharging-color);
         }
 
         .chart-legend-preview.discharging .chart-legend-swatch {
-          background: #EF5C83;
+          background: var(--discharging-color);
         }
 
         .chart-legend-swatch {
