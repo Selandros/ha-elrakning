@@ -2840,23 +2840,89 @@ class ElrakningPanel {
     return segments;
   }
 
-  buildSmoothMeterPath(segment, key, x, meterY) {
-    if (segment.length < 2) return "";
-    const coordinates = segment.map((point) => ({
+  buildMeterDisplayCoordinates(segment, key, x, meterY) {
+    return segment.map((point) => ({
       x: x(point.timestamp),
       y: meterY(point[key]),
     }));
+  }
+
+  buildMeterDisplayPathSegments(coordinates) {
+    if (coordinates.length < 2) return [];
+    const segments = [];
+    const midpoint = (left, right) => ({
+      x: (left.x + right.x) / 2,
+      y: (left.y + right.y) / 2,
+    });
+    segments.push({
+      start: coordinates[0],
+      control: coordinates[0],
+      end: midpoint(coordinates[0], coordinates[1]),
+    });
+    for (let index = 1; index < coordinates.length - 1; index += 1) {
+      segments.push({
+        start: midpoint(coordinates[index - 1], coordinates[index]),
+        control: coordinates[index],
+        end: midpoint(coordinates[index], coordinates[index + 1]),
+      });
+    }
+    segments.push({
+      start: midpoint(coordinates.at(-2), coordinates.at(-1)),
+      control: coordinates.at(-1),
+      end: coordinates.at(-1),
+    });
+    return segments;
+  }
+
+  buildMeterDisplayGeometry(points, key, x, meterY) {
+    return this.buildMeterDisplaySegments(points, key).map((segment) => {
+      const coordinates = this.buildMeterDisplayCoordinates(segment, key, x, meterY);
+      return {
+        coordinates,
+        pathSegments: this.buildMeterDisplayPathSegments(coordinates),
+      };
+    });
+  }
+
+  meterDisplayYAt(geometry, timestamp, x) {
+    const targetX = x(timestamp);
+    for (const segment of Array.isArray(geometry) ? geometry : []) {
+      for (const pathSegment of segment.pathSegments) {
+        const { start, control, end } = pathSegment;
+        const minX = Math.min(start.x, end.x);
+        const maxX = Math.max(start.x, end.x);
+        if (targetX < minX || targetX > maxX) continue;
+        if (end.x === start.x) return start.y;
+        let low = 0;
+        let high = 1;
+        for (let iteration = 0; iteration < 24; iteration += 1) {
+          const progress = (low + high) / 2;
+          const inverse = 1 - progress;
+          const currentX = inverse * inverse * start.x
+            + 2 * inverse * progress * control.x
+            + progress * progress * end.x;
+          if (currentX < targetX) low = progress;
+          else high = progress;
+        }
+        const progress = (low + high) / 2;
+        const inverse = 1 - progress;
+        return inverse * inverse * start.y
+          + 2 * inverse * progress * control.y
+          + progress * progress * end.y;
+      }
+    }
+    return null;
+  }
+
+  buildSmoothMeterPath(segment, key, x, meterY) {
+    if (segment.length < 2) return "";
+    const coordinates = this.buildMeterDisplayCoordinates(segment, key, x, meterY);
+    const pathSegments = this.buildMeterDisplayPathSegments(coordinates);
     const first = coordinates[0];
     const path = [`M ${first.x} ${first.y}`];
-    for (let index = 0; index < coordinates.length - 1; index += 1) {
-      const current = coordinates[index];
-      const next = coordinates[index + 1];
-      const midpointX = (current.x + next.x) / 2;
-      const midpointY = (current.y + next.y) / 2;
-      path.push(`Q ${current.x} ${current.y} ${midpointX} ${midpointY}`);
-    }
-    const last = coordinates[coordinates.length - 1];
-    path.push(`Q ${last.x} ${last.y} ${last.x} ${last.y}`);
+    pathSegments.forEach(({ control, end }) => {
+      path.push(`Q ${control.x} ${control.y} ${end.x} ${end.y}`);
+    });
     return path.join(" ");
   }
 
@@ -3007,6 +3073,10 @@ class ElrakningPanel {
         .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`)
         .join("")
       : "";
+    const meterDisplayGeometry = {
+      import_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "import_kw", x, meterY),
+      export_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "export_kw", x, meterY),
+    };
     const meterLines = [
       meterLinesFor("import_kw", "chart-meter-import", this._meterPowerVisible.import),
       meterLinesFor("export_kw", "chart-meter-export", this._meterPowerVisible.export),
@@ -3131,7 +3201,12 @@ class ElrakningPanel {
     }).join("");
     const legend = this.host.querySelector("[data-meter-legend]");
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
-    this._chartHoverGeometry = { x, y, meterY };
+    this._chartHoverGeometry = {
+      x,
+      y,
+      meterY,
+      meterDisplayY: (key, timestamp) => this.meterDisplayYAt(meterDisplayGeometry[key], timestamp, x),
+    };
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       ${meterGrid}
@@ -3266,11 +3341,13 @@ class ElrakningPanel {
         if (this._spotBarsVisible && Number.isFinite(hoverSnapshot.priceBarValue)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
         }
-        if (this._meterPowerVisible.import && Number.isFinite(hoverSnapshot.importValue) && hoverSnapshot.importValue > 0) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${hoverGeometry.meterY(hoverSnapshot.importValue)}" r="4" />`);
+        const importDisplayY = hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.hoverTime);
+        if (this._meterPowerVisible.import && Number.isFinite(hoverSnapshot.importValue) && hoverSnapshot.importValue > 0 && Number.isFinite(importDisplayY)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${importDisplayY}" r="4" />`);
         }
-        if (this._meterPowerVisible.export && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${hoverGeometry.meterY(hoverSnapshot.exportValue)}" r="4" />`);
+        const exportDisplayY = hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.hoverTime);
+        if (this._meterPowerVisible.export && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0 && Number.isFinite(exportDisplayY)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${exportDisplayY}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");
       }
