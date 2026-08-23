@@ -1072,11 +1072,11 @@ class ElrakningPanel {
         }
 
         .chart-legend-toggle[data-chart-layer="import"] {
-          color: var(--grid-import-color);
+          color: var(--primary-text-color);
         }
 
         .chart-legend-toggle[data-chart-layer="export"] {
-          color: var(--grid-export-color);
+          color: var(--primary-text-color);
         }
 
         .chart-legend-toggle[data-chart-layer="spot"] {
@@ -1092,36 +1092,24 @@ class ElrakningPanel {
           opacity: .55;
         }
 
-        .chart-legend-preview.solar {
-          color: var(--solar-color);
-        }
-
         .chart-legend-preview.solar .chart-legend-swatch {
           background: var(--solar-color);
-        }
-
-        .chart-legend-preview.consumption {
-          color: var(--consumption-color);
         }
 
         .chart-legend-preview.consumption .chart-legend-swatch {
           background: var(--consumption-color);
         }
 
-        .chart-legend-preview.charging {
-          color: var(--charging-color);
-        }
-
         .chart-legend-preview.charging .chart-legend-swatch {
           background: var(--charging-color);
         }
 
-        .chart-legend-preview.discharging {
-          color: var(--discharging-color);
-        }
-
         .chart-legend-preview.discharging .chart-legend-swatch {
           background: var(--discharging-color);
+        }
+
+        .chart-legend-preview {
+          color: var(--primary-text-color);
         }
 
         .chart-legend-swatch {
