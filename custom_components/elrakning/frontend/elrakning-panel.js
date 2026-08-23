@@ -2508,7 +2508,7 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 220;
-    const plot = { left: 8, right: 8, top: 62, bottom: 30 };
+    const plot = { left: 8, right: 8, top: 56, bottom: 30 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const valueRange = range || 1;
@@ -2551,6 +2551,15 @@ class ElrakningPanel {
         markerGroups.set(key, group);
       });
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime()) / dayDuration) * plotWidth;
+    const barGeometry = periods.map((period, index) => {
+      const price = prices[index];
+      return {
+        period,
+        startX: x(period.start),
+        endX: x(period.end),
+        top: price >= 0 ? y(price) : zeroY,
+      };
+    });
     const meterPoints = Array.isArray(this._meterPowerHistory?.points)
       ? this._meterPowerHistory.points.filter((point) => {
         const timestamp = new Date(point.timestamp).getTime();
@@ -2615,21 +2624,50 @@ class ElrakningPanel {
       const markerClass = markerGroups.has(period.start) ? " marker-highlight" : "";
       return `<rect class="chart-bar ${category}${markerClass}" data-index="${index}" data-tooltip="${this.formatTime(start)}–${this.formatTime(end)}|${this.formatPrice(price)} öre/kWh" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
-    const highestBarTop = prices.length
-      ? Math.min(...prices.map((price) => price >= 0 ? y(price) : zeroY))
-      : plot.top + plotHeight;
-    const markerLabelY = Math.max(16, highestBarTop - 10);
-    const priceMarkers = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
+    const markerLayouts = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
       const markerX = (x(group.period.start) + x(group.period.end)) / 2;
-      const label = group.labels.join("/");
-      const labelWidth = label.length * 8.5;
+      const label = group.labels.join(" • ");
+      const labelWidth = Math.max(16, label.length * 8.5);
       const placeRight = markerX + labelWidth / 2 > width - 4;
       const placeLeft = markerX - labelWidth / 2 < 4;
       const textX = placeRight ? markerX - 4 : placeLeft ? markerX + 4 : markerX;
       const textAnchor = placeRight ? "end" : placeLeft ? "start" : "middle";
-      return `
-      <text class="price-marker-label" text-anchor="${textAnchor}" x="${textX}" y="${markerLabelY}">${group.labels.join(" • ")}</text>`;
-    }).join("") : "";
+      const textLeft = textAnchor === "start" ? textX : textAnchor === "end" ? textX - labelWidth : textX - labelWidth / 2;
+      const textRight = textAnchor === "start" ? textX + labelWidth : textAnchor === "end" ? textX : textX + labelWidth / 2;
+      const coveredBars = barGeometry.filter((bar) => bar.endX > textLeft && bar.startX < textRight);
+      const highestCoveredTop = coveredBars.length
+        ? Math.min(...coveredBars.map((bar) => bar.top))
+        : plot.top + plotHeight;
+      const averageLineY = y(average);
+      return {
+        label,
+        markerX,
+        textX,
+        textAnchor,
+        textLeft,
+        textRight,
+        maxY: averageLineY - 8,
+        y: Math.max(18, Math.min(highestCoveredTop - 8, averageLineY - 8)),
+      };
+    }) : [];
+    const markerMinY = 18;
+    const markerHeight = 16;
+    const markerGap = 4;
+    const markerLayoutsByHeight = [...markerLayouts].sort((left, right) => left.y - right.y);
+    for (let index = 0; index < markerLayoutsByHeight.length; index += 1) {
+      const current = markerLayoutsByHeight[index];
+      for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
+        const previous = markerLayoutsByHeight[previousIndex];
+        const horizontalOverlap = current.textLeft < previous.textRight && current.textRight > previous.textLeft;
+        const verticalOverlap = current.y - markerHeight < previous.y + markerGap;
+        if (!horizontalOverlap || !verticalOverlap) continue;
+        const upperY = previous.y - markerHeight - markerGap;
+        const lowerY = previous.y + markerHeight + markerGap;
+        current.y = upperY >= markerMinY ? upperY : Math.min(lowerY, current.maxY);
+      }
+    }
+    const priceMarkers = markerLayouts.map((marker) => `
+      <text class="price-marker-label" text-anchor="${marker.textAnchor}" x="${marker.textX}" y="${marker.y}">${marker.label}</text>`).join("");
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
