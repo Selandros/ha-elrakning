@@ -165,6 +165,7 @@ class ElrakningPanel {
     this._chartDebugCopyText = "";
     this._meterPowerHistory = { date: null, points: [] };
     this._meterPowerVisible = { import: true, export: true };
+    this._priceLayerVisible = { spot: false, electricity: true, grid: false };
     this._providerConfigured = false;
     this.priceData = {
       source: "nord_pool",
@@ -221,10 +222,19 @@ class ElrakningPanel {
           </div>
           <div class="price-chart" aria-live="polite"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
-            <button type="button" class="chart-legend-toggle active" data-meter-series="import" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle active" data-chart-layer="electricity" aria-pressed="true">
+              <span class="chart-legend-swatch electricity" aria-hidden="true"></span>Elhandel
+            </button>
+            <button type="button" class="chart-legend-toggle" data-chart-layer="grid" aria-pressed="false">
+              <span class="chart-legend-swatch grid" aria-hidden="true"></span>Elnät
+            </button>
+            <button type="button" class="chart-legend-toggle" data-chart-layer="spot" aria-pressed="false">
+              <span class="chart-legend-swatch spot" aria-hidden="true"></span>Spotpris
+            </button>
+            <button type="button" class="chart-legend-toggle active" data-chart-layer="import" aria-pressed="true">
               <span class="chart-legend-swatch import" aria-hidden="true"></span>Import
             </button>
-            <button type="button" class="chart-legend-toggle active" data-meter-series="export" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle active" data-chart-layer="export" aria-pressed="true">
               <span class="chart-legend-swatch export" aria-hidden="true"></span>Export
             </button>
           </div>
@@ -872,8 +882,10 @@ class ElrakningPanel {
         .price-chart-legend {
           align-items: center;
           display: flex;
+          flex-wrap: wrap;
           gap: 12px;
           height: 22px;
+          justify-content: center;
           margin-top: 1px;
         }
 
@@ -895,6 +907,26 @@ class ElrakningPanel {
           opacity: 1;
         }
 
+        .chart-legend-toggle[data-chart-layer="import"] {
+          color: var(--grid-import-color);
+        }
+
+        .chart-legend-toggle[data-chart-layer="export"] {
+          color: var(--grid-export-color);
+        }
+
+        .chart-legend-toggle[data-chart-layer="spot"] {
+          color: var(--secondary-text-color);
+        }
+
+        .chart-legend-toggle[data-chart-layer="electricity"] {
+          color: var(--primary-color);
+        }
+
+        .chart-legend-toggle[data-chart-layer="grid"] {
+          color: var(--accent-color);
+        }
+
         .chart-legend-swatch {
           border-radius: 999px;
           display: inline-block;
@@ -908,6 +940,18 @@ class ElrakningPanel {
 
         .chart-legend-swatch.export {
           background: var(--grid-export-color);
+        }
+
+        .chart-legend-swatch.spot {
+          background: var(--secondary-text-color);
+        }
+
+        .chart-legend-swatch.electricity {
+          background: var(--primary-color);
+        }
+
+        .chart-legend-swatch.grid {
+          background: var(--accent-color);
         }
 
         .empty-chart {
@@ -961,7 +1005,7 @@ class ElrakningPanel {
           fill: none;
           stroke-linecap: round;
           stroke-linejoin: round;
-          stroke-width: 2;
+          stroke-width: 2.5;
           vector-effect: non-scaling-stroke;
         }
 
@@ -971,6 +1015,27 @@ class ElrakningPanel {
 
         .chart-meter-export {
           stroke: var(--grid-export-color);
+        }
+
+        .chart-price-layer {
+          fill: none;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 1.5;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .chart-price-layer.spot {
+          stroke: var(--secondary-text-color);
+          stroke-dasharray: 4 3;
+        }
+
+        .chart-price-layer.electricity {
+          stroke: var(--primary-color);
+        }
+
+        .chart-price-layer.grid {
+          stroke: var(--accent-color);
         }
 
         .price-marker-label {
@@ -1091,18 +1156,32 @@ class ElrakningPanel {
     this._bindMeterSourceDialog();
     this._bindDiagnostics();
     this._bindMainInvoiceParser();
-    this._bindMeterPowerLegend();
+    this._bindChartLegend();
     this.renderPriceChart();
   }
 
-  _bindMeterPowerLegend() {
-    for (const button of this.host.querySelectorAll("[data-meter-series]")) {
+  _bindChartLegend() {
+    for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
       button.addEventListener("click", () => {
-        const series = button.dataset.meterSeries;
-        if (!(series in this._meterPowerVisible)) return;
-        this._meterPowerVisible[series] = !this._meterPowerVisible[series];
-        button.classList.toggle("active", this._meterPowerVisible[series]);
-        button.setAttribute("aria-pressed", String(this._meterPowerVisible[series]));
+        const layer = button.dataset.chartLayer;
+        if (layer === "import" || layer === "export") {
+          this._meterPowerVisible[layer] = !this._meterPowerVisible[layer];
+          button.classList.toggle("active", this._meterPowerVisible[layer]);
+          button.setAttribute("aria-pressed", String(this._meterPowerVisible[layer]));
+          this.renderPriceChart();
+          return;
+        }
+        if (!(layer in this._priceLayerVisible)) return;
+        this._priceLayerVisible[layer] = !this._priceLayerVisible[layer];
+        if (this._priceLayerVisible.electricity || this._priceLayerVisible.grid) {
+          this._priceLayerVisible.spot = true;
+        }
+        for (const priceLayer of Object.keys(this._priceLayerVisible)) {
+          const priceButton = this.host.querySelector(`[data-chart-layer="${priceLayer}"]`);
+          if (!priceButton) continue;
+          priceButton.classList.toggle("active", this._priceLayerVisible[priceLayer]);
+          priceButton.setAttribute("aria-pressed", String(this._priceLayerVisible[priceLayer]));
+        }
         this.renderPriceChart();
       });
     }
@@ -2230,6 +2309,25 @@ class ElrakningPanel {
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
   }
 
+  _activePriceLayer() {
+    return ["electricity", "grid", "spot"].find((layer) => this._priceLayerVisible[layer]) || null;
+  }
+
+  _priceLayerValue(period, layer) {
+    const spotExVat = Number(period.spot_price_ex_vat);
+    const customerPrice = Number(period.customer_price ?? period.price);
+    if (layer === "spot") {
+      return Number.isFinite(spotExVat) ? spotExVat * 125 : customerPrice * 100;
+    }
+    if (layer === "electricity") {
+      return customerPrice * 100;
+    }
+    const gridExVat = Number(period.grid_cost_ex_vat);
+    return Number.isFinite(gridExVat) && Number.isFinite(spotExVat)
+      ? (spotExVat + gridExVat) * 125
+      : (Number.isFinite(spotExVat) ? spotExVat * 125 : customerPrice * 100);
+  }
+
   updatePriceSummary() {
     const periods = Array.isArray(this.priceSnapshot?.periods)
       ? this.priceSnapshot.periods
@@ -2304,10 +2402,20 @@ class ElrakningPanel {
     }
 
     const periods = this.priceData.periods;
-    const prices = periods.map((period) => Number(period.price) * 100);
-    const average = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-    const minimum = Math.min(...prices);
-    const maximum = Math.max(...prices);
+    const activePriceLayer = this._activePriceLayer();
+    const visiblePriceLayers = Object.keys(this._priceLayerVisible)
+      .filter((layer) => this._priceLayerVisible[layer]);
+    const prices = activePriceLayer
+      ? periods.map((period) => this._priceLayerValue(period, activePriceLayer))
+      : [];
+    const visibleLayerPrices = visiblePriceLayers.flatMap((layer) => (
+      periods.map((period) => this._priceLayerValue(period, layer))
+    )).filter(Number.isFinite);
+    const average = prices.length
+      ? prices.reduce((sum, price) => sum + price, 0) / prices.length
+      : 0;
+    const minimum = visibleLayerPrices.length ? Math.min(...visibleLayerPrices) : 0;
+    const maximum = visibleLayerPrices.length ? Math.max(...visibleLayerPrices) : 0;
     const range = maximum - minimum;
     const colorBands = priceColorBands(prices);
     const priceRanks = new Map();
@@ -2337,16 +2445,16 @@ class ElrakningPanel {
       dayDuration,
     };
     const now = new Date();
-    const currentPeriod = periods.find((period) => {
+    const currentPeriod = activePriceLayer && periods.find((period) => {
       const start = new Date(period.start);
       const end = new Date(period.end);
       return start <= now && now < end;
     });
-    const lowestPeriod = periods.reduce((lowest, period) => (
-      Number(period.price) < Number(lowest.price) ? period : lowest
+    const lowestPeriod = activePriceLayer && periods.reduce((lowest, period) => (
+      this._priceLayerValue(period, activePriceLayer) < this._priceLayerValue(lowest, activePriceLayer) ? period : lowest
     ), periods[0]);
-    const highestPeriod = periods.reduce((highest, period) => (
-      Number(period.price) > Number(highest.price) ? period : highest
+    const highestPeriod = activePriceLayer && periods.reduce((highest, period) => (
+      this._priceLayerValue(period, activePriceLayer) > this._priceLayerValue(highest, activePriceLayer) ? period : highest
     ), periods[0]);
     const markerGroups = new Map();
     [[currentPeriod, "Nu"], [lowestPeriod, "Lägst"], [highestPeriod, "Högst"]]
@@ -2390,7 +2498,16 @@ class ElrakningPanel {
     const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
       new Date(point.timestamp).getTime() <= timestamp ? point : latest
     ), null);
-    const bars = periods.map((period, index) => {
+    const priceLayerPath = (layer) => periods
+      .map((period) => `${x(period.start)},${y(this._priceLayerValue(period, layer))}`)
+      .join(" ");
+    const priceLayerLines = activePriceLayer
+      ? visiblePriceLayers
+        .filter((layer) => layer !== activePriceLayer)
+        .map((layer) => `<polyline class="chart-price-layer ${layer}" points="${priceLayerPath(layer)}" />`)
+        .join("")
+      : "";
+    const bars = activePriceLayer ? periods.map((period, index) => {
       const price = prices[index];
       const top = price >= 0 ? y(price) : zeroY;
       const bottom = price >= 0 ? zeroY : y(price);
@@ -2421,10 +2538,12 @@ class ElrakningPanel {
       const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
       const markerClass = markerGroups.has(period.start) ? " marker-highlight" : "";
       return `<rect class="chart-bar ${category}${markerClass}" data-index="${index}" data-tooltip="${this.formatTime(start)}–${this.formatTime(end)}|${this.formatPrice(price)} öre/kWh" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
-    }).join("");
-    const highestBarTop = Math.min(...prices.map((price) => price >= 0 ? y(price) : zeroY));
+    }).join("") : "";
+    const highestBarTop = prices.length
+      ? Math.min(...prices.map((price) => price >= 0 ? y(price) : zeroY))
+      : plot.top + plotHeight;
     const markerLabelY = Math.max(16, highestBarTop - 10);
-    const priceMarkers = [...markerGroups.entries()].map(([, group]) => {
+    const priceMarkers = activePriceLayer ? [...markerGroups.entries()].map(([, group]) => {
       const markerX = (x(group.period.start) + x(group.period.end)) / 2;
       const label = group.labels.join("/");
       const labelWidth = label.length * 8.5;
@@ -2434,20 +2553,21 @@ class ElrakningPanel {
       const textAnchor = placeRight ? "end" : placeLeft ? "start" : "middle";
       return `
       <text class="price-marker-label" text-anchor="${textAnchor}" x="${textX}" y="${markerLabelY}">${group.labels.join(" • ")}</text>`;
-    }).join("");
+    }).join("") : "";
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
       return `<text class="chart-label" text-anchor="middle" x="${x(hourDate)}" y="${height - 8}">${String(hour).padStart(2, "0")}</text>`;
     }).join("");
     const legend = this.host.querySelector("[data-meter-legend]");
-    if (legend) legend.hidden = meterPoints.length === 0;
+    if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       ${bars}
+      ${priceLayerLines}
       ${meterAxis}
       ${meterLines}
-      <line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />
+      ${activePriceLayer ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       ${priceMarkers}
       ${hourLabels}
     </svg><div class="chart-tooltip" hidden></div>`;
@@ -2534,6 +2654,11 @@ class ElrakningPanel {
     };
     svg.addEventListener("mousemove", (event) => {
       if (event.sourceCapabilities?.firesTouchEvents) return;
+      if (!this._activePriceLayer()) {
+        clearBarHover();
+        tooltip.hidden = true;
+        return;
+      }
       const period = periodAt(event.clientX);
       if (period && insidePlot(event.clientX, event.clientY)) {
         const bar = svg.querySelector(`.chart-bar[data-index="${period.index}"]`);
@@ -2574,7 +2699,7 @@ class ElrakningPanel {
       }
     };
     svg.addEventListener("click", (event) => {
-      if (!this._debugEnabled || !insidePlot(event.clientX, event.clientY)) return;
+      if (!this._debugEnabled || !this._activePriceLayer() || !insidePlot(event.clientX, event.clientY)) return;
       const hit = periodAt(event.clientX);
       if (!hit) return;
       show(hit.period, event);
@@ -2608,7 +2733,7 @@ class ElrakningPanel {
       this._chartTouch = null;
       if (!state || !touch) return;
       if (state.moved || Math.abs(chart.scrollLeft - state.scrollLeft) > 3) return;
-      if (!insidePlot(touch.clientX, touch.clientY)) {
+      if (!this._activePriceLayer() || !insidePlot(touch.clientX, touch.clientY)) {
         clearPinnedTooltip();
         return;
       }
