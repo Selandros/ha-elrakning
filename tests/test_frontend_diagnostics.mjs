@@ -260,7 +260,7 @@ assert.match(panelSource, /this\._previewLayersVisible\[layer\] = !this\._previe
 assert.match(panelSource, /chart-legend-preview:not\(\.active\)/);
 assert.match(panelSource, /#56C7A0/);
 assert.match(panelSource, /#FF6363/);
-assert.match(panelSource, /#D65368/);
+assert.match(panelSource, /#A55E63/);
 assert.doesNotMatch(panelSource, /chart-legend-preview\.charging\.active/);
 assert.doesNotMatch(panelSource, /chart-legend-preview\.charging:not\(\.active\)/);
 assert.match(panelSource, /#EF5C83/);

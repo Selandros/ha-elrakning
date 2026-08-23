@@ -1105,11 +1105,11 @@ class ElrakningPanel {
         }
 
         .chart-legend-preview.charging {
-          color: #D65368;
+          color: #A55E63;
         }
 
         .chart-legend-preview.charging .chart-legend-swatch {
-          background: #D65368;
+          background: #A55E63;
         }
 
         .chart-legend-preview.discharging {
