@@ -74,6 +74,7 @@ class MeterManager:
         self._diagnostic_callback = diagnostic_callback
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
+        self._history_summary: dict[str, Any] | None = None
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     async def _async_state_changed(self, event: Event) -> None:
@@ -107,6 +108,7 @@ class MeterManager:
 
     async def async_clear(self) -> dict[str, Any]:
         self.mapping = {field: None for field in METER_FIELDS}
+        self._history_summary = None
         await self.store.async_remove()
         return await self.async_state()
 
@@ -125,6 +127,7 @@ class MeterManager:
                     raise ValueError(f"entity_not_found:{field}")
             await self._diagnostic("INFO", "meter_validation_success", "Meter mapping validated")
             self.mapping = selected
+            self._history_summary = None
             await self.store.async_save(self.mapping)
             await self._diagnostic("INFO", "meter_store_write_success", "Meter mapping stored")
             await self._diagnostic(
@@ -160,20 +163,45 @@ class MeterManager:
         return result
 
     async def async_source(self) -> dict[str, Any]:
-        return {"mapping": dict(self.mapping), "state": await self.async_state()}
+        return {
+            "mapping": dict(self.mapping),
+            "state": await self.async_state(),
+            "history": self._history_summary,
+        }
 
-    async def async_power_history(self) -> dict[str, Any]:
-        """Return today's normalized history for the selected power entity."""
+    async def async_power_history(self, requested_entity_id: str | None = None) -> dict[str, Any]:
+        """Return today's normalized Recorder history for the selected power entity."""
         entity_id = self.mapping.get("power_entity")
         now = dt_util.now()
         start = dt_util.start_of_local_day(now)
         end = dt_util.start_of_local_day(now + timedelta(days=1))
+        date = start.date().isoformat()
+        if requested_entity_id is not None and requested_entity_id != entity_id:
+            return {
+                "success": False,
+                "entity_id": requested_entity_id,
+                "date": date,
+                "points": [],
+                "error": "meter_mapping_changed",
+            }
         if not entity_id:
-            return {"success": True, "date": start.date().isoformat(), "points": []}
+            summary = {
+                "entity_id": None,
+                "success": True,
+                "date": date,
+                "point_count": 0,
+                "first_timestamp": None,
+                "last_timestamp": None,
+                "max_abs_kw": None,
+            }
+            self._history_summary = summary
+            await self._diagnostic("INFO", "meter_history_request_success", "Meter history loaded · 0 points")
+            return {"success": True, "entity_id": None, "date": date, "points": [], "history": summary}
         try:
-            from homeassistant.components.recorder import history
+            from homeassistant.components.recorder import get_instance, history
 
-            history_by_entity = await self.hass.async_add_executor_job(
+            recorder = get_instance(self.hass)
+            history_by_entity = await recorder.async_add_executor_job(
                 partial(
                     history.get_significant_states,
                     self.hass,
@@ -186,10 +214,16 @@ class MeterManager:
                     no_attributes=False,
                 )
             )
-        except Exception:
+        except Exception as err:
+            await self._diagnostic(
+                "ERROR",
+                "meter_history_request_failed",
+                f"Meter history failed · Entity: {entity_id} · Error: {type(err).__name__}: {str(err) or 'empty_exception_message'}",
+            )
             return {
                 "success": False,
-                "date": start.date().isoformat(),
+                "entity_id": entity_id,
+                "date": date,
                 "points": [],
                 "error": "history_unavailable",
             }
@@ -199,4 +233,27 @@ class MeterManager:
             if point is not None:
                 points.append(point)
         points.sort(key=lambda point: point["timestamp"])
-        return {"success": True, "date": start.date().isoformat(), "points": points}
+        max_abs_kw = max(
+            (max(point["import_kw"], point["export_kw"]) for point in points),
+            default=None,
+        )
+        summary = {
+            "entity_id": entity_id,
+            "success": True,
+            "date": date,
+            "point_count": len(points),
+            "first_timestamp": points[0]["timestamp"] if points else None,
+            "last_timestamp": points[-1]["timestamp"] if points else None,
+            "max_abs_kw": round(max_abs_kw, 3) if max_abs_kw is not None else None,
+        }
+        self._history_summary = summary
+        await self._diagnostic(
+            "INFO",
+            "meter_history_request_success",
+            "Meter history loaded · "
+            f"Entity: {entity_id} · Points: {len(points)} · "
+            f"First: {summary['first_timestamp'] or 'none'} · "
+            f"Last: {summary['last_timestamp'] or 'none'} · "
+            f"Max: {summary['max_abs_kw'] if summary['max_abs_kw'] is not None else 'none'} kW",
+        )
+        return {"success": True, "entity_id": entity_id, "date": date, "points": points, "history": summary}

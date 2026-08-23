@@ -83,10 +83,12 @@ def _hass(*entity_ids):
     async def async_add_executor_job(function, *args, **kwargs):
         return function(*args, **kwargs)
 
+    recorder = types.SimpleNamespace(async_add_executor_job=async_add_executor_job)
     return types.SimpleNamespace(
         states=types.SimpleNamespace(async_all=lambda domain: [], get=states.get),
         bus=types.SimpleNamespace(async_listen=lambda *args: lambda: None),
         async_add_executor_job=async_add_executor_job,
+        recorder=recorder,
     )
 
 
@@ -136,6 +138,7 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
     async def test_power_history_is_chronological_and_semantic(self):
         recorder = types.ModuleType("homeassistant.components.recorder")
         history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda hass: hass.recorder
         history.get_significant_states = lambda *args, **kwargs: {
             "sensor.power": [
                 types.SimpleNamespace(
@@ -179,6 +182,75 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(result["points"][0]["import_kw"], 1.5)
         self.assertEqual(result["points"][1]["export_kw"], 0.5)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["entity_id"], "sensor.power")
+        self.assertEqual(result["history"]["point_count"], 2)
+        self.assertEqual(result["history"]["max_abs_kw"], 1.5)
+
+    async def test_recorder_instance_executor_is_used(self):
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda hass: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: {"sensor.power": []}
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {
+            name: sys.modules.get(name)
+            for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")
+        }
+        sys.modules.update({
+            "homeassistant.components": components,
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        })
+        try:
+            hass = _hass("sensor.power")
+            manager = meter.MeterManager(hass)
+            await manager.async_save_mapping({"power_entity": "sensor.power"})
+            result = await manager.async_power_history()
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertTrue(result["success"])
+        self.assertEqual(result["points"], [])
+        self.assertEqual(result["history"]["point_count"], 0)
+
+    async def test_recorder_failure_is_not_empty_success(self):
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda hass: hass.recorder
+        def fail(*args, **kwargs):
+            raise RuntimeError("recorder unavailable")
+        history.get_significant_states = fail
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {
+            name: sys.modules.get(name)
+            for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")
+        }
+        sys.modules.update({
+            "homeassistant.components": components,
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        })
+        try:
+            hass = _hass("sensor.power")
+            manager = meter.MeterManager(hass)
+            await manager.async_save_mapping({"power_entity": "sensor.power"})
+            result = await manager.async_power_history()
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "history_unavailable")
 
     async def test_save_without_selected_meter_clears_configuration(self):
         hass = _hass()

@@ -541,13 +541,19 @@ async def websocket_meter_store_clear(hass, connection, msg):
     connection.send_result(msg["id"], {"success": True, **state})
 
 
-@websocket_api.websocket_command({vol.Required("type"): METER_POWER_HISTORY_COMMAND})
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): METER_POWER_HISTORY_COMMAND,
+        vol.Optional("entity_id"): str,
+    }
+)
 @websocket_api.async_response
 async def websocket_meter_power_history(hass, connection, msg):
     """Return today's normalized live power history for the selected meter."""
     manager = _meter_manager(hass)
-    result = await manager.async_power_history() if manager else {
+    result = await manager.async_power_history(msg.get("entity_id")) if manager else {
         "success": False,
+        "entity_id": msg.get("entity_id"),
         "points": [],
         "error": "meter_unavailable",
     }

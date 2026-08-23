@@ -193,6 +193,8 @@ class ElrakningPanel {
     this._chartTouch = null;
     this._chartDebugCopyText = "";
     this._meterPowerHistory = { date: null, points: [] };
+    this._meterHistorySummary = null;
+    this._meterHistoryRequestToken = 0;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
     this._priceComparisonVisible = { electricity: true, grid: false };
@@ -1390,6 +1392,7 @@ class ElrakningPanel {
           throw new Error(response.error || "save_failed");
         }
         this._applyMeterState(response);
+        await this.loadMeterPowerHistory();
         close();
       } catch (error) {
         const details = this._websocketErrorDetails(error);
@@ -2361,20 +2364,75 @@ class ElrakningPanel {
 
   async loadMeterPowerHistory() {
     if (!this.hass?.callWS) return;
+    const entityId = this._meterState?.power_entity || null;
+    const requestToken = ++this._meterHistoryRequestToken;
+    this._meterPowerHistory = { date: null, points: [] };
+    this._meterHistorySummary = null;
+    await this._recordMeterDiagnostic(
+      "INFO",
+      "meter_history_request_started",
+      `Meter history request started · Entity: ${entityId || "none"}`,
+    );
     try {
-      const response = await this.hass.callWS({ type: "elrakning/meter_power_history" });
+      const request = { type: "elrakning/meter_power_history" };
+      if (entityId) request.entity_id = entityId;
+      const response = await this.hass.callWS(request);
+      if (requestToken !== this._meterHistoryRequestToken || entityId !== (this._meterState?.power_entity || null)) return;
+      if (!response?.success) {
+        this._meterHistorySummary = {
+          entity_id: response?.entity_id || entityId,
+          success: false,
+          date: response?.date || null,
+          point_count: 0,
+          error: response?.error || "history_unavailable",
+        };
+        await this._recordMeterDiagnostic(
+          "ERROR",
+          "meter_history_request_failed",
+          `Meter history failed · Entity: ${entityId || "none"} · Error: ${response?.error || "history_unavailable"}`,
+        );
+        if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+        return;
+      }
       this._meterPowerHistory = {
         date: response?.date || null,
         points: Array.isArray(response?.points) ? response.points : [],
       };
-    } catch {
+      this._meterHistorySummary = response.history || {
+        entity_id: response?.entity_id || entityId,
+        success: true,
+        date: response?.date || null,
+        point_count: this._meterPowerHistory.points.length,
+      };
+      const summary = this._meterHistorySummary;
+      await this._recordMeterDiagnostic(
+        "INFO",
+        "meter_history_request_success",
+        `Meter history loaded · Entity: ${summary.entity_id || "none"} · Points: ${summary.point_count}`,
+      );
+    } catch (error) {
+      if (requestToken !== this._meterHistoryRequestToken) return;
       this._meterPowerHistory = { date: null, points: [] };
+      this._meterHistorySummary = {
+        entity_id: entityId,
+        success: false,
+        date: null,
+        point_count: 0,
+        error: "history_unavailable",
+      };
+      const details = this._websocketErrorDetails(error);
+      await this._recordMeterDiagnostic(
+        "ERROR",
+        "meter_history_request_failed",
+        `Meter history failed · Entity: ${entityId || "none"} · Error: ${details.code}: ${details.message}`,
+      );
     }
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
   }
 
   _appendMeterPowerPoint(point) {
     if (!point?.timestamp) return;
+    if (point.entity_id && point.entity_id !== this._meterState?.power_entity) return;
     const timestamp = new Date(point.timestamp);
     if (Number.isNaN(timestamp.getTime())) return;
     const date = timestamp.toLocaleDateString("sv-SE");
