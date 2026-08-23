@@ -162,6 +162,8 @@ assert.match(panelSource, /chart-meter-export/);
 assert.match(panelSource, /chart-meter-gridline/);
 assert.match(panelSource, /const meterGrid = meterVisible/);
 assert.match(panelSource, /const meterGridLevels = Array\.from/);
+assert.match(panelSource, /const plot = \{ left: 42, right: 8/);
+assert.match(panelSource, /chart-meter-label" text-anchor="start" x="8"/);
 assert.doesNotMatch(panelSource, /chart-meter-axis/);
 assert.doesNotMatch(panelSource, /const meterAxis/);
 assert.match(panelSource, /#F2A373/);

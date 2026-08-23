@@ -2509,7 +2509,7 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 220;
-    const plot = { left: 8, right: 8, top: 42, bottom: 30 };
+    const plot = { left: 42, right: 8, top: 42, bottom: 30 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const valueRange = range || 1;
@@ -2594,7 +2594,7 @@ class ElrakningPanel {
     const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
     const meterGrid = meterVisible
       ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />
-         <text class="chart-meter-label" text-anchor="start" x="2" y="${meterY(level) + 4}">${this._formatNumber(level)} kW</text>`).join("")
+         <text class="chart-meter-label" text-anchor="start" x="8" y="${meterY(level) + 4}">${this._formatNumber(level)} kW</text>`).join("")
       : "";
     const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
       new Date(point.timestamp).getTime() <= timestamp ? point : latest
