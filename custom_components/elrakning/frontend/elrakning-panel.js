@@ -1181,6 +1181,14 @@ class ElrakningPanel {
           margin-top: 4px;
         }
 
+        .tooltip-meter-import {
+          color: var(--grid-import-color);
+        }
+
+        .tooltip-meter-export {
+          color: var(--grid-export-color);
+        }
+
         .card {
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
           border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
@@ -2772,10 +2780,8 @@ class ElrakningPanel {
     const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
       new Date(point.timestamp).getTime() <= timestamp ? point : latest
     ), null);
-    const bars = this._spotBarsVisible ? periods.map((period, index) => {
+    periods.forEach((period, index) => {
       const price = prices[index];
-      const top = price >= 0 ? y(price) : zeroY;
-      const bottom = price >= 0 ? zeroY : y(price);
       const category = priceCategory(price, colorBands);
       const colorDetails = priceColorDetails(
         price,
@@ -2797,6 +2803,12 @@ class ElrakningPanel {
           export_kw: meterPointAt(new Date(period.start).getTime()).export_kw,
         } : {}),
       });
+    });
+    const bars = this._spotBarsVisible ? periods.map((period, index) => {
+      const price = prices[index];
+      const top = price >= 0 ? y(price) : zeroY;
+      const bottom = price >= 0 ? zeroY : y(price);
+      const category = priceCategory(price, colorBands);
       const start = new Date(period.start);
       const end = new Date(period.end);
       const startX = x(period.start);
@@ -2887,6 +2899,23 @@ class ElrakningPanel {
     });
   }
 
+  _buildVisibleTooltipRows(comparisonPrice, details) {
+    const rows = [];
+    if (this._spotBarsVisible && Number.isFinite(comparisonPrice)) {
+      const label = this._priceComparisonVisible.grid
+        ? "Elnät"
+        : this._priceComparisonVisible.electricity ? "Elhandel" : "Spotpris";
+      rows.push(`<span class="tooltip-value">${label}: ${this.formatPrice(comparisonPrice)} öre/kWh</span>`);
+    }
+    if (this._meterPowerVisible.import && Number.isFinite(details?.import_kw)) {
+      rows.push(`<span class="tooltip-value tooltip-meter-import">Import: ${this._formatNumber(details.import_kw)} kW</span>`);
+    }
+    if (this._meterPowerVisible.export && Number.isFinite(details?.export_kw)) {
+      rows.push(`<span class="tooltip-value tooltip-meter-export">Export: ${this._formatNumber(details.export_kw)} kW</span>`);
+    }
+    return rows.join("");
+  }
+
   bindChartTooltips() {
     const chart = this.host.querySelector(".price-chart");
     const svg = this.host.querySelector(".chart-svg");
@@ -2924,11 +2953,12 @@ class ElrakningPanel {
       const value = `${Number.isFinite(comparisonPrice) ? this.formatPrice(comparisonPrice) : "–"} öre/kWh`;
       const index = this.priceData.periods.indexOf(period);
       const details = this._debugEnabled ? this._chartTooltipDetails?.get(index) : null;
+      const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, this._chartTooltipDetails?.get(index));
       const tooltipText = details ? createPriceDebugText({ time, value, details }) : "";
       if (details) {
         tooltip.textContent = tooltipText;
       } else {
-        tooltip.innerHTML = `<strong>${time}</strong><span class="tooltip-value">${value}</span>`;
+        tooltip.innerHTML = `<strong>${time}</strong>${tooltipRows}`;
       }
       this._chartDebugCopyText = tooltipText;
       tooltip.classList.toggle("debug-tooltip", Boolean(details));
@@ -2939,9 +2969,12 @@ class ElrakningPanel {
     const clearBarHover = () => {
       svg.querySelector(".chart-bar.bar-hover")?.classList.remove("bar-hover");
     };
+    const hasVisibleTooltipLayer = this._spotBarsVisible
+      || this._meterPowerVisible.import
+      || this._meterPowerVisible.export;
     svg.addEventListener("mousemove", (event) => {
       if (event.sourceCapabilities?.firesTouchEvents) return;
-      if (!this._spotBarsVisible) {
+      if (!hasVisibleTooltipLayer) {
         clearBarHover();
         tooltip.hidden = true;
         return;
@@ -2986,7 +3019,7 @@ class ElrakningPanel {
       }
     };
     svg.addEventListener("click", (event) => {
-      if (!this._debugEnabled || !this._spotBarsVisible || !insidePlot(event.clientX, event.clientY)) return;
+      if (!this._debugEnabled || !hasVisibleTooltipLayer || !insidePlot(event.clientX, event.clientY)) return;
       const hit = periodAt(event.clientX);
       if (!hit) return;
       show(hit.period, event);
@@ -3020,7 +3053,7 @@ class ElrakningPanel {
       this._chartTouch = null;
       if (!state || !touch) return;
       if (state.moved || Math.abs(chart.scrollLeft - state.scrollLeft) > 3) return;
-      if (!this._spotBarsVisible || !insidePlot(touch.clientX, touch.clientY)) {
+      if (!hasVisibleTooltipLayer || !insidePlot(touch.clientX, touch.clientY)) {
         clearPinnedTooltip();
         return;
       }
