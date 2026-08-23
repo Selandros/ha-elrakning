@@ -3225,25 +3225,32 @@ class ElrakningPanel {
         : "";
       const index = this.priceData.periods.indexOf(period);
       const meterPoint = this._meterPointAtNearest(tooltipTimestamp);
-      const baseDetails = this._chartTooltipDetails?.get(index) || {};
-      const details = this._debugEnabled
-        ? { ...baseDetails, ...(meterPoint ? {
-          ...(Number.isFinite(Number(meterPoint.import_kw))
-            ? { import_kw: meterPoint.import_kw }
-            : {}),
-          ...(Number.isFinite(Number(meterPoint.export_kw))
-            ? { export_kw: meterPoint.export_kw }
-            : {}),
-        } : {}) }
+      const meterValue = (key) => meterPoint && Number.isFinite(Number(meterPoint[key]))
+        ? Number(meterPoint[key])
         : null;
-      if (details && meterPoint) {
-        if (!Number.isFinite(Number(meterPoint.import_kw))) delete details.import_kw;
-        if (!Number.isFinite(Number(meterPoint.export_kw))) delete details.export_kw;
-      } else if (details) {
-        delete details.import_kw;
-        delete details.export_kw;
+      const barPrice = this._chartBarPrices?.[index];
+      const hoverSnapshot = {
+        hoverTime: tooltipTimestamp,
+        priceBarValue: barPrice ?? null,
+        importValue: meterValue("import_kw"),
+        exportValue: meterValue("export_kw"),
+        pvValue: null,
+        loadValue: null,
+        chargeValue: null,
+        dischargeValue: null,
+      };
+      const baseDetails = this._chartTooltipDetails?.get(index) || {};
+      const details = this._debugEnabled ? { ...baseDetails } : null;
+      if (details) {
+        if (hoverSnapshot.importValue === null) delete details.import_kw;
+        else details.import_kw = hoverSnapshot.importValue;
+        if (hoverSnapshot.exportValue === null) delete details.export_kw;
+        else details.export_kw = hoverSnapshot.exportValue;
       }
-      const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, meterPoint);
+      const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, {
+        import_kw: hoverSnapshot.importValue,
+        export_kw: hoverSnapshot.exportValue,
+      });
       const tooltipText = details ? createPriceDebugText({ time, value, details }) : "";
       if (details) {
         tooltip.textContent = tooltipText;
@@ -3254,19 +3261,16 @@ class ElrakningPanel {
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
       const hoverGeometry = this._chartHoverGeometry;
       if (hoverMarkers && hoverGeometry) {
-        const markerX = hoverGeometry.x(tooltipTimestamp);
+        const markerX = hoverGeometry.x(hoverSnapshot.hoverTime);
         const markers = [];
-        const barPrice = this._chartBarPrices?.[index];
-        if (this._spotBarsVisible && Number.isFinite(barPrice)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(barPrice)}" r="4" />`);
+        if (this._spotBarsVisible && Number.isFinite(hoverSnapshot.priceBarValue)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
         }
-        if (meterPoint) {
-          if (this._meterPowerVisible.import && Number.isFinite(Number(meterPoint.import_kw)) && Number(meterPoint.import_kw) > 0) {
-            markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${hoverGeometry.meterY(meterPoint.import_kw)}" r="4" />`);
-          }
-          if (this._meterPowerVisible.export && Number.isFinite(Number(meterPoint.export_kw)) && Number(meterPoint.export_kw) > 0) {
-            markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${hoverGeometry.meterY(meterPoint.export_kw)}" r="4" />`);
-          }
+        if (this._meterPowerVisible.import && Number.isFinite(hoverSnapshot.importValue) && hoverSnapshot.importValue > 0) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${hoverGeometry.meterY(hoverSnapshot.importValue)}" r="4" />`);
+        }
+        if (this._meterPowerVisible.export && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${hoverGeometry.meterY(hoverSnapshot.exportValue)}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");
       }
