@@ -771,6 +771,8 @@ class ElrakningPanel {
         }
 
         .price-section {
+          --grid-import-color: #F2A373;
+          --grid-export-color: #72AAF6;
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
           border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
           border-radius: var(--ha-card-border-radius, 12px);
@@ -858,8 +860,6 @@ class ElrakningPanel {
           }
 
         .price-section {
-          --grid-import-color: #F2A373;
-          --grid-export-color: #72AAF6;
           padding: 16px 12px 10px;
         }
 
