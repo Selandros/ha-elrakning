@@ -260,9 +260,9 @@ assert.match(panelSource, /this\._previewLayersVisible\[layer\] = !this\._previe
 assert.match(panelSource, /chart-legend-preview:not\(\.active\)/);
 assert.match(panelSource, /#56C7A0/);
 assert.match(panelSource, /#FF6363/);
-assert.match(panelSource, /#984C5A/);
-assert.match(panelSource, /#D96B7C/);
-assert.match(panelSource, /chart-legend-preview\.charging:not\(\.active\) \{[\s\S]*color: var\(--secondary-text-color\)/);
+assert.match(panelSource, /#D65368/);
+assert.doesNotMatch(panelSource, /chart-legend-preview\.charging\.active/);
+assert.doesNotMatch(panelSource, /chart-legend-preview\.charging:not\(\.active\)/);
 assert.match(panelSource, /#EF5C83/);
 assert.match(panelSource, /height: 7px;\n\s+width: 7px;/);
 assert.match(panelSource, /this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);
