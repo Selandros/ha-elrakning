@@ -3306,6 +3306,7 @@ class ElrakningPanel {
       const barPrice = this._chartBarPrices?.[index];
       const hoverSnapshot = {
         hoverTime: tooltipTimestamp,
+        meterSampleTime: meterPoint ? new Date(meterPoint.timestamp).getTime() : null,
         priceBarValue: barPrice ?? null,
         importValue: meterValue("import_kw"),
         exportValue: meterValue("export_kw"),
@@ -3336,18 +3337,25 @@ class ElrakningPanel {
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
       const hoverGeometry = this._chartHoverGeometry;
       if (hoverMarkers && hoverGeometry) {
-        const markerX = hoverGeometry.x(hoverSnapshot.hoverTime);
+        const priceMarkerX = hoverGeometry.x(hoverSnapshot.hoverTime);
+        const meterMarkerX = Number.isFinite(hoverSnapshot.meterSampleTime)
+          ? hoverGeometry.x(hoverSnapshot.meterSampleTime)
+          : null;
         const markers = [];
         if (this._spotBarsVisible && Number.isFinite(hoverSnapshot.priceBarValue)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${priceMarkerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
         }
-        const importDisplayY = hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.hoverTime);
-        if (this._meterPowerVisible.import && Number.isFinite(hoverSnapshot.importValue) && hoverSnapshot.importValue > 0 && Number.isFinite(importDisplayY)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${importDisplayY}" r="4" />`);
+        const importDisplayY = meterMarkerX === null
+          ? null
+          : hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.meterSampleTime);
+        if (this._meterPowerVisible.import && meterMarkerX !== null && Number.isFinite(hoverSnapshot.importValue) && hoverSnapshot.importValue > 0 && Number.isFinite(importDisplayY)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${meterMarkerX}" cy="${importDisplayY}" r="4" />`);
         }
-        const exportDisplayY = hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.hoverTime);
-        if (this._meterPowerVisible.export && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0 && Number.isFinite(exportDisplayY)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${exportDisplayY}" r="4" />`);
+        const exportDisplayY = meterMarkerX === null
+          ? null
+          : hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.meterSampleTime);
+        if (this._meterPowerVisible.export && meterMarkerX !== null && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0 && Number.isFinite(exportDisplayY)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${meterMarkerX}" cy="${exportDisplayY}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");
       }
