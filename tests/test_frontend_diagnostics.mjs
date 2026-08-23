@@ -243,6 +243,7 @@ assert.match(panelSource, /Förbrukning/);
 assert.match(panelSource, /Laddning/);
 assert.match(panelSource, /Urladdning/);
 assert.match(panelSource, /chart-legend-preview/);
+assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*cursor: pointer;/);
 assert.match(panelSource, /min-height: 22px/);
 assert.match(panelSource, /chart-legend-preview\.solar/);
 assert.match(panelSource, /chart-legend-preview\.consumption/);

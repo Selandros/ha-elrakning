@@ -1048,6 +1048,7 @@ class ElrakningPanel {
           background: transparent;
           border: 0;
           color: var(--secondary-text-color);
+          cursor: pointer;
           display: inline-flex;
           font-size: 12px;
           gap: 5px;
