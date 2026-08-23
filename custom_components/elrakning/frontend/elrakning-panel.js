@@ -225,8 +225,8 @@ export function nearestMeterPoint(points, timestamp, maxDistanceMs = 2.5 * 60 * 
   return nearest?.point || null;
 }
 
-function positionChartTooltip(chart, tooltip, clientX, clientY) {
-  const gap = 10;
+function positionChartTooltip(chart, tooltip, clientX, clientY, obstacles = [], orbitState = {}) {
+  const gap = 12;
   const safety = 7;
   const bounds = chart.getBoundingClientRect();
   const pointerX = clientX - bounds.left + chart.scrollLeft;
@@ -237,21 +237,58 @@ function positionChartTooltip(chart, tooltip, clientX, clientY) {
   const viewportRight = chart.scrollLeft + chart.clientWidth - safety;
   const viewportTop = chart.scrollTop + safety;
   const viewportBottom = chart.scrollTop + chart.clientHeight - safety;
-  const minLeft = viewportLeft;
-  const maxLeft = Math.max(minLeft, viewportRight - tooltipWidth);
-  const left = Math.max(minLeft, Math.min(maxLeft, pointerX - tooltipWidth / 2));
-  const aboveY = pointerY - gap - tooltipHeight;
-  const belowY = pointerY + gap;
-  const fits = (top) => top >= viewportTop && top + tooltipHeight <= viewportBottom;
-  const preferBelow = pointerY < chart.scrollTop + chart.clientHeight / 2;
-  const preferredY = preferBelow ? belowY : aboveY;
-  const alternateY = preferBelow ? aboveY : belowY;
-  const chosenY = fits(preferredY) ? preferredY : fits(alternateY) ? alternateY : preferredY;
-  const minTop = viewportTop;
-  const maxTop = Math.max(minTop, viewportBottom - tooltipHeight);
-  const top = Math.max(minTop, Math.min(maxTop, chosenY));
-  tooltip.style.left = `${left}px`;
-  tooltip.style.top = `${top}px`;
+  const obstacleRects = obstacles.map((obstacle) => {
+    const rect = obstacle.getBoundingClientRect ? obstacle.getBoundingClientRect() : obstacle;
+    return {
+      left: rect.left - bounds.left + chart.scrollLeft - 8,
+      right: rect.right - bounds.left + chart.scrollLeft + 8,
+      top: rect.top - bounds.top + chart.scrollTop - 8,
+      bottom: rect.bottom - bounds.top + chart.scrollTop + 8,
+    };
+  });
+  const intersects = (left, top) => obstacleRects.some((rect) => (
+    left < rect.right
+    && left + tooltipWidth > rect.left
+    && top < rect.bottom
+    && top + tooltipHeight > rect.top
+  ));
+  const fitsViewport = (left, top) => (
+    left >= viewportLeft
+    && top >= viewportTop
+    && left + tooltipWidth <= viewportRight
+    && top + tooltipHeight <= viewportBottom
+  );
+  const angleStep = Math.PI / 45;
+  const preferredAngle = Number.isFinite(orbitState.angle) ? orbitState.angle : -Math.PI / 2;
+  const candidates = [];
+  for (let distance = 0; distance <= 36; distance += 12) {
+    for (let offset = 0; offset <= Math.PI; offset += angleStep) {
+      if (offset === 0) {
+        candidates.push(preferredAngle);
+        continue;
+      }
+      candidates.push(preferredAngle - offset, preferredAngle + offset);
+    }
+    for (const angle of candidates) {
+      const unitX = Math.cos(angle);
+      const unitY = Math.sin(angle);
+      const extent = Math.abs(unitX) * tooltipWidth / 2 + Math.abs(unitY) * tooltipHeight / 2;
+      const centerX = pointerX + unitX * (extent + gap + distance);
+      const centerY = pointerY + unitY * (extent + gap + distance);
+      const left = centerX - tooltipWidth / 2;
+      const top = centerY - tooltipHeight / 2;
+      if (!fitsViewport(left, top) || intersects(left, top)) continue;
+      orbitState.angle = angle;
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+      return;
+    }
+    candidates.length = 0;
+  }
+  const fallbackLeft = Math.max(viewportLeft, Math.min(viewportRight - tooltipWidth, pointerX - tooltipWidth / 2));
+  const fallbackTop = Math.max(viewportTop, Math.min(viewportBottom - tooltipHeight, pointerY - tooltipHeight / 2));
+  tooltip.style.left = `${fallbackLeft}px`;
+  tooltip.style.top = `${fallbackTop}px`;
 }
 
 class ElrakningPanel {
@@ -264,6 +301,7 @@ class ElrakningPanel {
     this._pinnedPeriod = null;
     this._chartTouch = null;
     this._chartDebugCopyText = "";
+    this._tooltipOrbit = { angle: null };
     this._meterPowerHistory = { date: null, points: [] };
     this._meterTooltipPoints = [];
     this._meterHistorySummary = null;
@@ -3182,11 +3220,18 @@ class ElrakningPanel {
       const baseDetails = this._chartTooltipDetails?.get(index) || {};
       const details = this._debugEnabled
         ? { ...baseDetails, ...(meterPoint ? {
-          import_kw: meterPoint.import_kw,
-          export_kw: meterPoint.export_kw,
+          ...(Number.isFinite(Number(meterPoint.import_kw))
+            ? { import_kw: meterPoint.import_kw }
+            : {}),
+          ...(Number.isFinite(Number(meterPoint.export_kw))
+            ? { export_kw: meterPoint.export_kw }
+            : {}),
         } : {}) }
         : null;
-      if (details && !meterPoint) {
+      if (details && meterPoint) {
+        if (!Number.isFinite(Number(meterPoint.import_kw))) delete details.import_kw;
+        if (!Number.isFinite(Number(meterPoint.export_kw))) delete details.export_kw;
+      } else if (details) {
         delete details.import_kw;
         delete details.export_kw;
       }
@@ -3207,10 +3252,10 @@ class ElrakningPanel {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(comparisonPrice)}" r="4" />`);
         }
         if (meterPoint) {
-          if (this._meterPowerVisible.import && Number.isFinite(Number(meterPoint.import_kw))) {
+          if (this._meterPowerVisible.import && Number.isFinite(Number(meterPoint.import_kw)) && Number(meterPoint.import_kw) > 0) {
             markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${hoverGeometry.meterY(meterPoint.import_kw)}" r="4" />`);
           }
-          if (this._meterPowerVisible.export && Number.isFinite(Number(meterPoint.export_kw))) {
+          if (this._meterPowerVisible.export && Number.isFinite(Number(meterPoint.export_kw)) && Number(meterPoint.export_kw) > 0) {
             markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${hoverGeometry.meterY(meterPoint.export_kw)}" r="4" />`);
           }
         }
@@ -3219,7 +3264,10 @@ class ElrakningPanel {
       tooltip.classList.toggle("debug-tooltip", Boolean(details));
       tooltip.title = "";
       tooltip.hidden = false;
-      positionChartTooltip(chart, tooltip, event.clientX, event.clientY);
+      const obstacles = [
+        ...svg.querySelectorAll(".chart-hover-marker, .price-marker-label"),
+      ];
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, obstacles, this._tooltipOrbit);
     };
     const clearBarHover = () => {
       svg.querySelector(".chart-bar.bar-hover")?.classList.remove("bar-hover");
