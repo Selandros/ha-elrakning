@@ -2566,6 +2566,93 @@ class ElrakningPanel {
     }
   }
 
+  prepareMeterDisplayPoints(points) {
+    const latestByTimestamp = new Map();
+    points.forEach((point) => {
+      const timestamp = new Date(point.timestamp).getTime();
+      const importKw = Number(point.import_kw);
+      const exportKw = Number(point.export_kw);
+      if (!Number.isFinite(timestamp) || !Number.isFinite(importKw) || !Number.isFinite(exportKw)) return;
+      latestByTimestamp.set(timestamp, {
+        timestamp: point.timestamp,
+        import_kw: importKw,
+        export_kw: exportKw,
+      });
+    });
+    return [...latestByTimestamp.values()].sort((a, b) => (
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    ));
+  }
+
+  smoothSignedMeterPoints(points, tauSeconds = 100, gapSeconds = 300, deadband = 0.03) {
+    let previousTimestamp = null;
+    let previousSmoothed = null;
+    return points.map((point) => {
+      const timestamp = new Date(point.timestamp).getTime();
+      const signedKw = point.import_kw - point.export_kw;
+      const gapBefore = previousTimestamp !== null && (timestamp - previousTimestamp) > gapSeconds * 1000;
+      const dtSeconds = previousTimestamp === null ? 0 : Math.max(0, (timestamp - previousTimestamp) / 1000);
+      const alpha = previousSmoothed === null || gapBefore
+        ? 1
+        : 1 - Math.exp(-dtSeconds / tauSeconds);
+      let smoothedSignedKw = previousSmoothed === null || gapBefore
+        ? signedKw
+        : previousSmoothed + alpha * (signedKw - previousSmoothed);
+      if (Math.abs(smoothedSignedKw) < deadband) smoothedSignedKw = 0;
+      previousTimestamp = timestamp;
+      previousSmoothed = smoothedSignedKw;
+      return {
+        ...point,
+        signed_kw: signedKw,
+        smoothed_signed_kw: smoothedSignedKw,
+        import_kw: Math.max(smoothedSignedKw, 0),
+        export_kw: Math.max(-smoothedSignedKw, 0),
+        gap_before: gapBefore,
+      };
+    });
+  }
+
+  buildMeterDisplaySegments(points, key) {
+    const segments = [];
+    let start = null;
+    points.forEach((point, index) => {
+      const active = Number(point[key]) > 0;
+      if (active && start === null) start = index;
+      if ((!active || index === points.length - 1) && start !== null) {
+        const end = active && index === points.length - 1 ? index : index - 1;
+        const from = start > 0 && points[start - 1][key] === 0 && !points[start].gap_before
+          ? start - 1
+          : start;
+        const to = end < points.length - 1 && points[end + 1][key] === 0 && !points[end + 1].gap_before
+          ? end + 1
+          : end;
+        if (to - from > 0) segments.push(points.slice(from, to + 1));
+        start = null;
+      }
+    });
+    return segments;
+  }
+
+  buildSmoothMeterPath(segment, key, x, meterY) {
+    if (segment.length < 2) return "";
+    const coordinates = segment.map((point) => ({
+      x: x(point.timestamp),
+      y: meterY(point[key]),
+    }));
+    const first = coordinates[0];
+    const path = [`M ${first.x} ${first.y}`];
+    for (let index = 0; index < coordinates.length - 1; index += 1) {
+      const current = coordinates[index];
+      const next = coordinates[index + 1];
+      const midpointX = (current.x + next.x) / 2;
+      const midpointY = (current.y + next.y) / 2;
+      path.push(`Q ${current.x} ${current.y} ${midpointX} ${midpointY}`);
+    }
+    const last = coordinates[coordinates.length - 1];
+    path.push(`Q ${last.x} ${last.y} ${last.x} ${last.y}`);
+    return path.join(" ");
+  }
+
   renderPriceChart() {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
@@ -2654,6 +2741,7 @@ class ElrakningPanel {
         return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
       })
       : [];
+    const meterDisplayPoints = this.smoothSignedMeterPoints(this.prepareMeterDisplayPoints(meterPoints));
     const meterMaximum = Math.max(
       0,
       ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
@@ -2666,24 +2754,9 @@ class ElrakningPanel {
     const meterStep = meterStepFactor * meterMagnitude;
     const meterRange = Math.ceil(meterBase / meterStep) * meterStep;
     const meterY = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / meterRange) * plotHeight;
-    const buildMeterSegments = (key) => {
-      const segments = [];
-      let segment = [];
-      meterPoints.forEach((point) => {
-        const value = Number(point[key]);
-        if (Number.isFinite(value) && value > 0) {
-          segment.push(`${x(point.timestamp)},${meterY(value)}`);
-        } else {
-          if (segment.length > 1) segments.push(segment);
-          segment = [];
-        }
-      });
-      if (segment.length > 1) segments.push(segment);
-      return segments;
-    };
     const meterLinesFor = (key, className, visible) => visible
-      ? buildMeterSegments(key)
-        .map((segment) => `<polyline class="${className}" points="${segment.join(" ")}" />`)
+      ? this.buildMeterDisplaySegments(meterDisplayPoints, key)
+        .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`)
         .join("")
       : "";
     const meterLines = [
