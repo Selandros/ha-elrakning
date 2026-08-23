@@ -163,6 +163,8 @@ class ElrakningPanel {
     this._pinnedPeriod = null;
     this._chartTouch = null;
     this._chartDebugCopyText = "";
+    this._meterPowerHistory = { date: null, points: [] };
+    this._meterPowerVisible = { import: true, export: true };
     this._providerConfigured = false;
     this.priceData = {
       source: "nord_pool",
@@ -218,6 +220,14 @@ class ElrakningPanel {
             </div>
           </div>
           <div class="price-chart" aria-live="polite"></div>
+          <div class="price-chart-legend" data-meter-legend hidden>
+            <button type="button" class="chart-legend-toggle active" data-meter-series="import" aria-pressed="true">
+              <span class="chart-legend-swatch import" aria-hidden="true"></span>Import
+            </button>
+            <button type="button" class="chart-legend-toggle active" data-meter-series="export" aria-pressed="true">
+              <span class="chart-legend-swatch export" aria-hidden="true"></span>Export
+            </button>
+          </div>
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisprognos laddas …</p>
         </section>
 
@@ -799,9 +809,11 @@ class ElrakningPanel {
             flex-wrap: wrap;
           }
 
-          .price-section {
-            padding: 16px 12px 10px;
-          }
+        .price-section {
+          --grid-import-color: #F2A373;
+          --grid-export-color: #72AAF6;
+          padding: 16px 12px 10px;
+        }
 
           .price-summary {
             gap: 12px 18px;
@@ -857,6 +869,47 @@ class ElrakningPanel {
           color: var(--error-color);
         }
 
+        .price-chart-legend {
+          align-items: center;
+          display: flex;
+          gap: 12px;
+          height: 22px;
+          margin-top: 1px;
+        }
+
+        .chart-legend-toggle {
+          align-items: center;
+          background: transparent;
+          border: 0;
+          color: var(--secondary-text-color);
+          display: inline-flex;
+          font-size: 12px;
+          gap: 5px;
+          margin: 0;
+          opacity: .55;
+          padding: 2px 0;
+        }
+
+        .chart-legend-toggle.active {
+          color: var(--primary-text-color);
+          opacity: 1;
+        }
+
+        .chart-legend-swatch {
+          border-radius: 999px;
+          display: inline-block;
+          height: 3px;
+          width: 18px;
+        }
+
+        .chart-legend-swatch.import {
+          background: var(--grid-import-color);
+        }
+
+        .chart-legend-swatch.export {
+          background: var(--grid-export-color);
+        }
+
         .empty-chart {
           align-items: center;
           border: 1px dashed var(--divider-color);
@@ -891,6 +944,33 @@ class ElrakningPanel {
           stroke: var(--warning-color);
           stroke-dasharray: 5 4;
           stroke-width: 1.5;
+        }
+
+        .chart-meter-axis {
+          stroke: var(--divider-color);
+          stroke-width: 1;
+        }
+
+        .chart-meter-label {
+          fill: var(--secondary-text-color);
+          font-size: 10px;
+        }
+
+        .chart-meter-import,
+        .chart-meter-export {
+          fill: none;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 2;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .chart-meter-import {
+          stroke: var(--grid-import-color);
+        }
+
+        .chart-meter-export {
+          stroke: var(--grid-export-color);
         }
 
         .price-marker-label {
@@ -1011,7 +1091,21 @@ class ElrakningPanel {
     this._bindMeterSourceDialog();
     this._bindDiagnostics();
     this._bindMainInvoiceParser();
+    this._bindMeterPowerLegend();
     this.renderPriceChart();
+  }
+
+  _bindMeterPowerLegend() {
+    for (const button of this.host.querySelectorAll("[data-meter-series]")) {
+      button.addEventListener("click", () => {
+        const series = button.dataset.meterSeries;
+        if (!(series in this._meterPowerVisible)) return;
+        this._meterPowerVisible[series] = !this._meterPowerVisible[series];
+        button.classList.toggle("active", this._meterPowerVisible[series]);
+        button.setAttribute("aria-pressed", String(this._meterPowerVisible[series]));
+        this.renderPriceChart();
+      });
+    }
   }
 
   _bindDebugToggle() {
@@ -1882,6 +1976,11 @@ class ElrakningPanel {
           .then((unsubscribe) => unsubscribe?.())
           .catch(() => {});
       }
+      if (this._meterPowerEventUnsubscribePromise) {
+        Promise.resolve(this._meterPowerEventUnsubscribePromise)
+          .then((unsubscribe) => unsubscribe?.())
+          .catch(() => {});
+      }
       if (this._diagnosticsEventUnsubscribePromise) {
         Promise.resolve(this._diagnosticsEventUnsubscribePromise)
           .then((unsubscribe) => unsubscribe?.())
@@ -1907,6 +2006,10 @@ class ElrakningPanel {
           }
         },
         "state_changed",
+      );
+      this._meterPowerEventUnsubscribePromise = hass.connection.subscribeEvents(
+        (event) => this._appendMeterPowerPoint(event.data),
+        "elrakning_meter_power_update",
       );
       this._diagnosticsEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this._loadDiagnosticsState?.(),
@@ -1940,6 +2043,11 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._meterPowerEventUnsubscribePromise) {
+      Promise.resolve(this._meterPowerEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
     if (this._diagnosticsEventUnsubscribePromise) {
       Promise.resolve(this._diagnosticsEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -1949,6 +2057,7 @@ class ElrakningPanel {
     this._eventUnsubscribePromise = null;
     this._greenelyEventUnsubscribePromise = null;
     this._meterEventUnsubscribePromise = null;
+    this._meterPowerEventUnsubscribePromise = null;
     this._diagnosticsEventUnsubscribePromise = null;
     this._loadDiagnosticsState = null;
     this._eventConnection = null;
@@ -2078,9 +2187,47 @@ class ElrakningPanel {
     try {
       const state = await this.hass.callWS({ type: "elrakning/meter_state" });
       this._applyMeterState(state);
+      await this.loadMeterPowerHistory();
     } catch {
       // Keep the meter card unconfigured when state is unavailable.
     }
+  }
+
+  async loadMeterPowerHistory() {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/meter_power_history" });
+      this._meterPowerHistory = {
+        date: response?.date || null,
+        points: Array.isArray(response?.points) ? response.points : [],
+      };
+    } catch {
+      this._meterPowerHistory = { date: null, points: [] };
+    }
+    if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+  }
+
+  _appendMeterPowerPoint(point) {
+    if (!point?.timestamp) return;
+    const timestamp = new Date(point.timestamp);
+    if (Number.isNaN(timestamp.getTime())) return;
+    const date = timestamp.toLocaleDateString("sv-SE");
+    const currentDate = this._meterPowerHistory.date || date;
+    if (date !== currentDate) return;
+    const points = Array.isArray(this._meterPowerHistory.points)
+      ? [...this._meterPowerHistory.points]
+      : [];
+    const next = {
+      timestamp: timestamp.toISOString(),
+      import_kw: Number(point.import_kw) || 0,
+      export_kw: Number(point.export_kw) || 0,
+    };
+    const index = points.findIndex((item) => item.timestamp === next.timestamp);
+    if (index >= 0) points[index] = next;
+    else points.push(next);
+    points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
+    this._meterPowerHistory = { date: currentDate, points };
+    if (this.host.querySelector(".price-chart")) this.renderPriceChart();
   }
 
   updatePriceSummary() {
@@ -2147,6 +2294,8 @@ class ElrakningPanel {
     if (!chart) return;
 
     if (!this.priceData.periods.length) {
+      const legend = this.host.querySelector("[data-meter-legend]");
+      if (legend) legend.hidden = true;
       const message = this.priceData.error === "missing_integration"
         ? "<strong>Ingen Nord Pool-sensor hittades.</strong><span>Lägg till Nord Pool i Home Assistant för att visa dagens elpris.</span>"
         : "<strong>Dagens Nord Pool-priser kunde inte hämtas.</strong>";
@@ -2209,6 +2358,38 @@ class ElrakningPanel {
         markerGroups.set(key, group);
       });
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime()) / dayDuration) * plotWidth;
+    const meterPoints = Array.isArray(this._meterPowerHistory?.points)
+      ? this._meterPowerHistory.points.filter((point) => {
+        const timestamp = new Date(point.timestamp).getTime();
+        return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+      })
+      : [];
+    const meterMaximum = Math.max(
+      0,
+      ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
+        .filter(Number.isFinite),
+    );
+    const meterRange = meterMaximum || 1;
+    const meterY = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / meterRange) * plotHeight;
+    const meterPath = (key) => meterPoints
+      .map((point) => `${x(point.timestamp)},${meterY(point[key])}`)
+      .join(" ");
+    const meterLines = [
+      this._meterPowerVisible.import && meterPoints.length
+        ? `<polyline class="chart-meter-import" points="${meterPath("import_kw")}" />`
+        : "",
+      this._meterPowerVisible.export && meterPoints.length
+        ? `<polyline class="chart-meter-export" points="${meterPath("export_kw")}" />`
+        : "",
+    ].join("");
+    const meterAxis = meterPoints.length
+      ? `<line class="chart-meter-axis" x1="${width - plot.right}" y1="${plot.top}" x2="${width - plot.right}" y2="${plot.top + plotHeight}" />
+         <text class="chart-meter-label" text-anchor="end" x="${width - 2}" y="${plot.top + 4}">${this._formatNumber(meterRange)} kW</text>
+         <text class="chart-meter-label" text-anchor="end" x="${width - 2}" y="${plot.top + plotHeight}">0 kW</text>`
+      : "";
+    const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
+      new Date(point.timestamp).getTime() <= timestamp ? point : latest
+    ), null);
     const bars = periods.map((period, index) => {
       const price = prices[index];
       const top = price >= 0 ? y(price) : zeroY;
@@ -2229,6 +2410,10 @@ class ElrakningPanel {
         subtotal_ex_vat: Number(period.subtotal_ex_vat) * 100,
         vat: Number(period.vat) * 100,
         customer_price: Number(period.customer_price) * 100,
+        ...(meterPointAt(new Date(period.start).getTime()) ? {
+          import_kw: meterPointAt(new Date(period.start).getTime()).import_kw,
+          export_kw: meterPointAt(new Date(period.start).getTime()).export_kw,
+        } : {}),
       });
       const start = new Date(period.start);
       const end = new Date(period.end);
@@ -2255,9 +2440,13 @@ class ElrakningPanel {
       hourDate.setHours(hourDate.getHours() + hour);
       return `<text class="chart-label" text-anchor="middle" x="${x(hourDate)}" y="${height - 8}">${String(hour).padStart(2, "0")}</text>`;
     }).join("");
+    const legend = this.host.querySelector("[data-meter-legend]");
+    if (legend) legend.hidden = meterPoints.length === 0;
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       ${bars}
+      ${meterAxis}
+      ${meterLines}
       <line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />
       ${priceMarkers}
       ${hourLabels}

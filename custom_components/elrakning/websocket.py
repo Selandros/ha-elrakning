@@ -44,6 +44,7 @@ METER_DIAGNOSTIC_COMMAND = f"{DOMAIN}/meter_diagnostic"
 METER_STATE_COMMAND = f"{DOMAIN}/meter_state"
 METER_SOURCE_COMMAND = f"{DOMAIN}/meter_source"
 METER_STORE_CLEAR_COMMAND = f"{DOMAIN}/meter_store_clear"
+METER_POWER_HISTORY_COMMAND = f"{DOMAIN}/meter_power_history"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_meter_state)
     websocket_api.async_register_command(hass, websocket_meter_source)
     websocket_api.async_register_command(hass, websocket_meter_store_clear)
+    websocket_api.async_register_command(hass, websocket_meter_power_history)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
 
 
@@ -537,6 +539,19 @@ async def websocket_meter_store_clear(hass, connection, msg):
     manager = _meter_manager(hass)
     state = await manager.async_clear() if manager else {"configured": False}
     connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command({vol.Required("type"): METER_POWER_HISTORY_COMMAND})
+@websocket_api.async_response
+async def websocket_meter_power_history(hass, connection, msg):
+    """Return today's normalized live power history for the selected meter."""
+    manager = _meter_manager(hass)
+    result = await manager.async_power_history() if manager else {
+        "success": False,
+        "points": [],
+        "error": "meter_unavailable",
+    }
+    connection.send_result(msg["id"], result)
 
 
 def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:

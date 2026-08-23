@@ -99,7 +99,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if manager := frontend_data.pop("elhandel_manager", None):
         await manager.async_shutdown()
-    frontend_data.pop("meter_manager", None)
+    if meter_manager := frontend_data.pop("meter_manager", None):
+        await meter_manager.async_shutdown()
     if frontend.async_panel_exists(hass, PANEL_PATH):
         frontend.async_remove_panel(hass, PANEL_PATH)
     return True

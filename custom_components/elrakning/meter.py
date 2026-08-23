@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
-from homeassistant.core import valid_entity_id
+from homeassistant.core import EVENT_STATE_CHANGED, Event, State, valid_entity_id
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.storage import Store
 
 
@@ -16,6 +19,7 @@ METER_FIELDS = (
     "energy_import_entity",
     "energy_export_entity",
 )
+METER_POWER_UPDATE_EVENT = "elrakning_meter_power_update"
 
 
 def _text(value: Any) -> str:
@@ -30,6 +34,38 @@ def _number(state, divisor: float) -> float | None:
     return value / divisor
 
 
+def _power_kw(state: State | Any) -> float | None:
+    """Normalize a signed power state to kW."""
+    raw = getattr(state, "state", state)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not value == value or value in (float("inf"), float("-inf")):
+        return None
+    unit = str(getattr(state, "attributes", {}).get("unit_of_measurement", "")).lower()
+    if unit == "w":
+        value /= 1000
+    elif unit == "mw":
+        value *= 1000
+    return value
+
+
+def normalize_power_state(state: State | Any) -> dict[str, Any] | None:
+    """Convert signed meter power into semantic import/export series."""
+    power_kw = _power_kw(state)
+    if power_kw is None:
+        return None
+    timestamp = getattr(state, "last_updated", None)
+    if timestamp is None:
+        return None
+    return {
+        "timestamp": timestamp.isoformat(),
+        "import_kw": max(power_kw, 0),
+        "export_kw": max(-power_kw, 0),
+    }
+
+
 class MeterManager:
     """Persist a user-selected generic meter mapping and read its states."""
 
@@ -38,6 +74,25 @@ class MeterManager:
         self._diagnostic_callback = diagnostic_callback
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
+        self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
+
+    async def _async_state_changed(self, event: Event) -> None:
+        """Publish normalized live power without polling."""
+        entity_id = event.data.get("entity_id")
+        if entity_id != self.mapping.get("power_entity"):
+            return
+        point = normalize_power_state(event.data.get("new_state"))
+        if point is not None:
+            self.hass.bus.async_fire(
+                METER_POWER_UPDATE_EVENT,
+                {"entity_id": entity_id, **point},
+            )
+
+    async def async_shutdown(self) -> None:
+        """Unsubscribe from Home Assistant state changes."""
+        if self._state_unsub:
+            self._state_unsub()
+            self._state_unsub = None
 
     async def _diagnostic(self, level: str, event: str, message: str) -> None:
         if self._diagnostic_callback is not None:
@@ -106,3 +161,42 @@ class MeterManager:
 
     async def async_source(self) -> dict[str, Any]:
         return {"mapping": dict(self.mapping), "state": await self.async_state()}
+
+    async def async_power_history(self) -> dict[str, Any]:
+        """Return today's normalized history for the selected power entity."""
+        entity_id = self.mapping.get("power_entity")
+        now = dt_util.now()
+        start = dt_util.start_of_local_day(now)
+        end = dt_util.start_of_local_day(now + timedelta(days=1))
+        if not entity_id:
+            return {"success": True, "date": start.date().isoformat(), "points": []}
+        try:
+            from homeassistant.components.recorder import history
+
+            history_by_entity = await self.hass.async_add_executor_job(
+                partial(
+                    history.get_significant_states,
+                    self.hass,
+                    start,
+                    end,
+                    entity_ids=[entity_id],
+                    include_start_time_state=True,
+                    significant_changes_only=False,
+                    minimal_response=False,
+                    no_attributes=False,
+                )
+            )
+        except Exception:
+            return {
+                "success": False,
+                "date": start.date().isoformat(),
+                "points": [],
+                "error": "history_unavailable",
+            }
+        points = []
+        for state in history_by_entity.get(entity_id, []):
+            point = normalize_power_state(state)
+            if point is not None:
+                points.append(point)
+        points.sort(key=lambda point: point["timestamp"])
+        return {"success": True, "date": start.date().isoformat(), "points": points}
