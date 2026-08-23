@@ -258,6 +258,7 @@ assert.match(panelSource, /chart-legend-preview:not\(\.active\)/);
 assert.match(panelSource, /#56C7A0/);
 assert.match(panelSource, /#FF6363/);
 assert.match(panelSource, /#984C5A/);
+assert.match(panelSource, /#C66A78/);
 assert.match(panelSource, /#EF5C83/);
 assert.match(panelSource, /height: 7px;\n\s+width: 7px;/);
 assert.match(panelSource, /this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);

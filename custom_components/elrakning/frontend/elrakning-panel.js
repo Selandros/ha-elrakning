@@ -1108,8 +1108,17 @@ class ElrakningPanel {
           color: #984C5A;
         }
 
+        .chart-legend-preview.charging .chart-legend-swatch {
+          background: #984C5A;
+        }
+
         .chart-legend-preview.charging.active {
+          color: #C66A78;
           opacity: 1;
+        }
+
+        .chart-legend-preview.charging.active .chart-legend-swatch {
+          background: #C66A78;
         }
 
         .chart-legend-preview.charging:not(.active) {
