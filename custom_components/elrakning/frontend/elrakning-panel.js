@@ -1330,12 +1330,6 @@ class ElrakningPanel {
           fill: color-mix(in srgb, var(--error-color) 68%, var(--ha-card-background, var(--card-background-color)));
         }
 
-        .chart-bar.bar-hover {
-          transform-box: fill-box;
-          transform-origin: center bottom;
-          transform: scale(1.22, 1.08);
-        }
-
         .chart-tooltip {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
@@ -3269,9 +3263,6 @@ class ElrakningPanel {
       ];
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, obstacles, this._tooltipOrbit);
     };
-    const clearBarHover = () => {
-      svg.querySelector(".chart-bar.bar-hover")?.classList.remove("bar-hover");
-    };
     const clearHoverMarkers = () => {
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
       if (hoverMarkers) hoverMarkers.replaceChildren();
@@ -3282,28 +3273,19 @@ class ElrakningPanel {
     svg.addEventListener("mousemove", (event) => {
       if (event.sourceCapabilities?.firesTouchEvents) return;
       if (!hasVisibleTooltipLayer) {
-        clearBarHover();
         clearHoverMarkers();
         tooltip.hidden = true;
         return;
       }
       const period = periodAt(event.clientX);
       if (period && insidePlot(event.clientX, event.clientY)) {
-        const bar = svg.querySelector(`.chart-bar[data-index="${period.index}"]`);
-        const current = svg.querySelector(".chart-bar.bar-hover");
-        if (current !== bar) {
-          current?.classList.remove("bar-hover");
-          bar?.classList.add("bar-hover");
-        }
         show(period.period, event, period.tooltipTimestamp);
       } else {
-        clearBarHover();
         clearHoverMarkers();
         if (!this._pinnedPeriod) tooltip.hidden = true;
       }
     });
     svg.addEventListener("mouseleave", () => {
-      clearBarHover();
       clearHoverMarkers();
       if (!this._pinnedPeriod) tooltip.hidden = true;
     });
