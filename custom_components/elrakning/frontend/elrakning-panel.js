@@ -308,6 +308,7 @@ class ElrakningPanel {
     this._meterHistoryRequestToken = 0;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
+    this._averageLineVisible = true;
     this._previewLayersVisible = {
       solar: true,
       consumption: true,
@@ -385,6 +386,9 @@ class ElrakningPanel {
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="spot" aria-pressed="true">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Spotpris
+            </button>
+            <button type="button" class="chart-legend-toggle active" data-chart-layer="average" aria-pressed="true">
+              <span class="chart-legend-swatch average" aria-hidden="true"></span>Snitt
             </button>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="import" aria-pressed="true">
               <span class="chart-legend-swatch import" aria-hidden="true"></span>Import
@@ -1221,6 +1225,10 @@ class ElrakningPanel {
           background: var(--secondary-text-color);
         }
 
+        .chart-legend-swatch.average {
+          background: var(--warning-color);
+        }
+
         .empty-chart {
           align-items: center;
           border: 1px dashed var(--divider-color);
@@ -1435,6 +1443,13 @@ class ElrakningPanel {
           this._meterPowerVisible[layer] = !this._meterPowerVisible[layer];
           button.classList.toggle("active", this._meterPowerVisible[layer]);
           button.setAttribute("aria-pressed", String(this._meterPowerVisible[layer]));
+          this.renderPriceChart();
+          return;
+        }
+        if (layer === "average") {
+          this._averageLineVisible = !this._averageLineVisible;
+          button.classList.toggle("active", this._averageLineVisible);
+          button.setAttribute("aria-pressed", String(this._averageLineVisible));
           this.renderPriceChart();
           return;
         }
@@ -3055,7 +3070,8 @@ class ElrakningPanel {
         ? Math.min(...coveredBars.map((bar) => bar.top))
         : plot.top + plotHeight;
       const averageLineY = y(average);
-      const obstacleTops = [highestCoveredTop, averageLineY];
+      const obstacleTops = [highestCoveredTop];
+      if (this._averageLineVisible) obstacleTops.push(averageLineY);
       if (this._meterPowerVisible.import) {
         const importTop = this.meterObstacleTop(
           meterDisplayPoints,
@@ -3120,7 +3136,7 @@ class ElrakningPanel {
       ${meterGrid}
       ${bars}
       ${meterLines}
-      ${this._spotBarsVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
+      ${this._averageLineVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       ${priceMarkers}
       <g class="chart-hover-markers" aria-hidden="true"></g>
       ${hourLabels}
