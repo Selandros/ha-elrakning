@@ -1248,6 +1248,28 @@ class ElrakningPanel {
           stroke: var(--grid-export-color);
         }
 
+        .chart-hover-markers {
+          pointer-events: none;
+        }
+
+        .chart-hover-marker {
+          stroke: var(--ha-card-background, var(--card-background-color));
+          stroke-width: 2;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .chart-hover-marker-spot {
+          fill: var(--primary-text-color);
+        }
+
+        .chart-hover-marker-import {
+          fill: var(--grid-import-color);
+        }
+
+        .chart-hover-marker-export {
+          fill: var(--grid-export-color);
+        }
+
         .price-marker-label {
           fill: var(--primary-color);
           font-size: 16px;
@@ -3060,6 +3082,7 @@ class ElrakningPanel {
     }).join("");
     const legend = this.host.querySelector("[data-meter-legend]");
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
+    this._chartHoverGeometry = { x, y, meterY };
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       ${meterGrid}
@@ -3067,6 +3090,7 @@ class ElrakningPanel {
       ${meterLines}
       ${this._spotBarsVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       ${priceMarkers}
+      <g class="chart-hover-markers" aria-hidden="true"></g>
       ${hourLabels}
     </svg><div class="chart-tooltip" hidden></div>`;
     this.bindChartTooltips();
@@ -3174,6 +3198,24 @@ class ElrakningPanel {
         tooltip.innerHTML = `<strong>${time}</strong>${tooltipRows}`;
       }
       this._chartDebugCopyText = tooltipText;
+      const hoverMarkers = svg.querySelector(".chart-hover-markers");
+      const hoverGeometry = this._chartHoverGeometry;
+      if (hoverMarkers && hoverGeometry) {
+        const markerX = hoverGeometry.x(tooltipTimestamp);
+        const markers = [];
+        if (this._spotBarsVisible && Number.isFinite(comparisonPrice)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(comparisonPrice)}" r="4" />`);
+        }
+        if (meterPoint) {
+          if (this._meterPowerVisible.import && Number.isFinite(Number(meterPoint.import_kw))) {
+            markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${markerX}" cy="${hoverGeometry.meterY(meterPoint.import_kw)}" r="4" />`);
+          }
+          if (this._meterPowerVisible.export && Number.isFinite(Number(meterPoint.export_kw))) {
+            markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${markerX}" cy="${hoverGeometry.meterY(meterPoint.export_kw)}" r="4" />`);
+          }
+        }
+        hoverMarkers.innerHTML = markers.join("");
+      }
       tooltip.classList.toggle("debug-tooltip", Boolean(details));
       tooltip.title = "";
       tooltip.hidden = false;
@@ -3182,6 +3224,10 @@ class ElrakningPanel {
     const clearBarHover = () => {
       svg.querySelector(".chart-bar.bar-hover")?.classList.remove("bar-hover");
     };
+    const clearHoverMarkers = () => {
+      const hoverMarkers = svg.querySelector(".chart-hover-markers");
+      if (hoverMarkers) hoverMarkers.replaceChildren();
+    };
     const hasVisibleTooltipLayer = this._spotBarsVisible
       || this._meterPowerVisible.import
       || this._meterPowerVisible.export;
@@ -3189,6 +3235,7 @@ class ElrakningPanel {
       if (event.sourceCapabilities?.firesTouchEvents) return;
       if (!hasVisibleTooltipLayer) {
         clearBarHover();
+        clearHoverMarkers();
         tooltip.hidden = true;
         return;
       }
@@ -3203,11 +3250,13 @@ class ElrakningPanel {
         show(period.period, event, period.tooltipTimestamp);
       } else {
         clearBarHover();
+        clearHoverMarkers();
         if (!this._pinnedPeriod) tooltip.hidden = true;
       }
     });
     svg.addEventListener("mouseleave", () => {
       clearBarHover();
+      clearHoverMarkers();
       if (!this._pinnedPeriod) tooltip.hidden = true;
     });
     const clearPinnedTooltip = () => {
