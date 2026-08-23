@@ -73,7 +73,58 @@ const upcomingPeriods = [1, 1, 1, 1, 3, 4, 10, 12, 14, 15].map((price, index) =>
 }));
 assert.deepEqual(
   generateUpcomingPriceAnalysis(upcomingPeriods, 0, new Date("2026-08-23T12:00:00+02:00")),
-  { category: "cheap", status: "Billigt nu", forecast: "Priset väntas stiga om cirka 1 timme" },
+  { category: "cheap", status: "Billigt nu", forecast: "Dagens dyraste timme börjar klockan 13:30. Priset stiger igen senare idag" },
+);
+const makeAnalysisPeriods = (values) => values.map((price, index) => {
+  const start = new Date("2026-08-23T00:00:00+02:00");
+  start.setMinutes(index * 15);
+  const end = new Date(start);
+  end.setMinutes(end.getMinutes() + 15);
+  return { start: start.toISOString(), end: end.toISOString(), price: price / 100 };
+});
+const passedExpensiveHour = generateUpcomingPriceAnalysis(
+  makeAnalysisPeriods([10, 10, 10, 10, 2, 2, 2, 2, 2, 2, 2, 2]),
+  8,
+  new Date("2026-08-23T02:00:00+02:00"),
+);
+assert.match(passedExpensiveHour.forecast, /Dagens dyraste timme är förbi/);
+const futureExpensiveHour = generateUpcomingPriceAnalysis(
+  makeAnalysisPeriods([2, 2, 2, 2, 9, 9, 9, 9, 2, 2, 2, 2]),
+  0,
+  new Date("2026-08-23T00:00:00+02:00"),
+);
+assert.match(futureExpensiveHour.forecast, /Dagens dyraste timme börjar/);
+const activeExpensiveHour = generateUpcomingPriceAnalysis(
+  makeAnalysisPeriods([2, 9, 9, 9, 9, 2, 2, 2]),
+  2,
+  new Date("2026-08-23T00:30:00+02:00"),
+);
+assert.match(activeExpensiveHour.forecast, /Vi är inne i dagens dyraste timme/);
+const lowRemainder = generateUpcomingPriceAnalysis(
+  makeAnalysisPeriods([10, 10, 10, 10, 1, 1, 1, 1, 1, 1, 1, 1]),
+  5,
+  new Date("2026-08-23T01:15:00+02:00"),
+);
+assert.match(lowRemainder.forecast, /Priset ligger lågt resten av dagen/);
+const futurePeak = generateUpcomingPriceAnalysis(
+  makeAnalysisPeriods([1, 1, 1, 1, 2, 2, 2, 2, 10, 10, 10, 10]),
+  4,
+  new Date("2026-08-23T01:00:00+02:00"),
+);
+assert.doesNotMatch(futurePeak.forecast, /Priset ligger lågt resten av dagen/);
+const flatAnalysis = generateUpcomingPriceAnalysis(
+  makeAnalysisPeriods([5, 5, 5, 5, 5, 5, 5, 5]),
+  2,
+  new Date("2026-08-23T00:30:00+02:00"),
+);
+assert.doesNotMatch(flatAnalysis.forecast, /väntas|förväntas|prognos/);
+assert.equal(
+  JSON.stringify(futureExpensiveHour),
+  JSON.stringify(generateUpcomingPriceAnalysis(
+    makeAnalysisPeriods([2, 2, 2, 2, 9, 9, 9, 9, 2, 2, 2, 2]),
+    0,
+    new Date("2026-08-23T00:00:00+02:00"),
+  )),
 );
 const guardedLowDay = priceColorBands([...Array.from({ length: 15 }, (_, index) => 1 + index / 10), 4.1, 100, 101, 102, 103, 104]);
 assert.equal(priceCategory(4.1, guardedLowDay), "normal");

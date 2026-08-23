@@ -102,54 +102,106 @@ export function createPriceDebugText(priceData) {
   return lines.join("\n");
 }
 
+function findRollingPriceExtreme(periods, prices, mode) {
+  if (periods.length < 4) return null;
+  let best = null;
+  for (let start = 0; start <= periods.length - 4; start += 1) {
+    const blockPrices = prices.slice(start, start + 4);
+    const average = blockPrices.reduce((sum, price) => sum + price, 0) / blockPrices.length;
+    if (!best || (mode === "max" ? average > best.average : average < best.average)) {
+      best = {
+        startIndex: start,
+        endIndex: start + 3,
+        average,
+        start: periods[start].start,
+        end: periods[start + 3].end,
+      };
+    }
+  }
+  return best;
+}
+
+function formatAnalysisOffset(target, now) {
+  const minutes = Math.max(0, Math.round((new Date(target).getTime() - now.getTime()) / 60000));
+  if (minutes <= 15) return "inom en kvart";
+  if (minutes < 60) return `om cirka ${Math.max(1, Math.round(minutes / 15) * 15)} minuter`;
+  const hours = Math.max(1, Math.round(minutes / 60));
+  return `om cirka ${hours} ${hours === 1 ? "timme" : "timmar"}`;
+}
+
+function formatAnalysisClock(timestamp) {
+  return new Date(timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+}
+
+function findNextMeaningfulTurningPoint(prices, categories, currentIndex, direction) {
+  for (let index = currentIndex + 1; index < prices.length - 1; index += 1) {
+    const before = prices[index - 1];
+    const current = prices[index];
+    const after = prices[index + 1];
+    const localTurningPoint = direction === "low"
+      ? current <= before && current <= after
+      : current >= before && current >= after;
+    if (!localTurningPoint) continue;
+    const surrounding = (before + after) / 2;
+    const meaningfulChange = surrounding > 0 && Math.abs(surrounding - current) / surrounding >= 0.08;
+    const categoryChange = direction === "low"
+      ? categories[index] === "cheap" && categories[index - 1] !== "cheap"
+      : categories[index] === "expensive" && categories[index - 1] !== "expensive";
+    if (meaningfulChange || categoryChange) return index;
+  }
+  return null;
+}
+
+function analyzeRemainingPriceProfile(prices, categories, currentIndex, bands) {
+  const remainingPrices = prices.slice(currentIndex);
+  const remainingCategories = categories.slice(currentIndex);
+  if (!remainingPrices.length || !bands) return null;
+  const cheapShare = remainingCategories.filter((category) => category === "cheap").length / remainingCategories.length;
+  const expensiveAhead = remainingCategories.slice(1).some((category) => category === "expensive");
+  const remainingAverage = remainingPrices.reduce((sum, price) => sum + price, 0) / remainingPrices.length;
+  if (!expensiveAhead && cheapShare >= 0.7 && remainingAverage <= bands.average) {
+    return "Priset ligger lågt resten av dagen";
+  }
+  if (expensiveAhead) return "Priset stiger igen senare idag";
+  if (remainingAverage <= bands.average * 1.1) return "Priset håller sig på en måttlig nivå resten av dagen";
+  return "Priserna varierar under resten av dagen";
+}
+
 export function generateUpcomingPriceAnalysis(periods, currentIndex, now = new Date()) {
   if (!Array.isArray(periods) || currentIndex < 0 || currentIndex >= periods.length) {
-    return { category: null, status: "", forecast: "Dagens prisprognos är inte tillgänglig." };
+    return { category: null, status: "", forecast: "Dagens prisanalys är inte tillgänglig" };
   }
   const prices = periods.map((period) => Number(period.price) * 100);
   const bands = priceColorBands(prices);
   const categories = prices.map((price) => priceCategory(price, bands));
   const currentCategory = categories[currentIndex];
-  let changeIndex = currentIndex + 1;
-  while (changeIndex < categories.length && categories[changeIndex] === currentCategory) {
-    changeIndex += 1;
+  const observations = [];
+  const highestHour = findRollingPriceExtreme(periods, prices, "max");
+  if (highestHour) {
+    if (highestHour.startIndex <= currentIndex && currentIndex <= highestHour.endIndex) {
+      observations.push("Vi är inne i dagens dyraste timme");
+    } else if (highestHour.startIndex > currentIndex) {
+      observations.push(`Dagens dyraste timme börjar klockan ${formatAnalysisClock(highestHour.start)}`);
+    } else {
+      observations.push("Dagens dyraste timme är förbi");
+    }
   }
-  const current = periods[currentIndex];
-  const currentStart = new Date(current.start);
-  const currentEnd = new Date(current.end);
-  const reference = currentStart <= now && now < currentEnd ? now : currentStart;
-  const levelEnds = new Date(periods[changeIndex - 1].end);
-  const minutes = Math.max(0, Math.round((levelEnds.getTime() - reference.getTime()) / 60000));
-  const roundedHours = Math.round(minutes / 60);
-  const duration = minutes <= 20
-    ? "inom en kvart"
-    : minutes < 60
-      ? `om cirka ${Math.round(minutes / 15) * 15} minuter`
-      : `om cirka ${roundedHours} ${roundedHours === 1 ? "timme" : "timmar"}`;
-  const nextCategory = categories[changeIndex];
-  if (!nextCategory) {
-    return {
-      category: currentCategory,
-      status: { cheap: "Billigt nu", normal: "Normalt pris nu", expensive: "Dyrt nu" }[currentCategory],
-      forecast: {
-        cheap: "Lågt pris väntas resten av dagen",
-        normal: "Prisnivån väntas vara stabil resten av dagen",
-        expensive: "Hög prisnivå väntas resten av dagen",
-      }[currentCategory],
-    };
+  const remainder = analyzeRemainingPriceProfile(prices, categories, currentIndex, bands);
+  if (remainder) observations.push(remainder);
+  const nextLow = findNextMeaningfulTurningPoint(prices, categories, currentIndex, "low");
+  const nextHigh = findNextMeaningfulTurningPoint(prices, categories, currentIndex, "high");
+  if (observations.length < 2 && nextLow !== null) {
+    observations.push(`En billigare dip kommer ${formatAnalysisOffset(periods[nextLow].start, now)}`);
+  } else if (observations.length < 2 && nextHigh !== null) {
+    observations.push(`Priset stiger tydligt ${formatAnalysisOffset(periods[nextHigh].start, now)}`);
   }
-  if (currentCategory === "cheap") {
-    return { category: currentCategory, status: "Billigt nu", forecast: `Priset väntas stiga ${duration}` };
-  }
-  if (currentCategory === "expensive") {
-    return { category: currentCategory, status: "Dyrt nu", forecast: `Priset väntas sjunka ${duration}` };
+  if (!observations.length) {
+    observations.push(bands ? "Priset håller sig nära dagens nivå" : "Priset är jämnt under dagen");
   }
   return {
     category: currentCategory,
-    status: "Normalt pris nu",
-    forecast: nextCategory === "cheap"
-      ? `Billigare el väntas ${duration}`
-      : `Priset väntas stiga ${duration}`,
+    status: { cheap: "Billigt nu", normal: "Normalt pris nu", expensive: "Dyrt nu" }[currentCategory],
+    forecast: observations.slice(0, 2).join(". "),
   };
 }
 
@@ -315,7 +367,7 @@ class ElrakningPanel {
               <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning
             </button>
           </div>
-          <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisprognos laddas …</p>
+          <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
         </section>
 
         <section class="grid" aria-label="Elräkningens översikt">
