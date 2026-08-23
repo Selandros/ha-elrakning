@@ -278,7 +278,9 @@ assert.match(panelSource, /priceCategory\(prices\[currentIndex\], colorBands\)/)
 assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, var\(--success-color\) 68%,/);
 assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 68%,/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 68%,/);
-assert.match(panelSource, /\.chart-bar\.marker-highlight \{\n\s+fill: color-mix\(in srgb, var\(--primary-color\) 82%,/);
+assert.doesNotMatch(panelSource, /marker-highlight/);
+assert.match(panelSource, /return `<rect class="chart-bar \$\{category\}"/);
+assert.match(panelSource, /\.price-marker-label \{[\s\S]*fill: var\(--primary-color\)/);
 assert.ok((panelSource.match(/var\(--ha-card-background, var\(--card-background-color\)\)/g) || []).length >= 4);
 assert.match(panelSource, /_buildVisibleTooltipRows\(comparisonPrice, details\)/);
 assert.match(panelSource, /snapTooltipTimestamp\(/);

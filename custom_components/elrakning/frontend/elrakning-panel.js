@@ -1270,10 +1270,6 @@ class ElrakningPanel {
           fill: color-mix(in srgb, var(--error-color) 68%, var(--ha-card-background, var(--card-background-color)));
         }
 
-        .chart-bar.marker-highlight {
-          fill: color-mix(in srgb, var(--primary-color) 82%, var(--ha-card-background, var(--card-background-color)));
-        }
-
         .chart-bar.bar-hover {
           transform-box: fill-box;
           transform-origin: center bottom;
@@ -2987,8 +2983,7 @@ class ElrakningPanel {
       const end = new Date(period.end);
       const startX = x(period.start);
       const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
-      const markerClass = markerGroups.has(period.start) ? " marker-highlight" : "";
-      return `<rect class="chart-bar ${category}${markerClass}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
+      return `<rect class="chart-bar ${category}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
     const markerMinY = 18;
     const markerLayouts = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
