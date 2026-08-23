@@ -2916,6 +2916,7 @@ class ElrakningPanel {
     const periods = this.priceData.periods;
     this._updatePriceComparisonControls();
     const prices = periods.map((period) => this._periodCustomerPrice(period));
+    this._chartBarPrices = prices;
     const average = prices.length
       ? prices.reduce((sum, price) => sum + price, 0) / prices.length
       : 0;
@@ -3255,8 +3256,9 @@ class ElrakningPanel {
       if (hoverMarkers && hoverGeometry) {
         const markerX = hoverGeometry.x(tooltipTimestamp);
         const markers = [];
-        if (this._spotBarsVisible && Number.isFinite(comparisonPrice)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(comparisonPrice)}" r="4" />`);
+        const barPrice = this._chartBarPrices?.[index];
+        if (this._spotBarsVisible && Number.isFinite(barPrice)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${markerX}" cy="${hoverGeometry.y(barPrice)}" r="4" />`);
         }
         if (meterPoint) {
           if (this._meterPowerVisible.import && Number.isFinite(Number(meterPoint.import_kw)) && Number(meterPoint.import_kw) > 0) {
