@@ -153,6 +153,26 @@ export function generateUpcomingPriceAnalysis(periods, currentIndex, now = new D
   };
 }
 
+export function snapTooltipTimestamp(timestamp, dayStartMs, dayEndMs, slotMs = 5 * 60 * 1000) {
+  const latestSlot = dayEndMs - slotMs;
+  const snapped = dayStartMs + Math.round((timestamp - dayStartMs) / slotMs) * slotMs;
+  return Math.max(dayStartMs, Math.min(latestSlot, snapped));
+}
+
+export function nearestMeterPoint(points, timestamp, maxDistanceMs = 2.5 * 60 * 1000) {
+  const nearest = (Array.isArray(points) ? points : []).reduce((result, point) => {
+    const pointTimestamp = new Date(point.timestamp).getTime();
+    const distance = Math.abs(pointTimestamp - timestamp);
+    if (!Number.isFinite(pointTimestamp) || distance > maxDistanceMs || (!result || distance < result.distance)) {
+      return Number.isFinite(pointTimestamp) && distance <= maxDistanceMs
+        ? { point, distance }
+        : result;
+    }
+    return result;
+  }, null);
+  return nearest?.point || null;
+}
+
 function positionChartTooltip(chart, tooltip, clientX, clientY) {
   const gap = 10;
   const safety = 7;
@@ -193,6 +213,7 @@ class ElrakningPanel {
     this._chartTouch = null;
     this._chartDebugCopyText = "";
     this._meterPowerHistory = { date: null, points: [] };
+    this._meterTooltipPoints = [];
     this._meterHistorySummary = null;
     this._meterHistoryRequestToken = 0;
     this._meterPowerVisible = { import: true, export: true };
@@ -2749,6 +2770,7 @@ class ElrakningPanel {
         return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
       })
       : [];
+    this._meterTooltipPoints = meterPoints;
     const meterDisplayPoints = this.smoothSignedMeterPoints(this.prepareMeterDisplayPoints(meterPoints));
     const meterMaximum = Math.max(
       0,
@@ -2814,7 +2836,7 @@ class ElrakningPanel {
       const startX = x(period.start);
       const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
       const markerClass = markerGroups.has(period.start) ? " marker-highlight" : "";
-      return `<rect class="chart-bar ${category}${markerClass}" data-index="${index}" data-tooltip="${this.formatTime(start)}–${this.formatTime(end)}|${this.formatPrice(price)} öre/kWh" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
+      return `<rect class="chart-bar ${category}${markerClass}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
     const markerLayouts = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
       const markerX = (x(group.period.start) + x(group.period.end)) / 2;
@@ -2916,6 +2938,10 @@ class ElrakningPanel {
     return rows.join("");
   }
 
+  _meterPointAtNearest(timestamp) {
+    return nearestMeterPoint(this._meterTooltipPoints, timestamp);
+  }
+
   bindChartTooltips() {
     const chart = this.host.querySelector(".price-chart");
     const svg = this.host.querySelector(".chart-svg");
@@ -2928,12 +2954,17 @@ class ElrakningPanel {
       if (viewX < geometry.plotLeft || viewX > geometry.plotLeft + geometry.plotWidth) return null;
       const timestamp = geometry.dayStartMs
         + ((viewX - geometry.plotLeft) / geometry.plotWidth) * geometry.dayDuration;
+      const tooltipTimestamp = snapTooltipTimestamp(
+        timestamp,
+        geometry.dayStartMs,
+        geometry.dayStartMs + geometry.dayDuration,
+      );
       const index = this.priceData.periods.findIndex((period) => {
         const start = new Date(period.start).getTime();
         const end = new Date(period.end).getTime();
-        return start <= timestamp && timestamp < end;
+        return start <= tooltipTimestamp && tooltipTimestamp < end;
       });
-      return index < 0 ? null : { period: this.priceData.periods[index], index };
+      return index < 0 ? null : { period: this.priceData.periods[index], index, tooltipTimestamp };
     };
     const insidePlot = (clientX, clientY) => {
       const geometry = this._chartGeometry;
@@ -2945,15 +2976,26 @@ class ElrakningPanel {
         && viewY >= geometry.plotTop
         && viewY <= geometry.plotTop + geometry.plotHeight;
     };
-    const show = (period, event) => {
-      const start = new Date(period.start);
-      const end = new Date(period.end);
-      const time = `${this.formatTime(start)}–${this.formatTime(end)}`;
+    const show = (period, event, tooltipTimestamp) => {
+      const time = this.formatTime(new Date(tooltipTimestamp));
       const comparisonPrice = this._comparisonPrice(period);
-      const value = `${Number.isFinite(comparisonPrice) ? this.formatPrice(comparisonPrice) : "–"} öre/kWh`;
+      const value = this._spotBarsVisible && Number.isFinite(comparisonPrice)
+        ? `${this.formatPrice(comparisonPrice)} öre/kWh`
+        : "";
       const index = this.priceData.periods.indexOf(period);
-      const details = this._debugEnabled ? this._chartTooltipDetails?.get(index) : null;
-      const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, this._chartTooltipDetails?.get(index));
+      const meterPoint = this._meterPointAtNearest(tooltipTimestamp);
+      const baseDetails = this._chartTooltipDetails?.get(index) || {};
+      const details = this._debugEnabled
+        ? { ...baseDetails, ...(meterPoint ? {
+          import_kw: meterPoint.import_kw,
+          export_kw: meterPoint.export_kw,
+        } : {}) }
+        : null;
+      if (details && !meterPoint) {
+        delete details.import_kw;
+        delete details.export_kw;
+      }
+      const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, meterPoint);
       const tooltipText = details ? createPriceDebugText({ time, value, details }) : "";
       if (details) {
         tooltip.textContent = tooltipText;
@@ -2987,7 +3029,7 @@ class ElrakningPanel {
           current?.classList.remove("bar-hover");
           bar?.classList.add("bar-hover");
         }
-        show(period.period, event);
+        show(period.period, event, period.tooltipTimestamp);
       } else {
         clearBarHover();
         if (!this._pinnedPeriod) tooltip.hidden = true;
@@ -3022,7 +3064,7 @@ class ElrakningPanel {
       if (!this._debugEnabled || !hasVisibleTooltipLayer || !insidePlot(event.clientX, event.clientY)) return;
       const hit = periodAt(event.clientX);
       if (!hit) return;
-      show(hit.period, event);
+      show(hit.period, event, hit.tooltipTimestamp);
       void copyChartDebugText();
     });
     chart.addEventListener("touchstart", (event) => {
@@ -3063,7 +3105,7 @@ class ElrakningPanel {
         return;
       }
       this._pinnedPeriod = hit.period;
-      show(hit.period, touch);
+      show(hit.period, touch, hit.tooltipTimestamp);
       void copyChartDebugText();
     }, { passive: true });
     chart.addEventListener("touchcancel", () => {

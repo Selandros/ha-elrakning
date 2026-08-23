@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, priceCategory, priceColorBands, priceColorDetails, providerLabel } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, priceCategory, priceColorBands, priceColorDetails, providerLabel, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -78,6 +78,20 @@ assert.deepEqual(
 const guardedLowDay = priceColorBands([...Array.from({ length: 15 }, (_, index) => 1 + index / 10), 4.1, 100, 101, 102, 103, 104]);
 assert.equal(priceCategory(4.1, guardedLowDay), "normal");
 assert.equal(priceCategory(2, priceColorBands([2, 2, 2])), "normal");
+const tooltipDayStart = new Date("2026-08-23T00:00:00+02:00").getTime();
+const tooltipDayEnd = tooltipDayStart + 24 * 60 * 60 * 1000;
+const tooltipSlot = (hour, minute) => new Date(`2026-08-23T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+02:00`).getTime();
+assert.equal(snapTooltipTimestamp(tooltipSlot(4, 45), tooltipDayStart, tooltipDayEnd), tooltipSlot(4, 45));
+assert.equal(snapTooltipTimestamp(tooltipSlot(4, 47), tooltipDayStart, tooltipDayEnd), tooltipSlot(4, 45));
+assert.equal(snapTooltipTimestamp(tooltipSlot(4, 49), tooltipDayStart, tooltipDayEnd), tooltipSlot(4, 50));
+assert.equal(snapTooltipTimestamp(tooltipSlot(4, 53), tooltipDayStart, tooltipDayEnd), tooltipSlot(4, 55));
+assert.equal(snapTooltipTimestamp(tooltipSlot(23, 59), tooltipDayStart, tooltipDayEnd), tooltipSlot(23, 55));
+const rawMeterPoints = [
+  { timestamp: "2026-08-23T04:48:30+02:00", import_kw: 4.82, export_kw: 0 },
+  { timestamp: "2026-08-23T04:52:00+02:00", import_kw: 5, export_kw: 0 },
+];
+assert.equal(nearestMeterPoint(rawMeterPoints, tooltipSlot(4, 50)).import_kw, 4.82);
+assert.equal(nearestMeterPoint(rawMeterPoints, tooltipSlot(4, 55)), null);
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.doesNotMatch(panelSource, /E\.ON Energidistribution/);
@@ -216,6 +230,14 @@ assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srg
 assert.match(panelSource, /\.chart-bar\.marker-highlight \{\n\s+fill: color-mix\(in srgb, var\(--primary-color\) 82%,/);
 assert.ok((panelSource.match(/var\(--ha-card-background, var\(--card-background-color\)\)/g) || []).length >= 4);
 assert.match(panelSource, /_buildVisibleTooltipRows\(comparisonPrice, details\)/);
+assert.match(panelSource, /snapTooltipTimestamp\(/);
+assert.match(panelSource, /tooltipTimestamp = snapTooltipTimestamp/);
+assert.match(panelSource, /return start <= tooltipTimestamp && tooltipTimestamp < end/);
+assert.match(panelSource, /const time = this\.formatTime\(new Date\(tooltipTimestamp\)\)/);
+assert.match(panelSource, /nearestMeterPoint\(this\._meterTooltipPoints, timestamp\)/);
+assert.match(panelSource, /const meterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
+assert.match(panelSource, /const value = this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);
+assert.doesNotMatch(panelSource, /data-tooltip=/);
 assert.match(panelSource, /this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);
 assert.match(panelSource, /this\._priceComparisonVisible\.grid/);
 assert.match(panelSource, /this\._priceComparisonVisible\.electricity/);
