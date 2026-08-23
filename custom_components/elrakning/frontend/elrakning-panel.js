@@ -1063,9 +1063,10 @@ class ElrakningPanel {
           stroke-width: 1.5;
         }
 
-        .chart-meter-axis {
+        .chart-meter-gridline {
           stroke: var(--divider-color);
           stroke-width: 1;
+          opacity: .45;
         }
 
         .chart-meter-label {
@@ -2571,7 +2572,12 @@ class ElrakningPanel {
       ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
         .filter(Number.isFinite),
     );
-    const meterRange = meterMaximum || 1;
+    const meterBase = meterMaximum || 1;
+    const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
+    const meterNormalized = (meterBase / 4) / meterMagnitude;
+    const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;
+    const meterStep = meterStepFactor * meterMagnitude;
+    const meterRange = Math.ceil(meterBase / meterStep) * meterStep;
     const meterY = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / meterRange) * plotHeight;
     const meterPath = (key) => meterPoints
       .map((point) => `${x(point.timestamp)},${meterY(point[key])}`)
@@ -2584,10 +2590,11 @@ class ElrakningPanel {
         ? `<polyline class="chart-meter-export" points="${meterPath("export_kw")}" />`
         : "",
     ].join("");
-    const meterAxis = meterPoints.length
-      ? `<line class="chart-meter-axis" x1="${width - plot.right}" y1="${plot.top}" x2="${width - plot.right}" y2="${plot.top + plotHeight}" />
-         <text class="chart-meter-label" text-anchor="end" x="${width - 2}" y="${plot.top + 4}">${this._formatNumber(meterRange)} kW</text>
-         <text class="chart-meter-label" text-anchor="end" x="${width - 2}" y="${plot.top + plotHeight}">0 kW</text>`
+    const meterVisible = meterPoints.length > 0 && (this._meterPowerVisible.import || this._meterPowerVisible.export);
+    const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
+    const meterGrid = meterVisible
+      ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />
+         <text class="chart-meter-label" text-anchor="start" x="2" y="${meterY(level) + 4}">${this._formatNumber(level)} kW</text>`).join("")
       : "";
     const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
       new Date(point.timestamp).getTime() <= timestamp ? point : latest
@@ -2677,8 +2684,8 @@ class ElrakningPanel {
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
+      ${meterGrid}
       ${bars}
-      ${meterAxis}
       ${meterLines}
       ${this._spotBarsVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       ${priceMarkers}
