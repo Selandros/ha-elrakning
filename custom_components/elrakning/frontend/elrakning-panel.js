@@ -2743,6 +2743,45 @@ class ElrakningPanel {
     return path.join(" ");
   }
 
+  meterObstacleTop(points, key, textLeft, textRight, x, meterY) {
+    let obstacleTop = Infinity;
+    const segments = this.buildMeterDisplaySegments(points, key);
+    const quadraticPoint = (start, control, end, progress) => {
+      const inverse = 1 - progress;
+      return {
+        x: inverse * inverse * start.x + 2 * inverse * progress * control.x + progress * progress * end.x,
+        y: inverse * inverse * start.y + 2 * inverse * progress * control.y + progress * progress * end.y,
+      };
+    };
+    segments.forEach((segment) => {
+      const coordinates = segment.map((point) => ({
+        x: x(point.timestamp),
+        y: meterY(point[key]),
+      }));
+      coordinates.forEach((current, index) => {
+        const next = coordinates[index + 1];
+        if (!next) return;
+        const midpoint = {
+          x: (current.x + next.x) / 2,
+          y: (current.y + next.y) / 2,
+        };
+        [
+          [current, current, midpoint],
+          [midpoint, next, next],
+        ].forEach(([start, control, end]) => {
+          const steps = Math.max(1, Math.ceil(Math.abs(end.x - start.x) / 3));
+          for (let step = 0; step <= steps; step += 1) {
+            const point = quadraticPoint(start, control, end, step / steps);
+            if (point.x >= textLeft && point.x <= textRight) {
+              obstacleTop = Math.min(obstacleTop, point.y);
+            }
+          }
+        });
+      });
+    });
+    return Number.isFinite(obstacleTop) ? obstacleTop : null;
+  }
+
   renderPriceChart() {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
@@ -2899,6 +2938,7 @@ class ElrakningPanel {
       const markerClass = markerGroups.has(period.start) ? " marker-highlight" : "";
       return `<rect class="chart-bar ${category}${markerClass}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
+    const markerMinY = 18;
     const markerLayouts = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
       const markerX = (x(group.period.start) + x(group.period.end)) / 2;
       const label = group.labels.join(" • ");
@@ -2914,6 +2954,30 @@ class ElrakningPanel {
         ? Math.min(...coveredBars.map((bar) => bar.top))
         : plot.top + plotHeight;
       const averageLineY = y(average);
+      const obstacleTops = [highestCoveredTop, averageLineY];
+      if (this._meterPowerVisible.import) {
+        const importTop = this.meterObstacleTop(
+          meterDisplayPoints,
+          "import_kw",
+          textLeft,
+          textRight,
+          x,
+          meterY,
+        );
+        if (importTop !== null) obstacleTops.push(importTop);
+      }
+      if (this._meterPowerVisible.export) {
+        const exportTop = this.meterObstacleTop(
+          meterDisplayPoints,
+          "export_kw",
+          textLeft,
+          textRight,
+          x,
+          meterY,
+        );
+        if (exportTop !== null) obstacleTops.push(exportTop);
+      }
+      const highestObstacleY = Math.min(...obstacleTops);
       return {
         label,
         markerX,
@@ -2921,11 +2985,10 @@ class ElrakningPanel {
         textAnchor,
         textLeft,
         textRight,
-        maxY: averageLineY - 8,
-        y: Math.max(18, Math.min(highestCoveredTop - 8, averageLineY - 8)),
+        maxY: highestObstacleY - 8,
+        y: Math.max(markerMinY, highestObstacleY - 8),
       };
     }) : [];
-    const markerMinY = 18;
     const markerHeight = 16;
     const markerGap = 4;
     const markerLayoutsByHeight = [...markerLayouts].sort((left, right) => left.y - right.y);
