@@ -1,0 +1,13 @@
+{
+  "domain": "elrakning",
+  "name": "Elräkning",
+  "version": "0.0.134",
+  "documentation": "https://github.com/Selandros/ha-elrakning",
+  "issue_tracker": "https://github.com/Selandros/ha-elrakning/issues",
+  "codeowners": ["@Selandros"],
+  "config_flow": true,
+  "single_config_entry": true,
+  "integration_type": "service",
+  "after_dependencies": ["nordpool"],
+  "requirements": ["pypdf==6.15.0"]
+}

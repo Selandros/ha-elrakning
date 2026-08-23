@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Elräkning",
+        "description": "Lägg till Elräkning."
+      }
+    },
+    "abort": {
+      "already_configured": "Elräkning är redan konfigurerad."
+    }
+  }
+}

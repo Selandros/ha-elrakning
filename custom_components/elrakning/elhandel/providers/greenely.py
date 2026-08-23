@@ -1,0 +1,165 @@
+"""Greenely provider operations backed by the existing API client."""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+
+from ...const import GREENELY_EMAIL, GREENELY_FACILITY_ID, GREENELY_PASSWORD
+from .greenely_consumption import normalize_greenely_consumption, summarize_greenely_consumption
+from .greenely_source import sanitize_greenely_source
+from .greenely_client import GreenelyClient, GreenelyError
+from .greenely_invoice import GreenelyInvoiceError, GreenelyInvoiceProcessor
+
+
+class GreenelyProvider:
+    """Delegate Greenely API operations without changing their behavior."""
+
+    def __init__(self, hass) -> None:
+        self._client = GreenelyClient(hass)
+
+    @staticmethod
+    def validate_credentials(email: str, password: str) -> None:
+        """Validate the credentials required by the Greenely API."""
+        if not isinstance(email, str) or not email.strip():
+            raise GreenelyError("invalid_auth")
+        if not isinstance(password, str) or not password:
+            raise GreenelyError("invalid_auth")
+
+    @staticmethod
+    def has_credentials(config: dict[str, Any]) -> bool:
+        return all(
+            isinstance(config.get(key), str) and bool(config.get(key))
+            for key in (GREENELY_EMAIL, GREENELY_PASSWORD)
+        )
+
+    @classmethod
+    def is_configured(cls, config: dict[str, Any]) -> bool:
+        return cls.has_credentials(config) and isinstance(
+            config.get(GREENELY_FACILITY_ID), str
+        ) and bool(config.get(GREENELY_FACILITY_ID))
+
+    @staticmethod
+    def facility_id(config: dict[str, Any]) -> str | None:
+        value = config.get(GREENELY_FACILITY_ID)
+        return value if isinstance(value, str) and value else None
+
+    async def async_login(self, email: str, password: str) -> None:
+        self.validate_credentials(email, password)
+        await self._client.async_login(email, password)
+
+    @staticmethod
+    def select_facility(facilities: list[dict[str, Any]], facility_id: str) -> dict[str, Any]:
+        """Select one configured facility from the API response."""
+        if not isinstance(facility_id, str) or not facility_id:
+            raise GreenelyError("unexpected_response")
+        selected = next(
+            (item for item in facilities if str(item.get("id")) == facility_id),
+            None,
+        )
+        if selected is None:
+            raise GreenelyError("unexpected_response")
+        return selected
+
+    async def async_create_config(
+        self,
+        email: str,
+        password: str,
+        facility_id: str,
+    ) -> dict[str, Any]:
+        """Authenticate and return the existing Greenely config payload."""
+        self.validate_credentials(email, password)
+        await self.async_login(email, password)
+        facilities = await self.async_get_facilities()
+        selected = self.select_facility(facilities, facility_id)
+        return {
+            "config": {
+                "email": email,
+                "password": password,
+                "facility_id": facility_id,
+            },
+            "facility": selected,
+        }
+
+    async def async_get_refresh_data(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Load and sanitize the facility data used by the manager refresh."""
+        if not self.is_configured(config):
+            raise GreenelyError("invalid_auth")
+        facility_id = self.facility_id(config)
+        await self.async_login(config[GREENELY_EMAIL], config[GREENELY_PASSWORD])
+        facilities = await self.async_get_facilities()
+        selected = self.select_facility(facilities, facility_id)
+        data = await self.async_get_facility_invoices(facility_id)
+        return {
+            "facility_id": facility_id,
+            "facility": sanitize_greenely_source(selected),
+            "contracts": sanitize_greenely_source(data.get("contracts", [])),
+            "invoices": sanitize_greenely_source(data.get("invoices", [])),
+            "failed_contracts": data.get("failed_contracts", []),
+        }
+
+    async def async_get_consumption_data(
+        self,
+        config: dict[str, Any],
+        start_date: date,
+        end_date: date,
+        month: str,
+    ) -> dict[str, Any]:
+        """Load and normalize Greenely consumption for the manager."""
+        if not self.is_configured(config):
+            raise GreenelyError("invalid_auth")
+        facility_id = self.facility_id(config)
+        await self.async_login(config[GREENELY_EMAIL], config[GREENELY_PASSWORD])
+        payload = await self.async_get_consumption(facility_id, start_date, end_date)
+        samples = normalize_greenely_consumption(payload)
+        summary = summarize_greenely_consumption(payload, month)
+        if summary is None:
+            raise GreenelyError("no_consumption")
+        return {"samples": samples, "summary": summary}
+
+    async def async_process_invoice(
+        self,
+        config: dict[str, Any],
+        contract_id: str,
+        invoice_key: str,
+        amount_due_sek: float | None,
+    ) -> dict[str, Any]:
+        """Authenticate and process one Greenely invoice."""
+        if not self.has_credentials(config):
+            raise GreenelyError("invalid_auth")
+        await self.async_login(config[GREENELY_EMAIL], config[GREENELY_PASSWORD])
+        try:
+            return await GreenelyInvoiceProcessor(self).async_process(
+                contract_id, invoice_key, amount_due_sek
+            )
+        except GreenelyError as err:
+            raise GreenelyInvoiceError(err.code, "pdf_download") from err
+
+    async def async_get_facilities(self) -> list[dict[str, Any]]:
+        return await self._client.async_get_facilities()
+
+    async def async_get_electricity_contracts(self, facility_id: str) -> list[dict[str, Any]]:
+        return await self._client.async_get_electricity_contracts(facility_id)
+
+    async def async_get_invoices(self, contract_id: str) -> list[dict[str, Any]]:
+        return await self._client.async_get_invoices(contract_id)
+
+    async def async_get_facility_invoices(self, facility_id: str) -> dict[str, Any]:
+        return await self._client.async_get_facility_invoices(facility_id)
+
+    async def async_get_consumption(
+        self,
+        facility_id: str,
+        start_date: date,
+        end_date: date,
+        resolution: str = "hourly",
+    ) -> Any:
+        return await self._client.async_get_consumption(
+            facility_id,
+            start_date,
+            end_date,
+            resolution,
+        )
+
+    async def async_get_invoice_pdf(self, contract_id: str, invoice_key: str) -> bytes:
+        return await self._client.async_get_invoice_pdf(contract_id, invoice_key)
