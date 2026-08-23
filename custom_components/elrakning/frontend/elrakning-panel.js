@@ -1105,27 +1105,28 @@ class ElrakningPanel {
         }
 
         .chart-legend-preview.charging {
-          color: #984C5A;
+          color: #D96B7C;
         }
 
         .chart-legend-preview.charging .chart-legend-swatch {
-          background: #984C5A;
+          background: #D96B7C;
         }
 
         .chart-legend-preview.charging.active {
-          color: #C66A78;
+          color: #D96B7C;
           opacity: 1;
         }
 
         .chart-legend-preview.charging.active .chart-legend-swatch {
-          background: #C66A78;
+          background: #D96B7C;
         }
 
         .chart-legend-preview.charging:not(.active) {
+          color: var(--secondary-text-color);
           opacity: .42;
         }
 
-        .chart-legend-preview.charging .chart-legend-swatch {
+        .chart-legend-preview.charging:not(.active) .chart-legend-swatch {
           background: #984C5A;
         }
 
