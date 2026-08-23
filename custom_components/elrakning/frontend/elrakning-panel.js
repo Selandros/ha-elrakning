@@ -3167,10 +3167,7 @@ class ElrakningPanel {
   _buildVisibleTooltipRows(comparisonPrice, details) {
     const rows = [];
     if (this._spotBarsVisible && Number.isFinite(comparisonPrice)) {
-      const label = this._priceComparisonVisible.grid
-        ? "Elnät"
-        : this._priceComparisonVisible.electricity ? "Elhandel" : "Spotpris";
-      rows.push(`<span class="tooltip-value">${label}: ${this.formatPrice(comparisonPrice)} öre/kWh</span>`);
+      rows.push(`<span class="tooltip-value">Spotpris: ${this.formatPrice(comparisonPrice)} öre/kWh</span>`);
     }
     if (this._meterPowerVisible.import && Number.isFinite(details?.import_kw)) {
       rows.push(`<span class="tooltip-value tooltip-meter-import">Import: ${this._formatNumber(details.import_kw)} kW</span>`);
