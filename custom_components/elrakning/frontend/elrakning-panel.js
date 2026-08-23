@@ -841,6 +841,7 @@ class ElrakningPanel {
           }
 
           .price-comparison-controls {
+            align-self: auto;
             justify-content: flex-start;
             margin: 0;
             width: 100%;
@@ -907,6 +908,7 @@ class ElrakningPanel {
           display: flex;
           gap: 12px;
           justify-content: flex-end;
+          align-self: center;
           margin: 0 0 0 auto;
           white-space: nowrap;
         }
