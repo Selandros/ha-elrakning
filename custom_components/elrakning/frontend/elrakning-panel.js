@@ -225,6 +225,77 @@ export function nearestMeterPoint(points, timestamp, maxDistanceMs = 2.5 * 60 * 
   return nearest?.point || null;
 }
 
+export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
+  const dayStartMs = new Date(dayStart).getTime();
+  const dayEndMs = new Date(dayEnd).getTime();
+  const canonical = [];
+  let previousSelected = false;
+  for (let slotTimestamp = dayStartMs; slotTimestamp < dayEndMs; slotTimestamp += slotMs) {
+    const selected = nearestMeterPoint(points, slotTimestamp, maxDistanceMs);
+    const importKw = selected ? Number(selected.import_kw) : null;
+    const exportKw = selected ? Number(selected.export_kw) : null;
+    const hasSample = Boolean(selected)
+      && Number.isFinite(importKw)
+      && Number.isFinite(exportKw);
+    canonical.push({
+      timestamp: slotTimestamp,
+      raw_timestamp: hasSample ? selected.timestamp : null,
+      import_kw: hasSample ? importKw : null,
+      export_kw: hasSample ? exportKw : null,
+      gap_before: hasSample && !previousSelected,
+    });
+    previousSelected = hasSample;
+  }
+  return canonical;
+}
+
+function monotoneEndpointTangent(point, nextPoint, followingPoint, slope, nextSlope) {
+  const width = Math.abs(nextPoint.x - point.x);
+  const nextWidth = Math.abs(followingPoint.x - nextPoint.x);
+  let tangent = ((2 * width + nextWidth) * slope - width * nextSlope) / (width + nextWidth);
+  if (Math.sign(tangent) !== Math.sign(slope)) tangent = 0;
+  if (Math.sign(slope) !== Math.sign(nextSlope) && Math.abs(tangent) > Math.abs(3 * slope)) {
+    tangent = 3 * slope;
+  }
+  return tangent;
+}
+
+export function buildMonotoneCubicSegments(coordinates) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return [];
+  const slopes = coordinates.slice(0, -1).map((left, index) => (
+    (coordinates[index + 1].y - left.y) / (coordinates[index + 1].x - left.x)
+  ));
+  const tangents = new Array(coordinates.length).fill(0);
+  if (slopes.length === 1) {
+    tangents[0] = slopes[0];
+    tangents[1] = slopes[0];
+  } else {
+    tangents[0] = monotoneEndpointTangent(
+      coordinates[0], coordinates[1], coordinates[2], slopes[0], slopes[1],
+    );
+    for (let index = 1; index < coordinates.length - 1; index += 1) {
+      const previousSlope = slopes[index - 1];
+      const nextSlope = slopes[index];
+      tangents[index] = previousSlope * nextSlope <= 0
+        ? 0
+        : (2 * previousSlope * nextSlope) / (previousSlope + nextSlope);
+    }
+    tangents[tangents.length - 1] = monotoneEndpointTangent(
+      coordinates.at(-1), coordinates.at(-2), coordinates.at(-3), slopes.at(-1), slopes.at(-2),
+    );
+  }
+  return coordinates.slice(0, -1).map((start, index) => {
+    const end = coordinates[index + 1];
+    const width = end.x - start.x;
+    return {
+      start,
+      control1: { x: start.x + width / 3, y: start.y + tangents[index] * width / 3 },
+      control2: { x: end.x - width / 3, y: end.y - tangents[index + 1] * width / 3 },
+      end,
+    };
+  });
+}
+
 function positionChartTooltip(chart, tooltip, clientX, clientY, obstacles = [], orbitState = {}) {
   const gap = 12;
   const safety = 7;
@@ -304,6 +375,8 @@ class ElrakningPanel {
     this._tooltipOrbit = { angle: null };
     this._meterPowerHistory = { date: null, points: [] };
     this._meterTooltipPoints = [];
+    this._meterCanonicalPoints = [];
+    this._meterCanonicalPointMap = new Map();
     this._meterHistorySummary = null;
     this._meterHistoryRequestToken = 0;
     this._meterPowerVisible = { import: true, export: true };
@@ -2779,44 +2852,22 @@ class ElrakningPanel {
       const timestamp = new Date(point.timestamp).getTime();
       const importKw = Number(point.import_kw);
       const exportKw = Number(point.export_kw);
-      if (!Number.isFinite(timestamp) || !Number.isFinite(importKw) || !Number.isFinite(exportKw)) return;
+      if (!Number.isFinite(timestamp)) return;
       latestByTimestamp.set(timestamp, {
-        timestamp: point.timestamp,
-        import_kw: importKw,
-        export_kw: exportKw,
+        timestamp,
+        raw_timestamp: point.raw_timestamp ?? null,
+        import_kw: Number.isFinite(importKw) ? importKw : null,
+        export_kw: Number.isFinite(exportKw) ? exportKw : null,
+        gap_before: Boolean(point.gap_before),
       });
     });
     return [...latestByTimestamp.values()].sort((a, b) => (
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      a.timestamp - b.timestamp
     ));
   }
 
-  smoothSignedMeterPoints(points, tauSeconds = 100, gapSeconds = 300, deadband = 0.03) {
-    let previousTimestamp = null;
-    let previousSmoothed = null;
-    return points.map((point) => {
-      const timestamp = new Date(point.timestamp).getTime();
-      const signedKw = point.import_kw - point.export_kw;
-      const gapBefore = previousTimestamp !== null && (timestamp - previousTimestamp) > gapSeconds * 1000;
-      const dtSeconds = previousTimestamp === null ? 0 : Math.max(0, (timestamp - previousTimestamp) / 1000);
-      const alpha = previousSmoothed === null || gapBefore
-        ? 1
-        : 1 - Math.exp(-dtSeconds / tauSeconds);
-      let smoothedSignedKw = previousSmoothed === null || gapBefore
-        ? signedKw
-        : previousSmoothed + alpha * (signedKw - previousSmoothed);
-      if (Math.abs(smoothedSignedKw) < deadband) smoothedSignedKw = 0;
-      previousTimestamp = timestamp;
-      previousSmoothed = smoothedSignedKw;
-      return {
-        ...point,
-        signed_kw: signedKw,
-        smoothed_signed_kw: smoothedSignedKw,
-        import_kw: Math.max(smoothedSignedKw, 0),
-        export_kw: Math.max(-smoothedSignedKw, 0),
-        gap_before: gapBefore,
-      };
-    });
+  buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
+    return buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs, maxDistanceMs);
   }
 
   buildMeterDisplaySegments(points, key) {
@@ -2848,30 +2899,7 @@ class ElrakningPanel {
   }
 
   buildMeterDisplayPathSegments(coordinates) {
-    if (coordinates.length < 2) return [];
-    const segments = [];
-    const midpoint = (left, right) => ({
-      x: (left.x + right.x) / 2,
-      y: (left.y + right.y) / 2,
-    });
-    segments.push({
-      start: coordinates[0],
-      control: coordinates[0],
-      end: midpoint(coordinates[0], coordinates[1]),
-    });
-    for (let index = 1; index < coordinates.length - 1; index += 1) {
-      segments.push({
-        start: midpoint(coordinates[index - 1], coordinates[index]),
-        control: coordinates[index],
-        end: midpoint(coordinates[index], coordinates[index + 1]),
-      });
-    }
-    segments.push({
-      start: midpoint(coordinates.at(-2), coordinates.at(-1)),
-      control: coordinates.at(-1),
-      end: coordinates.at(-1),
-    });
-    return segments;
+    return buildMonotoneCubicSegments(coordinates);
   }
 
   buildMeterDisplayGeometry(points, key, x, meterY) {
@@ -2888,7 +2916,7 @@ class ElrakningPanel {
     const targetX = x(timestamp);
     for (const segment of Array.isArray(geometry) ? geometry : []) {
       for (const pathSegment of segment.pathSegments) {
-        const { start, control, end } = pathSegment;
+        const { start, control1, control2, end } = pathSegment;
         const minX = Math.min(start.x, end.x);
         const maxX = Math.max(start.x, end.x);
         if (targetX < minX || targetX > maxX) continue;
@@ -2898,17 +2926,19 @@ class ElrakningPanel {
         for (let iteration = 0; iteration < 24; iteration += 1) {
           const progress = (low + high) / 2;
           const inverse = 1 - progress;
-          const currentX = inverse * inverse * start.x
-            + 2 * inverse * progress * control.x
-            + progress * progress * end.x;
+          const currentX = inverse * inverse * inverse * start.x
+            + 3 * inverse * inverse * progress * control1.x
+            + 3 * inverse * progress * progress * control2.x
+            + progress * progress * progress * end.x;
           if (currentX < targetX) low = progress;
           else high = progress;
         }
         const progress = (low + high) / 2;
         const inverse = 1 - progress;
-        return inverse * inverse * start.y
-          + 2 * inverse * progress * control.y
-          + progress * progress * end.y;
+        return inverse * inverse * inverse * start.y
+          + 3 * inverse * inverse * progress * control1.y
+          + 3 * inverse * progress * progress * control2.y
+          + progress * progress * progress * end.y;
       }
     }
     return null;
@@ -2920,46 +2950,35 @@ class ElrakningPanel {
     const pathSegments = this.buildMeterDisplayPathSegments(coordinates);
     const first = coordinates[0];
     const path = [`M ${first.x} ${first.y}`];
-    pathSegments.forEach(({ control, end }) => {
-      path.push(`Q ${control.x} ${control.y} ${end.x} ${end.y}`);
+    pathSegments.forEach(({ control1, control2, end }) => {
+      path.push(`C ${control1.x} ${control1.y} ${control2.x} ${control2.y} ${end.x} ${end.y}`);
     });
     return path.join(" ");
   }
 
   meterObstacleTop(points, key, textLeft, textRight, x, meterY) {
     let obstacleTop = Infinity;
-    const segments = this.buildMeterDisplaySegments(points, key);
-    const quadraticPoint = (start, control, end, progress) => {
+    const geometry = this.buildMeterDisplayGeometry(points, key, x, meterY);
+    const cubicPoint = (start, control1, control2, end, progress) => {
       const inverse = 1 - progress;
       return {
-        x: inverse * inverse * start.x + 2 * inverse * progress * control.x + progress * progress * end.x,
-        y: inverse * inverse * start.y + 2 * inverse * progress * control.y + progress * progress * end.y,
+        x: inverse * inverse * inverse * start.x
+          + 3 * inverse * inverse * progress * control1.x
+          + 3 * inverse * progress * progress * control2.x
+          + progress * progress * progress * end.x,
+        y: inverse * inverse * inverse * start.y
+          + 3 * inverse * inverse * progress * control1.y
+          + 3 * inverse * progress * progress * control2.y
+          + progress * progress * progress * end.y,
       };
     };
-    segments.forEach((segment) => {
-      const coordinates = segment.map((point) => ({
-        x: x(point.timestamp),
-        y: meterY(point[key]),
-      }));
-      coordinates.forEach((current, index) => {
-        const next = coordinates[index + 1];
-        if (!next) return;
-        const midpoint = {
-          x: (current.x + next.x) / 2,
-          y: (current.y + next.y) / 2,
-        };
-        [
-          [current, current, midpoint],
-          [midpoint, next, next],
-        ].forEach(([start, control, end]) => {
-          const steps = Math.max(1, Math.ceil(Math.abs(end.x - start.x) / 3));
-          for (let step = 0; step <= steps; step += 1) {
-            const point = quadraticPoint(start, control, end, step / steps);
-            if (point.x >= textLeft && point.x <= textRight) {
-              obstacleTop = Math.min(obstacleTop, point.y);
-            }
-          }
-        });
+    geometry.forEach(({ pathSegments }) => {
+      pathSegments.forEach(({ start, control1, control2, end }) => {
+        const steps = Math.max(1, Math.ceil(Math.abs(end.x - start.x) / 3));
+        for (let step = 0; step <= steps; step += 1) {
+          const point = cubicPoint(start, control1, control2, end, step / steps);
+          if (point.x >= textLeft && point.x <= textRight) obstacleTop = Math.min(obstacleTop, point.y);
+        }
       });
     });
     return Number.isFinite(obstacleTop) ? obstacleTop : null;
@@ -3055,7 +3074,14 @@ class ElrakningPanel {
       })
       : [];
     this._meterTooltipPoints = meterPoints;
-    const meterDisplayPoints = this.smoothSignedMeterPoints(this.prepareMeterDisplayPoints(meterPoints));
+    const meterCanonicalPoints = this.buildCanonicalMeterPoints(meterPoints, dayStart, dayEnd);
+    this._meterCanonicalPoints = meterCanonicalPoints;
+    this._meterCanonicalPointMap = new Map(
+      meterCanonicalPoints
+        .filter((point) => point.raw_timestamp !== null)
+        .map((point) => [point.timestamp, point]),
+    );
+    const meterDisplayPoints = this.prepareMeterDisplayPoints(meterCanonicalPoints);
     const meterMaximum = Math.max(
       0,
       ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
@@ -3258,6 +3284,11 @@ class ElrakningPanel {
     return nearestMeterPoint(this._meterTooltipPoints, timestamp);
   }
 
+  _meterCanonicalPointAt(timestamp) {
+    const timestampMs = new Date(timestamp).getTime();
+    return this._meterCanonicalPointMap.get(timestampMs) || null;
+  }
+
   bindChartTooltips() {
     const chart = this.host.querySelector(".price-chart");
     const svg = this.host.querySelector(".chart-svg");
@@ -3299,14 +3330,15 @@ class ElrakningPanel {
         ? `${this.formatPrice(comparisonPrice)} öre/kWh`
         : "";
       const index = this.priceData.periods.indexOf(period);
-      const meterPoint = this._meterPointAtNearest(tooltipTimestamp);
-      const meterValue = (key) => meterPoint && Number.isFinite(Number(meterPoint[key]))
-        ? Number(meterPoint[key])
+      const canonicalMeterPoint = this._meterCanonicalPointAt(tooltipTimestamp);
+      const rawMeterPoint = this._meterPointAtNearest(tooltipTimestamp);
+      const meterValue = (key) => canonicalMeterPoint && Number.isFinite(Number(canonicalMeterPoint[key]))
+        ? Number(canonicalMeterPoint[key])
         : null;
       const barPrice = this._chartBarPrices?.[index];
       const hoverSnapshot = {
         hoverTime: tooltipTimestamp,
-        meterSampleTime: meterPoint ? new Date(meterPoint.timestamp).getTime() : null,
+        meterSampleTime: canonicalMeterPoint ? canonicalMeterPoint.timestamp : null,
         priceBarValue: barPrice ?? null,
         importValue: meterValue("import_kw"),
         exportValue: meterValue("export_kw"),
@@ -3318,10 +3350,10 @@ class ElrakningPanel {
       const baseDetails = this._chartTooltipDetails?.get(index) || {};
       const details = this._debugEnabled ? { ...baseDetails } : null;
       if (details) {
-        if (hoverSnapshot.importValue === null) delete details.import_kw;
-        else details.import_kw = hoverSnapshot.importValue;
-        if (hoverSnapshot.exportValue === null) delete details.export_kw;
-        else details.export_kw = hoverSnapshot.exportValue;
+        if (!rawMeterPoint || !Number.isFinite(Number(rawMeterPoint.import_kw))) delete details.import_kw;
+        else details.import_kw = Number(rawMeterPoint.import_kw);
+        if (!rawMeterPoint || !Number.isFinite(Number(rawMeterPoint.export_kw))) delete details.export_kw;
+        else details.export_kw = Number(rawMeterPoint.export_kw);
       }
       const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, {
         import_kw: hoverSnapshot.importValue,

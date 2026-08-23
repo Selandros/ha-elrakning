@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, priceCategory, priceColorBands, priceColorDetails, providerLabel, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, priceCategory, priceColorBands, priceColorDetails, providerLabel, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -143,6 +143,40 @@ const rawMeterPoints = [
 ];
 assert.equal(nearestMeterPoint(rawMeterPoints, tooltipSlot(4, 50)).import_kw, 4.82);
 assert.equal(nearestMeterPoint(rawMeterPoints, tooltipSlot(4, 55)), null);
+const canonicalMeterPoints = buildCanonicalMeterPoints(
+  [...rawMeterPoints, { timestamp: "2026-08-23T04:53:00+02:00", import_kw: 5, export_kw: 0 }],
+  new Date("2026-08-23T00:00:00+02:00"),
+  new Date("2026-08-24T00:00:00+02:00"),
+);
+assert.equal(canonicalMeterPoints.length, 288);
+const canonical0450 = canonicalMeterPoints.find((point) => point.timestamp === tooltipSlot(4, 50));
+assert.equal(canonical0450.import_kw, 4.82);
+assert.equal(canonical0450.raw_timestamp, rawMeterPoints[0].timestamp);
+const canonical0455 = canonicalMeterPoints.find((point) => point.timestamp === tooltipSlot(4, 55));
+assert.equal(canonical0455.import_kw, 5);
+assert.equal(canonical0455.raw_timestamp, "2026-08-23T04:53:00+02:00");
+const canonical0500 = canonicalMeterPoints.find((point) => point.timestamp === tooltipSlot(5, 0));
+assert.equal(canonical0500.import_kw, null);
+assert.equal(canonical0500.raw_timestamp, null);
+assert.equal(rawMeterPoints.length, 2);
+const monotoneCoordinates = [{ x: 0, y: 0 }, { x: 1, y: 2 }, { x: 2, y: 1 }, { x: 3, y: 3 }];
+const monotoneSegments = buildMonotoneCubicSegments(monotoneCoordinates);
+assert.equal(monotoneSegments.length, monotoneCoordinates.length - 1);
+assert.deepEqual(monotoneSegments[0].start, monotoneCoordinates[0]);
+assert.deepEqual(monotoneSegments.at(-1).end, monotoneCoordinates.at(-1));
+for (const segment of monotoneSegments) {
+  const low = Math.min(segment.start.y, segment.end.y);
+  const high = Math.max(segment.start.y, segment.end.y);
+  for (let step = 0; step <= 20; step += 1) {
+    const t = step / 20;
+    const inverse = 1 - t;
+    const y = inverse ** 3 * segment.start.y
+      + 3 * inverse ** 2 * t * segment.control1.y
+      + 3 * inverse * t ** 2 * segment.control2.y
+      + t ** 3 * segment.end.y;
+    assert.ok(y >= low - 1e-9 && y <= high + 1e-9);
+  }
+}
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.doesNotMatch(panelSource, /E\.ON Energidistribution/);
@@ -253,17 +287,19 @@ assert.match(panelSource, /\.chart-meter-gridline \{\n\s+stroke: var\(--divider-
 assert.doesNotMatch(panelSource, /const meterPath =/);
 assert.match(panelSource, /prepareMeterDisplayPoints\(points\)/);
 assert.match(panelSource, /latestByTimestamp = new Map\(\)/);
-assert.match(panelSource, /smoothSignedMeterPoints\(points, tauSeconds = 100, gapSeconds = 300, deadband = 0\.03\)/);
-assert.match(panelSource, /const signedKw = point\.import_kw - point\.export_kw/);
-assert.match(panelSource, /Math\.exp\(-dtSeconds \/ tauSeconds\)/);
-assert.match(panelSource, /gapSeconds \* 1000/);
-assert.match(panelSource, /Math\.abs\(smoothedSignedKw\) < deadband/);
+assert.doesNotMatch(panelSource, /smoothSignedMeterPoints/);
+assert.match(panelSource, /buildCanonicalMeterPoints\(points, dayStart, dayEnd, slotMs = 5 \* 60 \* 1000, maxDistanceMs = 2\.5 \* 60 \* 1000\)/);
+assert.match(panelSource, /nearestMeterPoint\(points, slotTimestamp, maxDistanceMs\)/);
+assert.match(panelSource, /raw_timestamp: hasSample \? selected\.timestamp : null/);
+assert.match(panelSource, /for \(let slotTimestamp = dayStartMs; slotTimestamp < dayEndMs; slotTimestamp \+= slotMs\)/);
 assert.match(panelSource, /buildMeterDisplaySegments\(points, key\)/);
 assert.match(panelSource, /buildSmoothMeterPath\(segment, key, x, meterY\)/);
 assert.match(panelSource, /<path class=\"\$\{className\}\" d=\"\$\{this\.buildSmoothMeterPath/);
 assert.match(panelSource, /if \(to - from > 0\) segments\.push\(points\.slice\(from, to \+ 1\)\)/);
 assert.match(panelSource, /if \(segment\.length < 2\) return \"\"/);
-assert.match(panelSource, /const meterDisplayPoints = this\.smoothSignedMeterPoints/);
+assert.match(panelSource, /const meterCanonicalPoints = this\.buildCanonicalMeterPoints/);
+assert.match(panelSource, /const meterDisplayPoints = this\.prepareMeterDisplayPoints\(meterCanonicalPoints\)/);
+assert.doesNotMatch(panelSource, /const meterDisplayPoints = this\.smoothSignedMeterPoints/);
 assert.match(panelSource, /const meterMaximum = Math\.max\(/);
 assert.match(panelSource, /meterPointAt = \(timestamp\) => meterPoints\.reduce/);
 assert.match(panelSource, /Är du säker\? Alla valda mätare tas bort\./);
@@ -292,7 +328,7 @@ assert.match(panelSource, /tooltipTimestamp = snapTooltipTimestamp/);
 assert.match(panelSource, /return start <= tooltipTimestamp && tooltipTimestamp < end/);
 assert.match(panelSource, /const time = this\.formatTime\(new Date\(tooltipTimestamp\)\)/);
 assert.match(panelSource, /nearestMeterPoint\(this\._meterTooltipPoints, timestamp\)/);
-assert.match(panelSource, /const meterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
+assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
 assert.match(panelSource, /const value = this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);
 assert.doesNotMatch(panelSource, /data-tooltip=/);
 assert.match(panelSource, /Solproduktion/);
@@ -324,7 +360,9 @@ assert.match(panelSource, /chart-hover-marker, \.price-marker-label/);
 assert.match(panelSource, /Number\.isFinite\(details\?\.import_kw\)/);
 assert.match(panelSource, /Number\.isFinite\(details\?\.export_kw\)/);
 assert.match(panelSource, /const hoverSnapshot = \{[\s\S]*hoverTime: tooltipTimestamp/);
-assert.match(panelSource, /meterSampleTime: meterPoint \? new Date\(meterPoint\.timestamp\)\.getTime\(\) : null/);
+assert.match(panelSource, /const canonicalMeterPoint = this\._meterCanonicalPointAt\(tooltipTimestamp\)/);
+assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
+assert.match(panelSource, /meterSampleTime: canonicalMeterPoint \? canonicalMeterPoint\.timestamp : null/);
 assert.match(panelSource, /priceBarValue: barPrice \?\? null/);
 assert.match(panelSource, /importValue: meterValue\("import_kw"\)/);
 assert.match(panelSource, /exportValue: meterValue\("export_kw"\)/);
@@ -335,8 +373,11 @@ assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /buildMeterDisplayCoordinates\(segment, key, x, meterY\)/);
 assert.match(panelSource, /buildMeterDisplayPathSegments\(coordinates\)/);
 assert.match(panelSource, /meterDisplayYAt\(geometry, timestamp, x\)/);
+assert.match(panelSource, /control1:/);
+assert.match(panelSource, /control2:/);
+assert.match(panelSource, /path\.push\(`C /);
 assert.match(panelSource, /for \(let iteration = 0; iteration < 24; iteration \+= 1\)/);
-assert.match(panelSource, /const currentX = inverse \* inverse \* start\.x/);
+assert.match(panelSource, /const currentX = inverse \* inverse \* inverse \* start\.x/);
 assert.match(panelSource, /meterDisplayY: \(key, timestamp\) => this\.meterDisplayYAt/);
 assert.match(panelSource, /const importDisplayY = meterMarkerX === null/);
 assert.match(panelSource, /const meterMarkerX = Number\.isFinite\(hoverSnapshot\.meterSampleTime\)/);
@@ -346,7 +387,7 @@ assert.match(panelSource, /hoverGeometry\.meterDisplayY\("export_kw", hoverSnaps
 assert.match(panelSource, /Number\.isFinite\(importDisplayY\)/);
 assert.match(panelSource, /Number\.isFinite\(exportDisplayY\)/);
 assert.match(panelSource, /meterObstacleTop\(points, key, textLeft, textRight, x, meterY\)/);
-assert.match(panelSource, /const segments = this\.buildMeterDisplaySegments\(points, key\)/);
+assert.match(panelSource, /const geometry = this\.buildMeterDisplayGeometry\(points, key, x, meterY\)/);
 assert.match(panelSource, /Math\.ceil\(Math\.abs\(end\.x - start\.x\) \/ 3\)/);
 assert.match(panelSource, /if \(this\._meterPowerVisible\.import\)/);
 assert.match(panelSource, /if \(this\._meterPowerVisible\.export\)/);
