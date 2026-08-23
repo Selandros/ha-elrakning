@@ -1097,7 +1097,7 @@ class ElrakningPanel {
         .chart-meter-gridline {
           stroke: var(--divider-color);
           stroke-width: 1;
-          opacity: .45;
+          opacity: .28;
         }
 
         .chart-meter-label {
@@ -1110,7 +1110,8 @@ class ElrakningPanel {
           fill: none;
           stroke-linecap: round;
           stroke-linejoin: round;
-          stroke-width: 2.5;
+          stroke-width: 1.6;
+          opacity: .82;
           vector-effect: non-scaling-stroke;
         }
 
@@ -2665,16 +2666,29 @@ class ElrakningPanel {
     const meterStep = meterStepFactor * meterMagnitude;
     const meterRange = Math.ceil(meterBase / meterStep) * meterStep;
     const meterY = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / meterRange) * plotHeight;
-    const meterPath = (key) => meterPoints
-      .map((point) => `${x(point.timestamp)},${meterY(point[key])}`)
-      .join(" ");
+    const buildMeterSegments = (key) => {
+      const segments = [];
+      let segment = [];
+      meterPoints.forEach((point) => {
+        const value = Number(point[key]);
+        if (Number.isFinite(value) && value > 0) {
+          segment.push(`${x(point.timestamp)},${meterY(value)}`);
+        } else {
+          if (segment.length > 1) segments.push(segment);
+          segment = [];
+        }
+      });
+      if (segment.length > 1) segments.push(segment);
+      return segments;
+    };
+    const meterLinesFor = (key, className, visible) => visible
+      ? buildMeterSegments(key)
+        .map((segment) => `<polyline class="${className}" points="${segment.join(" ")}" />`)
+        .join("")
+      : "";
     const meterLines = [
-      this._meterPowerVisible.import && meterPoints.length
-        ? `<polyline class="chart-meter-import" points="${meterPath("import_kw")}" />`
-        : "",
-      this._meterPowerVisible.export && meterPoints.length
-        ? `<polyline class="chart-meter-export" points="${meterPath("export_kw")}" />`
-        : "",
+      meterLinesFor("import_kw", "chart-meter-import", this._meterPowerVisible.import),
+      meterLinesFor("export_kw", "chart-meter-export", this._meterPowerVisible.export),
     ].join("");
     const meterVisible = meterPoints.length > 0 && (this._meterPowerVisible.import || this._meterPowerVisible.export);
     const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
