@@ -221,8 +221,6 @@ class ElrakningPanel {
     this._previewLayersVisible = {
       solar: true,
       consumption: true,
-      gridExport: true,
-      gridImport: true,
       charging: true,
       discharging: true,
     };
@@ -309,12 +307,6 @@ class ElrakningPanel {
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview active consumption" data-preview-layer="consumption" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Förbrukning
-            </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-export" data-preview-layer="gridExport" aria-pressed="true">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Export till nätet
-            </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-import" data-preview-layer="gridImport" aria-pressed="true">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Import från nätet
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview active charging" data-preview-layer="charging" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning
@@ -1111,24 +1103,16 @@ class ElrakningPanel {
           background: #FF6363;
         }
 
-        .chart-legend-preview.grid-export {
-          color: #5B9EF3;
-        }
-
-        .chart-legend-preview.grid-export .chart-legend-swatch {
-          background: #5B9EF3;
-        }
-
-        .chart-legend-preview.grid-import {
-          color: #FF9966;
-        }
-
-        .chart-legend-preview.grid-import .chart-legend-swatch {
-          background: #FF9966;
-        }
-
         .chart-legend-preview.charging {
           color: #984C5A;
+        }
+
+        .chart-legend-preview.charging.active {
+          opacity: 1;
+        }
+
+        .chart-legend-preview.charging:not(.active) {
+          opacity: .42;
         }
 
         .chart-legend-preview.charging .chart-legend-swatch {
