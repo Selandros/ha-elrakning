@@ -2508,7 +2508,7 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 220;
-    const plot = { left: 8, right: 8, top: 42, bottom: 30 };
+    const plot = { left: 8, right: 8, top: 20, bottom: 30 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const valueRange = range || 1;
