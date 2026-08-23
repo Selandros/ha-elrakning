@@ -153,6 +153,35 @@ export function generateUpcomingPriceAnalysis(periods, currentIndex, now = new D
   };
 }
 
+function positionChartTooltip(chart, tooltip, clientX, clientY) {
+  const gap = 10;
+  const safety = 7;
+  const bounds = chart.getBoundingClientRect();
+  const pointerX = clientX - bounds.left + chart.scrollLeft;
+  const pointerY = clientY - bounds.top + chart.scrollTop;
+  const tooltipWidth = tooltip.offsetWidth;
+  const tooltipHeight = tooltip.offsetHeight;
+  const viewportLeft = chart.scrollLeft + safety;
+  const viewportRight = chart.scrollLeft + chart.clientWidth - safety;
+  const viewportTop = chart.scrollTop + safety;
+  const viewportBottom = chart.scrollTop + chart.clientHeight - safety;
+  const minLeft = viewportLeft;
+  const maxLeft = Math.max(minLeft, viewportRight - tooltipWidth);
+  const left = Math.max(minLeft, Math.min(maxLeft, pointerX - tooltipWidth / 2));
+  const aboveY = pointerY - gap - tooltipHeight;
+  const belowY = pointerY + gap;
+  const fits = (top) => top >= viewportTop && top + tooltipHeight <= viewportBottom;
+  const preferBelow = pointerY < chart.scrollTop + chart.clientHeight / 2;
+  const preferredY = preferBelow ? belowY : aboveY;
+  const alternateY = preferBelow ? aboveY : belowY;
+  const chosenY = fits(preferredY) ? preferredY : fits(alternateY) ? alternateY : preferredY;
+  const minTop = viewportTop;
+  const maxTop = Math.max(minTop, viewportBottom - tooltipHeight);
+  const top = Math.max(minTop, Math.min(maxTop, chosenY));
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -1135,7 +1164,6 @@ class ElrakningPanel {
           pointer-events: none;
           position: absolute;
           top: 0;
-          transform: translate(-50%, -100%);
           white-space: nowrap;
           z-index: 1;
         }
@@ -2761,14 +2789,7 @@ class ElrakningPanel {
       tooltip.classList.toggle("debug-tooltip", Boolean(details));
       tooltip.title = "";
       tooltip.hidden = false;
-      const bounds = chart.getBoundingClientRect();
-      const pointerX = event.clientX - bounds.left + chart.scrollLeft;
-      const pointerY = event.clientY - bounds.top + chart.scrollTop;
-      const halfWidth = tooltip.offsetWidth / 2;
-      const minLeft = chart.scrollLeft + halfWidth + 6;
-      const maxLeft = chart.scrollLeft + chart.clientWidth - halfWidth - 6;
-      tooltip.style.left = `${Math.max(minLeft, Math.min(maxLeft, pointerX))}px`;
-      tooltip.style.top = `${pointerY - 10}px`;
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY);
     };
     const clearBarHover = () => {
       svg.querySelector(".chart-bar.bar-hover")?.classList.remove("bar-hover");

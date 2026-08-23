@@ -207,6 +207,17 @@ assert.match(panelSource, /lastChartDebugCopyAt/);
 assert.match(panelSource, /clipboardError/);
 assert.doesNotMatch(panelSource, /tooltip_click_received/);
 assert.doesNotMatch(panelSource, /tooltip_copy_text_length/);
+assert.match(panelSource, /function positionChartTooltip\(chart, tooltip, clientX, clientY\)/);
+assert.match(panelSource, /tooltip\.offsetWidth/);
+assert.match(panelSource, /tooltip\.offsetHeight/);
+assert.match(panelSource, /const aboveY = pointerY - gap - tooltipHeight/);
+assert.match(panelSource, /const belowY = pointerY \+ gap/);
+assert.match(panelSource, /const minLeft = viewportLeft/);
+assert.match(panelSource, /const maxLeft = Math\.max\(minLeft, viewportRight - tooltipWidth\)/);
+assert.match(panelSource, /const viewportTop = chart\.scrollTop \+ safety/);
+assert.match(panelSource, /const viewportBottom = chart\.scrollTop \+ chart\.clientHeight - safety/);
+assert.match(panelSource, /positionChartTooltip\(chart, tooltip, event\.clientX, event\.clientY\)/);
+assert.doesNotMatch(panelSource, /transform: translate\(-50%, -100%\)/);
 
 const technicalOutput = formatDiagnosticsText([
   { level: "DEBUG", component: "source", event: "debug_event", message: "Technical detail" },
