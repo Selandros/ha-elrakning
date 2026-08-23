@@ -218,6 +218,14 @@ class ElrakningPanel {
     this._meterHistoryRequestToken = 0;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
+    this._previewLayersVisible = {
+      solar: true,
+      consumption: true,
+      gridExport: true,
+      gridImport: true,
+      charging: true,
+      discharging: true,
+    };
     this._priceComparisonVisible = { electricity: true, grid: false };
     this._providerConfigured = false;
     this.priceData = {
@@ -296,22 +304,22 @@ class ElrakningPanel {
             <button type="button" class="chart-legend-toggle active" data-chart-layer="export" aria-pressed="true">
               <span class="chart-legend-swatch export" aria-hidden="true"></span>Export
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active solar">
+            <button type="button" class="chart-legend-toggle chart-legend-preview active solar" data-preview-layer="solar" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Solproduktion
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active consumption">
+            <button type="button" class="chart-legend-toggle chart-legend-preview active consumption" data-preview-layer="consumption" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Förbrukning
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-export">
+            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-export" data-preview-layer="gridExport" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Export till nätet
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-import">
+            <button type="button" class="chart-legend-toggle chart-legend-preview active grid-import" data-preview-layer="gridImport" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Import från nätet
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active charging">
+            <button type="button" class="chart-legend-toggle chart-legend-preview active charging" data-preview-layer="charging" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active discharging">
+            <button type="button" class="chart-legend-toggle chart-legend-preview active discharging" data-preview-layer="discharging" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning
             </button>
           </div>
@@ -1083,65 +1091,63 @@ class ElrakningPanel {
           opacity: 1;
         }
 
-        .chart-legend-preview .chart-legend-swatch {
-          border-radius: 999px;
-          height: 7px;
-          width: 7px;
+        .chart-legend-preview:not(.active) {
+          opacity: .55;
         }
 
         .chart-legend-preview.solar {
-          color: var(--success-color);
+          color: #56C7A0;
         }
 
         .chart-legend-preview.solar .chart-legend-swatch {
-          background: var(--success-color);
+          background: #56C7A0;
         }
 
         .chart-legend-preview.consumption {
-          color: var(--error-color);
+          color: #FF6363;
         }
 
         .chart-legend-preview.consumption .chart-legend-swatch {
-          background: var(--error-color);
+          background: #FF6363;
         }
 
         .chart-legend-preview.grid-export {
-          color: var(--grid-export-color);
+          color: #5B9EF3;
         }
 
         .chart-legend-preview.grid-export .chart-legend-swatch {
-          background: var(--grid-export-color);
+          background: #5B9EF3;
         }
 
         .chart-legend-preview.grid-import {
-          color: var(--grid-import-color);
+          color: #FF9966;
         }
 
         .chart-legend-preview.grid-import .chart-legend-swatch {
-          background: var(--grid-import-color);
+          background: #FF9966;
         }
 
         .chart-legend-preview.charging {
-          color: color-mix(in srgb, var(--error-color) 75%, var(--primary-text-color));
+          color: #984C5A;
         }
 
         .chart-legend-preview.charging .chart-legend-swatch {
-          background: color-mix(in srgb, var(--error-color) 75%, var(--primary-text-color));
+          background: #984C5A;
         }
 
         .chart-legend-preview.discharging {
-          color: color-mix(in srgb, var(--error-color) 55%, var(--primary-color));
+          color: #EF5C83;
         }
 
         .chart-legend-preview.discharging .chart-legend-swatch {
-          background: color-mix(in srgb, var(--error-color) 55%, var(--primary-color));
+          background: #EF5C83;
         }
 
         .chart-legend-swatch {
           border-radius: 999px;
           display: inline-block;
-          height: 3px;
-          width: 18px;
+          height: 7px;
+          width: 7px;
         }
 
         .chart-legend-swatch.import {
@@ -1366,6 +1372,15 @@ class ElrakningPanel {
         button.classList.toggle("active", this._spotBarsVisible);
         button.setAttribute("aria-pressed", String(this._spotBarsVisible));
         this.renderPriceChart();
+      });
+    }
+    for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
+      button.addEventListener("click", () => {
+        const layer = button.dataset.previewLayer;
+        if (!(layer in this._previewLayersVisible)) return;
+        this._previewLayersVisible[layer] = !this._previewLayersVisible[layer];
+        button.classList.toggle("active", this._previewLayersVisible[layer]);
+        button.setAttribute("aria-pressed", String(this._previewLayersVisible[layer]));
       });
     }
     for (const control of this.host.querySelectorAll("[data-price-layer]")) {
