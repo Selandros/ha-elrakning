@@ -202,6 +202,18 @@ class ElrakningPanel {
               <h2 id="price-title">Dagens elpris</h2>
               <p class="status">Nord Pool · Spotpris · öre/kWh</p>
             </div>
+            <div class="price-comparison-controls" aria-label="Prisjämförelse">
+              <label class="price-filter-toggle" data-price-layer="electricity">
+                <span>Elhandel</span>
+                <input type="checkbox" role="switch" data-price-toggle checked>
+                <span class="price-filter-track" aria-hidden="true"><span></span></span>
+              </label>
+              <label class="price-filter-toggle" data-price-layer="grid">
+                <span>Elnät</span>
+                <input type="checkbox" role="switch" data-price-toggle>
+                <span class="price-filter-track" aria-hidden="true"><span></span></span>
+              </label>
+            </div>
             <div class="price-summary">
               <div class="price-value current">
                 <span>Just nu</span>
@@ -220,14 +232,6 @@ class ElrakningPanel {
                 <strong data-price="average">–</strong>
               </div>
             </div>
-          </div>
-          <div class="price-comparison-controls" aria-label="Prisjämförelse">
-            <button type="button" class="chart-legend-toggle active" data-price-layer="electricity" aria-pressed="true">
-              <span class="chart-legend-swatch electricity" aria-hidden="true"></span>Elhandel
-            </button>
-            <button type="button" class="chart-legend-toggle" data-price-layer="grid" aria-pressed="false">
-              <span class="chart-legend-swatch grid" aria-hidden="true"></span>Elnät
-            </button>
           </div>
           <div class="price-chart" aria-live="polite"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
@@ -836,6 +840,12 @@ class ElrakningPanel {
             width: 100%;
           }
 
+          .price-comparison-controls {
+            justify-content: flex-start;
+            margin: 0;
+            width: 100%;
+          }
+
           .price-value.current {
             grid-column: 1;
             grid-row: 1;
@@ -897,7 +907,68 @@ class ElrakningPanel {
           display: flex;
           gap: 12px;
           justify-content: flex-end;
-          margin: -4px 0 8px;
+          margin: 0 0 0 auto;
+          white-space: nowrap;
+        }
+
+        .price-filter-toggle {
+          align-items: center;
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          display: inline-flex;
+          font-size: 12px;
+          gap: 6px;
+          user-select: none;
+        }
+
+        .price-filter-toggle input {
+          height: 1px;
+          opacity: 0;
+          position: absolute;
+          width: 1px;
+        }
+
+        .price-filter-track {
+          background: var(--divider-color);
+          border-radius: 999px;
+          box-sizing: border-box;
+          display: block;
+          height: 22px;
+          position: relative;
+          transition: background-color 120ms ease;
+          width: 38px;
+        }
+
+        .price-filter-track span {
+          background: var(--ha-card-background, var(--card-background-color));
+          border-radius: 50%;
+          box-shadow: var(--ha-card-box-shadow, none);
+          display: block;
+          height: 16px;
+          left: 3px;
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          transition: left 120ms ease;
+          width: 16px;
+        }
+
+        .price-filter-toggle input:checked + .price-filter-track {
+          background: var(--primary-color);
+        }
+
+        .price-filter-toggle input:checked + .price-filter-track span {
+          left: calc(100% - 3px - 16px);
+        }
+
+        .price-filter-toggle input:focus-visible + .price-filter-track {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+
+        .price-filter-toggle.is-disabled {
+          cursor: default;
+          opacity: .35;
         }
 
         .chart-legend-toggle {
@@ -935,14 +1006,6 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
         }
 
-        .chart-legend-toggle[data-chart-layer="electricity"] {
-          color: var(--primary-color);
-        }
-
-        .chart-legend-toggle[data-chart-layer="grid"] {
-          color: var(--accent-color);
-        }
-
         .chart-legend-swatch {
           border-radius: 999px;
           display: inline-block;
@@ -960,14 +1023,6 @@ class ElrakningPanel {
 
         .chart-legend-swatch.spot {
           background: var(--secondary-text-color);
-        }
-
-        .chart-legend-swatch.electricity {
-          background: var(--primary-color);
-        }
-
-        .chart-legend-swatch.grid {
-          background: var(--accent-color);
         }
 
         .empty-chart {
@@ -1173,13 +1228,14 @@ class ElrakningPanel {
         this.renderPriceChart();
       });
     }
-    for (const button of this.host.querySelectorAll("[data-price-layer]")) {
-      button.addEventListener("click", () => {
-        const layer = button.dataset.priceLayer;
-        if (!(layer in this._priceComparisonVisible) || button.disabled) return;
+    for (const control of this.host.querySelectorAll("[data-price-layer]")) {
+      const input = control.querySelector("[data-price-toggle]");
+      if (!input) continue;
+      input.addEventListener("change", () => {
+        const layer = control.dataset.priceLayer;
+        if (!(layer in this._priceComparisonVisible) || input.disabled) return;
         this._priceComparisonVisible[layer] = !this._priceComparisonVisible[layer];
-        button.classList.toggle("active", this._priceComparisonVisible[layer]);
-        button.setAttribute("aria-pressed", String(this._priceComparisonVisible[layer]));
+        input.checked = this._priceComparisonVisible[layer];
         this.updatePriceSummary();
         this.renderPriceChart();
       });
@@ -2337,15 +2393,16 @@ class ElrakningPanel {
   }
 
   _updatePriceComparisonControls() {
-    const button = this.host.querySelector('[data-price-layer="grid"]');
-    if (!button) return;
+    const control = this.host.querySelector('[data-price-layer="grid"]');
+    const input = control?.querySelector("[data-price-toggle]");
+    if (!control || !input) return;
     const available = this._hasGridPriceData();
-    button.disabled = !available;
-    button.title = available ? "Visa elnätskostnad i prisjämförelsen" : "Elnätspris saknas";
+    input.disabled = !available;
+    control.title = available ? "Visa elnätskostnad i prisjämförelsen" : "Elnätspris saknas";
+    control.classList.toggle("is-disabled", !available);
     if (!available) {
       this._priceComparisonVisible.grid = false;
-      button.classList.remove("active");
-      button.setAttribute("aria-pressed", "false");
+      input.checked = false;
     }
   }
 
