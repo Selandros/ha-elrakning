@@ -474,8 +474,8 @@ class ElrakningPanel {
               <span class="frontend-version">${this.version}</span>
             </div>
             <div class="header-icon-controls" aria-label="Elräkningens kontroller">
-              <button type="button" class="header-icon-button config-cards-button${this._configurationCardsVisible ? " active" : ""}" aria-label="Visa konfigurationskort" aria-pressed="${this._configurationCardsVisible}" data-config-cards-toggle>⚙️</button>
-              <button type="button" class="header-icon-button debug-button${this._debugEnabled ? " active" : ""}" aria-label="Visa diagnostik" aria-pressed="${this._debugEnabled}" data-debug-toggle>🐞</button>
+              <button type="button" class="header-icon-button config-cards-button${this._configurationCardsVisible ? " active" : ""}" aria-label="Visa konfigurationskort" aria-pressed="${this._configurationCardsVisible}" data-config-cards-toggle><ha-icon icon="mdi:cog-outline"></ha-icon></button>
+              <button type="button" class="header-icon-button debug-button${this._debugEnabled ? " active" : ""}" aria-label="Visa diagnostik" aria-pressed="${this._debugEnabled}" data-debug-toggle><ha-icon icon="mdi:bug-outline"></ha-icon></button>
             </div>
           </div>
         </header>
@@ -718,6 +718,12 @@ class ElrakningPanel {
           width: 32px;
         }
 
+        .header-icon-button ha-icon {
+          --mdc-icon-size: 20px;
+          height: 20px;
+          width: 20px;
+        }
+
         .header-icon-button:hover {
           background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
         }
@@ -744,6 +750,12 @@ class ElrakningPanel {
             font-size: 18px;
             height: 30px;
             width: 30px;
+          }
+
+          .header-icon-button ha-icon {
+            --mdc-icon-size: 18px;
+            height: 18px;
+            width: 18px;
           }
         }
 
@@ -1112,11 +1124,19 @@ class ElrakningPanel {
           color: var(--success-color);
         }
 
+        .price-value strong.cheap {
+          color: var(--success-color);
+        }
+
         .price-value.current strong.normal {
           color: var(--warning-color);
         }
 
         .price-value.current strong.expensive {
+          color: var(--error-color);
+        }
+
+        .price-value strong.expensive {
           color: var(--error-color);
         }
 
@@ -1570,6 +1590,14 @@ class ElrakningPanel {
           fill: var(--primary-color);
           font-size: var(--card-marker-size);
           font-weight: 700;
+        }
+
+        .price-marker-label.cheap {
+          fill: var(--success-color);
+        }
+
+        .price-marker-label.expensive {
+          fill: var(--error-color);
         }
 
         .chart-bar {
@@ -3136,10 +3164,10 @@ class ElrakningPanel {
       const element = this.host.querySelector(`[data-price="${key}"]`);
       if (element) {
         element.textContent = Number.isFinite(value) ? this.formatPrice(value) : "–";
-        if (key === "current") {
-          element.classList.remove("cheap", "normal", "expensive");
-          if (currentCategory) element.classList.add(currentCategory);
-        }
+        element.classList.remove("cheap", "normal", "expensive");
+        if (key === "current" && currentCategory) element.classList.add(currentCategory);
+        if (key === "lowest") element.classList.add("cheap");
+        if (key === "highest") element.classList.add("expensive");
       }
       const time = this.host.querySelector(`[data-time="${key}"]`);
       const period = summary[key];
@@ -3523,8 +3551,15 @@ class ElrakningPanel {
         current.y = upperY >= markerMinY ? upperY : Math.min(lowerY, current.maxY);
       }
     }
-    const priceMarkers = markerLayouts.map((marker) => `
-      <text class="price-marker-label" text-anchor="${marker.textAnchor}" x="${marker.textX}" y="${marker.y}">${marker.label}</text>`).join("");
+    const priceMarkers = markerLayouts.map((marker) => {
+      const markerClasses = [
+        "price-marker-label",
+        ...(marker.label.includes("Lägst") ? ["cheap"] : []),
+        ...(marker.label.includes("Högst") ? ["expensive"] : []),
+      ].join(" ");
+      return `
+      <text class="${markerClasses}" text-anchor="${marker.textAnchor}" x="${marker.textX}" y="${marker.y}">${marker.label}</text>`;
+    }).join("");
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
