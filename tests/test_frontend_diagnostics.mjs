@@ -358,7 +358,7 @@ assert.match(panelSource, /--knob-size: clamp\(11px, 3cqw, 14px\)/);
 assert.match(panelSource, /--track-padding: clamp\(2px, \.7cqw, 3px\)/);
 assert.match(panelSource, /width: clamp\(27px, 7\.2cqw, 34px\)/);
 assert.match(panelSource, /height: clamp\(16px, 4\.1cqw, 20px\)/);
-assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*gap: 1px 0/);
+assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*gap: 2px clamp\(3px, \.8cqw, 6px\)/);
 assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*font-size: clamp\(8\.5px, 2\.25cqw, 11px\)/);
 assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*letter-spacing: -\.15px/);
 assert.match(panelSource, /\.price-section \.chart-legend-toggle[\s\S]*gap: clamp\(1\.5px, \.4cqw, 3px\)/);
