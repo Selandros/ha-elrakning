@@ -584,6 +584,16 @@ class ElrakningPanel {
       </div>
       <style>
         :host {
+          --card-title-size: clamp(20px, 3.2vw, 28px);
+          --card-subtitle-size: clamp(13px, 2vw, 18px);
+          --card-toggle-size: clamp(12px, 1.8vw, 16px);
+          --card-kpi-label-size: clamp(13px, 1.9vw, 18px);
+          --card-kpi-value-size: clamp(24px, 3vw, 36px);
+          --card-chart-label-size: clamp(10px, 1.2vw, 12px);
+          --card-marker-size: clamp(11px, 1.4vw, 14px);
+          --card-legend-size: clamp(12px, 1.7vw, 16px);
+          --card-analysis-title-size: clamp(16px, 2.2vw, 20px);
+          --card-analysis-body-size: clamp(14px, 2vw, 18px);
           display: block;
           height: 100%;
           min-height: 0;
@@ -1018,14 +1028,14 @@ class ElrakningPanel {
 
         .price-value strong {
           display: block;
-          font-size: 17px;
-          font-weight: 500;
+          font-size: var(--card-kpi-value-size);
+          font-weight: 700;
           margin-top: 3px;
           white-space: nowrap;
         }
 
         .price-value.current strong {
-          font-size: 19px;
+          font-size: var(--card-kpi-value-size);
         }
 
         .price-value.current strong.cheap {
@@ -1050,16 +1060,23 @@ class ElrakningPanel {
 
         .price-value > span {
           color: var(--secondary-text-color);
-          font-size: 13px;
+          font-size: var(--card-kpi-label-size);
         }
 
-        .section-heading h2 {
+        .section-heading h2,
+        .card[data-provider-card] h2 {
+          font-size: var(--card-title-size);
+          font-weight: 700;
+          line-height: 1.1;
           margin-bottom: 6px;
         }
 
         .unit {
           color: var(--secondary-text-color);
-          font-size: 13px;
+          font-size: var(--card-subtitle-size);
+          font-weight: 500;
+          line-height: 1.2;
+          opacity: .9;
           white-space: nowrap;
         }
 
@@ -1116,15 +1133,15 @@ class ElrakningPanel {
           }
 
           .price-value > span {
-            font-size: 10px;
+            font-size: var(--card-kpi-label-size);
           }
 
           .price-value strong {
-            font-size: 14px;
+            font-size: var(--card-kpi-value-size);
           }
 
           .price-value.current strong {
-            font-size: 15px;
+            font-size: var(--card-kpi-value-size);
           }
 
           .price-comparison-controls {
@@ -1159,7 +1176,9 @@ class ElrakningPanel {
         }
 
         .price-analysis-status {
+          font-size: var(--card-analysis-title-size);
           font-weight: 600;
+          line-height: 1.2;
         }
 
         .price-analysis-status.cheap {
@@ -1180,6 +1199,8 @@ class ElrakningPanel {
         }
 
         .price-analysis-forecast {
+          font-size: var(--card-analysis-body-size);
+          line-height: 1.35;
           overflow-wrap: anywhere;
         }
 
@@ -1203,7 +1224,7 @@ class ElrakningPanel {
           display: flex;
           flex-wrap: wrap;
           gap: 5px 10px;
-          font-size: clamp(9px, 2.2cqw, 11px);
+          font-size: var(--card-legend-size);
           min-height: 22px;
           justify-content: center;
           margin-top: 1px;
@@ -1229,7 +1250,7 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           cursor: pointer;
           display: inline-flex;
-          font-size: 12px;
+          font-size: var(--card-toggle-size);
           gap: 6px;
           user-select: none;
         }
@@ -1292,12 +1313,12 @@ class ElrakningPanel {
           }
 
           .price-section .section-heading h2 {
-            font-size: clamp(15px, 4.2cqw, 19px);
+            font-size: var(--card-title-size);
             margin-bottom: clamp(2px, .7cqw, 6px);
           }
 
           .price-section .section-heading .status {
-            font-size: clamp(11px, 2.9cqw, 14px);
+            font-size: var(--card-subtitle-size);
           }
 
           .price-section .price-comparison-controls {
@@ -1305,7 +1326,7 @@ class ElrakningPanel {
           }
 
           .price-section .price-filter-toggle {
-            font-size: clamp(9px, 2.25cqw, 11px);
+            font-size: var(--card-toggle-size);
             gap: clamp(2px, .8cqw, 4px);
           }
 
@@ -1321,15 +1342,15 @@ class ElrakningPanel {
           }
 
           .price-section .price-value > span {
-            font-size: clamp(9.5px, 2.7cqw, 13px);
+            font-size: var(--card-kpi-label-size);
           }
 
           .price-section .price-value strong {
-            font-size: clamp(12.5px, 3.2cqw, 15.5px);
+            font-size: var(--card-kpi-value-size);
           }
 
           .price-section .price-value.current strong {
-            font-size: clamp(13.5px, 3.5cqw, 17px);
+            font-size: var(--card-kpi-value-size);
           }
 
           .price-section .chart-legend-swatch {
@@ -1342,12 +1363,12 @@ class ElrakningPanel {
           }
 
           .price-section .price-analysis-status {
-            font-size: clamp(10.5px, 2.6cqw, 12.5px);
+            font-size: var(--card-analysis-title-size);
             line-height: 1.25;
           }
 
           .price-section .price-analysis-forecast {
-            font-size: clamp(9.5px, 2.35cqw, 11.5px);
+            font-size: var(--card-analysis-body-size);
             line-height: 1.35;
           }
 
@@ -1363,7 +1384,7 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           cursor: pointer;
           display: inline-flex;
-          font-size: 12px;
+          font-size: var(--card-legend-size);
           gap: 3px;
           margin: 0;
           opacity: .55;
@@ -1480,7 +1501,7 @@ class ElrakningPanel {
 
         .chart-label {
           fill: var(--secondary-text-color);
-          font-size: 11px;
+          font-size: var(--card-chart-label-size);
         }
 
         .chart-average {
@@ -1497,7 +1518,7 @@ class ElrakningPanel {
 
         .chart-meter-label {
           fill: var(--secondary-text-color);
-          font-size: 10px;
+          font-size: var(--card-chart-label-size);
         }
 
         .chart-meter-import,
@@ -1542,7 +1563,7 @@ class ElrakningPanel {
 
         .price-marker-label {
           fill: var(--primary-color);
-          font-size: 16px;
+          font-size: var(--card-marker-size);
           font-weight: 700;
         }
 
