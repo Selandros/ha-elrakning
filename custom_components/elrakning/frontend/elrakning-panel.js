@@ -110,14 +110,6 @@ function formatAnalysisPrice(value) {
   return `${Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 1 })} öre/kWh`;
 }
 
-function formatWaitDuration(minutes) {
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (!hours) return `${remainder} min`;
-  if (!remainder) return `${hours} h`;
-  return `${hours} h ${remainder} min`;
-}
-
 function buildUsageWindow(periods, prices, startIndex, windowPeriods) {
   if (startIndex < 0 || startIndex + windowPeriods > periods.length) return null;
   const values = prices.slice(startIndex, startIndex + windowPeriods);
@@ -147,16 +139,21 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
     currentIndex + searchHorizonPeriods - usageWindowPeriods,
   );
   let bestWindow = nowWindow;
+  let highestWindow = nowWindow;
   for (let startIndex = currentIndex + 1; startIndex <= lastStartIndex; startIndex += 1) {
     const window = buildUsageWindow(periods, prices, startIndex, usageWindowPeriods);
-    if (window && window.average_price < bestWindow.average_price) bestWindow = window;
+    if (!window) continue;
+    if (window.average_price < bestWindow.average_price) bestWindow = window;
+    if (window.average_price > highestWindow.average_price) highestWindow = window;
   }
   const differenceOre = nowWindow.average_price - bestWindow.average_price;
   const differencePercent = nowWindow.average_price !== 0
     ? (differenceOre / Math.abs(nowWindow.average_price)) * 100
     : 0;
-  const worthWaiting = bestWindow.startIndex > nowWindow.startIndex
-    && (differenceOre >= 10 || differencePercent >= 15);
+  const higherDifferenceOre = highestWindow.average_price - nowWindow.average_price;
+  const higherDifferencePercent = nowWindow.average_price !== 0
+    ? (higherDifferenceOre / Math.abs(nowWindow.average_price)) * 100
+    : 0;
   return {
     currentIndex,
     status: categories[currentIndex],
@@ -170,28 +167,35 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
     search_horizon_hours: 6,
     now_window: nowWindow,
     best_window: bestWindow,
-    wait_minutes: Math.max(0, (bestWindow.startIndex - nowWindow.startIndex) * 15),
+    highest_window: highestWindow,
     difference_ore_per_kwh: differenceOre,
     difference_percent: differencePercent,
-    worth_waiting: worthWaiting,
-    recommendation: worthWaiting ? "wait" : "start_now",
+    lower_window_significant: bestWindow.startIndex > nowWindow.startIndex
+      && (differenceOre >= 10 || differencePercent >= 15),
+    higher_window_significant: highestWindow.startIndex > nowWindow.startIndex
+      && (higherDifferenceOre >= 10 || higherDifferencePercent >= 15),
     categories,
   };
 }
 
 export function renderPriceAnalysis(facts) {
   if (!facts) return { category: null, status: "", forecast: "Dagens prisanalys är inte tillgänglig" };
-  if (facts.recommendation === "wait") {
-    return {
-      category: facts.status,
-      status: `Vänta ${formatWaitDuration(facts.wait_minutes)}`,
-      forecast: `Billigast att starta runt ${formatAnalysisClock(facts.best_window.start)}. Snittpriset blir ${formatAnalysisPrice(facts.best_window.average_price)} mot ${formatAnalysisPrice(facts.now_window.average_price)} om du startar nu.`,
-    };
+  const status = {
+    cheap: "Billigt pris nu",
+    normal: "Normalt pris nu",
+    expensive: "Dyrt pris nu",
+  }[facts.status];
+  const observations = [
+    `De kommande 2 timmarna ligger runt ${formatAnalysisPrice(facts.now_window.average_price)}.`,
+  ];
+  if (facts.lower_window_significant) {
+    observations.push(`Från ${formatAnalysisClock(facts.best_window.start)} sjunker tvåtimmarssnittet till ${formatAnalysisPrice(facts.best_window.average_price)}.`);
+  } else if (facts.higher_window_significant) {
+    observations.push(`Från ${formatAnalysisClock(facts.highest_window.start)} stiger tvåtimmarssnittet till ${formatAnalysisPrice(facts.highest_window.average_price)}.`);
+  } else {
+    observations.push("Ingen tydligt billigare eller dyrare period finns de närmaste 6 timmarna.");
   }
-  const forecast = facts.best_window.startIndex === facts.now_window.startIndex
-    ? "Nu är redan ett av dagens billigare tvåtimmarsfönster."
-    : "Det blir inte märkbart billigare de närmaste 6 timmarna.";
-  return { category: facts.status, status: "Starta nu", forecast };
+  return { category: facts.status, status, forecast: observations.slice(0, 2).join(" ") };
 }
 
 export function generateUpcomingPriceAnalysis(periods, currentIndex) {

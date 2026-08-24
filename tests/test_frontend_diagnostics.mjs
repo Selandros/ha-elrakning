@@ -84,32 +84,34 @@ assert.equal(waitFacts.search_horizon_hours, 6);
 assert.equal(waitFacts.now_window.average_price, 86);
 assert.equal(waitFacts.best_window.startIndex, 12);
 assert.equal(waitFacts.best_window.average_price, 54);
-assert.equal(waitFacts.wait_minutes, 180);
 assert.equal(waitFacts.difference_ore_per_kwh, 32);
 assert.equal(Math.round(waitFacts.difference_percent), 37);
-assert.equal(waitFacts.worth_waiting, true);
-assert.equal(waitFacts.recommendation, "wait");
+assert.equal(waitFacts.lower_window_significant, true);
+assert.equal(waitFacts.higher_window_significant, false);
 assert.deepEqual(renderPriceAnalysis(waitFacts), {
   category: waitFacts.status,
-  status: "Vänta 3 h",
-  forecast: "Billigast att starta runt 03:00. Snittpriset blir 54 öre/kWh mot 86 öre/kWh om du startar nu.",
+  status: "Billigt pris nu",
+  forecast: "De kommande 2 timmarna ligger runt 86 öre/kWh. Från 03:00 sjunker tvåtimmarssnittet till 54 öre/kWh.",
 });
 const marginPeriods = makeAnalysisPeriods([...Array(8).fill(86), ...Array(24).fill(82)]);
 const marginFacts = buildPriceAnalysisFacts(marginPeriods, 0);
 assert.equal(marginFacts.best_window.average_price, 82);
-assert.equal(marginFacts.worth_waiting, false);
-assert.equal(renderPriceAnalysis(marginFacts).status, "Starta nu");
+assert.equal(marginFacts.lower_window_significant, false);
+assert.equal(marginFacts.higher_window_significant, false);
+assert.equal(renderPriceAnalysis(marginFacts).status, "Dyrt pris nu");
 assert.match(renderPriceAnalysis(marginFacts).forecast, /6 timmar/);
 const cheapNowFacts = buildPriceAnalysisFacts(makeAnalysisPeriods([...Array(8).fill(40), ...Array(24).fill(100)]), 0);
 assert.equal(cheapNowFacts.best_window.startIndex, 0);
-assert.equal(cheapNowFacts.recommendation, "start_now");
-assert.match(renderPriceAnalysis(cheapNowFacts).forecast, /billigare tvåtimmarsfönster/);
-assert.doesNotMatch(
-  renderPriceAnalysis(waitFacts).forecast,
-  /(?:stiger|sjunker) \d+ %\./,
-);
+assert.equal(cheapNowFacts.lower_window_significant, false);
+assert.match(renderPriceAnalysis(cheapNowFacts).forecast, /De kommande 2 timmarna/);
+const renderedAnalysis = renderPriceAnalysis(waitFacts);
+assert.doesNotMatch(renderedAnalysis.status + renderedAnalysis.forecast, /Starta nu|Vänta|Billigast att starta|Du bör|Kör tvättmaskin/);
+assert.doesNotMatch(renderedAnalysis.forecast, /Priset stiger senare|Det blir billigare|Priset förändras under kvällen/);
 assert.match(renderPriceAnalysis(waitFacts).forecast, /öre\/kWh/);
-assert.match(renderPriceAnalysis(waitFacts).forecast, /mot 86 öre\/kWh/);
+assert.match(renderPriceAnalysis(waitFacts).forecast, /Från 03:00/);
+assert.equal(renderPriceAnalysis({ ...waitFacts, status: "cheap" }).status, "Billigt pris nu");
+assert.equal(renderPriceAnalysis({ ...waitFacts, status: "normal" }).status, "Normalt pris nu");
+assert.equal(renderPriceAnalysis({ ...waitFacts, status: "expensive" }).status, "Dyrt pris nu");
 assert.equal(renderPriceAnalysis(buildPriceAnalysisFacts(makeAnalysisPeriods([5, 5, 5, 5]), 0)).forecast, "Dagens prisanalys är inte tillgänglig");
 const guardedLowDay = priceColorBands([...Array.from({ length: 15 }, (_, index) => 1 + index / 10), 4.1, 100, 101, 102, 103, 104]);
 assert.equal(priceCategory(4.1, guardedLowDay), "normal");
