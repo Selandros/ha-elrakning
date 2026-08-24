@@ -983,6 +983,8 @@ class ElrakningPanel {
           --grid-export-color: #72AAF6;
           --charging-color: #844A54;
           --discharging-color: #E06681;
+          container-name: price-card;
+          container-type: inline-size;
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
           border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
           border-radius: var(--ha-card-border-radius, 12px);
@@ -1232,6 +1234,8 @@ class ElrakningPanel {
           box-sizing: border-box;
           display: block;
           height: 22px;
+          --knob-size: 16px;
+          --track-padding: 3px;
           position: relative;
           transition: background-color 120ms ease;
           width: 38px;
@@ -1242,13 +1246,13 @@ class ElrakningPanel {
           border-radius: 50%;
           box-shadow: var(--ha-card-box-shadow, none);
           display: block;
-          height: 16px;
-          left: 3px;
+          height: var(--knob-size);
+          left: var(--track-padding);
           position: absolute;
           top: 50%;
           transform: translateY(-50%);
           transition: left 120ms ease;
-          width: 16px;
+          width: var(--knob-size);
         }
 
         .price-filter-toggle input:checked + .price-filter-track {
@@ -1256,7 +1260,7 @@ class ElrakningPanel {
         }
 
         .price-filter-toggle input:checked + .price-filter-track span {
-          left: calc(100% - 3px - 16px);
+          left: calc(100% - var(--track-padding) - var(--knob-size));
         }
 
         .price-filter-toggle input:focus-visible + .price-filter-track {
@@ -1267,6 +1271,66 @@ class ElrakningPanel {
         .price-filter-toggle.is-disabled {
           cursor: default;
           opacity: .35;
+        }
+
+        @supports (font-size: 1cqw) {
+          .price-section .section-heading h2 {
+            font-size: clamp(20px, 5.4cqw, 24px);
+          }
+
+          .price-section .section-heading .status {
+            font-size: clamp(13px, 3.3cqw, 16px);
+          }
+
+          .price-section .price-comparison-controls {
+            gap: clamp(6px, 2.5cqw, 12px);
+          }
+
+          .price-section .price-filter-toggle {
+            font-size: clamp(10px, 2.6cqw, 12px);
+            gap: clamp(3px, 1.3cqw, 6px);
+          }
+
+          .price-section .price-filter-track {
+            --knob-size: clamp(12px, 3.5cqw, 16px);
+            --track-padding: clamp(2px, .8cqw, 3px);
+            height: clamp(18px, 4.7cqw, 22px);
+            width: clamp(30px, 8.2cqw, 38px);
+          }
+
+          .price-section .price-summary {
+            gap: clamp(4px, 2.1cqw, 20px);
+          }
+
+          .price-section .price-value > span {
+            font-size: clamp(10px, 2.7cqw, 13px);
+          }
+
+          .price-section .price-value strong {
+            font-size: clamp(14px, 3.6cqw, 17px);
+          }
+
+          .price-section .price-value.current strong {
+            font-size: clamp(15px, 4cqw, 19px);
+          }
+
+          .price-section .price-chart-legend {
+            gap: clamp(4px, 1.6cqw, 10px) clamp(4px, 1.6cqw, 10px);
+            font-size: clamp(9.5px, 2.7cqw, 12px);
+          }
+
+          .price-section .chart-legend-toggle {
+            gap: clamp(3px, .8cqw, 5px);
+          }
+
+          .price-section .chart-legend-swatch {
+            height: clamp(5px, 1.9cqw, 7px);
+            width: clamp(5px, 1.9cqw, 7px);
+          }
+
+          .price-section .price-analysis {
+            font-size: clamp(11px, 2.7cqw, 13px);
+          }
         }
 
         .chart-legend-toggle {
