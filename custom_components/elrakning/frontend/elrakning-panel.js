@@ -1186,6 +1186,30 @@ class ElrakningPanel {
           color: var(--error-color);
         }
 
+        .price-analysis-separator,
+        .price-analysis-forecast {
+          color: var(--secondary-text-color);
+        }
+
+        .price-analysis-forecast {
+          overflow-wrap: anywhere;
+        }
+
+        @container price-card (max-width: 480px) {
+          .price-analysis-status,
+          .price-analysis-forecast {
+            display: block;
+          }
+
+          .price-analysis-separator {
+            display: none;
+          }
+
+          .price-analysis-forecast {
+            margin-top: 2px;
+          }
+        }
+
         .price-chart-legend {
           align-items: center;
           display: flex;
@@ -2936,9 +2960,18 @@ class ElrakningPanel {
         const status = document.createElement("span");
         status.className = `price-analysis-status ${upcoming.category}`;
         status.textContent = upcoming.status;
-        analysis.append(status, document.createTextNode(` · ${upcoming.forecast}`));
+        const separator = document.createElement("span");
+        separator.className = "price-analysis-separator";
+        separator.textContent = " · ";
+        const forecast = document.createElement("span");
+        forecast.className = "price-analysis-forecast";
+        forecast.textContent = upcoming.forecast;
+        analysis.append(status, separator, forecast);
       } else {
-        analysis.textContent = upcoming.forecast;
+        const forecast = document.createElement("span");
+        forecast.className = "price-analysis-forecast";
+        forecast.textContent = upcoming.forecast;
+        analysis.append(forecast);
       }
     }
     const summary = { current, lowest, highest, average };
