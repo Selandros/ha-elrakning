@@ -360,7 +360,7 @@ assert.match(panelSource, /width: clamp\(27px, 7\.2cqw, 34px\)/);
 assert.match(panelSource, /height: clamp\(16px, 4\.1cqw, 20px\)/);
 assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*gap: 2px clamp\(3px, \.8cqw, 6px\)/);
 assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*font-size: clamp\(8px, 2\.25cqw, 11px\)/);
-assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*letter-spacing: -\.15px/);
+assert.match(panelSource, /\.price-section \.price-chart-legend[\s\S]*letter-spacing: -\.25px/);
 assert.match(panelSource, /\.price-section \.chart-legend-toggle[\s\S]*gap: clamp\(1px, \.3cqw, 3px\)/);
 assert.match(panelSource, /\.price-section \.price-analysis-status[\s\S]*font-size: clamp\(10\.5px, 2\.6cqw, 12\.5px\)/);
 assert.match(panelSource, /\.price-section \.price-analysis-forecast[\s\S]*font-size: clamp\(9\.5px, 2\.35cqw, 11\.5px\)/);
