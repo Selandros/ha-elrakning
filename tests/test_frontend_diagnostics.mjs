@@ -389,6 +389,7 @@ assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*flex: 0 0 82px
 assert.match(panelSource, /ResizeObserver\(updateLayoutState\)/);
 assert.match(panelSource, /price-summary-wrapped/);
 assert.match(panelSource, /price-summary-inline/);
+assert.match(panelSource, /summary\.getBoundingClientRect\(\)\.top > cluster\.getBoundingClientRect\(\)\.bottom \+ 1/);
 assert.match(panelSource, /\.section-heading\.price-summary-inline[\s\S]*font-size: clamp\(10px, 1\.4cqw, 15px\)/);
 assert.match(panelSource, /\.section-heading\.price-summary-inline[\s\S]*font-size: clamp\(10px, 1\.6cqw, 17px\)/);
 assert.match(panelSource, /chart-legend-preview/);

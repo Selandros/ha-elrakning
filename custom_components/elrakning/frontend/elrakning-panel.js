@@ -1638,7 +1638,7 @@ class ElrakningPanel {
       const cluster = heading.querySelector(".price-heading-main");
       const summary = heading.querySelector(".price-summary");
       if (!cluster || !summary) return;
-      const wrapped = Math.abs(summary.getBoundingClientRect().top - cluster.getBoundingClientRect().top) > 1;
+      const wrapped = summary.getBoundingClientRect().top > cluster.getBoundingClientRect().bottom + 1;
       heading.classList.toggle("price-summary-wrapped", wrapped);
       heading.classList.toggle("price-summary-inline", !wrapped);
     };
