@@ -1025,21 +1025,20 @@ class ElrakningPanel {
 
         .price-summary {
           align-items: center;
-          column-gap: 20px;
-          display: flex;
+          display: grid;
           flex: 1 1 408px;
-          flex-wrap: wrap;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px 20px;
           justify-content: center;
-          min-width: min(100%, 408px);
-          row-gap: 8px;
+          min-width: min(100%, 360px);
           text-align: right;
           width: min(100%, 408px);
         }
 
         .price-summary .price-value {
-          flex: 0 0 82px;
-          min-width: 82px;
+          min-width: 0;
           text-align: center;
+          white-space: nowrap;
         }
 
         .price-value > span {

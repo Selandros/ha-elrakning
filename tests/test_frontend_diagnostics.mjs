@@ -383,9 +383,11 @@ assert.match(panelSource, /\.price-heading-main[\s\S]*price-comparison-controls/
 assert.doesNotMatch(panelSource, /\.price-comparison-controls \{[\s\S]*margin: 0 0 0 auto/);
 assert.match(panelSource, /\.section-heading \{[\s\S]*justify-content: flex-start/);
 assert.match(panelSource, /\.price-heading-main \{[\s\S]*justify-content: flex-start/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*display: flex[\s\S]*flex-wrap: wrap[\s\S]*justify-content: center/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*display: grid[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+assert.doesNotMatch(panelSource, /\.price-summary \{[^}]*flex-wrap:/);
 assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 1 1 408px/);
-assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*flex: 0 0 82px[\s\S]*min-width: 82px[\s\S]*text-align: center/);
+assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*min-width: 0[\s\S]*text-align: center[\s\S]*white-space: nowrap/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*min-width: min\(100%, 360px\)/);
 assert.match(panelSource, /ResizeObserver\(updateLayoutState\)/);
 assert.match(panelSource, /price-summary-wrapped/);
 assert.match(panelSource, /price-summary-inline/);
@@ -520,7 +522,7 @@ assert.match(panelSource, /\.price-analysis-forecast \{[\s\S]*column-gap: \.3em[
 assert.match(panelSource, /\.price-analysis-sentence \{[\s\S]*flex: 0 1 auto[\s\S]*min-width: min-content[\s\S]*overflow-wrap: break-word/);
 assert.doesNotMatch(panelSource, /price-analysis-separator/);
 assert.doesNotMatch(panelSource, /@container price-card \(max-width: 480px\)[\s\S]*price-analysis/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*column-gap: 20px[\s\S]*row-gap: 8px/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*gap: 8px 20px/);
 assert.doesNotMatch(panelSource, /-webkit-line-clamp: 2/);
 assert.match(panelSource, /for \(const sentenceText of upcoming\.sentences \|\| \[upcoming\.forecast\]\)/);
 assert.match(panelSource, /sentence\.className = "price-analysis-sentence"/);
