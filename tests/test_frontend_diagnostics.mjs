@@ -379,7 +379,9 @@ assert.match(panelSource, /\.price-heading-main \{[\s\S]*display: flex[\s\S]*fle
 assert.match(panelSource, /\.price-heading-main > div:first-child \{[\s\S]*flex: 0 0 auto[\s\S]*min-width: max-content/);
 assert.match(panelSource, /\.price-heading-main[\s\S]*price-comparison-controls/);
 assert.doesNotMatch(panelSource, /\.price-comparison-controls \{[\s\S]*margin: 0 0 0 auto/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 0 0 auto[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+assert.match(panelSource, /\.section-heading \{[\s\S]*justify-content: center/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*display: flex[\s\S]*flex-wrap: wrap[\s\S]*justify-content: center/);
+assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*flex: 0 0 82px[\s\S]*min-width: 82px[\s\S]*text-align: center/);
 assert.match(panelSource, /chart-legend-preview/);
 assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*cursor: pointer;/);
 assert.match(panelSource, /min-height: 22px/);
@@ -508,7 +510,7 @@ assert.match(panelSource, /\.price-analysis-forecast \{[\s\S]*column-gap: \.3em[
 assert.match(panelSource, /\.price-analysis-sentence \{[\s\S]*flex: 0 1 auto[\s\S]*min-width: min-content[\s\S]*overflow-wrap: break-word/);
 assert.doesNotMatch(panelSource, /price-analysis-separator/);
 assert.doesNotMatch(panelSource, /@container price-card \(max-width: 480px\)[\s\S]*price-analysis/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*column-gap: 20px[\s\S]*row-gap: 8px/);
 assert.doesNotMatch(panelSource, /-webkit-line-clamp: 2/);
 assert.match(panelSource, /for \(const sentenceText of upcoming\.sentences \|\| \[upcoming\.forecast\]\)/);
 assert.match(panelSource, /sentence\.className = "price-analysis-sentence"/);
