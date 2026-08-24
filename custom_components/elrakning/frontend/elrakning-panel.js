@@ -1064,6 +1064,18 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
+        .chart-bar.cheap {
+          fill: color-mix(in srgb, var(--success-color) 44%, var(--ha-card-background, var(--card-background-color)));
+        }
+
+        .chart-bar.normal {
+          fill: color-mix(in srgb, var(--warning-color) 44%, var(--ha-card-background, var(--card-background-color)));
+        }
+
+        .chart-bar.expensive {
+          fill: color-mix(in srgb, var(--error-color) 44%, var(--ha-card-background, var(--card-background-color)));
+        }
+
         @media (max-width: 600px) {
           .section-heading {
             flex-wrap: wrap;
@@ -1397,18 +1409,6 @@ class ElrakningPanel {
 
         .chart-bar {
           cursor: default;
-        }
-
-        .chart-bar.cheap {
-          fill: color-mix(in srgb, var(--success-color) 68%, var(--ha-card-background, var(--card-background-color)));
-        }
-
-        .chart-bar.normal {
-          fill: color-mix(in srgb, var(--warning-color) 68%, var(--ha-card-background, var(--card-background-color)));
-        }
-
-        .chart-bar.expensive {
-          fill: color-mix(in srgb, var(--error-color) 68%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-tooltip {
