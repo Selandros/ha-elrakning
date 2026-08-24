@@ -224,6 +224,9 @@ assert.match(panelSource, /this\._applyConfigurationCardsVisibility\(response\.c
 assert.match(panelSource, /configuration_cards_visible: this._configurationCardsVisible/);
 assert.doesNotMatch(panelSource, /debug-toggle-track/);
 assert.doesNotMatch(panelSource, /role="switch" aria-label="Visa diagnostik"/);
+assert.doesNotMatch(panelSource, />Översikt<\/p>/);
+assert.match(panelSource, /\.header \{[\s\S]*margin-bottom: 16px;[\s\S]*padding-bottom: 0;/);
+assert.doesNotMatch(panelSource, /\.header \{[\s\S]*border-bottom:/);
 assert.match(panelSource, /\[data-configuration-cards\]\[hidden\] \{[\s\S]*display: none;/);
 assert.match(panelSource, /\.header-icon-button \{[\s\S]*opacity: \.55;/);
 assert.match(panelSource, /\.header-icon-button\.active \{[\s\S]*opacity: 1;/);

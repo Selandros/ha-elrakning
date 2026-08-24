@@ -417,7 +417,6 @@ class ElrakningPanel {
               <button type="button" class="header-icon-button debug-button${this._debugEnabled ? " active" : ""}" aria-label="Visa diagnostik" aria-pressed="${this._debugEnabled}" data-debug-toggle>🐞</button>
             </div>
           </div>
-          <p>Översikt</p>
         </header>
 
         <section class="price-section" aria-labelledby="price-title">
@@ -958,9 +957,8 @@ class ElrakningPanel {
 
 
         .header {
-          border-bottom: 1px solid var(--divider-color);
-          margin-bottom: 24px;
-          padding-bottom: 16px;
+          margin-bottom: 16px;
+          padding-bottom: 0;
         }
 
         h1, h2, p {
@@ -970,12 +968,6 @@ class ElrakningPanel {
         h1 {
           font-size: 28px;
           font-weight: 500;
-        }
-
-        .header p {
-          color: var(--secondary-text-color);
-          font-size: 16px;
-          margin-top: 8px;
         }
 
         .grid {
