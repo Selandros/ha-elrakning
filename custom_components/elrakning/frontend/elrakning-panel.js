@@ -476,7 +476,7 @@ class ElrakningPanel {
               <span class="chart-legend-swatch" aria-hidden="true"></span>Sol
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview active consumption" data-preview-layer="consumption" aria-pressed="true">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Förbrukning
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Last
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview active charging" data-preview-layer="charging" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning

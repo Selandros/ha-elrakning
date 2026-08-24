@@ -344,7 +344,7 @@ assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(too
 assert.match(panelSource, /const value = this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);
 assert.doesNotMatch(panelSource, /data-tooltip=/);
 assert.match(panelSource, />Sol\s*</);
-assert.match(panelSource, /Förbrukning/);
+assert.match(panelSource, /data-preview-layer="consumption"[\s\S]*>Last/);
 assert.match(panelSource, /Laddning/);
 assert.match(panelSource, /Urladdning/);
 assert.match(panelSource, /<p class="status">Spotpris · öre\/kWh<\/p>/);
