@@ -564,6 +564,12 @@ assert.match(panelSource, /for \(let distance = 0; distance <= 36; distance \+= 
 assert.match(panelSource, /const viewportTop = chart\.scrollTop \+ safety/);
 assert.match(panelSource, /const viewportBottom = chart\.scrollTop \+ chart\.clientHeight - safety/);
 assert.match(panelSource, /positionChartTooltip\(chart, tooltip, event\.clientX, event\.clientY, obstacles, this\._tooltipOrbit\)/);
+assert.match(panelSource, /touch-action: pan-y/);
+assert.match(panelSource, /chart\.addEventListener\("touchstart"[\s\S]*insidePlot\(touch\.clientX, touch\.clientY\)[\s\S]*show\(hit\.period, touch, hit\.tooltipTimestamp\)/);
+assert.match(panelSource, /chart\.addEventListener\("touchmove"[\s\S]*periodAt\(touch\.clientX\)[\s\S]*show\(hit\.period, touch, hit\.tooltipTimestamp\)/);
+assert.match(panelSource, /const clearTouchHover = \(\) => \{[\s\S]*tooltip\.hidden = true/);
+assert.doesNotMatch(panelSource, /_pinnedPeriod/);
+assert.doesNotMatch(panelSource, /touchend[\s\S]*copyChartDebugText/);
 assert.doesNotMatch(panelSource, /transform: translate\(-50%, -100%\)/);
 
 const technicalOutput = formatDiagnosticsText([

@@ -370,7 +370,6 @@ class ElrakningPanel {
     this._debugEnabled = false;
     this._debugPreferenceChanged = false;
     this._diagnosticEntries = [];
-    this._pinnedPeriod = null;
     this._chartTouch = null;
     this._chartDebugCopyText = "";
     this._tooltipOrbit = { angle: null };
@@ -1147,6 +1146,7 @@ class ElrakningPanel {
           min-height: 0;
           overflow-x: hidden;
           position: relative;
+          touch-action: pan-y;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior-x: contain;
         }
@@ -2684,9 +2684,6 @@ class ElrakningPanel {
   }
 
   destroy() {
-    if (this._dismissTooltip) {
-      document.removeEventListener("touchstart", this._dismissTooltip);
-    }
     if (this._eventUnsubscribePromise) {
       Promise.resolve(this._eventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -2712,7 +2709,6 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
-    this._dismissTooltip = null;
     this._eventUnsubscribePromise = null;
     this._greenelyEventUnsubscribePromise = null;
     this._meterEventUnsubscribePromise = null;
@@ -2720,7 +2716,6 @@ class ElrakningPanel {
     this._diagnosticsEventUnsubscribePromise = null;
     this._loadDiagnosticsState = null;
     this._eventConnection = null;
-    this._tooltipChart = null;
     window.removeEventListener("resize", this._onThemeResize);
     window.removeEventListener("focus", this._onThemeFocus);
     document.removeEventListener("visibilitychange", this._onThemeVisibility);
@@ -3644,17 +3639,13 @@ class ElrakningPanel {
         show(period.period, event, period.tooltipTimestamp);
       } else {
         clearHoverMarkers();
-        if (!this._pinnedPeriod) tooltip.hidden = true;
+        tooltip.hidden = true;
       }
     });
     svg.addEventListener("mouseleave", () => {
       clearHoverMarkers();
-      if (!this._pinnedPeriod) tooltip.hidden = true;
-    });
-    const clearPinnedTooltip = () => {
-      this._pinnedPeriod = null;
       tooltip.hidden = true;
-    };
+    });
     let lastChartDebugCopyAt = 0;
     const copyChartDebugText = async () => {
       if (!this._debugEnabled) return;
@@ -3682,58 +3673,38 @@ class ElrakningPanel {
     chart.addEventListener("touchstart", (event) => {
       const touch = event.touches[0];
       if (!touch) return;
+      if (!hasVisibleTooltipLayer || !insidePlot(touch.clientX, touch.clientY)) {
+        clearHoverMarkers();
+        tooltip.hidden = true;
+        this._chartTouch = null;
+        return;
+      }
+      const hit = periodAt(touch.clientX);
+      if (!hit) return;
       this._chartTouch = {
-        x: touch.clientX,
-        y: touch.clientY,
-        scrollLeft: chart.scrollLeft,
-        moved: false,
+        active: true,
       };
+      show(hit.period, touch, hit.tooltipTimestamp);
     }, { passive: true });
     chart.addEventListener("touchmove", (event) => {
       const state = this._chartTouch;
       const touch = event.touches[0];
       if (!state || !touch) return;
-      const moved = Math.abs(touch.clientX - state.x) > 8
-        || Math.abs(touch.clientY - state.y) > 8
-        || Math.abs(chart.scrollLeft - state.scrollLeft) > 3;
-      if (moved && !state.moved) {
-        state.moved = true;
-        if (this._pinnedPeriod) clearPinnedTooltip();
-      }
-    }, { passive: true });
-    chart.addEventListener("touchend", (event) => {
-      const state = this._chartTouch;
-      const touch = event.changedTouches[0];
-      this._chartTouch = null;
-      if (!state || !touch) return;
-      if (state.moved || Math.abs(chart.scrollLeft - state.scrollLeft) > 3) return;
       if (!hasVisibleTooltipLayer || !insidePlot(touch.clientX, touch.clientY)) {
-        clearPinnedTooltip();
+        clearHoverMarkers();
+        tooltip.hidden = true;
         return;
       }
       const hit = periodAt(touch.clientX);
-      if (!hit) {
-        clearPinnedTooltip();
-        return;
-      }
-      this._pinnedPeriod = hit.period;
-      show(hit.period, touch, hit.tooltipTimestamp);
-      void copyChartDebugText();
+      if (hit) show(hit.period, touch, hit.tooltipTimestamp);
     }, { passive: true });
-    chart.addEventListener("touchcancel", () => {
+    const clearTouchHover = () => {
       this._chartTouch = null;
-    }, { passive: true });
-    if (this._dismissTooltip) {
-      document.removeEventListener("touchstart", this._dismissTooltip);
-    }
-    this._dismissTooltip = ((event) => {
-      if (!this._pinnedPeriod) return;
-      const path = event.composedPath?.() || [];
-      if (path.includes(this._tooltipChart)) return;
-      clearPinnedTooltip();
-    });
-    this._tooltipChart = chart;
-    document.addEventListener("touchstart", this._dismissTooltip, { passive: true });
+      clearHoverMarkers();
+      tooltip.hidden = true;
+    };
+    chart.addEventListener("touchend", clearTouchHover, { passive: true });
+    chart.addEventListener("touchcancel", clearTouchHover, { passive: true });
   }
 
   formatPrice(value) {
