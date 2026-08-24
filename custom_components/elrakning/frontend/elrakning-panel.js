@@ -2775,7 +2775,7 @@ class ElrakningPanel {
       this.loadPriceData();
       this.loadProviderState();
       this.loadRetainedHistory();
-      this.loadMeterState();
+      this.loadMeterState(true);
       this._loadDebugPreference();
       this._loadChartPreferences();
     }
@@ -2937,12 +2937,12 @@ class ElrakningPanel {
     summary.hidden = rows.length === 0;
   }
 
-  async loadMeterState() {
+  async loadMeterState(loadHistory = false) {
     if (!this.hass?.callWS) return;
     try {
       const state = await this.hass.callWS({ type: "elrakning/meter_state" });
       this._applyMeterState(state);
-      await this.loadMeterPowerHistory();
+      if (loadHistory) await this.loadMeterPowerHistory();
     } catch {
       // Keep the meter card unconfigured when state is unavailable.
     }
@@ -2954,11 +2954,6 @@ class ElrakningPanel {
     const requestToken = ++this._meterHistoryRequestToken;
     this._meterPowerHistory = { date: null, points: [] };
     this._meterHistorySummary = null;
-    await this._recordMeterDiagnostic(
-      "INFO",
-      "meter_history_request_started",
-      `Meter history request started · Entity: ${entityId || "none"}`,
-    );
     try {
       const request = { type: "elrakning/meter_power_history" };
       if (entityId) request.entity_id = entityId;
@@ -2990,12 +2985,6 @@ class ElrakningPanel {
         date: response?.date || null,
         point_count: this._meterPowerHistory.points.length,
       };
-      const summary = this._meterHistorySummary;
-      await this._recordMeterDiagnostic(
-        "INFO",
-        "meter_history_request_success",
-        `Meter history loaded · Entity: ${summary.entity_id || "none"} · Points: ${summary.point_count}`,
-      );
     } catch (error) {
       if (requestToken !== this._meterHistoryRequestToken) return;
       this._meterPowerHistory = { date: null, points: [] };
