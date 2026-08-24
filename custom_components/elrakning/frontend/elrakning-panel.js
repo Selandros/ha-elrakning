@@ -1191,12 +1191,21 @@ class ElrakningPanel {
         .price-chart-legend {
           align-items: center;
           display: flex;
-          flex-wrap: wrap;
-          gap: 5px 10px;
+          flex-wrap: nowrap;
           font-size: var(--card-legend-size);
           min-height: 22px;
-          justify-content: center;
+          justify-content: space-between;
           margin-top: 1px;
+          margin-left: 0;
+          margin-right: 0;
+          max-width: none;
+          width: 100%;
+        }
+
+        .price-chart-legend .chart-legend-toggle {
+          flex: 0 1 auto;
+          min-width: 0;
+          white-space: nowrap;
         }
 
         .price-comparison-controls {
