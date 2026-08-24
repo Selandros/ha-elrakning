@@ -1264,19 +1264,7 @@ class ElrakningPanel {
           }
 
           .price-section .price-comparison-controls {
-            gap: clamp(4px, 1.7cqw, 8px);
-          }
-
-          .price-section .price-filter-toggle {
-            font-size: var(--price-card-text-size);
-            gap: clamp(2px, .8cqw, 4px);
-          }
-
-          .price-section .price-filter-track {
-            --knob-size: clamp(11px, 3cqw, 14px);
-            --track-padding: clamp(2px, .7cqw, 3px);
-            height: clamp(16px, 4.1cqw, 20px);
-            width: clamp(27px, 7.2cqw, 34px);
+            gap: 6px;
           }
 
           .price-section .price-summary {
