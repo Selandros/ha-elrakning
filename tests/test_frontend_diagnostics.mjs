@@ -379,8 +379,10 @@ assert.match(panelSource, /\.price-heading-main \{[\s\S]*display: flex[\s\S]*fle
 assert.match(panelSource, /\.price-heading-main > div:first-child \{[\s\S]*flex: 0 0 auto[\s\S]*min-width: max-content/);
 assert.match(panelSource, /\.price-heading-main[\s\S]*price-comparison-controls/);
 assert.doesNotMatch(panelSource, /\.price-comparison-controls \{[\s\S]*margin: 0 0 0 auto/);
-assert.match(panelSource, /\.section-heading \{[\s\S]*justify-content: center/);
+assert.match(panelSource, /\.section-heading \{[\s\S]*justify-content: flex-start/);
+assert.match(panelSource, /\.price-heading-main \{[\s\S]*justify-content: flex-start/);
 assert.match(panelSource, /\.price-summary \{[\s\S]*display: flex[\s\S]*flex-wrap: wrap[\s\S]*justify-content: center/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 1 1 408px/);
 assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*flex: 0 0 82px[\s\S]*min-width: 82px[\s\S]*text-align: center/);
 assert.match(panelSource, /chart-legend-preview/);
 assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*cursor: pointer;/);

@@ -1010,7 +1010,7 @@ class ElrakningPanel {
           display: flex;
           flex-wrap: wrap;
           gap: 16px;
-          justify-content: center;
+          justify-content: flex-start;
           margin-bottom: 2px;
         }
 
@@ -1019,13 +1019,14 @@ class ElrakningPanel {
           display: flex;
           flex: 0 0 auto;
           gap: 12px;
+          justify-content: flex-start;
         }
 
         .price-summary {
           align-items: center;
           column-gap: 20px;
           display: flex;
-          flex: 0 0 auto;
+          flex: 1 1 408px;
           flex-wrap: wrap;
           justify-content: center;
           min-width: min(100%, 408px);
