@@ -3551,15 +3551,7 @@ class ElrakningPanel {
         current.y = upperY >= markerMinY ? upperY : Math.min(lowerY, current.maxY);
       }
     }
-    const priceMarkers = markerLayouts.map((marker) => {
-      const markerClasses = [
-        "price-marker-label",
-        ...(marker.label.includes("Lägst") ? ["cheap"] : []),
-        ...(marker.label.includes("Högst") ? ["expensive"] : []),
-      ].join(" ");
-      return `
-      <text class="${markerClasses}" text-anchor="${marker.textAnchor}" x="${marker.textX}" y="${marker.y}">${marker.label}</text>`;
-    }).join("");
+    const priceMarkers = "";
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
