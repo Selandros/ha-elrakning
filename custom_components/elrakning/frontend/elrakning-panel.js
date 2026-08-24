@@ -450,6 +450,10 @@ class ElrakningPanel {
                 <span>Just nu</span>
                 <strong data-price="current">–</strong>
               </div>
+              <div class="price-value average">
+                <span>Snitt</span>
+                <strong data-price="average">–</strong>
+              </div>
               <div class="price-value">
                 <span>Lägst</span>
                 <strong data-price="lowest">–</strong>
@@ -457,10 +461,6 @@ class ElrakningPanel {
               <div class="price-value">
                 <span>Högst</span>
                 <strong data-price="highest">–</strong>
-              </div>
-              <div class="price-value average">
-                <span>Snitt</span>
-                <strong data-price="average">–</strong>
               </div>
             </div>
           </div>
@@ -1146,15 +1146,6 @@ class ElrakningPanel {
             width: auto;
           }
 
-          .price-value.current {
-            grid-column: 1;
-            grid-row: 1;
-          }
-
-          .price-value.average {
-            grid-column: 2;
-            grid-row: 1;
-          }
         }
 
         .price-chart {
@@ -1205,22 +1196,6 @@ class ElrakningPanel {
         }
 
         @container price-card (max-width: 480px) {
-          .price-section .price-chart-legend {
-            column-gap: 2px;
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            justify-items: center;
-            letter-spacing: normal;
-            margin-left: 0;
-            margin-right: 0;
-            row-gap: clamp(4px, 1.2cqw, 7px);
-            font-size: clamp(9px, 2.5cqw, 11px);
-          }
-
-          .price-section .price-chart-legend > .chart-legend-toggle {
-            justify-self: center;
-          }
-
           .price-analysis-status,
           .price-analysis-forecast {
             display: block;
@@ -1239,7 +1214,8 @@ class ElrakningPanel {
           align-items: center;
           display: flex;
           flex-wrap: wrap;
-          gap: 6px 10px;
+          gap: 5px 10px;
+          font-size: clamp(9px, 2.2cqw, 11px);
           min-height: 22px;
           justify-content: center;
           margin-top: 1px;
@@ -1255,19 +1231,8 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
-        @container price-card (max-width: 480px) {
-          .price-section .price-chart-legend {
-            column-gap: 2px;
-            font-size: clamp(9px, 2.5cqw, 11px);
-            letter-spacing: normal;
-            margin-left: 0;
-            margin-right: 0;
-            row-gap: clamp(4px, 1.2cqw, 7px);
-          }
-        }
-
         .chart-legend-toggle {
-          gap: 4px;
+          gap: 3px;
           padding: 1px 0;
         }
 
@@ -1379,15 +1344,6 @@ class ElrakningPanel {
             font-size: clamp(13.5px, 3.5cqw, 17px);
           }
 
-          .price-section .price-chart-legend {
-            gap: 2px clamp(3px, .8cqw, 6px);
-            min-height: clamp(18px, 5.5cqw, 22px);
-          }
-
-          .price-section .chart-legend-toggle {
-            gap: clamp(1px, .3cqw, 3px);
-          }
-
           .price-section .chart-legend-swatch {
             height: clamp(4.5px, 1.5cqw, 6px);
             width: clamp(4.5px, 1.5cqw, 6px);
@@ -1420,7 +1376,7 @@ class ElrakningPanel {
           cursor: pointer;
           display: inline-flex;
           font-size: 12px;
-          gap: 5px;
+          gap: 3px;
           margin: 0;
           opacity: .55;
           padding: 2px 0;
