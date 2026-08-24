@@ -1197,8 +1197,8 @@ class ElrakningPanel {
 
         @container price-card (max-width: 480px) {
           .price-chart-legend {
-            margin-left: -12px;
-            margin-right: -12px;
+            margin-left: -6px;
+            margin-right: -6px;
           }
 
           .price-analysis-status,
@@ -1350,7 +1350,7 @@ class ElrakningPanel {
 
           .price-section .price-chart-legend {
             gap: 2px clamp(3px, .8cqw, 6px);
-            font-size: clamp(8.25px, 2.25cqw, 11px);
+            font-size: clamp(8px, 2.25cqw, 11px);
             letter-spacing: -.15px;
             min-height: clamp(18px, 5.5cqw, 22px);
           }
