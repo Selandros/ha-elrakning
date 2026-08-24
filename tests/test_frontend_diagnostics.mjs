@@ -492,6 +492,7 @@ assert.match(panelSource, /price-analysis-status/);
 assert.match(panelSource, /price-analysis-separator/);
 assert.match(panelSource, /price-analysis-forecast/);
 assert.match(panelSource, /@container price-card \(max-width: 480px\)/);
+assert.match(panelSource, /@container price-card \(max-width: 480px\)[\s\S]*margin-left: -12px[\s\S]*margin-right: -12px/);
 assert.match(panelSource, /\.price-analysis-separator \{[\s\S]*display: none/);
 assert.match(panelSource, /\.price-analysis-forecast \{[\s\S]*overflow-wrap: anywhere/);
 assert.match(panelSource, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);

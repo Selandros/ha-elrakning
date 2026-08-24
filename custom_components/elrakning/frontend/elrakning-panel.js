@@ -1196,6 +1196,11 @@ class ElrakningPanel {
         }
 
         @container price-card (max-width: 480px) {
+          .price-chart-legend {
+            margin-left: -12px;
+            margin-right: -12px;
+          }
+
           .price-analysis-status,
           .price-analysis-forecast {
             display: block;
