@@ -241,7 +241,12 @@ export function renderPriceAnalysis(facts) {
   const observations = [
     `${futureWindowLabel(facts)}: ${formatAnalysisPrice(facts.now_window.average_price)} i snitt.`,
   ];
-  if (facts.lower_window_significant) {
+  const lateDayFallback = !facts.has_full_two_hour_window
+    && facts.ends_at_day_boundary
+    && !facts.has_next_day_data;
+  if (lateDayFallback) {
+    // The remaining evening is already fully described by the first observation.
+  } else if (facts.lower_window_significant) {
     observations.push(`Från ${formatAnalysisClock(facts.best_window.start)}: ${formatAnalysisPrice(facts.best_window.average_price)}.`);
   } else if (facts.higher_window_significant) {
     observations.push(`Från ${formatAnalysisClock(facts.highest_window.start)}: ${formatAnalysisPrice(facts.highest_window.average_price)}.`);
@@ -276,6 +281,12 @@ export function nearestMeterPoint(points, timestamp, maxDistanceMs = 2.5 * 60 * 
   return nearest?.point || null;
 }
 
+export function normalizeMeterValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const dayEndMs = new Date(dayEnd).getTime();
@@ -283,8 +294,8 @@ export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 *
   let previousSelected = false;
   for (let slotTimestamp = dayStartMs; slotTimestamp < dayEndMs; slotTimestamp += slotMs) {
     const selected = nearestMeterPoint(points, slotTimestamp, maxDistanceMs);
-    const importKw = selected ? Number(selected.import_kw) : null;
-    const exportKw = selected ? Number(selected.export_kw) : null;
+    const importKw = selected ? normalizeMeterValue(selected.import_kw) : null;
+    const exportKw = selected ? normalizeMeterValue(selected.export_kw) : null;
     const hasSample = Boolean(selected)
       && Number.isFinite(importKw)
       && Number.isFinite(exportKw);
@@ -3004,8 +3015,8 @@ class ElrakningPanel {
       : [];
     const next = {
       timestamp: timestamp.toISOString(),
-      import_kw: Number(point.import_kw) || 0,
-      export_kw: Number(point.export_kw) || 0,
+      import_kw: normalizeMeterValue(point.import_kw),
+      export_kw: normalizeMeterValue(point.export_kw),
     };
     const index = points.findIndex((item) => item.timestamp === next.timestamp);
     if (index >= 0) points[index] = next;
@@ -3144,8 +3155,8 @@ class ElrakningPanel {
     const latestByTimestamp = new Map();
     points.forEach((point) => {
       const timestamp = new Date(point.timestamp).getTime();
-      const importKw = Number(point.import_kw);
-      const exportKw = Number(point.export_kw);
+      const importKw = normalizeMeterValue(point.import_kw);
+      const exportKw = normalizeMeterValue(point.export_kw);
       if (!Number.isFinite(timestamp)) return;
       latestByTimestamp.set(timestamp, {
         timestamp,

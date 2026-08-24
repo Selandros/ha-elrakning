@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, normalizeMeterValue, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -120,6 +120,7 @@ assert.equal(lateWithoutTomorrow.has_full_two_hour_window, false);
 assert.equal(lateWithoutTomorrow.has_full_six_hour_horizon, false);
 assert.match(renderPriceAnalysis(lateWithoutTomorrow).forecast, /Resten av kvällen/);
 assert.doesNotMatch(renderPriceAnalysis(lateWithoutTomorrow).forecast, /Nästa 2 h|6 timmar/);
+assert.deepEqual(renderPriceAnalysis(lateWithoutTomorrow).sentences, ["Resten av kvällen: 81,5 öre/kWh i snitt."]);
 const lateWithTomorrow = buildPriceAnalysisFacts(
   makeClockPeriods("2026-08-23T23:00:00+02:00", Array.from({ length: 24 }, (_, index) => 80 + index)),
   0,
@@ -179,6 +180,30 @@ const canonical0500 = canonicalMeterPoints.find((point) => point.timestamp === t
 assert.equal(canonical0500.import_kw, null);
 assert.equal(canonical0500.raw_timestamp, null);
 assert.equal(rawMeterPoints.length, 2);
+assert.equal(normalizeMeterValue(null), null);
+assert.equal(normalizeMeterValue(undefined), null);
+assert.equal(normalizeMeterValue(""), null);
+assert.equal(normalizeMeterValue(0), 0);
+assert.equal(normalizeMeterValue("0"), 0);
+assert.equal(normalizeMeterValue(4.82), 4.82);
+const canonicalMissingSample = buildCanonicalMeterPoints(
+  [{ timestamp: "2026-08-23T05:00:00+02:00", import_kw: null, export_kw: 0 }],
+  new Date("2026-08-23T00:00:00+02:00"),
+  new Date("2026-08-24T00:00:00+02:00"),
+);
+const canonical0500Missing = canonicalMissingSample.find((point) => point.timestamp === tooltipSlot(5, 0));
+assert.equal(canonical0500Missing.import_kw, null);
+assert.equal(canonical0500Missing.export_kw, null);
+assert.equal(canonical0500Missing.raw_timestamp, null);
+const canonicalZeroSample = buildCanonicalMeterPoints(
+  [{ timestamp: "2026-08-23T05:00:00+02:00", import_kw: 0, export_kw: 0 }],
+  new Date("2026-08-23T00:00:00+02:00"),
+  new Date("2026-08-24T00:00:00+02:00"),
+);
+const canonical0500Zero = canonicalZeroSample.find((point) => point.timestamp === tooltipSlot(5, 0));
+assert.equal(canonical0500Zero.import_kw, 0);
+assert.equal(canonical0500Zero.export_kw, 0);
+assert.equal(canonical0500Zero.raw_timestamp, "2026-08-23T05:00:00+02:00");
 const monotoneCoordinates = [{ x: 0, y: 0 }, { x: 1, y: 2 }, { x: 2, y: 1 }, { x: 3, y: 3 }];
 const monotoneSegments = buildMonotoneCubicSegments(monotoneCoordinates);
 assert.equal(monotoneSegments.length, monotoneCoordinates.length - 1);
@@ -357,6 +382,13 @@ assert.match(panelSource, /buildMeterDisplaySegments\(points, key\)/);
 assert.match(panelSource, /buildSmoothMeterPath\(segment, key, x, meterY\)/);
 assert.match(panelSource, /<path class=\"\$\{className\}\" d=\"\$\{this\.buildSmoothMeterPath/);
 assert.match(panelSource, /if \(to - from > 0\) segments\.push\(points\.slice\(from, to \+ 1\)\)/);
+assert.match(panelSource, /const lateDayFallback = !facts\.has_full_two_hour_window/);
+assert.match(panelSource, /normalizeMeterValue\(point\.import_kw\)/);
+assert.match(panelSource, /normalizeMeterValue\(point\.export_kw\)/);
+assert.doesNotMatch(panelSource, /import_kw: Number\(point\.import_kw\) \|\| 0/);
+assert.doesNotMatch(panelSource, /export_kw: Number\(point\.export_kw\) \|\| 0/);
+assert.match(panelSource, /points\[start - 1\]\[key\] === 0/);
+assert.match(panelSource, /points\[end \+ 1\]\[key\] === 0/);
 assert.match(panelSource, /if \(segment\.length < 2\) return \"\"/);
 assert.match(panelSource, /const meterCanonicalPoints = this\.buildCanonicalMeterPoints/);
 assert.match(panelSource, /const meterDisplayPoints = this\.prepareMeterDisplayPoints\(meterCanonicalPoints\)/);
