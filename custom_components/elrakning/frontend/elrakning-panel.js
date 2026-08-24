@@ -1124,7 +1124,8 @@ class ElrakningPanel {
         }
 
         .price-chart {
-          min-height: 350px;
+          container-type: inline-size;
+          min-height: 0;
           overflow-x: hidden;
           position: relative;
           -webkit-overflow-scrolling: touch;
@@ -1347,11 +1348,19 @@ class ElrakningPanel {
         }
 
         .chart-svg {
+          aspect-ratio: 960 / 350;
           display: block;
-          height: 350px;
+          height: auto;
           max-width: 100%;
+          max-height: 350px;
           min-width: 0;
           width: 100%;
+        }
+
+        @supports (height: 1cqw) {
+          .chart-svg {
+            height: min(350px, 36.458333cqw);
+          }
         }
 
         .chart-axis, .chart-gridline {
