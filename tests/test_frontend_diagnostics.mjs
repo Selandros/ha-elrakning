@@ -105,6 +105,37 @@ const cheapNowFacts = buildPriceAnalysisFacts(makeAnalysisPeriods([...Array(8).f
 assert.equal(cheapNowFacts.best_window.startIndex, 0);
 assert.equal(cheapNowFacts.lower_window_significant, false);
 assert.match(renderPriceAnalysis(cheapNowFacts).forecast, /Nästa 2 h/);
+const makeClockPeriods = (startText, values, gapAfter = -1) => values.map((value, index) => {
+  const start = new Date(startText);
+  start.setTime(start.getTime() + index * 15 * 60 * 1000 + (index > gapAfter && gapAfter >= 0 ? 15 * 60 * 1000 : 0));
+  const end = new Date(start.getTime() + 15 * 60 * 1000);
+  return { start: start.toISOString(), end: end.toISOString(), price: value / 100 };
+});
+const lateWithoutTomorrow = buildPriceAnalysisFacts(
+  makeClockPeriods("2026-08-23T23:00:00+02:00", [80, 81, 82, 83]),
+  0,
+);
+assert.equal(lateWithoutTomorrow.available_future_minutes, 60);
+assert.equal(lateWithoutTomorrow.has_full_two_hour_window, false);
+assert.equal(lateWithoutTomorrow.has_full_six_hour_horizon, false);
+assert.match(renderPriceAnalysis(lateWithoutTomorrow).forecast, /Resten av kvällen/);
+assert.doesNotMatch(renderPriceAnalysis(lateWithoutTomorrow).forecast, /Nästa 2 h|6 timmar/);
+const lateWithTomorrow = buildPriceAnalysisFacts(
+  makeClockPeriods("2026-08-23T23:00:00+02:00", Array.from({ length: 24 }, (_, index) => 80 + index)),
+  0,
+);
+assert.equal(lateWithTomorrow.available_future_minutes, 360);
+assert.equal(lateWithTomorrow.has_full_two_hour_window, true);
+assert.equal(lateWithTomorrow.has_full_six_hour_horizon, true);
+assert.equal(lateWithTomorrow.crosses_midnight, true);
+assert.match(renderPriceAnalysis(lateWithTomorrow).forecast, /Nästa 2 h/);
+const gapFacts = buildPriceAnalysisFacts(
+  makeClockPeriods("2026-08-23T21:00:00+02:00", [80, 81, 82, 83], 1),
+  0,
+);
+assert.equal(gapFacts.available_future_periods, 2);
+assert.equal(gapFacts.effective_search_horizon_minutes, 30);
+assert.doesNotMatch(renderPriceAnalysis(gapFacts).forecast, /6 timmar|Nästa 2 h/);
 const renderedAnalysis = renderPriceAnalysis(waitFacts);
 assert.doesNotMatch(renderedAnalysis.status + renderedAnalysis.forecast, /Starta nu|Vänta|Billigast att starta|Du bör|Kör tvättmaskin/);
 assert.doesNotMatch(renderedAnalysis.forecast, /Priset stiger senare|Det blir billigare|Priset förändras under kvällen/);

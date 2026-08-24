@@ -123,20 +123,37 @@ function buildUsageWindow(periods, prices, startIndex, windowPeriods) {
   };
 }
 
+function periodsAreContiguous(previous, next) {
+  const previousEnd = new Date(previous?.end).getTime();
+  const nextStart = new Date(next?.start).getTime();
+  return Number.isFinite(previousEnd) && Number.isFinite(nextStart) && previousEnd === nextStart;
+}
+
+function contiguousFuturePeriodCount(periods, currentIndex) {
+  if (currentIndex < 0 || currentIndex >= periods.length) return 0;
+  let count = 1;
+  while (currentIndex + count < periods.length
+    && periodsAreContiguous(periods[currentIndex + count - 1], periods[currentIndex + count])) {
+    count += 1;
+  }
+  return count;
+}
+
 export function buildPriceAnalysisFacts(periods, currentIndex) {
   if (!Array.isArray(periods) || currentIndex < 0 || currentIndex >= periods.length) {
     return null;
   }
   const prices = periods.map((period) => Number(period.price) * 100);
   const bands = priceColorBands(prices);
-  const usageWindowPeriods = 8;
-  const searchHorizonPeriods = 24;
+  const availableFuturePeriods = contiguousFuturePeriodCount(periods, currentIndex);
+  const effectiveSearchPeriods = Math.min(24, availableFuturePeriods);
+  const usageWindowPeriods = Math.min(8, effectiveSearchPeriods);
   const nowWindow = buildUsageWindow(periods, prices, currentIndex, usageWindowPeriods);
   if (!bands || !nowWindow) return null;
   const categories = prices.map((price) => priceCategory(price, bands));
   const lastStartIndex = Math.min(
-    periods.length - usageWindowPeriods,
-    currentIndex + searchHorizonPeriods - usageWindowPeriods,
+    currentIndex + availableFuturePeriods - usageWindowPeriods,
+    currentIndex + effectiveSearchPeriods - usageWindowPeriods,
   );
   let bestWindow = nowWindow;
   let highestWindow = nowWindow;
@@ -154,6 +171,13 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
   const higherDifferencePercent = nowWindow.average_price !== 0
     ? (higherDifferenceOre / Math.abs(nowWindow.average_price)) * 100
     : 0;
+  const currentStart = new Date(periods[currentIndex].start);
+  const lastStart = new Date(periods[currentIndex + availableFuturePeriods - 1].start);
+  const lastEnd = new Date(periods[currentIndex + availableFuturePeriods - 1].end);
+  const hasNextDayData = lastStart.toDateString() !== currentStart.toDateString();
+  const endsAtDayBoundary = lastEnd.getHours() === 0
+    && lastEnd.getMinutes() === 0
+    && lastEnd.getSeconds() === 0;
   return {
     currentIndex,
     status: categories[currentIndex],
@@ -163,8 +187,16 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
     percentile: (prices.filter((price) => price <= prices[currentIndex]).length / prices.length) * 100,
     minimum: bands.minimum,
     maximum: bands.maximum,
-    usage_window_minutes: 120,
-    search_horizon_hours: 6,
+    usage_window_minutes: usageWindowPeriods * 15,
+    search_horizon_hours: effectiveSearchPeriods * 15 / 60,
+    available_future_periods: availableFuturePeriods,
+    available_future_minutes: availableFuturePeriods * 15,
+    effective_search_horizon_minutes: effectiveSearchPeriods * 15,
+    has_full_two_hour_window: availableFuturePeriods >= 8,
+    has_full_six_hour_horizon: availableFuturePeriods >= 24,
+    crosses_midnight: hasNextDayData,
+    has_next_day_data: hasNextDayData,
+    ends_at_day_boundary: endsAtDayBoundary,
     now_window: nowWindow,
     best_window: bestWindow,
     highest_window: highestWindow,
@@ -178,6 +210,24 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
   };
 }
 
+function futureWindowLabel(facts) {
+  if (facts.has_full_two_hour_window) return "Nästa 2 h";
+  if (facts.ends_at_day_boundary && !facts.has_next_day_data) return "Resten av kvällen";
+  if (facts.available_future_minutes % 60 === 0) {
+    return `Nästa ${facts.available_future_minutes / 60} h`;
+  }
+  return "Återstående prisdata";
+}
+
+function futureHorizonLabel(facts) {
+  if (facts.has_full_six_hour_horizon) return "de närmaste 6 timmarna";
+  if (facts.ends_at_day_boundary && !facts.has_next_day_data) return "resten av kvällen";
+  if (facts.effective_search_horizon_minutes % 60 === 0) {
+    return `de kommande ${facts.effective_search_horizon_minutes / 60} timmarna`;
+  }
+  return "den återstående prisdatan";
+}
+
 export function renderPriceAnalysis(facts) {
   if (!facts) {
     const forecast = "Dagens prisanalys är inte tillgänglig";
@@ -189,14 +239,14 @@ export function renderPriceAnalysis(facts) {
     expensive: "Dyrt pris nu",
   }[facts.status];
   const observations = [
-    `Nästa 2 h: ${formatAnalysisPrice(facts.now_window.average_price)} i snitt.`,
+    `${futureWindowLabel(facts)}: ${formatAnalysisPrice(facts.now_window.average_price)} i snitt.`,
   ];
   if (facts.lower_window_significant) {
     observations.push(`Från ${formatAnalysisClock(facts.best_window.start)}: ${formatAnalysisPrice(facts.best_window.average_price)}.`);
   } else if (facts.higher_window_significant) {
     observations.push(`Från ${formatAnalysisClock(facts.highest_window.start)}: ${formatAnalysisPrice(facts.highest_window.average_price)}.`);
   } else {
-    observations.push("Ingen tydligt billigare eller dyrare period finns de närmaste 6 timmarna.");
+    observations.push(`Ingen tydligt billigare eller dyrare period finns ${futureHorizonLabel(facts)}.`);
   }
   const sentences = observations.slice(0, 2);
   return { category: facts.status, status, forecast: sentences.join(" "), sentences };
