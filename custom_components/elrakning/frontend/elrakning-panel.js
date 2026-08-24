@@ -1531,14 +1531,14 @@ class ElrakningPanel {
         .chart-tooltip {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
-          border-radius: 12px;
+          border-radius: 8px;
           box-shadow: var(--ha-card-box-shadow);
           color: var(--primary-text-color);
-          font-size: var(--price-card-text-size);
+          font-size: clamp(9px, 2.2cqw, 10px);
           left: 0;
-          max-width: min(210px, calc(100% - 16px));
+          max-width: min(170px, calc(100% - 12px));
           overflow-wrap: anywhere;
-          padding: clamp(5px, 1.3cqw, 7px) clamp(6px, 1.7cqw, 8px);
+          padding: clamp(4px, 1cqw, 5px) clamp(5px, 1.3cqw, 6px);
           pointer-events: none;
           position: absolute;
           top: 0;
@@ -1556,16 +1556,16 @@ class ElrakningPanel {
 
         .tooltip-value {
           display: block;
-          font-size: var(--price-card-text-size);
-          line-height: 1.25;
-          margin-top: 4px;
+          font-size: inherit;
+          line-height: 1.15;
+          margin-top: 2px;
         }
 
         .chart-tooltip > strong {
           display: block;
-          font-size: var(--price-card-text-size);
+          font-size: inherit;
           font-weight: 600;
-          line-height: 1.2;
+          line-height: 1.15;
         }
 
         .tooltip-meter-import {
@@ -3410,7 +3410,7 @@ class ElrakningPanel {
   _buildVisibleTooltipRows(comparisonPrice, details) {
     const rows = [];
     if (this._spotBarsVisible && Number.isFinite(comparisonPrice)) {
-      rows.push(`<span class="tooltip-value">Spotpris: ${this.formatPrice(comparisonPrice)} öre/kWh</span>`);
+      rows.push(`<span class="tooltip-value">Spotpris: ${this.formatPrice(comparisonPrice)}</span>`);
     }
     if (this._meterPowerVisible.import && Number.isFinite(details?.import_kw)) {
       rows.push(`<span class="tooltip-value tooltip-meter-import">Import: ${this._formatNumber(details.import_kw)} kW</span>`);
