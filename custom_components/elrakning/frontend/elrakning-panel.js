@@ -1586,20 +1586,6 @@ class ElrakningPanel {
           fill: var(--grid-export-color);
         }
 
-        .price-marker-label {
-          fill: var(--primary-color);
-          font-size: var(--card-marker-size);
-          font-weight: 700;
-        }
-
-        .price-marker-label.cheap {
-          fill: var(--success-color);
-        }
-
-        .price-marker-label.expensive {
-          fill: var(--error-color);
-        }
-
         .chart-bar {
           cursor: default;
         }
@@ -3289,34 +3275,6 @@ class ElrakningPanel {
     return path.join(" ");
   }
 
-  meterObstacleTop(points, key, textLeft, textRight, x, meterY) {
-    let obstacleTop = Infinity;
-    const geometry = this.buildMeterDisplayGeometry(points, key, x, meterY);
-    const cubicPoint = (start, control1, control2, end, progress) => {
-      const inverse = 1 - progress;
-      return {
-        x: inverse * inverse * inverse * start.x
-          + 3 * inverse * inverse * progress * control1.x
-          + 3 * inverse * progress * progress * control2.x
-          + progress * progress * progress * end.x,
-        y: inverse * inverse * inverse * start.y
-          + 3 * inverse * inverse * progress * control1.y
-          + 3 * inverse * progress * progress * control2.y
-          + progress * progress * progress * end.y,
-      };
-    };
-    geometry.forEach(({ pathSegments }) => {
-      pathSegments.forEach(({ start, control1, control2, end }) => {
-        const steps = Math.max(1, Math.ceil(Math.abs(end.x - start.x) / 3));
-        for (let step = 0; step <= steps; step += 1) {
-          const point = cubicPoint(start, control1, control2, end, step / steps);
-          if (point.x >= textLeft && point.x <= textRight) obstacleTop = Math.min(obstacleTop, point.y);
-        }
-      });
-    });
-    return Number.isFinite(obstacleTop) ? obstacleTop : null;
-  }
-
   renderPriceChart() {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
@@ -3375,31 +3333,7 @@ class ElrakningPanel {
       const end = new Date(period.end);
       return start <= now && now < end;
     });
-    const lowestPeriod = periods.reduce((lowest, period) => (
-      this._periodCustomerPrice(period) < this._periodCustomerPrice(lowest) ? period : lowest
-    ), periods[0]);
-    const highestPeriod = periods.reduce((highest, period) => (
-      this._periodCustomerPrice(period) > this._periodCustomerPrice(highest) ? period : highest
-    ), periods[0]);
-    const markerGroups = new Map();
-    [[currentPeriod, "Nu"], [lowestPeriod, "Lägst"], [highestPeriod, "Högst"]]
-      .forEach(([period, label]) => {
-        if (!period) return;
-        const key = period.start;
-        const group = markerGroups.get(key) || { period, labels: [] };
-        group.labels.push(label);
-        markerGroups.set(key, group);
-      });
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime()) / dayDuration) * plotWidth;
-    const barGeometry = periods.map((period, index) => {
-      const price = prices[index];
-      return {
-        period,
-        startX: x(period.start),
-        endX: x(period.end),
-        top: price >= 0 ? y(price) : zeroY,
-      };
-    });
     const meterPoints = Array.isArray(this._meterPowerHistory?.points)
       ? this._meterPowerHistory.points.filter((point) => {
         const timestamp = new Date(point.timestamp).getTime();
@@ -3484,74 +3418,6 @@ class ElrakningPanel {
       const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
       return `<rect class="chart-bar ${category}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
-    const markerMinY = 18;
-    const markerLayouts = this._spotBarsVisible ? [...markerGroups.entries()].map(([, group]) => {
-      const markerX = (x(group.period.start) + x(group.period.end)) / 2;
-      const label = group.labels.join(" • ");
-      const labelWidth = Math.max(16, label.length * 8.5);
-      const placeRight = markerX + labelWidth / 2 > width - 4;
-      const placeLeft = markerX - labelWidth / 2 < 4;
-      const textX = placeRight ? markerX - 4 : placeLeft ? markerX + 4 : markerX;
-      const textAnchor = placeRight ? "end" : placeLeft ? "start" : "middle";
-      const textLeft = textAnchor === "start" ? textX : textAnchor === "end" ? textX - labelWidth : textX - labelWidth / 2;
-      const textRight = textAnchor === "start" ? textX + labelWidth : textAnchor === "end" ? textX : textX + labelWidth / 2;
-      const coveredBars = barGeometry.filter((bar) => bar.endX > textLeft && bar.startX < textRight);
-      const highestCoveredTop = coveredBars.length
-        ? Math.min(...coveredBars.map((bar) => bar.top))
-        : plot.top + plotHeight;
-      const averageLineY = y(average);
-      const obstacleTops = [highestCoveredTop];
-      if (this._averageLineVisible) obstacleTops.push(averageLineY);
-      if (this._meterPowerVisible.import) {
-        const importTop = this.meterObstacleTop(
-          meterDisplayPoints,
-          "import_kw",
-          textLeft,
-          textRight,
-          x,
-          meterY,
-        );
-        if (importTop !== null) obstacleTops.push(importTop);
-      }
-      if (this._meterPowerVisible.export) {
-        const exportTop = this.meterObstacleTop(
-          meterDisplayPoints,
-          "export_kw",
-          textLeft,
-          textRight,
-          x,
-          meterY,
-        );
-        if (exportTop !== null) obstacleTops.push(exportTop);
-      }
-      const highestObstacleY = Math.min(...obstacleTops);
-      return {
-        label,
-        markerX,
-        textX,
-        textAnchor,
-        textLeft,
-        textRight,
-        maxY: highestObstacleY - 8,
-        y: Math.max(markerMinY, highestObstacleY - 8),
-      };
-    }) : [];
-    const markerHeight = 16;
-    const markerGap = 4;
-    const markerLayoutsByHeight = [...markerLayouts].sort((left, right) => left.y - right.y);
-    for (let index = 0; index < markerLayoutsByHeight.length; index += 1) {
-      const current = markerLayoutsByHeight[index];
-      for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
-        const previous = markerLayoutsByHeight[previousIndex];
-        const horizontalOverlap = current.textLeft < previous.textRight && current.textRight > previous.textLeft;
-        const verticalOverlap = current.y - markerHeight < previous.y + markerGap;
-        if (!horizontalOverlap || !verticalOverlap) continue;
-        const upperY = previous.y - markerHeight - markerGap;
-        const lowerY = previous.y + markerHeight + markerGap;
-        current.y = upperY >= markerMinY ? upperY : Math.min(lowerY, current.maxY);
-      }
-    }
-    const priceMarkers = "";
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
@@ -3571,7 +3437,6 @@ class ElrakningPanel {
       ${bars}
       ${meterLines}
       ${this._averageLineVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
-      ${priceMarkers}
       <g class="chart-hover-markers" aria-hidden="true"></g>
       ${hourLabels}
     </svg><div class="chart-tooltip" hidden></div>`;
@@ -3727,7 +3592,7 @@ class ElrakningPanel {
       tooltip.title = "";
       tooltip.hidden = false;
       const obstacles = [
-        ...svg.querySelectorAll(".chart-hover-marker, .price-marker-label"),
+        ...svg.querySelectorAll(".chart-hover-marker"),
       ];
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, obstacles, this._tooltipOrbit);
     };
