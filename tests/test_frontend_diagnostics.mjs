@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, priceCategory, priceColorBands, priceColorDetails, providerLabel, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -71,9 +71,16 @@ const upcomingPeriods = [1, 1, 1, 1, 3, 4, 10, 12, 14, 15].map((price, index) =>
   end: `2026-08-23T${String(12 + Math.floor((index + 1) / 4)).padStart(2, "0")}:${String(((index + 1) % 4) * 15).padStart(2, "0")}:00+02:00`,
   price: price / 100,
 }));
+const upcomingFacts = buildPriceAnalysisFacts(upcomingPeriods, 0);
+assert.equal(upcomingFacts.cheapestHour.startIndex, 0);
+assert.equal(upcomingFacts.mostExpensiveHour.startIndex, 6);
+assert.equal(upcomingFacts.cheapestRemainingHour.startIndex, 0);
+assert.equal(upcomingFacts.mostExpensiveRemainingHour.startIndex, 6);
+assert.equal(upcomingFacts.nextSignificantRise.time, upcomingPeriods[4].start);
+assert.equal(Math.round(upcomingFacts.nextSignificantRise.percentage), 200);
 assert.deepEqual(
   generateUpcomingPriceAnalysis(upcomingPeriods, 0, new Date("2026-08-23T12:00:00+02:00")),
-  { category: "cheap", status: "Billigt nu", forecast: "Dagens dyraste timme börjar klockan 13:30. Priset stiger igen senare idag" },
+  { category: "cheap", status: "Billigt nu", forecast: "Priset stiger 200 % klockan 13:00. Priset ligger under dagens snitt fram till 13:00." },
 );
 const makeAnalysisPeriods = (values) => values.map((price, index) => {
   const start = new Date("2026-08-23T00:00:00+02:00");
@@ -87,37 +94,43 @@ const passedExpensiveHour = generateUpcomingPriceAnalysis(
   8,
   new Date("2026-08-23T02:00:00+02:00"),
 );
-assert.match(passedExpensiveHour.forecast, /Dagens dyraste timme är förbi/);
+assert.match(passedExpensiveHour.forecast, /stabilt/);
 const futureExpensiveHour = generateUpcomingPriceAnalysis(
   makeAnalysisPeriods([2, 2, 2, 2, 9, 9, 9, 9, 2, 2, 2, 2]),
   0,
   new Date("2026-08-23T00:00:00+02:00"),
 );
-assert.match(futureExpensiveHour.forecast, /Dagens dyraste timme börjar/);
+assert.match(futureExpensiveHour.forecast, /stiger/);
 const activeExpensiveHour = generateUpcomingPriceAnalysis(
   makeAnalysisPeriods([2, 9, 9, 9, 9, 2, 2, 2]),
   2,
   new Date("2026-08-23T00:30:00+02:00"),
 );
-assert.match(activeExpensiveHour.forecast, /Vi är inne i dagens dyraste timme/);
+assert.match(activeExpensiveHour.forecast, /sjunker/);
 const lowRemainder = generateUpcomingPriceAnalysis(
   makeAnalysisPeriods([10, 10, 10, 10, 1, 1, 1, 1, 1, 1, 1, 1]),
   5,
   new Date("2026-08-23T01:15:00+02:00"),
 );
-assert.match(lowRemainder.forecast, /Priset ligger lågt resten av dagen/);
+assert.match(lowRemainder.forecast, /stabilt/);
 const futurePeak = generateUpcomingPriceAnalysis(
   makeAnalysisPeriods([1, 1, 1, 1, 2, 2, 2, 2, 10, 10, 10, 10]),
   4,
   new Date("2026-08-23T01:00:00+02:00"),
 );
-assert.doesNotMatch(futurePeak.forecast, /Priset ligger lågt resten av dagen/);
+assert.match(futurePeak.forecast, /stiger/);
 const flatAnalysis = generateUpcomingPriceAnalysis(
   makeAnalysisPeriods([5, 5, 5, 5, 5, 5, 5, 5]),
   2,
   new Date("2026-08-23T00:30:00+02:00"),
 );
 assert.doesNotMatch(flatAnalysis.forecast, /väntas|förväntas|prognos/);
+assert.equal(renderPriceAnalysis(buildPriceAnalysisFacts(makeAnalysisPeriods([5, 5, 5, 5]), 0)).forecast, "Dagens prisanalys är inte tillgänglig");
+assert.doesNotMatch(
+  [passedExpensiveHour, futureExpensiveHour, activeExpensiveHour, lowRemainder, futurePeak, flatAnalysis]
+    .map((analysis) => analysis.forecast).join(" "),
+  /väntas|förväntas|prognos|stiger igen senare idag/,
+);
 assert.equal(
   JSON.stringify(futureExpensiveHour),
   JSON.stringify(generateUpcomingPriceAnalysis(
@@ -352,7 +365,7 @@ assert.doesNotMatch(panelSource, /data-price-layer="electricity">[\s\S]*<span>El
 assert.doesNotMatch(panelSource, /data-price-layer="grid">[\s\S]*<span>Elnät<\/span>/);
 assert.match(panelSource, /container-name: price-card/);
 assert.match(panelSource, /container-type: inline-size/);
-assert.match(panelSource, /@supports \(font-size: 1cqw\)[\s\S]*font-size: clamp\(17px, 4\.8cqw, 22px\)/);
+assert.match(panelSource, /@supports \(font-size: 1cqw\)[\s\S]*font-size: clamp\(15px, 4\.2cqw, 19px\)/);
 assert.match(panelSource, /@supports \(font-size: 1cqw\)[\s\S]*font-size: clamp\(9px, 2\.25cqw, 11px\)/);
 assert.match(panelSource, /--knob-size: clamp\(11px, 3cqw, 14px\)/);
 assert.match(panelSource, /--track-padding: clamp\(2px, \.7cqw, 3px\)/);

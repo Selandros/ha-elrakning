@@ -102,107 +102,116 @@ export function createPriceDebugText(priceData) {
   return lines.join("\n");
 }
 
-function findRollingPriceExtreme(periods, prices, mode) {
-  if (periods.length < 4) return null;
+function formatAnalysisClock(timestamp) {
+  return new Date(timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+}
+
+function findRollingWindow(periods, prices, startIndex, mode) {
+  if (startIndex < 0 || periods.length - startIndex < 4) return null;
   let best = null;
-  for (let start = 0; start <= periods.length - 4; start += 1) {
-    const blockPrices = prices.slice(start, start + 4);
-    const average = blockPrices.reduce((sum, price) => sum + price, 0) / blockPrices.length;
+  for (let index = startIndex; index <= periods.length - 4; index += 1) {
+    const values = prices.slice(index, index + 4);
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
     if (!best || (mode === "max" ? average > best.average : average < best.average)) {
       best = {
-        startIndex: start,
-        endIndex: start + 3,
+        startIndex: index,
+        endIndex: index + 3,
+        start: periods[index].start,
+        end: periods[index + 3].end,
         average,
-        start: periods[start].start,
-        end: periods[start + 3].end,
       };
     }
   }
   return best;
 }
 
-function formatAnalysisOffset(target, now) {
-  const minutes = Math.max(0, Math.round((new Date(target).getTime() - now.getTime()) / 60000));
-  if (minutes <= 15) return "inom en kvart";
-  if (minutes < 60) return `om cirka ${Math.max(1, Math.round(minutes / 15) * 15)} minuter`;
-  const hours = Math.max(1, Math.round(minutes / 60));
-  return `om cirka ${hours} ${hours === 1 ? "timme" : "timmar"}`;
-}
-
-function formatAnalysisClock(timestamp) {
-  return new Date(timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-}
-
-function findNextMeaningfulTurningPoint(prices, categories, currentIndex, direction) {
-  for (let index = currentIndex + 1; index < prices.length - 1; index += 1) {
+function findSignificantChange(periods, prices, currentIndex, direction, threshold) {
+  for (let index = Math.max(1, currentIndex + 1); index < prices.length; index += 1) {
     const before = prices[index - 1];
-    const current = prices[index];
-    const after = prices[index + 1];
-    const localTurningPoint = direction === "low"
-      ? current <= before && current <= after
-      : current >= before && current >= after;
-    if (!localTurningPoint) continue;
-    const surrounding = (before + after) / 2;
-    const meaningfulChange = surrounding > 0 && Math.abs(surrounding - current) / surrounding >= 0.08;
-    const categoryChange = direction === "low"
-      ? categories[index] === "cheap" && categories[index - 1] !== "cheap"
-      : categories[index] === "expensive" && categories[index - 1] !== "expensive";
-    if (meaningfulChange || categoryChange) return index;
+    const after = prices[index];
+    const difference = after - before;
+    if ((direction === "drop" && difference >= 0) || (direction === "rise" && difference <= 0)) continue;
+    const absolute = Math.abs(difference);
+    const percentage = before !== 0 ? (absolute / Math.abs(before)) * 100 : 0;
+    if (absolute < threshold && percentage < 15) continue;
+    return {
+      index,
+      direction,
+      time: periods[index].start,
+      before,
+      after,
+      absolute,
+      percentage,
+    };
   }
   return null;
 }
 
-function analyzeRemainingPriceProfile(prices, categories, currentIndex, bands) {
-  const remainingPrices = prices.slice(currentIndex);
-  const remainingCategories = categories.slice(currentIndex);
-  if (!remainingPrices.length || !bands) return null;
-  const cheapShare = remainingCategories.filter((category) => category === "cheap").length / remainingCategories.length;
-  const expensiveAhead = remainingCategories.slice(1).some((category) => category === "expensive");
-  const remainingAverage = remainingPrices.reduce((sum, price) => sum + price, 0) / remainingPrices.length;
-  if (!expensiveAhead && cheapShare >= 0.7 && remainingAverage <= bands.average) {
-    return "Priset ligger lågt resten av dagen";
-  }
-  if (expensiveAhead) return "Priset stiger igen senare idag";
-  if (remainingAverage <= bands.average * 1.1) return "Priset håller sig på en måttlig nivå resten av dagen";
-  return "Priserna varierar under resten av dagen";
+function formatWindow(window) {
+  return `${formatAnalysisClock(window.start)}–${formatAnalysisClock(window.end)}`;
 }
 
-export function generateUpcomingPriceAnalysis(periods, currentIndex, now = new Date()) {
+function formatAnalysisPercent(value) {
+  return `${Math.round(value)} %`;
+}
+
+export function buildPriceAnalysisFacts(periods, currentIndex) {
   if (!Array.isArray(periods) || currentIndex < 0 || currentIndex >= periods.length) {
-    return { category: null, status: "", forecast: "Dagens prisanalys är inte tillgänglig" };
+    return null;
   }
   const prices = periods.map((period) => Number(period.price) * 100);
   const bands = priceColorBands(prices);
+  if (!bands || !Number.isFinite(prices[currentIndex])) return null;
   const categories = prices.map((price) => priceCategory(price, bands));
-  const currentCategory = categories[currentIndex];
-  const observations = [];
-  const highestHour = findRollingPriceExtreme(periods, prices, "max");
-  if (highestHour) {
-    if (highestHour.startIndex <= currentIndex && currentIndex <= highestHour.endIndex) {
-      observations.push("Vi är inne i dagens dyraste timme");
-    } else if (highestHour.startIndex > currentIndex) {
-      observations.push(`Dagens dyraste timme börjar klockan ${formatAnalysisClock(highestHour.start)}`);
-    } else {
-      observations.push("Dagens dyraste timme är förbi");
-    }
-  }
-  const remainder = analyzeRemainingPriceProfile(prices, categories, currentIndex, bands);
-  if (remainder) observations.push(remainder);
-  const nextLow = findNextMeaningfulTurningPoint(prices, categories, currentIndex, "low");
-  const nextHigh = findNextMeaningfulTurningPoint(prices, categories, currentIndex, "high");
-  if (observations.length < 2 && nextLow !== null) {
-    observations.push(`En billigare dip kommer ${formatAnalysisOffset(periods[nextLow].start, now)}`);
-  } else if (observations.length < 2 && nextHigh !== null) {
-    observations.push(`Priset stiger tydligt ${formatAnalysisOffset(periods[nextHigh].start, now)}`);
-  }
-  if (!observations.length) {
-    observations.push(bands ? "Priset håller sig nära dagens nivå" : "Priset är jämnt under dagen");
-  }
   return {
-    category: currentCategory,
-    status: { cheap: "Billigt nu", normal: "Normalt pris nu", expensive: "Dyrt nu" }[currentCategory],
-    forecast: observations.slice(0, 2).join(". "),
+    currentIndex,
+    status: categories[currentIndex],
+    currentPrice: prices[currentIndex],
+    dailyAverage: bands.average,
+    median: bands.median,
+    percentile: (prices.filter((price) => price <= prices[currentIndex]).length / prices.length) * 100,
+    minimum: bands.minimum,
+    maximum: bands.maximum,
+    cheapestHour: findRollingWindow(periods, prices, 0, "min"),
+    mostExpensiveHour: findRollingWindow(periods, prices, 0, "max"),
+    cheapestRemainingHour: findRollingWindow(periods, prices, currentIndex, "min"),
+    mostExpensiveRemainingHour: findRollingWindow(periods, prices, currentIndex, "max"),
+    nextSignificantDrop: findSignificantChange(periods, prices, currentIndex, "drop", Math.max(2, bands.average * 0.15)),
+    nextSignificantRise: findSignificantChange(periods, prices, currentIndex, "rise", Math.max(2, bands.average * 0.15)),
+    categories,
   };
+}
+
+export function renderPriceAnalysis(facts) {
+  if (!facts) return { category: null, status: "", forecast: "Dagens prisanalys är inte tillgänglig" };
+  const status = { cheap: "Billigt nu", normal: "Normalt pris nu", expensive: "Dyrt nu" }[facts.status];
+  const observations = [];
+  const current = facts.currentPrice;
+  const expensive = facts.mostExpensiveHour;
+  const futureExpensive = expensive && expensive.startIndex > facts.currentIndex;
+  const nextChange = [facts.nextSignificantDrop, facts.nextSignificantRise]
+    .filter(Boolean)
+    .sort((left, right) => left.index - right.index)[0];
+  if (nextChange?.direction === "drop") {
+    observations.push(`Priset sjunker ${formatAnalysisPercent(nextChange.percentage)} klockan ${formatAnalysisClock(nextChange.time)}.`);
+  } else if (nextChange?.direction === "rise") {
+    observations.push(`Priset stiger ${formatAnalysisPercent(nextChange.percentage)} klockan ${formatAnalysisClock(nextChange.time)}.`);
+  } else if (futureExpensive) {
+    const difference = ((expensive.average - current) / Math.abs(current)) * 100;
+    observations.push(`Dagens dyraste timme börjar klockan ${formatAnalysisClock(expensive.start)} och ligger ${formatAnalysisPercent(difference)} över priset nu.`);
+  }
+  if (facts.status === "cheap" && facts.nextSignificantRise) {
+    observations.push(`Priset ligger under dagens snitt fram till ${formatAnalysisClock(facts.nextSignificantRise.time)}.`);
+  } else if (facts.status === "expensive" && facts.cheapestRemainingHour) {
+    observations.push(`Billigaste kommande timme är ${formatWindow(facts.cheapestRemainingHour)}.`);
+  } else if (!observations.length) {
+    observations.push("Priset ligger relativt stabilt resten av dagen.");
+  }
+  return { category: facts.status, status, forecast: observations.slice(0, 2).join(" ") };
+}
+
+export function generateUpcomingPriceAnalysis(periods, currentIndex) {
+  return renderPriceAnalysis(buildPriceAnalysisFacts(periods, currentIndex));
 }
 
 export function snapTooltipTimestamp(timestamp, dayStartMs, dayEndMs, slotMs = 5 * 60 * 1000) {
@@ -1330,7 +1339,7 @@ class ElrakningPanel {
           }
 
           .price-section .section-heading h2 {
-            font-size: clamp(17px, 4.8cqw, 22px);
+            font-size: clamp(15px, 4.2cqw, 19px);
             margin-bottom: clamp(2px, .7cqw, 6px);
           }
 
@@ -1363,11 +1372,11 @@ class ElrakningPanel {
           }
 
           .price-section .price-value strong {
-            font-size: clamp(13.5px, 3.6cqw, 17px);
+            font-size: clamp(12.5px, 3.2cqw, 15.5px);
           }
 
           .price-section .price-value.current strong {
-            font-size: clamp(14.5px, 4cqw, 19px);
+            font-size: clamp(13.5px, 3.5cqw, 17px);
           }
 
           .price-section .price-chart-legend {
@@ -3000,7 +3009,7 @@ class ElrakningPanel {
         ...period,
         price: this._periodCustomerPrice(period) / 100,
       }));
-      const upcoming = generateUpcomingPriceAnalysis(analysisPeriods, currentIndex, now);
+      const upcoming = renderPriceAnalysis(buildPriceAnalysisFacts(analysisPeriods, currentIndex));
       analysis.replaceChildren();
       if (upcoming.status) {
         const status = document.createElement("span");
