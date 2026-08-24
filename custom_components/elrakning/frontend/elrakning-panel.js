@@ -584,18 +584,18 @@ class ElrakningPanel {
       </div>
       <style>
         :host {
-          --card-title-size: clamp(20px, 2.8vw, 26px);
-          --card-subtitle-size: clamp(13px, 1.9vw, 17px);
-          --card-toggle-size: clamp(12px, 1.8vw, 16px);
-          --card-kpi-label-size: clamp(12px, 1.6vw, 16px);
-          --card-kpi-value-size: clamp(22px, 3.2vw, 34px);
+          --card-title-size: clamp(20px, 5.2cqw, 24px);
+          --card-subtitle-size: clamp(13px, 3.8cqw, 16px);
+          --card-toggle-size: clamp(10px, 2.8cqw, 12px);
+          --card-kpi-label-size: clamp(11px, 3cqw, 13px);
+          --card-kpi-value-size: clamp(18px, 5cqw, 22px);
           --card-chart-label-size: clamp(10px, 1.2vw, 12px);
           --card-marker-size: clamp(11px, 1.4vw, 14px);
-          --card-legend-size: clamp(12px, 1.7vw, 16px);
-          --card-analysis-title-size: clamp(16px, 2vw, 20px);
-          --card-analysis-body-size: clamp(14px, 1.8vw, 17px);
-          --card-tooltip-title-size: clamp(13px, 1.6vw, 16px);
-          --card-tooltip-body-size: clamp(12px, 1.5vw, 15px);
+          --card-legend-size: clamp(10px, 2.7cqw, 12px);
+          --card-analysis-title-size: clamp(13px, 3.6cqw, 16px);
+          --card-analysis-body-size: clamp(11px, 3cqw, 14px);
+          --card-tooltip-title-size: clamp(10px, 2.7cqw, 12px);
+          --card-tooltip-body-size: clamp(9px, 2.4cqw, 11px);
           display: block;
           height: 100%;
           min-height: 0;
@@ -1036,10 +1036,6 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
-        .price-value.current strong {
-          font-size: var(--card-kpi-value-size);
-        }
-
         .price-value.current strong.cheap {
           color: var(--success-color);
         }
@@ -1080,6 +1076,13 @@ class ElrakningPanel {
           line-height: 1.2;
           opacity: .9;
           white-space: nowrap;
+        }
+
+        .price-section .section-heading .status {
+          font-size: var(--card-subtitle-size);
+          font-weight: 500;
+          line-height: 1.2;
+          opacity: .9;
         }
 
         .chart-bar.cheap {
@@ -1136,14 +1139,6 @@ class ElrakningPanel {
 
           .price-value > span {
             font-size: var(--card-kpi-label-size);
-          }
-
-          .price-value strong {
-            font-size: var(--card-kpi-value-size);
-          }
-
-          .price-value.current strong {
-            font-size: var(--card-kpi-value-size);
           }
 
           .price-comparison-controls {
@@ -1314,15 +1309,6 @@ class ElrakningPanel {
             gap: clamp(1px, .5cqw, 2px) clamp(6px, 2.1cqw, 16px);
           }
 
-          .price-section .section-heading h2 {
-            font-size: var(--card-title-size);
-            margin-bottom: clamp(2px, .7cqw, 6px);
-          }
-
-          .price-section .section-heading .status {
-            font-size: var(--card-subtitle-size);
-          }
-
           .price-section .price-comparison-controls {
             gap: clamp(4px, 1.7cqw, 8px);
           }
@@ -1343,18 +1329,6 @@ class ElrakningPanel {
             gap: clamp(4px, 2.1cqw, 20px);
           }
 
-          .price-section .price-value > span {
-            font-size: var(--card-kpi-label-size);
-          }
-
-          .price-section .price-value strong {
-            font-size: var(--card-kpi-value-size);
-          }
-
-          .price-section .price-value.current strong {
-            font-size: var(--card-kpi-value-size);
-          }
-
           .price-section .chart-legend-swatch {
             height: clamp(4.5px, 1.5cqw, 6px);
             width: clamp(4.5px, 1.5cqw, 6px);
@@ -1362,16 +1336,6 @@ class ElrakningPanel {
 
           .price-section .price-analysis {
             margin-top: clamp(1px, .5cqw, 2px);
-          }
-
-          .price-section .price-analysis-status {
-            font-size: var(--card-analysis-title-size);
-            line-height: 1.25;
-          }
-
-          .price-section .price-analysis-forecast {
-            font-size: var(--card-analysis-body-size);
-            line-height: 1.35;
           }
 
           .price-section .price-analysis-forecast {
@@ -1581,9 +1545,9 @@ class ElrakningPanel {
           color: var(--primary-text-color);
           font-size: var(--card-tooltip-body-size);
           left: 0;
-          max-width: min(260px, calc(100vw - 32px));
+          max-width: min(210px, calc(100% - 16px));
           overflow-wrap: anywhere;
-          padding: 10px 12px;
+          padding: clamp(5px, 1.3cqw, 7px) clamp(6px, 1.7cqw, 8px);
           pointer-events: none;
           position: absolute;
           top: 0;
@@ -1592,6 +1556,9 @@ class ElrakningPanel {
         }
 
         .chart-tooltip.debug-tooltip {
+          font-size: 13px;
+          max-width: min(420px, calc(100% - 16px));
+          padding: 8px 10px;
           pointer-events: none;
           white-space: pre-wrap;
         }
@@ -1629,6 +1596,7 @@ class ElrakningPanel {
           overflow: hidden;
           padding: 20px;
           position: relative;
+          container-type: inline-size;
           backdrop-filter: var(--ha-card-backdrop-filter, none);
           -webkit-backdrop-filter: var(--ha-card-backdrop-filter, none);
         }
