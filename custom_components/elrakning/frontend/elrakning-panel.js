@@ -1113,7 +1113,7 @@ class ElrakningPanel {
 
         .price-chart {
           min-height: 350px;
-          overflow-x: auto;
+          overflow-x: hidden;
           position: relative;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior-x: contain;
@@ -1330,7 +1330,8 @@ class ElrakningPanel {
         .chart-svg {
           display: block;
           height: 350px;
-          min-width: 720px;
+          max-width: 100%;
+          min-width: 0;
           width: 100%;
         }
 
