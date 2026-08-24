@@ -584,16 +584,18 @@ class ElrakningPanel {
       </div>
       <style>
         :host {
-          --card-title-size: clamp(20px, 3.2vw, 28px);
-          --card-subtitle-size: clamp(13px, 2vw, 18px);
+          --card-title-size: clamp(20px, 2.8vw, 26px);
+          --card-subtitle-size: clamp(13px, 1.9vw, 17px);
           --card-toggle-size: clamp(12px, 1.8vw, 16px);
-          --card-kpi-label-size: clamp(13px, 1.9vw, 18px);
-          --card-kpi-value-size: clamp(24px, 3vw, 36px);
+          --card-kpi-label-size: clamp(12px, 1.6vw, 16px);
+          --card-kpi-value-size: clamp(22px, 3.2vw, 34px);
           --card-chart-label-size: clamp(10px, 1.2vw, 12px);
           --card-marker-size: clamp(11px, 1.4vw, 14px);
           --card-legend-size: clamp(12px, 1.7vw, 16px);
-          --card-analysis-title-size: clamp(16px, 2.2vw, 20px);
-          --card-analysis-body-size: clamp(14px, 2vw, 18px);
+          --card-analysis-title-size: clamp(16px, 2vw, 20px);
+          --card-analysis-body-size: clamp(14px, 1.8vw, 17px);
+          --card-tooltip-title-size: clamp(13px, 1.6vw, 16px);
+          --card-tooltip-body-size: clamp(12px, 1.5vw, 15px);
           display: block;
           height: 100%;
           min-height: 0;
@@ -1574,16 +1576,18 @@ class ElrakningPanel {
         .chart-tooltip {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
-          border-radius: 6px;
+          border-radius: 12px;
           box-shadow: var(--ha-card-box-shadow);
           color: var(--primary-text-color);
-          font-size: 13px;
+          font-size: var(--card-tooltip-body-size);
           left: 0;
-          padding: 8px 10px;
+          max-width: min(260px, calc(100vw - 32px));
+          overflow-wrap: anywhere;
+          padding: 10px 12px;
           pointer-events: none;
           position: absolute;
           top: 0;
-          white-space: nowrap;
+          white-space: normal;
           z-index: 1;
         }
 
@@ -1594,7 +1598,16 @@ class ElrakningPanel {
 
         .tooltip-value {
           display: block;
+          font-size: var(--card-tooltip-body-size);
+          line-height: 1.25;
           margin-top: 4px;
+        }
+
+        .chart-tooltip > strong {
+          display: block;
+          font-size: var(--card-tooltip-title-size);
+          font-weight: 700;
+          line-height: 1.2;
         }
 
         .tooltip-meter-import {
