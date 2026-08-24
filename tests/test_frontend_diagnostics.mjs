@@ -356,6 +356,7 @@ assert.doesNotMatch(panelSource, /data-price-layer="grid">[\s\S]*<span>Elnät<\/
 assert.match(panelSource, /container-name: price-card/);
 assert.match(panelSource, /container-type: inline-size/);
 assert.match(panelSource, /\.section-heading h2,[\s\S]*font-size: var\(--card-title-size\)/);
+assert.match(panelSource, /\.price-section \.section-heading h2 \{[\s\S]*font-size: clamp\(19px, 4\.7cqw, 22px\)/);
 assert.match(panelSource, /@supports \(font-size: 1cqw\)[\s\S]*\.price-section \.price-comparison-controls \{[\s\S]*gap: 6px/);
 assert.match(panelSource, /\.price-filter-toggle \{[\s\S]*font-size: 10px/);
 assert.match(panelSource, /\.price-filter-track \{[\s\S]*height: 16px[\s\S]*--knob-size: 11px[\s\S]*--track-padding: 2px[\s\S]*width: 27px/);

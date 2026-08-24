@@ -1098,6 +1098,10 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
+        .price-section .section-heading h2 {
+          font-size: clamp(19px, 4.7cqw, 22px);
+        }
+
         .price-heading-main > div:first-child {
           flex: 0 0 auto;
           min-width: max-content;
