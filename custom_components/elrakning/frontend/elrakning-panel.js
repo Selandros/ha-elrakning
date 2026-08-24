@@ -413,8 +413,8 @@ class ElrakningPanel {
               <span class="frontend-version">${this.version}</span>
             </div>
             <div class="header-icon-controls" aria-label="Elräkningens kontroller">
-              <button type="button" class="header-icon-button config-cards-button active" aria-label="Visa konfigurationskort" aria-pressed="true" data-config-cards-toggle>⚙️</button>
-              <button type="button" class="header-icon-button debug-button" aria-label="Visa diagnostik" aria-pressed="false" data-debug-toggle>🐞</button>
+              <button type="button" class="header-icon-button config-cards-button${this._configurationCardsVisible ? " active" : ""}" aria-label="Visa konfigurationskort" aria-pressed="${this._configurationCardsVisible}" data-config-cards-toggle>⚙️</button>
+              <button type="button" class="header-icon-button debug-button${this._debugEnabled ? " active" : ""}" aria-label="Visa diagnostik" aria-pressed="${this._debugEnabled}" data-debug-toggle>🐞</button>
             </div>
           </div>
           <p>Översikt</p>
@@ -653,7 +653,8 @@ class ElrakningPanel {
           line-height: 1;
           margin: 0;
           padding: 0;
-          transition: color 120ms ease, filter 120ms ease, background-color 120ms ease;
+          opacity: .55;
+          transition: opacity 120ms ease, background-color 120ms ease;
           width: 32px;
         }
 
@@ -667,8 +668,11 @@ class ElrakningPanel {
         }
 
         .header-icon-button.active {
-          color: var(--primary-color);
-          filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary-color) 45%, transparent));
+          opacity: 1;
+        }
+
+        [data-configuration-cards][hidden] {
+          display: none;
         }
 
         @media (max-width: 480px) {
