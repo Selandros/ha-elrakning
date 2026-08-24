@@ -1196,9 +1196,20 @@ class ElrakningPanel {
         }
 
         @container price-card (max-width: 480px) {
-          .price-chart-legend {
-            margin-left: -6px;
-            margin-right: -6px;
+          .price-section .price-chart-legend {
+            column-gap: 2px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            justify-items: center;
+            letter-spacing: normal;
+            margin-left: 0;
+            margin-right: 0;
+            row-gap: clamp(4px, 1.2cqw, 7px);
+            font-size: clamp(9px, 2.5cqw, 11px);
+          }
+
+          .price-section .price-chart-legend > .chart-legend-toggle {
+            justify-self: center;
           }
 
           .price-analysis-status,
@@ -1233,6 +1244,17 @@ class ElrakningPanel {
           align-self: center;
           margin: 0 0 0 auto;
           white-space: nowrap;
+        }
+
+        @container price-card (max-width: 480px) {
+          .price-section .price-chart-legend {
+            column-gap: 2px;
+            font-size: clamp(9px, 2.5cqw, 11px);
+            letter-spacing: normal;
+            margin-left: 0;
+            margin-right: 0;
+            row-gap: clamp(4px, 1.2cqw, 7px);
+          }
         }
 
         .chart-legend-toggle {
@@ -1350,8 +1372,6 @@ class ElrakningPanel {
 
           .price-section .price-chart-legend {
             gap: 2px clamp(3px, .8cqw, 6px);
-            font-size: clamp(8px, 2.25cqw, 11px);
-            letter-spacing: -.25px;
             min-height: clamp(18px, 5.5cqw, 22px);
           }
 
