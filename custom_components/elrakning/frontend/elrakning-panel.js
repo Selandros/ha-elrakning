@@ -1000,9 +1000,9 @@ class ElrakningPanel {
         }
 
         .section-heading {
-          align-items: flex-start;
+          align-items: center;
           display: flex;
-          justify-content: space-between;
+          flex-wrap: wrap;
           gap: 16px;
           margin-bottom: 2px;
         }
@@ -1010,8 +1010,11 @@ class ElrakningPanel {
         .price-summary {
           display: grid;
           gap: 20px;
-          grid-template-columns: repeat(4, minmax(82px, auto));
+          flex: 0 0 auto;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          min-width: min(100%, 408px);
           text-align: right;
+          width: min(100%, 408px);
         }
 
         .price-value > span {
@@ -1058,6 +1061,12 @@ class ElrakningPanel {
           font-weight: 700;
           line-height: 1.1;
           margin-bottom: 6px;
+          white-space: nowrap;
+        }
+
+        .price-section .section-heading > div:first-child {
+          flex: 0 0 auto;
+          min-width: max-content;
         }
 
         .unit {
@@ -1089,56 +1098,9 @@ class ElrakningPanel {
         }
 
         @media (max-width: 600px) {
-          .section-heading {
-            align-items: center;
-            display: grid;
-            gap: 2px 8px;
-            grid-template-columns: minmax(0, 1fr) auto;
-          }
-
-          .section-heading > div:first-child {
-            grid-column: 1;
-            grid-row: 1;
-            min-width: 0;
-          }
-
-          .section-heading > .price-comparison-controls {
-            grid-column: 2;
-            grid-row: 1;
-            gap: 6px;
-            justify-content: flex-end;
-            margin: 0;
-            width: auto;
-          }
-
-          .section-heading > .price-summary {
-            grid-column: 1 / -1;
-            grid-row: 2;
-          }
-
-        .price-section {
+          .price-section {
           padding: 16px 12px 10px;
-        }
-
-          .price-summary {
-            gap: 4px;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            margin-left: 0;
-            text-align: center;
-            width: 100%;
           }
-
-          .price-value > span {
-            font-size: var(--price-card-text-size);
-          }
-
-          .price-comparison-controls {
-            align-self: auto;
-            justify-content: flex-start;
-            margin: 0;
-            width: auto;
-          }
-
         }
 
         .price-chart {
@@ -1221,7 +1183,8 @@ class ElrakningPanel {
         .price-comparison-controls {
           align-items: center;
           display: flex;
-          gap: 12px;
+          flex: 0 0 auto;
+          gap: 6px;
           justify-content: flex-end;
           align-self: center;
           margin: 0 0 0 auto;
@@ -1238,7 +1201,7 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           cursor: pointer;
           display: inline-flex;
-          font-size: var(--price-card-text-size);
+          font-size: 10px;
           gap: 6px;
           user-select: none;
         }
@@ -1255,12 +1218,12 @@ class ElrakningPanel {
           border-radius: 999px;
           box-sizing: border-box;
           display: block;
-          height: 22px;
-          --knob-size: 16px;
-          --track-padding: 3px;
+          height: 16px;
+          --knob-size: 11px;
+          --track-padding: 2px;
           position: relative;
           transition: background-color 120ms ease;
-          width: 38px;
+          width: 27px;
         }
 
         .price-filter-track span {
