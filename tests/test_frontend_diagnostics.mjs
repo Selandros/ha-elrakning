@@ -374,7 +374,11 @@ assert.match(panelSource, /\.price-section \.section-heading \.status[\s\S]*font
 assert.doesNotMatch(panelSource, /\.chart-svg \{[\s\S]*min-width: [^0]/);
 assert.match(panelSource, /\.section-heading \{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap/);
 assert.match(panelSource, /\.section-heading h2,[\s\S]*white-space: nowrap/);
-assert.match(panelSource, /\.price-section \.section-heading > div:first-child \{[\s\S]*flex: 0 0 auto[\s\S]*min-width: max-content/);
+assert.match(panelSource, /class="price-heading-main"/);
+assert.match(panelSource, /\.price-heading-main \{[\s\S]*display: flex[\s\S]*flex: 0 0 auto[\s\S]*gap: 12px/);
+assert.match(panelSource, /\.price-heading-main > div:first-child \{[\s\S]*flex: 0 0 auto[\s\S]*min-width: max-content/);
+assert.match(panelSource, /\.price-heading-main[\s\S]*price-comparison-controls/);
+assert.doesNotMatch(panelSource, /\.price-comparison-controls \{[\s\S]*margin: 0 0 0 auto/);
 assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 0 0 auto[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
 assert.match(panelSource, /chart-legend-preview/);
 assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*cursor: pointer;/);

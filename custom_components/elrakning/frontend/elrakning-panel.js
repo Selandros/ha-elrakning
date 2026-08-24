@@ -421,21 +421,23 @@ class ElrakningPanel {
 
         <section class="price-section" aria-labelledby="price-title">
           <div class="section-heading">
-            <div>
-              <h2 id="price-title">Dagens elpris</h2>
-              <p class="status">Spotpris · öre/kWh</p>
-            </div>
-            <div class="price-comparison-controls" aria-label="Prisjämförelse">
-              <label class="price-filter-toggle" data-price-layer="electricity">
-                <span>Handel</span>
-                <input type="checkbox" role="switch" data-price-toggle checked>
-                <span class="price-filter-track" aria-hidden="true"><span></span></span>
-              </label>
-              <label class="price-filter-toggle" data-price-layer="grid">
-                <span>Nät</span>
-                <input type="checkbox" role="switch" data-price-toggle>
-                <span class="price-filter-track" aria-hidden="true"><span></span></span>
-              </label>
+            <div class="price-heading-main">
+              <div>
+                <h2 id="price-title">Dagens elpris</h2>
+                <p class="status">Spotpris · öre/kWh</p>
+              </div>
+              <div class="price-comparison-controls" aria-label="Prisjämförelse">
+                <label class="price-filter-toggle" data-price-layer="electricity">
+                  <span>Handel</span>
+                  <input type="checkbox" role="switch" data-price-toggle checked>
+                  <span class="price-filter-track" aria-hidden="true"><span></span></span>
+                </label>
+                <label class="price-filter-toggle" data-price-layer="grid">
+                  <span>Nät</span>
+                  <input type="checkbox" role="switch" data-price-toggle>
+                  <span class="price-filter-track" aria-hidden="true"><span></span></span>
+                </label>
+              </div>
             </div>
             <div class="price-summary">
               <div class="price-value current">
@@ -1011,6 +1013,13 @@ class ElrakningPanel {
           margin-bottom: 2px;
         }
 
+        .price-heading-main {
+          align-items: center;
+          display: flex;
+          flex: 0 0 auto;
+          gap: 12px;
+        }
+
         .price-summary {
           display: grid;
           gap: 20px;
@@ -1068,7 +1077,7 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
-        .price-section .section-heading > div:first-child {
+        .price-heading-main > div:first-child {
           flex: 0 0 auto;
           min-width: max-content;
         }
@@ -1186,7 +1195,7 @@ class ElrakningPanel {
           gap: 6px;
           justify-content: flex-end;
           align-self: center;
-          margin: 0 0 0 auto;
+          margin: 0;
           white-space: nowrap;
         }
 
