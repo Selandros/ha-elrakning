@@ -422,16 +422,16 @@ class ElrakningPanel {
           <div class="section-heading">
             <div>
               <h2 id="price-title">Dagens elpris</h2>
-              <p class="status">Nord Pool · Spotpris · öre/kWh</p>
+              <p class="status">Spotpris · öre/kWh</p>
             </div>
             <div class="price-comparison-controls" aria-label="Prisjämförelse">
               <label class="price-filter-toggle" data-price-layer="electricity">
-                <span>Elhandel</span>
+                <span>Handel</span>
                 <input type="checkbox" role="switch" data-price-toggle checked>
                 <span class="price-filter-track" aria-hidden="true"><span></span></span>
               </label>
               <label class="price-filter-toggle" data-price-layer="grid">
-                <span>Elnät</span>
+                <span>Nät</span>
                 <input type="checkbox" role="switch" data-price-toggle>
                 <span class="price-filter-track" aria-hidden="true"><span></span></span>
               </label>
@@ -1078,7 +1078,30 @@ class ElrakningPanel {
 
         @media (max-width: 600px) {
           .section-heading {
-            flex-wrap: wrap;
+            align-items: center;
+            display: grid;
+            gap: 2px 8px;
+            grid-template-columns: minmax(0, 1fr) auto;
+          }
+
+          .section-heading > div:first-child {
+            grid-column: 1;
+            grid-row: 1;
+            min-width: 0;
+          }
+
+          .section-heading > .price-comparison-controls {
+            grid-column: 2;
+            grid-row: 1;
+            gap: 6px;
+            justify-content: flex-end;
+            margin: 0;
+            width: auto;
+          }
+
+          .section-heading > .price-summary {
+            grid-column: 1 / -1;
+            grid-row: 2;
           }
 
         .price-section {
@@ -1109,7 +1132,7 @@ class ElrakningPanel {
             align-self: auto;
             justify-content: flex-start;
             margin: 0;
-            width: 100%;
+            width: auto;
           }
 
           .price-value.current {
