@@ -324,6 +324,19 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(other_user["average"])
         self.assertTrue(other_user["consumption"])
 
+    async def test_configuration_cards_visibility_is_persistent_per_user(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        self.assertTrue(await manager.async_get_configuration_cards_visible("user-a"))
+        self.assertFalse(await manager.async_set_configuration_cards_visible("user-a", False))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("user-a"))
+        self.assertTrue(await manager.async_get_configuration_cards_visible("user-b"))
+
+        stored = await manager.chart_preferences_store.async_load()
+        self.assertFalse(stored["users"]["user-a"]["configuration_cards_visible"])
+        self.assertTrue(stored["users"]["user-b"]["configuration_cards_visible"])
+
 
 class _Connection:
     def __init__(self):

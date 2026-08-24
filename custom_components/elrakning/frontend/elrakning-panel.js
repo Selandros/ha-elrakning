@@ -369,6 +369,7 @@ class ElrakningPanel {
     this.version = version;
     this._debugEnabled = false;
     this._debugPreferenceChanged = false;
+    this._configurationCardsVisible = true;
     this._diagnosticEntries = [];
     this._chartTouch = null;
     this._chartDebugCopyText = "";
@@ -411,11 +412,10 @@ class ElrakningPanel {
               <h1>Elräkning</h1>
               <span class="frontend-version">${this.version}</span>
             </div>
-            <label class="debug-toggle">
-              <span aria-hidden="true">🐞</span>
-              <input type="checkbox" role="switch" aria-label="Visa diagnostik" data-debug-toggle>
-              <span class="debug-toggle-track" aria-hidden="true"><span></span></span>
-            </label>
+            <div class="header-icon-controls" aria-label="Elräkningens kontroller">
+              <button type="button" class="header-icon-button config-cards-button active" aria-label="Visa konfigurationskort" aria-pressed="true" data-config-cards-toggle>⚙️</button>
+              <button type="button" class="header-icon-button debug-button" aria-label="Visa diagnostik" aria-pressed="false" data-debug-toggle>🐞</button>
+            </div>
           </div>
           <p>Översikt</p>
         </header>
@@ -489,7 +489,7 @@ class ElrakningPanel {
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
         </section>
 
-        <section class="grid" aria-label="Elräkningens översikt">
+        <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
           <article class="card" data-provider-card="elhandel">
             <div class="card-heading">
               <h2>Elhandel</h2>
@@ -632,58 +632,55 @@ class ElrakningPanel {
           gap: 16px;
         }
 
-        .debug-toggle {
+        .header-icon-controls {
           align-items: center;
+          display: inline-flex;
+          flex: 0 0 auto;
+          gap: 4px;
+        }
+
+        .header-icon-button {
+          align-items: center;
+          background: transparent;
+          border: 0;
+          border-radius: 8px;
           color: var(--secondary-text-color);
           cursor: pointer;
           display: inline-flex;
-          gap: 10px;
-          user-select: none;
+          font-size: 20px;
+          height: 32px;
+          justify-content: center;
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          transition: color 120ms ease, filter 120ms ease, background-color 120ms ease;
+          width: 32px;
         }
 
-        .debug-toggle input {
-          height: 1px;
-          opacity: 0;
-          position: absolute;
-          width: 1px;
+        .header-icon-button:hover {
+          background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
         }
 
-        .debug-toggle-track {
-          background: var(--divider-color);
-          border-radius: 999px;
-          box-sizing: border-box;
-          display: block;
-          height: 30px;
-          position: relative;
-          transition: background-color 120ms ease;
-          width: 52px;
-        }
-
-        .debug-toggle-track span {
-          background: var(--ha-card-background, var(--card-background-color));
-          border-radius: 50%;
-          box-shadow: var(--ha-card-box-shadow, none);
-          display: block;
-          height: 22px;
-          left: 4px;
-          position: absolute;
-          top: 50%;
-          transform: translateY(-50%);
-          transition: left 120ms ease;
-          width: 22px;
-        }
-
-        .debug-toggle input:checked + .debug-toggle-track {
-          background: var(--primary-color);
-        }
-
-        .debug-toggle input:checked + .debug-toggle-track span {
-          left: calc(100% - 4px - 22px);
-        }
-
-        .debug-toggle input:focus-visible + .debug-toggle-track {
+        .header-icon-button:focus-visible {
           outline: 2px solid var(--primary-color);
           outline-offset: 2px;
+        }
+
+        .header-icon-button.active {
+          color: var(--primary-color);
+          filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary-color) 45%, transparent));
+        }
+
+        @media (max-width: 480px) {
+          .header-icon-controls {
+            gap: 2px;
+          }
+
+          .header-icon-button {
+            font-size: 18px;
+            height: 30px;
+            width: 30px;
+          }
         }
 
         .frontend-version {
@@ -1626,6 +1623,7 @@ class ElrakningPanel {
     this._bindRetainedHistory();
     this._bindMeterDialog();
     this._bindDebugToggle();
+    this._bindConfigurationCardsToggle();
     this._bindProviderSourceDialog();
     this._bindMeterSourceDialog();
     this._bindDiagnostics();
@@ -1661,6 +1659,18 @@ class ElrakningPanel {
     };
   }
 
+  _applyConfigurationCardsVisibility(visible) {
+    if (typeof visible !== "boolean") return;
+    this._configurationCardsVisible = visible;
+    const cards = this.host.querySelector("[data-configuration-cards]");
+    const button = this.host.querySelector("[data-config-cards-toggle]");
+    if (cards) cards.hidden = !visible;
+    if (button) {
+      button.classList.toggle("active", visible);
+      button.setAttribute("aria-pressed", String(visible));
+    }
+  }
+
   _applyChartLayerState(layers) {
     if (!layers || typeof layers !== "object") return;
     if (typeof layers.spot === "boolean") this._spotBarsVisible = layers.spot;
@@ -1693,6 +1703,7 @@ class ElrakningPanel {
     try {
       const response = await this.hass.callWS({ type: "elrakning/ui_preferences/get" });
       this._applyChartLayerState(response.chart_layers);
+      this._applyConfigurationCardsVisibility(response.configuration_cards_visible);
       this._chartPreferencesReady = true;
       this._syncChartLayerButtons();
       this.renderPriceChart();
@@ -1707,6 +1718,7 @@ class ElrakningPanel {
       await this.hass.callWS({
         type: "elrakning/ui_preferences/set",
         chart_layers: this._chartLayerState(),
+        configuration_cards_visible: this._configurationCardsVisible,
       });
     } catch (error) {
       console.warn("Elrakning chart preference persistence failed", error);
@@ -1768,13 +1780,25 @@ class ElrakningPanel {
   _bindDebugToggle() {
     const toggle = this.host.querySelector("[data-debug-toggle]");
     if (!toggle) return;
-    toggle.addEventListener("change", () => {
-      this._debugEnabled = toggle.checked;
+    toggle.addEventListener("click", () => {
+      this._debugEnabled = !this._debugEnabled;
+      toggle.classList.toggle("active", this._debugEnabled);
+      toggle.setAttribute("aria-pressed", String(this._debugEnabled));
       this._debugPreferenceChanged = true;
       this._applyDebugVisibility();
       this._saveDebugPreference();
     });
     this._applyDebugVisibility();
+  }
+
+  _bindConfigurationCardsToggle() {
+    const toggle = this.host.querySelector("[data-config-cards-toggle]");
+    if (!toggle) return;
+    toggle.addEventListener("click", () => {
+      this._applyConfigurationCardsVisibility(!this._configurationCardsVisible);
+      this._persistChartPreferences();
+    });
+    this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
   }
 
   async _loadDebugPreference() {
@@ -1784,7 +1808,10 @@ class ElrakningPanel {
       if (!this._debugPreferenceChanged && typeof response.debug_enabled === "boolean") {
         this._debugEnabled = response.debug_enabled;
         const toggle = this.host.querySelector("[data-debug-toggle]");
-        if (toggle) toggle.checked = this._debugEnabled;
+        if (toggle) {
+          toggle.classList.toggle("active", this._debugEnabled);
+          toggle.setAttribute("aria-pressed", String(this._debugEnabled));
+        }
         this._applyDebugVisibility();
       }
     } catch {

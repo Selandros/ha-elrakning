@@ -37,6 +37,7 @@ CHART_LAYER_DEFAULTS = {
     "charging": True,
     "discharging": True,
 }
+CONFIGURATION_CARDS_VISIBLE_DEFAULT = True
 
 
 class ElhandelManager:
@@ -156,6 +157,33 @@ class ElhandelManager:
         users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "chart_layers": current}
         await self.chart_preferences_store.async_save({"users": users})
         return current
+
+    async def async_get_configuration_cards_visible(self, user_id: str) -> bool:
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) else {}
+        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
+        visible = user_state.get("configuration_cards_visible") if isinstance(user_state, dict) else None
+        result = visible if isinstance(visible, bool) else CONFIGURATION_CARDS_VISIBLE_DEFAULT
+        if not isinstance(users, dict):
+            users = {}
+        if not isinstance(users.get(user_id), dict) or users[user_id].get("configuration_cards_visible") != result:
+            users[user_id] = {
+                **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
+                "configuration_cards_visible": result,
+            }
+            await self.chart_preferences_store.async_save({"users": users})
+        return result
+
+    async def async_set_configuration_cards_visible(self, user_id: str, visible: bool) -> bool:
+        result = bool(visible)
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
+        users[user_id] = {
+            **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
+            "configuration_cards_visible": result,
+        }
+        await self.chart_preferences_store.async_save({"users": users})
+        return result
 
     def async_start_refresh(self, reason: str = "startup") -> None:
         if not self.lifecycle.has_refresh_unsubscribe():

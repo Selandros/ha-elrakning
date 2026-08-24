@@ -463,7 +463,12 @@ async def websocket_chart_layers(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
         return
     chart_layers = await manager.async_get_chart_layers(connection.user.id)
-    connection.send_result(msg["id"], {"success": True, "chart_layers": chart_layers})
+    configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
+    connection.send_result(msg["id"], {
+        "success": True,
+        "chart_layers": chart_layers,
+        "configuration_cards_visible": configuration_cards_visible,
+    })
 
 
 @websocket_api.websocket_command(
@@ -472,6 +477,7 @@ async def websocket_chart_layers(hass, connection, msg):
         vol.Required("chart_layers"): {
             vol.Optional(key): bool for key in CHART_LAYER_DEFAULTS
         },
+        vol.Optional("configuration_cards_visible"): bool,
     }
 )
 @websocket_api.async_response
@@ -481,7 +487,16 @@ async def websocket_chart_layers_set(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
         return
     chart_layers = await manager.async_set_chart_layers(connection.user.id, msg["chart_layers"])
-    connection.send_result(msg["id"], {"success": True, "chart_layers": chart_layers})
+    configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
+    if "configuration_cards_visible" in msg:
+        configuration_cards_visible = await manager.async_set_configuration_cards_visible(
+            connection.user.id, msg["configuration_cards_visible"]
+        )
+    connection.send_result(msg["id"], {
+        "success": True,
+        "chart_layers": chart_layers,
+        "configuration_cards_visible": configuration_cards_visible,
+    })
 
 
 def _meter_manager(hass) -> MeterManager | None:
