@@ -1344,13 +1344,14 @@ class ElrakningPanel {
           }
 
           .price-section .price-chart-legend {
-            gap: clamp(3px, 1.1cqw, 7px) clamp(3px, 1.1cqw, 7px);
+            gap: clamp(1px, .4cqw, 5px) clamp(1px, .4cqw, 5px);
             font-size: clamp(8.5px, 2.25cqw, 11px);
+            letter-spacing: -.15px;
             min-height: clamp(18px, 5.5cqw, 22px);
           }
 
           .price-section .chart-legend-toggle {
-            gap: clamp(2px, .6cqw, 4px);
+            gap: clamp(1.5px, .4cqw, 3px);
           }
 
           .price-section .chart-legend-swatch {
