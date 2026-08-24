@@ -303,6 +303,28 @@ class _Hass:
         return asyncio.create_task(coroutine)
 
 
+class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chart_layers_are_initialized_per_user_and_preserve_existing_values(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        first = await manager.async_get_chart_layers("user-a")
+        self.assertTrue(first["spot"])
+        self.assertTrue(first["average"])
+        self.assertEqual(set(first), {"spot", "average", "import", "export", "solar", "consumption", "charging", "discharging"})
+
+        updated = await manager.async_set_chart_layers("user-a", {"average": False, "consumption": False})
+        self.assertFalse(updated["average"])
+        self.assertFalse(updated["consumption"])
+        self.assertTrue(updated["spot"])
+
+        restored = await manager.async_get_chart_layers("user-a")
+        self.assertEqual(restored, updated)
+        other_user = await manager.async_get_chart_layers("user-b")
+        self.assertTrue(other_user["average"])
+        self.assertTrue(other_user["consumption"])
+
+
 class _Connection:
     def __init__(self):
         self.result = None
@@ -595,7 +617,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
             return_value=state_store,
         ), patch(
             "custom_components.elrakning.elhandel.manager.Store",
-            side_effect=[diagnostics_store, preferences_store],
+            side_effect=[diagnostics_store, preferences_store, _Store()],
         ), patch(
             "custom_components.elrakning.elhandel.manager.async_get_integration",
             new=AsyncMock(return_value=integration),
@@ -620,7 +642,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
             return_value=_Store({"configured": True, "provider": "greenely"}),
         ), patch(
             "custom_components.elrakning.elhandel.manager.Store",
-            side_effect=[_Store([]), _Store()],
+            side_effect=[_Store([]), _Store(), _Store()],
         ), patch(
             "custom_components.elrakning.elhandel.manager.async_get_integration",
             new=AsyncMock(return_value=integration),

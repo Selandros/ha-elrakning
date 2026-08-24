@@ -18,7 +18,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data
-from .elhandel.manager import ElhandelManager
+from .elhandel.manager import CHART_LAYER_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
@@ -39,6 +39,8 @@ DIAGNOSTICS_STATE_COMMAND = f"{DOMAIN}/diagnostics_state"
 DIAGNOSTICS_CLEAR_COMMAND = f"{DOMAIN}/diagnostics_clear"
 FRONTEND_PREFERENCES_COMMAND = f"{DOMAIN}/frontend_preferences"
 FRONTEND_PREFERENCES_SET_COMMAND = f"{DOMAIN}/frontend_preferences_set"
+CHART_LAYERS_COMMAND = f"{DOMAIN}/ui_preferences/get"
+CHART_LAYERS_SET_COMMAND = f"{DOMAIN}/ui_preferences/set"
 METER_SAVE_COMMAND = f"{DOMAIN}/meter_save"
 METER_DIAGNOSTIC_COMMAND = f"{DOMAIN}/meter_diagnostic"
 METER_STATE_COMMAND = f"{DOMAIN}/meter_state"
@@ -67,6 +69,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_diagnostics_clear)
     websocket_api.async_register_command(hass, websocket_frontend_preferences)
     websocket_api.async_register_command(hass, websocket_frontend_preferences_set)
+    websocket_api.async_register_command(hass, websocket_chart_layers)
+    websocket_api.async_register_command(hass, websocket_chart_layers_set)
     _LOGGER.debug("websocket_command_name=%s registered", METER_SAVE_COMMAND)
     websocket_api.async_register_command(hass, websocket_meter_save)
     websocket_api.async_register_command(hass, websocket_meter_diagnostic)
@@ -449,6 +453,35 @@ async def websocket_frontend_preferences_set(hass, connection, msg):
         return
     preferences = await manager.async_set_debug_enabled(msg["debug_enabled"])
     connection.send_result(msg["id"], {"success": True, **preferences})
+
+
+@websocket_api.websocket_command({vol.Required("type"): CHART_LAYERS_COMMAND})
+@websocket_api.async_response
+async def websocket_chart_layers(hass, connection, msg):
+    manager = _elhandel_manager(hass)
+    if not manager or not getattr(connection, "user", None):
+        connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
+        return
+    chart_layers = await manager.async_get_chart_layers(connection.user.id)
+    connection.send_result(msg["id"], {"success": True, "chart_layers": chart_layers})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): CHART_LAYERS_SET_COMMAND,
+        vol.Required("chart_layers"): {
+            vol.Optional(key): bool for key in CHART_LAYER_DEFAULTS
+        },
+    }
+)
+@websocket_api.async_response
+async def websocket_chart_layers_set(hass, connection, msg):
+    manager = _elhandel_manager(hass)
+    if not manager or not getattr(connection, "user", None):
+        connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
+        return
+    chart_layers = await manager.async_set_chart_layers(connection.user.id, msg["chart_layers"])
+    connection.send_result(msg["id"], {"success": True, "chart_layers": chart_layers})
 
 
 def _meter_manager(hass) -> MeterManager | None:

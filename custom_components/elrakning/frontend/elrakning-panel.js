@@ -375,6 +375,7 @@ class ElrakningPanel {
     this._chartDebugCopyText = "";
     this._tooltipOrbit = { angle: null };
     this._priceHeaderLayoutObserver = null;
+    this._chartPreferencesReady = false;
     this._meterPowerHistory = { date: null, points: [] };
     this._meterTooltipPoints = [];
     this._meterCanonicalPoints = [];
@@ -461,28 +462,28 @@ class ElrakningPanel {
           </div>
           <div class="price-chart" aria-live="polite"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
-            <button type="button" class="chart-legend-toggle active" data-chart-layer="spot" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle${this._spotBarsVisible ? " active" : ""}" data-chart-layer="spot" aria-pressed="${this._spotBarsVisible}">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris
             </button>
-            <button type="button" class="chart-legend-toggle active" data-chart-layer="average" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle${this._averageLineVisible ? " active" : ""}" data-chart-layer="average" aria-pressed="${this._averageLineVisible}">
               <span class="chart-legend-swatch average" aria-hidden="true"></span>Snitt
             </button>
-            <button type="button" class="chart-legend-toggle active" data-chart-layer="import" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle${this._meterPowerVisible.import ? " active" : ""}" data-chart-layer="import" aria-pressed="${this._meterPowerVisible.import}">
               <span class="chart-legend-swatch import" aria-hidden="true"></span>Köp
             </button>
-            <button type="button" class="chart-legend-toggle active" data-chart-layer="export" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle${this._meterPowerVisible.export ? " active" : ""}" data-chart-layer="export" aria-pressed="${this._meterPowerVisible.export}">
               <span class="chart-legend-swatch export" aria-hidden="true"></span>Sälj
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active solar" data-preview-layer="solar" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.solar ? " active" : ""} solar" data-preview-layer="solar" aria-pressed="${this._previewLayersVisible.solar}">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Sol
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active consumption" data-preview-layer="consumption" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.consumption ? " active" : ""} consumption" data-preview-layer="consumption" aria-pressed="${this._previewLayersVisible.consumption}">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Last
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active charging" data-preview-layer="charging" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.charging ? " active" : ""} charging" data-preview-layer="charging" aria-pressed="${this._previewLayersVisible.charging}">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning
             </button>
-            <button type="button" class="chart-legend-toggle chart-legend-preview active discharging" data-preview-layer="discharging" aria-pressed="true">
+            <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.discharging ? " active" : ""} discharging" data-preview-layer="discharging" aria-pressed="${this._previewLayersVisible.discharging}">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning
             </button>
           </div>
@@ -1650,6 +1651,68 @@ class ElrakningPanel {
     updateLayoutState();
   }
 
+  _chartLayerState() {
+    return {
+      spot: this._spotBarsVisible,
+      average: this._averageLineVisible,
+      import: this._meterPowerVisible.import,
+      export: this._meterPowerVisible.export,
+      ...this._previewLayersVisible,
+    };
+  }
+
+  _applyChartLayerState(layers) {
+    if (!layers || typeof layers !== "object") return;
+    if (typeof layers.spot === "boolean") this._spotBarsVisible = layers.spot;
+    if (typeof layers.average === "boolean") this._averageLineVisible = layers.average;
+    if (typeof layers.import === "boolean") this._meterPowerVisible.import = layers.import;
+    if (typeof layers.export === "boolean") this._meterPowerVisible.export = layers.export;
+    for (const key of Object.keys(this._previewLayersVisible)) {
+      if (typeof layers[key] === "boolean") this._previewLayersVisible[key] = layers[key];
+    }
+  }
+
+  _syncChartLayerButtons() {
+    const layers = this._chartLayerState();
+    for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
+      const value = layers[button.dataset.chartLayer];
+      if (typeof value !== "boolean") continue;
+      button.classList.toggle("active", value);
+      button.setAttribute("aria-pressed", String(value));
+    }
+    for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
+      const value = layers[button.dataset.previewLayer];
+      if (typeof value !== "boolean") continue;
+      button.classList.toggle("active", value);
+      button.setAttribute("aria-pressed", String(value));
+    }
+  }
+
+  async _loadChartPreferences() {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/ui_preferences/get" });
+      this._applyChartLayerState(response.chart_layers);
+      this._chartPreferencesReady = true;
+      this._syncChartLayerButtons();
+      this.renderPriceChart();
+    } catch {
+      // Keep the first-use defaults for this session when preference loading fails.
+    }
+  }
+
+  async _persistChartPreferences() {
+    if (!this.hass?.callWS || !this._chartPreferencesReady) return;
+    try {
+      await this.hass.callWS({
+        type: "elrakning/ui_preferences/set",
+        chart_layers: this._chartLayerState(),
+      });
+    } catch (error) {
+      console.warn("Elrakning chart preference persistence failed", error);
+    }
+  }
+
   _bindChartLegend() {
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
       button.addEventListener("click", () => {
@@ -1659,6 +1722,7 @@ class ElrakningPanel {
           button.classList.toggle("active", this._meterPowerVisible[layer]);
           button.setAttribute("aria-pressed", String(this._meterPowerVisible[layer]));
           this.renderPriceChart();
+          this._persistChartPreferences();
           return;
         }
         if (layer === "average") {
@@ -1666,6 +1730,7 @@ class ElrakningPanel {
           button.classList.toggle("active", this._averageLineVisible);
           button.setAttribute("aria-pressed", String(this._averageLineVisible));
           this.renderPriceChart();
+          this._persistChartPreferences();
           return;
         }
         if (layer !== "spot") return;
@@ -1673,6 +1738,7 @@ class ElrakningPanel {
         button.classList.toggle("active", this._spotBarsVisible);
         button.setAttribute("aria-pressed", String(this._spotBarsVisible));
         this.renderPriceChart();
+        this._persistChartPreferences();
       });
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
@@ -1682,6 +1748,7 @@ class ElrakningPanel {
         this._previewLayersVisible[layer] = !this._previewLayersVisible[layer];
         button.classList.toggle("active", this._previewLayersVisible[layer]);
         button.setAttribute("aria-pressed", String(this._previewLayersVisible[layer]));
+        this._persistChartPreferences();
       });
     }
     for (const control of this.host.querySelectorAll("[data-price-layer]")) {
@@ -2612,6 +2679,7 @@ class ElrakningPanel {
       this.loadRetainedHistory();
       this.loadMeterState();
       this._loadDebugPreference();
+      this._loadChartPreferences();
     }
   }
 

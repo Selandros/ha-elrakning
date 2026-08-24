@@ -27,6 +27,17 @@ from .providers.greenely_invoice import GreenelyInvoiceError
 from .storage import StorageManager
 from .lifecycle import LifecycleManager
 
+CHART_LAYER_DEFAULTS = {
+    "spot": True,
+    "average": True,
+    "import": True,
+    "export": True,
+    "solar": True,
+    "consumption": True,
+    "charging": True,
+    "discharging": True,
+}
+
 
 class ElhandelManager:
     """Orchestrate electricity provider lifecycle and persisted state."""
@@ -37,6 +48,7 @@ class ElhandelManager:
         self.storage = StorageManager(hass)
         self.diagnostics_store = Store(hass, 1, "elrakning.diagnostics")
         self.preferences_store = Store(hass, 1, "elrakning.frontend_preferences")
+        self.chart_preferences_store = Store(hass, 1, "elrakning.chart_preferences")
         self.frontend_preferences = {"debug_enabled": False}
         self.lifecycle = LifecycleManager(hass)
         self.diagnostics: list[dict[str, Any]] = []
@@ -117,6 +129,33 @@ class ElhandelManager:
         self.frontend_preferences["debug_enabled"] = bool(enabled)
         await self.preferences_store.async_save(self.frontend_preferences)
         return await self.async_get_frontend_preferences()
+
+    async def async_get_chart_layers(self, user_id: str) -> dict[str, bool]:
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) else {}
+        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
+        chart_layers = user_state.get("chart_layers", {}) if isinstance(user_state, dict) else {}
+        result = {
+            key: chart_layers[key] if isinstance(chart_layers, dict) and isinstance(chart_layers.get(key), bool) else default
+            for key, default in CHART_LAYER_DEFAULTS.items()
+        }
+        if not isinstance(users, dict):
+            users = {}
+        if not isinstance(users.get(user_id), dict) or users[user_id].get("chart_layers") != result:
+            users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "chart_layers": result}
+            await self.chart_preferences_store.async_save({"users": users})
+        return result
+
+    async def async_set_chart_layers(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
+        current = await self.async_get_chart_layers(user_id)
+        for key, value in updates.items():
+            if key in CHART_LAYER_DEFAULTS and isinstance(value, bool):
+                current[key] = value
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
+        users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "chart_layers": current}
+        await self.chart_preferences_store.async_save({"users": users})
+        return current
 
     def async_start_refresh(self, reason: str = "startup") -> None:
         if not self.lifecycle.has_refresh_unsubscribe():
