@@ -106,53 +106,29 @@ function formatAnalysisClock(timestamp) {
   return new Date(timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
 }
 
-function findRollingWindow(periods, prices, startIndex, mode) {
-  if (startIndex < 0 || periods.length - startIndex < 4) return null;
-  let best = null;
-  for (let index = startIndex; index <= periods.length - 4; index += 1) {
-    const values = prices.slice(index, index + 4);
-    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-    if (!best || (mode === "max" ? average > best.average : average < best.average)) {
-      best = {
-        startIndex: index,
-        endIndex: index + 3,
-        start: periods[index].start,
-        end: periods[index + 3].end,
-        average,
-      };
-    }
-  }
-  return best;
+function formatAnalysisPrice(value) {
+  return `${Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 1 })} öre/kWh`;
 }
 
-function findSignificantChange(periods, prices, currentIndex, direction, threshold) {
-  for (let index = Math.max(1, currentIndex + 1); index < prices.length; index += 1) {
-    const before = prices[index - 1];
-    const after = prices[index];
-    const difference = after - before;
-    if ((direction === "drop" && difference >= 0) || (direction === "rise" && difference <= 0)) continue;
-    const absolute = Math.abs(difference);
-    const percentage = before !== 0 ? (absolute / Math.abs(before)) * 100 : 0;
-    if (absolute < threshold && percentage < 15) continue;
-    return {
-      index,
-      direction,
-      time: periods[index].start,
-      before,
-      after,
-      absolute,
-      percentage,
-    };
-  }
-  return null;
+function formatWaitDuration(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (!hours) return `${remainder} min`;
+  if (!remainder) return `${hours} h`;
+  return `${hours} h ${remainder} min`;
 }
 
-function formatWindow(window) {
-  return `${formatAnalysisClock(window.start)}–${formatAnalysisClock(window.end)}`;
-}
-
-function formatAnalysisPercent(value) {
-  return `${Math.round(value)} %`;
+function buildUsageWindow(periods, prices, startIndex, windowPeriods) {
+  if (startIndex < 0 || startIndex + windowPeriods > periods.length) return null;
+  const values = prices.slice(startIndex, startIndex + windowPeriods);
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  return {
+    start: periods[startIndex].start,
+    end: periods[startIndex + windowPeriods - 1].end,
+    startIndex,
+    endIndex: startIndex + windowPeriods - 1,
+    average_price: values.reduce((sum, value) => sum + value, 0) / values.length,
+  };
 }
 
 export function buildPriceAnalysisFacts(periods, currentIndex) {
@@ -161,8 +137,26 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
   }
   const prices = periods.map((period) => Number(period.price) * 100);
   const bands = priceColorBands(prices);
-  if (!bands || !Number.isFinite(prices[currentIndex])) return null;
+  const usageWindowPeriods = 8;
+  const searchHorizonPeriods = 24;
+  const nowWindow = buildUsageWindow(periods, prices, currentIndex, usageWindowPeriods);
+  if (!bands || !nowWindow) return null;
   const categories = prices.map((price) => priceCategory(price, bands));
+  const lastStartIndex = Math.min(
+    periods.length - usageWindowPeriods,
+    currentIndex + searchHorizonPeriods - usageWindowPeriods,
+  );
+  let bestWindow = nowWindow;
+  for (let startIndex = currentIndex + 1; startIndex <= lastStartIndex; startIndex += 1) {
+    const window = buildUsageWindow(periods, prices, startIndex, usageWindowPeriods);
+    if (window && window.average_price < bestWindow.average_price) bestWindow = window;
+  }
+  const differenceOre = nowWindow.average_price - bestWindow.average_price;
+  const differencePercent = nowWindow.average_price !== 0
+    ? (differenceOre / Math.abs(nowWindow.average_price)) * 100
+    : 0;
+  const worthWaiting = bestWindow.startIndex > nowWindow.startIndex
+    && (differenceOre >= 10 || differencePercent >= 15);
   return {
     currentIndex,
     status: categories[currentIndex],
@@ -172,42 +166,32 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
     percentile: (prices.filter((price) => price <= prices[currentIndex]).length / prices.length) * 100,
     minimum: bands.minimum,
     maximum: bands.maximum,
-    cheapestHour: findRollingWindow(periods, prices, 0, "min"),
-    mostExpensiveHour: findRollingWindow(periods, prices, 0, "max"),
-    cheapestRemainingHour: findRollingWindow(periods, prices, currentIndex, "min"),
-    mostExpensiveRemainingHour: findRollingWindow(periods, prices, currentIndex, "max"),
-    nextSignificantDrop: findSignificantChange(periods, prices, currentIndex, "drop", Math.max(2, bands.average * 0.15)),
-    nextSignificantRise: findSignificantChange(periods, prices, currentIndex, "rise", Math.max(2, bands.average * 0.15)),
+    usage_window_minutes: 120,
+    search_horizon_hours: 6,
+    now_window: nowWindow,
+    best_window: bestWindow,
+    wait_minutes: Math.max(0, (bestWindow.startIndex - nowWindow.startIndex) * 15),
+    difference_ore_per_kwh: differenceOre,
+    difference_percent: differencePercent,
+    worth_waiting: worthWaiting,
+    recommendation: worthWaiting ? "wait" : "start_now",
     categories,
   };
 }
 
 export function renderPriceAnalysis(facts) {
   if (!facts) return { category: null, status: "", forecast: "Dagens prisanalys är inte tillgänglig" };
-  const status = { cheap: "Billigt nu", normal: "Normalt pris nu", expensive: "Dyrt nu" }[facts.status];
-  const observations = [];
-  const current = facts.currentPrice;
-  const expensive = facts.mostExpensiveHour;
-  const futureExpensive = expensive && expensive.startIndex > facts.currentIndex;
-  const nextChange = [facts.nextSignificantDrop, facts.nextSignificantRise]
-    .filter(Boolean)
-    .sort((left, right) => left.index - right.index)[0];
-  if (nextChange?.direction === "drop") {
-    observations.push(`Priset sjunker ${formatAnalysisPercent(nextChange.percentage)} klockan ${formatAnalysisClock(nextChange.time)}.`);
-  } else if (nextChange?.direction === "rise") {
-    observations.push(`Priset stiger ${formatAnalysisPercent(nextChange.percentage)} klockan ${formatAnalysisClock(nextChange.time)}.`);
-  } else if (futureExpensive) {
-    const difference = ((expensive.average - current) / Math.abs(current)) * 100;
-    observations.push(`Dagens dyraste timme börjar klockan ${formatAnalysisClock(expensive.start)} och ligger ${formatAnalysisPercent(difference)} över priset nu.`);
+  if (facts.recommendation === "wait") {
+    return {
+      category: facts.status,
+      status: `Vänta ${formatWaitDuration(facts.wait_minutes)}`,
+      forecast: `Billigast att starta runt ${formatAnalysisClock(facts.best_window.start)}. Snittpriset blir ${formatAnalysisPrice(facts.best_window.average_price)} mot ${formatAnalysisPrice(facts.now_window.average_price)} om du startar nu.`,
+    };
   }
-  if (facts.status === "cheap" && facts.nextSignificantRise) {
-    observations.push(`Priset ligger under dagens snitt fram till ${formatAnalysisClock(facts.nextSignificantRise.time)}.`);
-  } else if (facts.status === "expensive" && facts.cheapestRemainingHour) {
-    observations.push(`Billigaste kommande timme är ${formatWindow(facts.cheapestRemainingHour)}.`);
-  } else if (!observations.length) {
-    observations.push("Priset ligger relativt stabilt resten av dagen.");
-  }
-  return { category: facts.status, status, forecast: observations.slice(0, 2).join(" ") };
+  const forecast = facts.best_window.startIndex === facts.now_window.startIndex
+    ? "Nu är redan ett av dagens billigare tvåtimmarsfönster."
+    : "Det blir inte märkbart billigare de närmaste 6 timmarna.";
+  return { category: facts.status, status: "Starta nu", forecast };
 }
 
 export function generateUpcomingPriceAnalysis(periods, currentIndex) {

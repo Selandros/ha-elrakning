@@ -66,22 +66,6 @@ assert.match(createPriceDebugText({
     category: "red",
   },
 }), /\"spot_price_ex_vat\": 29\.93[\s\S]*\"electricity_cost_ex_vat\": 17[\s\S]*\"subtotal_ex_vat\": 46\.93[\s\S]*\"vat\": 11\.73[\s\S]*\"customer_price\": 58\.66/);
-const upcomingPeriods = [1, 1, 1, 1, 3, 4, 10, 12, 14, 15].map((price, index) => ({
-  start: `2026-08-23T${String(12 + Math.floor(index / 4)).padStart(2, "0")}:${String((index % 4) * 15).padStart(2, "0")}:00+02:00`,
-  end: `2026-08-23T${String(12 + Math.floor((index + 1) / 4)).padStart(2, "0")}:${String(((index + 1) % 4) * 15).padStart(2, "0")}:00+02:00`,
-  price: price / 100,
-}));
-const upcomingFacts = buildPriceAnalysisFacts(upcomingPeriods, 0);
-assert.equal(upcomingFacts.cheapestHour.startIndex, 0);
-assert.equal(upcomingFacts.mostExpensiveHour.startIndex, 6);
-assert.equal(upcomingFacts.cheapestRemainingHour.startIndex, 0);
-assert.equal(upcomingFacts.mostExpensiveRemainingHour.startIndex, 6);
-assert.equal(upcomingFacts.nextSignificantRise.time, upcomingPeriods[4].start);
-assert.equal(Math.round(upcomingFacts.nextSignificantRise.percentage), 200);
-assert.deepEqual(
-  generateUpcomingPriceAnalysis(upcomingPeriods, 0, new Date("2026-08-23T12:00:00+02:00")),
-  { category: "cheap", status: "Billigt nu", forecast: "Priset stiger 200 % klockan 13:00. Priset ligger under dagens snitt fram till 13:00." },
-);
 const makeAnalysisPeriods = (values) => values.map((price, index) => {
   const start = new Date("2026-08-23T00:00:00+02:00");
   start.setMinutes(index * 15);
@@ -89,56 +73,44 @@ const makeAnalysisPeriods = (values) => values.map((price, index) => {
   end.setMinutes(end.getMinutes() + 15);
   return { start: start.toISOString(), end: end.toISOString(), price: price / 100 };
 });
-const passedExpensiveHour = generateUpcomingPriceAnalysis(
-  makeAnalysisPeriods([10, 10, 10, 10, 2, 2, 2, 2, 2, 2, 2, 2]),
-  8,
-  new Date("2026-08-23T02:00:00+02:00"),
-);
-assert.match(passedExpensiveHour.forecast, /stabilt/);
-const futureExpensiveHour = generateUpcomingPriceAnalysis(
-  makeAnalysisPeriods([2, 2, 2, 2, 9, 9, 9, 9, 2, 2, 2, 2]),
-  0,
-  new Date("2026-08-23T00:00:00+02:00"),
-);
-assert.match(futureExpensiveHour.forecast, /stiger/);
-const activeExpensiveHour = generateUpcomingPriceAnalysis(
-  makeAnalysisPeriods([2, 9, 9, 9, 9, 2, 2, 2]),
-  2,
-  new Date("2026-08-23T00:30:00+02:00"),
-);
-assert.match(activeExpensiveHour.forecast, /sjunker/);
-const lowRemainder = generateUpcomingPriceAnalysis(
-  makeAnalysisPeriods([10, 10, 10, 10, 1, 1, 1, 1, 1, 1, 1, 1]),
-  5,
-  new Date("2026-08-23T01:15:00+02:00"),
-);
-assert.match(lowRemainder.forecast, /stabilt/);
-const futurePeak = generateUpcomingPriceAnalysis(
-  makeAnalysisPeriods([1, 1, 1, 1, 2, 2, 2, 2, 10, 10, 10, 10]),
-  4,
-  new Date("2026-08-23T01:00:00+02:00"),
-);
-assert.match(futurePeak.forecast, /stiger/);
-const flatAnalysis = generateUpcomingPriceAnalysis(
-  makeAnalysisPeriods([5, 5, 5, 5, 5, 5, 5, 5]),
-  2,
-  new Date("2026-08-23T00:30:00+02:00"),
-);
-assert.doesNotMatch(flatAnalysis.forecast, /väntas|förväntas|prognos/);
-assert.equal(renderPriceAnalysis(buildPriceAnalysisFacts(makeAnalysisPeriods([5, 5, 5, 5]), 0)).forecast, "Dagens prisanalys är inte tillgänglig");
+const waitPeriods = makeAnalysisPeriods([
+  ...Array(12).fill(86),
+  ...Array(8).fill(54),
+  ...Array(12).fill(100),
+]);
+const waitFacts = buildPriceAnalysisFacts(waitPeriods, 0);
+assert.equal(waitFacts.usage_window_minutes, 120);
+assert.equal(waitFacts.search_horizon_hours, 6);
+assert.equal(waitFacts.now_window.average_price, 86);
+assert.equal(waitFacts.best_window.startIndex, 12);
+assert.equal(waitFacts.best_window.average_price, 54);
+assert.equal(waitFacts.wait_minutes, 180);
+assert.equal(waitFacts.difference_ore_per_kwh, 32);
+assert.equal(Math.round(waitFacts.difference_percent), 37);
+assert.equal(waitFacts.worth_waiting, true);
+assert.equal(waitFacts.recommendation, "wait");
+assert.deepEqual(renderPriceAnalysis(waitFacts), {
+  category: waitFacts.status,
+  status: "Vänta 3 h",
+  forecast: "Billigast att starta runt 03:00. Snittpriset blir 54 öre/kWh mot 86 öre/kWh om du startar nu.",
+});
+const marginPeriods = makeAnalysisPeriods([...Array(8).fill(86), ...Array(24).fill(82)]);
+const marginFacts = buildPriceAnalysisFacts(marginPeriods, 0);
+assert.equal(marginFacts.best_window.average_price, 82);
+assert.equal(marginFacts.worth_waiting, false);
+assert.equal(renderPriceAnalysis(marginFacts).status, "Starta nu");
+assert.match(renderPriceAnalysis(marginFacts).forecast, /6 timmar/);
+const cheapNowFacts = buildPriceAnalysisFacts(makeAnalysisPeriods([...Array(8).fill(40), ...Array(24).fill(100)]), 0);
+assert.equal(cheapNowFacts.best_window.startIndex, 0);
+assert.equal(cheapNowFacts.recommendation, "start_now");
+assert.match(renderPriceAnalysis(cheapNowFacts).forecast, /billigare tvåtimmarsfönster/);
 assert.doesNotMatch(
-  [passedExpensiveHour, futureExpensiveHour, activeExpensiveHour, lowRemainder, futurePeak, flatAnalysis]
-    .map((analysis) => analysis.forecast).join(" "),
-  /väntas|förväntas|prognos|stiger igen senare idag/,
+  renderPriceAnalysis(waitFacts).forecast,
+  /(?:stiger|sjunker) \d+ %\./,
 );
-assert.equal(
-  JSON.stringify(futureExpensiveHour),
-  JSON.stringify(generateUpcomingPriceAnalysis(
-    makeAnalysisPeriods([2, 2, 2, 2, 9, 9, 9, 9, 2, 2, 2, 2]),
-    0,
-    new Date("2026-08-23T00:00:00+02:00"),
-  )),
-);
+assert.match(renderPriceAnalysis(waitFacts).forecast, /öre\/kWh/);
+assert.match(renderPriceAnalysis(waitFacts).forecast, /mot 86 öre\/kWh/);
+assert.equal(renderPriceAnalysis(buildPriceAnalysisFacts(makeAnalysisPeriods([5, 5, 5, 5]), 0)).forecast, "Dagens prisanalys är inte tillgänglig");
 const guardedLowDay = priceColorBands([...Array.from({ length: 15 }, (_, index) => 1 + index / 10), 4.1, 100, 101, 102, 103, 104]);
 assert.equal(priceCategory(4.1, guardedLowDay), "normal");
 assert.equal(priceCategory(2, priceColorBands([2, 2, 2])), "normal");
