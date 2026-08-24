@@ -1,11 +1,13 @@
 """The Elräkning integration."""
 
+from functools import partial
 from pathlib import Path
 
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_time_change
 
 from .const import DOMAIN, ELECTRICITY_PROVIDER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
@@ -22,6 +24,11 @@ PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
 def _schedule_price_update(hass: HomeAssistant) -> None:
     """Schedule the existing price update event on Home Assistant's loop."""
     hass.loop.call_soon_threadsafe(hass.bus.async_fire, "elrakning_price_update")
+
+
+async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> None:
+    """Refresh the coordinator once at the local start of each day."""
+    await coordinator.async_request_refresh()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -47,6 +54,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["electricity_provider_price_unsub"] = hass.bus.async_listen(
         ELECTRICITY_PROVIDER_UPDATE_EVENT,
         lambda _: _schedule_price_update(hass),
+    )
+    if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
+        unsubscribe()
+    frontend_data["midnight_refresh_unsub"] = async_track_time_change(
+        hass,
+        partial(_async_midnight_refresh, coordinator),
+        hour=0,
+        minute=0,
+        second=0,
     )
 
     if not frontend_data.get("static_path_registered"):
@@ -96,6 +112,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unsubscribe := frontend_data.pop("coordinator_unsub", None):
         unsubscribe()
     if unsubscribe := frontend_data.pop("electricity_provider_price_unsub", None):
+        unsubscribe()
+    if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
         unsubscribe()
     if manager := frontend_data.pop("elhandel_manager", None):
         await manager.async_shutdown()
