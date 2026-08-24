@@ -91,7 +91,7 @@ assert.equal(waitFacts.higher_window_significant, false);
 assert.deepEqual(renderPriceAnalysis(waitFacts), {
   category: waitFacts.status,
   status: "Billigt pris nu",
-  forecast: "De kommande 2 timmarna ligger runt 86 öre/kWh. Från 03:00 sjunker tvåtimmarssnittet till 54 öre/kWh.",
+  forecast: "Nästa 2 h: 86 öre/kWh i snitt. Från 03:00: 54 öre/kWh.",
 });
 const marginPeriods = makeAnalysisPeriods([...Array(8).fill(86), ...Array(24).fill(82)]);
 const marginFacts = buildPriceAnalysisFacts(marginPeriods, 0);
@@ -103,12 +103,12 @@ assert.match(renderPriceAnalysis(marginFacts).forecast, /6 timmar/);
 const cheapNowFacts = buildPriceAnalysisFacts(makeAnalysisPeriods([...Array(8).fill(40), ...Array(24).fill(100)]), 0);
 assert.equal(cheapNowFacts.best_window.startIndex, 0);
 assert.equal(cheapNowFacts.lower_window_significant, false);
-assert.match(renderPriceAnalysis(cheapNowFacts).forecast, /De kommande 2 timmarna/);
+assert.match(renderPriceAnalysis(cheapNowFacts).forecast, /Nästa 2 h/);
 const renderedAnalysis = renderPriceAnalysis(waitFacts);
 assert.doesNotMatch(renderedAnalysis.status + renderedAnalysis.forecast, /Starta nu|Vänta|Billigast att starta|Du bör|Kör tvättmaskin/);
 assert.doesNotMatch(renderedAnalysis.forecast, /Priset stiger senare|Det blir billigare|Priset förändras under kvällen/);
 assert.match(renderPriceAnalysis(waitFacts).forecast, /öre\/kWh/);
-assert.match(renderPriceAnalysis(waitFacts).forecast, /Från 03:00/);
+assert.match(renderPriceAnalysis(waitFacts).forecast, /Från 03:00: 54 öre\/kWh/);
 assert.equal(renderPriceAnalysis({ ...waitFacts, status: "cheap" }).status, "Billigt pris nu");
 assert.equal(renderPriceAnalysis({ ...waitFacts, status: "normal" }).status, "Normalt pris nu");
 assert.equal(renderPriceAnalysis({ ...waitFacts, status: "expensive" }).status, "Dyrt pris nu");

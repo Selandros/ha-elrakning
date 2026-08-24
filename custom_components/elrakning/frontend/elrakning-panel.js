@@ -186,12 +186,12 @@ export function renderPriceAnalysis(facts) {
     expensive: "Dyrt pris nu",
   }[facts.status];
   const observations = [
-    `De kommande 2 timmarna ligger runt ${formatAnalysisPrice(facts.now_window.average_price)}.`,
+    `Nästa 2 h: ${formatAnalysisPrice(facts.now_window.average_price)} i snitt.`,
   ];
   if (facts.lower_window_significant) {
-    observations.push(`Från ${formatAnalysisClock(facts.best_window.start)} sjunker tvåtimmarssnittet till ${formatAnalysisPrice(facts.best_window.average_price)}.`);
+    observations.push(`Från ${formatAnalysisClock(facts.best_window.start)}: ${formatAnalysisPrice(facts.best_window.average_price)}.`);
   } else if (facts.higher_window_significant) {
-    observations.push(`Från ${formatAnalysisClock(facts.highest_window.start)} stiger tvåtimmarssnittet till ${formatAnalysisPrice(facts.highest_window.average_price)}.`);
+    observations.push(`Från ${formatAnalysisClock(facts.highest_window.start)}: ${formatAnalysisPrice(facts.highest_window.average_price)}.`);
   } else {
     observations.push("Ingen tydligt billigare eller dyrare period finns de närmaste 6 timmarna.");
   }
