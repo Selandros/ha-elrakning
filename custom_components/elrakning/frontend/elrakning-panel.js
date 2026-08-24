@@ -1298,28 +1298,33 @@ class ElrakningPanel {
         }
 
         @supports (font-size: 1cqw) {
+          .price-section .section-heading {
+            gap: clamp(1px, .5cqw, 2px) clamp(6px, 2.1cqw, 16px);
+          }
+
           .price-section .section-heading h2 {
-            font-size: clamp(20px, 5.4cqw, 24px);
+            font-size: clamp(17px, 4.8cqw, 22px);
+            margin-bottom: clamp(2px, .7cqw, 6px);
           }
 
           .price-section .section-heading .status {
-            font-size: clamp(13px, 3.3cqw, 16px);
+            font-size: clamp(11px, 2.9cqw, 14px);
           }
 
           .price-section .price-comparison-controls {
-            gap: clamp(6px, 2.5cqw, 12px);
+            gap: clamp(4px, 1.7cqw, 8px);
           }
 
           .price-section .price-filter-toggle {
-            font-size: clamp(10px, 2.6cqw, 12px);
-            gap: clamp(3px, 1.3cqw, 6px);
+            font-size: clamp(9px, 2.25cqw, 11px);
+            gap: clamp(2px, .8cqw, 4px);
           }
 
           .price-section .price-filter-track {
-            --knob-size: clamp(12px, 3.5cqw, 16px);
-            --track-padding: clamp(2px, .8cqw, 3px);
-            height: clamp(18px, 4.7cqw, 22px);
-            width: clamp(30px, 8.2cqw, 38px);
+            --knob-size: clamp(11px, 3cqw, 14px);
+            --track-padding: clamp(2px, .7cqw, 3px);
+            height: clamp(16px, 4.1cqw, 20px);
+            width: clamp(27px, 7.2cqw, 34px);
           }
 
           .price-section .price-summary {
@@ -1327,33 +1332,48 @@ class ElrakningPanel {
           }
 
           .price-section .price-value > span {
-            font-size: clamp(10px, 2.7cqw, 13px);
+            font-size: clamp(9.5px, 2.7cqw, 13px);
           }
 
           .price-section .price-value strong {
-            font-size: clamp(14px, 3.6cqw, 17px);
+            font-size: clamp(13.5px, 3.6cqw, 17px);
           }
 
           .price-section .price-value.current strong {
-            font-size: clamp(15px, 4cqw, 19px);
+            font-size: clamp(14.5px, 4cqw, 19px);
           }
 
           .price-section .price-chart-legend {
-            gap: clamp(4px, 1.6cqw, 10px) clamp(4px, 1.6cqw, 10px);
-            font-size: clamp(9.5px, 2.7cqw, 12px);
+            gap: clamp(3px, 1.1cqw, 7px) clamp(3px, 1.1cqw, 7px);
+            font-size: clamp(8.5px, 2.25cqw, 11px);
+            min-height: clamp(18px, 5.5cqw, 22px);
           }
 
           .price-section .chart-legend-toggle {
-            gap: clamp(3px, .8cqw, 5px);
+            gap: clamp(2px, .6cqw, 4px);
           }
 
           .price-section .chart-legend-swatch {
-            height: clamp(5px, 1.9cqw, 7px);
-            width: clamp(5px, 1.9cqw, 7px);
+            height: clamp(4.5px, 1.5cqw, 6px);
+            width: clamp(4.5px, 1.5cqw, 6px);
           }
 
           .price-section .price-analysis {
-            font-size: clamp(11px, 2.7cqw, 13px);
+            margin-top: clamp(1px, .5cqw, 2px);
+          }
+
+          .price-section .price-analysis-status {
+            font-size: clamp(10.5px, 2.6cqw, 12.5px);
+            line-height: 1.25;
+          }
+
+          .price-section .price-analysis-forecast {
+            font-size: clamp(9.5px, 2.35cqw, 11.5px);
+            line-height: 1.35;
+          }
+
+          .price-section .price-analysis-forecast {
+            margin-top: clamp(1px, .4cqw, 2px);
           }
         }
 
