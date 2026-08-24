@@ -179,7 +179,10 @@ export function buildPriceAnalysisFacts(periods, currentIndex) {
 }
 
 export function renderPriceAnalysis(facts) {
-  if (!facts) return { category: null, status: "", forecast: "Dagens prisanalys är inte tillgänglig" };
+  if (!facts) {
+    const forecast = "Dagens prisanalys är inte tillgänglig";
+    return { category: null, status: "", forecast, sentences: [forecast] };
+  }
   const status = {
     cheap: "Billigt pris nu",
     normal: "Normalt pris nu",
@@ -195,7 +198,8 @@ export function renderPriceAnalysis(facts) {
   } else {
     observations.push("Ingen tydligt billigare eller dyrare period finns de närmaste 6 timmarna.");
   }
-  return { category: facts.status, status, forecast: observations.slice(0, 2).join(" ") };
+  const sentences = observations.slice(0, 2);
+  return { category: facts.status, status, forecast: sentences.join(" "), sentences };
 }
 
 export function generateUpcomingPriceAnalysis(periods, currentIndex) {
@@ -1126,6 +1130,7 @@ class ElrakningPanel {
         }
 
         .price-analysis-status {
+          display: block;
           font-size: var(--price-card-text-size);
           font-weight: 600;
           line-height: 1.2;
@@ -1143,30 +1148,24 @@ class ElrakningPanel {
           color: var(--error-color);
         }
 
-        .price-analysis-separator,
         .price-analysis-forecast {
           color: var(--secondary-text-color);
         }
 
         .price-analysis-forecast {
+          align-items: baseline;
+          column-gap: .3em;
+          display: flex;
           font-size: var(--price-card-text-size);
+          flex-wrap: wrap;
           line-height: 1.35;
-          overflow-wrap: anywhere;
+          row-gap: 0;
         }
 
-        @container price-card (max-width: 480px) {
-          .price-analysis-status,
-          .price-analysis-forecast {
-            display: block;
-          }
-
-          .price-analysis-separator {
-            display: none;
-          }
-
-          .price-analysis-forecast {
-            margin-top: 2px;
-          }
+        .price-analysis-sentence {
+          flex: 0 1 auto;
+          min-width: min-content;
+          overflow-wrap: break-word;
         }
 
         .price-chart-legend {
@@ -2903,17 +2902,22 @@ class ElrakningPanel {
         const status = document.createElement("span");
         status.className = `price-analysis-status ${upcoming.category}`;
         status.textContent = upcoming.status;
-        const separator = document.createElement("span");
-        separator.className = "price-analysis-separator";
-        separator.textContent = " · ";
         const forecast = document.createElement("span");
         forecast.className = "price-analysis-forecast";
-        forecast.textContent = upcoming.forecast;
-        analysis.append(status, separator, forecast);
+        for (const sentenceText of upcoming.sentences || [upcoming.forecast]) {
+          const sentence = document.createElement("span");
+          sentence.className = "price-analysis-sentence";
+          sentence.textContent = sentenceText;
+          forecast.append(sentence);
+        }
+        analysis.append(status, forecast);
       } else {
         const forecast = document.createElement("span");
         forecast.className = "price-analysis-forecast";
-        forecast.textContent = upcoming.forecast;
+        const sentence = document.createElement("span");
+        sentence.className = "price-analysis-sentence";
+        sentence.textContent = upcoming.forecast;
+        forecast.append(sentence);
         analysis.append(forecast);
       }
     }

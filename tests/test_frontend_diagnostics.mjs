@@ -92,6 +92,7 @@ assert.deepEqual(renderPriceAnalysis(waitFacts), {
   category: waitFacts.status,
   status: "Billigt pris nu",
   forecast: "Nästa 2 h: 86 öre/kWh i snitt. Från 03:00: 54 öre/kWh.",
+  sentences: ["Nästa 2 h: 86 öre/kWh i snitt.", "Från 03:00: 54 öre/kWh."],
 });
 const marginPeriods = makeAnalysisPeriods([...Array(8).fill(86), ...Array(24).fill(82)]);
 const marginFacts = buildPriceAnalysisFacts(marginPeriods, 0);
@@ -113,6 +114,7 @@ assert.equal(renderPriceAnalysis({ ...waitFacts, status: "cheap" }).status, "Bil
 assert.equal(renderPriceAnalysis({ ...waitFacts, status: "normal" }).status, "Normalt pris nu");
 assert.equal(renderPriceAnalysis({ ...waitFacts, status: "expensive" }).status, "Dyrt pris nu");
 assert.equal(renderPriceAnalysis(buildPriceAnalysisFacts(makeAnalysisPeriods([5, 5, 5, 5]), 0)).forecast, "Dagens prisanalys är inte tillgänglig");
+assert.deepEqual(renderPriceAnalysis(buildPriceAnalysisFacts(makeAnalysisPeriods([5, 5, 5, 5]), 0)).sentences, ["Dagens prisanalys är inte tillgänglig"]);
 const guardedLowDay = priceColorBands([...Array.from({ length: 15 }, (_, index) => 1 + index / 10), 4.1, 100, 101, 102, 103, 104]);
 assert.equal(priceCategory(4.1, guardedLowDay), "normal");
 assert.equal(priceCategory(2, priceColorBands([2, 2, 2])), "normal");
@@ -496,15 +498,16 @@ assert.match(panelSource, /white-space: normal/);
 assert.match(panelSource, /text-overflow: clip/);
 assert.match(panelSource, /overflow-wrap: anywhere/);
 assert.match(panelSource, /price-analysis-status/);
-assert.match(panelSource, /price-analysis-separator/);
 assert.match(panelSource, /price-analysis-forecast/);
-assert.match(panelSource, /@container price-card \(max-width: 480px\)/);
-assert.match(panelSource, /\.price-analysis-separator \{[\s\S]*display: none/);
-assert.match(panelSource, /\.price-analysis-forecast \{[\s\S]*overflow-wrap: anywhere/);
+assert.match(panelSource, /\.price-analysis-status \{[\s\S]*display: block/);
+assert.match(panelSource, /\.price-analysis-forecast \{[\s\S]*column-gap: \.3em[\s\S]*display: flex[\s\S]*flex-wrap: wrap/);
+assert.match(panelSource, /\.price-analysis-sentence \{[\s\S]*flex: 0 1 auto[\s\S]*min-width: min-content[\s\S]*overflow-wrap: break-word/);
+assert.doesNotMatch(panelSource, /price-analysis-separator/);
+assert.doesNotMatch(panelSource, /@container price-card \(max-width: 480px\)[\s\S]*price-analysis/);
 assert.match(panelSource, /\.price-summary \{[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
 assert.doesNotMatch(panelSource, /-webkit-line-clamp: 2/);
-assert.match(panelSource, /separator\.textContent = " · "/);
-assert.match(panelSource, /forecast\.textContent = upcoming\.forecast/);
+assert.match(panelSource, /for \(const sentenceText of upcoming\.sentences \|\| \[upcoming\.forecast\]\)/);
+assert.match(panelSource, /sentence\.className = "price-analysis-sentence"/);
 assert.match(panelSource, /\.price-analysis-status\.cheap/);
 assert.match(panelSource, /\.price-analysis-status\.normal/);
 assert.match(panelSource, /\.price-analysis-status\.expensive/);
