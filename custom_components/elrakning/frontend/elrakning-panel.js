@@ -374,6 +374,7 @@ class ElrakningPanel {
     this._chartTouch = null;
     this._chartDebugCopyText = "";
     this._tooltipOrbit = { angle: null };
+    this._priceHeaderLayoutObserver = null;
     this._meterPowerHistory = { date: null, points: [] };
     this._meterTooltipPoints = [];
     this._meterCanonicalPoints = [];
@@ -1079,6 +1080,16 @@ class ElrakningPanel {
           font-size: var(--price-card-text-size);
         }
 
+        .section-heading.price-summary-inline .price-summary .price-value > span,
+        .section-heading.price-summary-inline .price-summary .price-value small,
+        .section-heading.price-summary-inline .price-summary .price-value em {
+          font-size: clamp(10px, 1.4cqw, 15px);
+        }
+
+        .section-heading.price-summary-inline .price-summary .price-value strong {
+          font-size: clamp(10px, 1.6cqw, 17px);
+        }
+
         .section-heading h2,
         .card[data-provider-card] h2 {
           font-size: var(--card-title-size);
@@ -1616,7 +1627,24 @@ class ElrakningPanel {
     this._bindDiagnostics();
     this._bindMainInvoiceParser();
     this._bindChartLegend();
+    this._setupPriceHeaderLayoutObserver();
     this.renderPriceChart();
+  }
+
+  _setupPriceHeaderLayoutObserver() {
+    const heading = this.host.querySelector(".section-heading");
+    if (!heading || !("ResizeObserver" in window)) return;
+    const updateLayoutState = () => {
+      const cluster = heading.querySelector(".price-heading-main");
+      const summary = heading.querySelector(".price-summary");
+      if (!cluster || !summary) return;
+      const wrapped = Math.abs(summary.getBoundingClientRect().top - cluster.getBoundingClientRect().top) > 1;
+      heading.classList.toggle("price-summary-wrapped", wrapped);
+      heading.classList.toggle("price-summary-inline", !wrapped);
+    };
+    this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
+    this._priceHeaderLayoutObserver.observe(heading);
+    updateLayoutState();
   }
 
   _bindChartLegend() {
@@ -2627,6 +2655,8 @@ class ElrakningPanel {
     document.removeEventListener("visibilitychange", this._onThemeVisibility);
     this._themeResizeObserver?.disconnect();
     this._themeResizeObserver = null;
+    this._priceHeaderLayoutObserver?.disconnect();
+    this._priceHeaderLayoutObserver = null;
     this._themeBackgroundReady = false;
   }
 

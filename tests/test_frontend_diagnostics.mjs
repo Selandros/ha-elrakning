@@ -386,6 +386,11 @@ assert.match(panelSource, /\.price-heading-main \{[\s\S]*justify-content: flex-s
 assert.match(panelSource, /\.price-summary \{[\s\S]*display: flex[\s\S]*flex-wrap: wrap[\s\S]*justify-content: center/);
 assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 1 1 408px/);
 assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*flex: 0 0 82px[\s\S]*min-width: 82px[\s\S]*text-align: center/);
+assert.match(panelSource, /ResizeObserver\(updateLayoutState\)/);
+assert.match(panelSource, /price-summary-wrapped/);
+assert.match(panelSource, /price-summary-inline/);
+assert.match(panelSource, /\.section-heading\.price-summary-inline[\s\S]*font-size: clamp\(10px, 1\.4cqw, 15px\)/);
+assert.match(panelSource, /\.section-heading\.price-summary-inline[\s\S]*font-size: clamp\(10px, 1\.6cqw, 17px\)/);
 assert.match(panelSource, /chart-legend-preview/);
 assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*cursor: pointer;/);
 assert.match(panelSource, /min-height: 22px/);
