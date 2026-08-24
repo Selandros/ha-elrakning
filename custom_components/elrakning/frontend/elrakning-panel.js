@@ -458,19 +458,19 @@ class ElrakningPanel {
           <div class="price-chart" aria-live="polite"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="spot" aria-pressed="true">
-              <span class="chart-legend-swatch spot" aria-hidden="true"></span>Spotpris
+              <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris
             </button>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="average" aria-pressed="true">
               <span class="chart-legend-swatch average" aria-hidden="true"></span>Snitt
             </button>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="import" aria-pressed="true">
-              <span class="chart-legend-swatch import" aria-hidden="true"></span>Import
+              <span class="chart-legend-swatch import" aria-hidden="true"></span>Köp
             </button>
             <button type="button" class="chart-legend-toggle active" data-chart-layer="export" aria-pressed="true">
-              <span class="chart-legend-swatch export" aria-hidden="true"></span>Export
+              <span class="chart-legend-swatch export" aria-hidden="true"></span>Sälj
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview active solar" data-preview-layer="solar" aria-pressed="true">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Solproduktion
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Sol
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview active consumption" data-preview-layer="consumption" aria-pressed="true">
               <span class="chart-legend-swatch" aria-hidden="true"></span>Förbrukning
@@ -1086,11 +1086,23 @@ class ElrakningPanel {
         }
 
           .price-summary {
-            gap: 12px 18px;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 4px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             margin-left: 0;
-            text-align: left;
+            text-align: center;
             width: 100%;
+          }
+
+          .price-value > span {
+            font-size: 10px;
+          }
+
+          .price-value strong {
+            font-size: 14px;
+          }
+
+          .price-value.current strong {
+            font-size: 15px;
           }
 
           .price-comparison-controls {
@@ -1122,12 +1134,14 @@ class ElrakningPanel {
         .price-analysis {
           color: var(--secondary-text-color);
           font-size: 13px;
-          height: 20px;
-          line-height: 20px;
+          height: auto;
+          line-height: 18px;
           margin: 2px 0 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+          min-height: 20px;
+          overflow: visible;
+          overflow-wrap: anywhere;
+          text-overflow: clip;
+          white-space: normal;
         }
 
         .price-analysis-status {
@@ -1150,7 +1164,7 @@ class ElrakningPanel {
           align-items: center;
           display: flex;
           flex-wrap: wrap;
-          gap: 12px;
+          gap: 6px 10px;
           min-height: 22px;
           justify-content: center;
           margin-top: 1px;
@@ -1164,6 +1178,11 @@ class ElrakningPanel {
           align-self: center;
           margin: 0 0 0 auto;
           white-space: nowrap;
+        }
+
+        .chart-legend-toggle {
+          gap: 4px;
+          padding: 1px 0;
         }
 
         .price-filter-toggle {

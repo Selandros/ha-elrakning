@@ -340,7 +340,7 @@ assert.match(panelSource, /nearestMeterPoint\(this\._meterTooltipPoints, timesta
 assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
 assert.match(panelSource, /const value = this\._spotBarsVisible && Number\.isFinite\(comparisonPrice\)/);
 assert.doesNotMatch(panelSource, /data-tooltip=/);
-assert.match(panelSource, /Solproduktion/);
+assert.match(panelSource, />Sol\s*</);
 assert.match(panelSource, /Förbrukning/);
 assert.match(panelSource, /Laddning/);
 assert.match(panelSource, /Urladdning/);
@@ -456,8 +456,12 @@ assert.match(panelSource, /const markerLayoutsByHeight = \[\.\.\.markerLayouts\]
 assert.doesNotMatch(panelSource, /const markerLabelY =/);
 assert.match(panelSource, /data-price-analysis/);
 assert.match(panelSource, /\.price-analysis/);
-assert.match(panelSource, /white-space: nowrap/);
-assert.match(panelSource, /text-overflow: ellipsis/);
+assert.match(panelSource, /white-space: normal/);
+assert.match(panelSource, /text-overflow: clip/);
+assert.match(panelSource, /overflow-wrap: anywhere/);
+assert.match(panelSource, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+assert.match(panelSource, /\.price-chart-legend \{[\s\S]*gap: 6px 10px/);
+assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*gap: 4px/);
 assert.doesNotMatch(panelSource, /-webkit-line-clamp: 2/);
 assert.doesNotMatch(panelSource, /price-analysis-separator/);
 assert.match(panelSource, /document\.createTextNode\(` · \$\{upcoming\.forecast\}`\)/);
