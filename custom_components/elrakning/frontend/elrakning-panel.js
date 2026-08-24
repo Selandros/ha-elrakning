@@ -3354,7 +3354,7 @@ class ElrakningPanel {
       ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
         .filter(Number.isFinite),
     );
-    const meterBase = meterMaximum || 1;
+    const meterBase = Math.max(10, meterMaximum);
     const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
     const meterNormalized = (meterBase / 4) / meterMagnitude;
     const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;

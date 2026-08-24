@@ -397,6 +397,21 @@ assert.match(panelSource, /const meterCanonicalPoints = this\.buildCanonicalMete
 assert.match(panelSource, /const meterDisplayPoints = this\.prepareMeterDisplayPoints\(meterCanonicalPoints\)/);
 assert.doesNotMatch(panelSource, /const meterDisplayPoints = this\.smoothSignedMeterPoints/);
 assert.match(panelSource, /const meterMaximum = Math\.max\(/);
+assert.match(panelSource, /const meterBase = Math\.max\(10, meterMaximum\)/);
+const meterRangeForMaximum = (meterMaximum) => {
+  const meterBase = Math.max(10, meterMaximum);
+  const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
+  const meterNormalized = (meterBase / 4) / meterMagnitude;
+  const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;
+  const meterStep = meterStepFactor * meterMagnitude;
+  return Math.ceil(meterBase / meterStep) * meterStep;
+};
+assert.equal(meterRangeForMaximum(0.8), 10);
+assert.equal(meterRangeForMaximum(4.2), 10);
+assert.equal(meterRangeForMaximum(9.9), 10);
+assert.equal(meterRangeForMaximum(10), 10);
+assert.ok(meterRangeForMaximum(10.1) > 10);
+assert.match(panelSource, /const meterY = \(value\) => plot\.top \+ plotHeight - \(Math\.max\(0, Number\(value\) \|\| 0\) \/ meterRange\) \* plotHeight/);
 assert.match(panelSource, /meterPointAt = \(timestamp\) => meterPoints\.reduce/);
 assert.match(panelSource, /Är du säker\? Alla valda mätare tas bort\./);
 assert.match(panelSource, /renderSelectors\(response\);/);
