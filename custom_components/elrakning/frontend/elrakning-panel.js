@@ -443,6 +443,9 @@ class ElrakningPanel {
     this._meterCanonicalPointMap = new Map();
     this._meterHistorySummary = null;
     this._meterHistoryRequestToken = 0;
+    this._powerState = null;
+    this._powerHistory = { date: null, series: {} };
+    this._powerHistoryRequestToken = 0;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
     this._averageLineVisible = true;
@@ -587,6 +590,24 @@ class ElrakningPanel {
             <button type="button" data-meter-source hidden>Visa mätardata</button>
           </article>
 
+          <article class="card power-card" data-power-card="solar">
+            <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span></div>
+            <div class="power-summary" data-power-summary="solar" hidden></div>
+            <button type="button" data-power-configure="solar">Konfigurera</button>
+          </article>
+
+          <article class="card power-card" data-power-card="consumption">
+            <div class="card-heading"><h2>Last</h2><span class="status" data-power-status="consumption">Ej konfigurerad</span></div>
+            <div class="power-summary" data-power-summary="consumption" hidden></div>
+            <button type="button" data-power-configure="consumption">Konfigurera</button>
+          </article>
+
+          <article class="card power-card" data-power-card="battery">
+            <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span></div>
+            <div class="power-summary" data-power-summary="battery" hidden></div>
+            <button type="button" data-power-configure="battery">Konfigurera</button>
+          </article>
+
         </section>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
@@ -628,6 +649,18 @@ class ElrakningPanel {
           <h2>Mätardata</h2>
           <pre data-meter-source-text></pre>
           <button type="button" data-meter-source-close>Stäng</button>
+        </div>
+      </div>
+      <div class="meter-dialog power-dialog" data-power-dialog hidden role="dialog" aria-modal="true" aria-labelledby="power-title">
+        <div class="meter-dialog-card">
+          <h2 id="power-title">Konfigurera energi</h2>
+          <p data-power-result></p>
+          <div class="meter-selectors" data-power-selectors></div>
+          <button type="button" data-power-add-solar hidden>Lägg till solentitet</button>
+          <div class="provider-actions">
+            <button type="button" data-power-cancel>Avbryt</button>
+            <button type="button" data-power-save disabled>Spara</button>
+          </div>
         </div>
       </div>
       <div class="provider-dialog" data-electricity-dialog hidden role="dialog" aria-modal="true" aria-labelledby="electricity-provider-title">
@@ -815,6 +848,14 @@ class ElrakningPanel {
         }
 
         .meter-summary {
+          color: var(--secondary-text-color);
+          display: grid;
+          gap: 6px 18px;
+          grid-template-columns: minmax(120px, auto) 1fr;
+          margin-top: 14px;
+        }
+
+        .power-summary {
           color: var(--secondary-text-color);
           display: grid;
           gap: 6px 18px;
@@ -1564,6 +1605,22 @@ class ElrakningPanel {
           stroke: var(--grid-export-color);
         }
 
+        .chart-power-solar { stroke: var(--solar-color); }
+        .chart-power-consumption { stroke: var(--consumption-color); }
+        .chart-power-charging { stroke: var(--charging-color); }
+        .chart-power-discharging { stroke: var(--discharging-color); }
+        .chart-power-solar,
+        .chart-power-consumption,
+        .chart-power-charging,
+        .chart-power-discharging {
+          fill: none;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 1.6;
+          opacity: .82;
+          vector-effect: non-scaling-stroke;
+        }
+
         .chart-hover-markers {
           pointer-events: none;
         }
@@ -1585,6 +1642,16 @@ class ElrakningPanel {
         .chart-hover-marker-export {
           fill: var(--grid-export-color);
         }
+
+        .chart-hover-marker-solar { fill: var(--solar-color); }
+        .chart-hover-marker-consumption { fill: var(--consumption-color); }
+        .chart-hover-marker-charging { fill: var(--charging-color); }
+        .chart-hover-marker-discharging { fill: var(--discharging-color); }
+
+        .tooltip-power-solar { color: var(--solar-color); }
+        .tooltip-power-consumption { color: var(--consumption-color); }
+        .tooltip-power-charging { color: var(--charging-color); }
+        .tooltip-power-discharging { color: var(--discharging-color); }
 
         .chart-bar {
           cursor: default;
@@ -1693,6 +1760,7 @@ class ElrakningPanel {
     this._bindElectricityProviderDialog();
     this._bindRetainedHistory();
     this._bindMeterDialog();
+    this._bindPowerDialog();
     this._bindDebugToggle();
     this._bindConfigurationCardsToggle();
     this._bindProviderSourceDialog();
@@ -2003,6 +2071,155 @@ class ElrakningPanel {
         result.textContent = `Elmätaren kunde inte rensas: ${details.code}: ${details.message}`;
       }
     });
+  }
+
+  _bindPowerDialog() {
+    const dialog = this.host.querySelector("[data-power-dialog]");
+    const selectorsElement = this.host.querySelector("[data-power-selectors]");
+    const result = this.host.querySelector("[data-power-result]");
+    const save = this.host.querySelector("[data-power-save]");
+    const cancel = this.host.querySelector("[data-power-cancel]");
+    const addSolar = this.host.querySelector("[data-power-add-solar]");
+    if (!dialog || !selectorsElement || !result || !save || !cancel) return;
+    let mode = "solar";
+    let solarCount = 2;
+    const fieldsFor = (selectedMode) => selectedMode === "solar"
+      ? Array.from({ length: solarCount }, (_, index) => [`Solproduktion ${index + 1}`, "solar_entities", true])
+      : selectedMode === "consumption"
+        ? [["Förbrukning", "consumption_entity", false]]
+        : [["Laddning", "charging_entity", false], ["Urladdning", "discharging_entity", false], ["Batteriets laddnivå", "soc_entity", false], ["Batterikapacitet", "capacity_entity", false]];
+    const close = () => { dialog.hidden = true; selectorsElement.replaceChildren(); };
+    const renderSelectors = (state) => {
+      const fields = fieldsFor(mode);
+      selectorsElement.replaceChildren(...fields.map(([labelText, field, multiple], index) => {
+        const label = document.createElement("label");
+        label.className = "meter-selector-label";
+        label.textContent = labelText;
+        const selector = document.createElement("ha-selector");
+        selector.dataset.powerField = field;
+        if (multiple) selector.dataset.powerIndex = String(index);
+        selector.hass = this.hass;
+        selector.selector = { entity: { filter: { domain: "sensor" }, multiple: false } };
+        const current = multiple ? state?.solar_entities?.[index] : state?.[field];
+        selector.value = current || undefined;
+        selector.addEventListener("value-changed", (event) => { selector.value = event.detail?.value; });
+        label.append(selector);
+        return label;
+      }));
+    };
+    const open = async (selectedMode) => {
+      mode = selectedMode;
+      dialog.hidden = false;
+      save.disabled = true;
+      result.textContent = "Hämtar sparad konfiguration …";
+      try {
+        const state = await this.hass.callWS({ type: "elrakning/power_state" });
+        solarCount = Math.max(2, state?.solar_entities?.length || 0);
+        this._applyPowerState(state);
+        renderSelectors(state);
+        if (addSolar) addSolar.hidden = mode !== "solar";
+        result.textContent = "Välj de entiteter som ska användas.";
+        save.disabled = false;
+      } catch {
+        selectorsElement.replaceChildren();
+        result.textContent = "Energikonfigurationen kunde inte hämtas.";
+      }
+    };
+    this.host.querySelectorAll("[data-power-configure]").forEach((button) => {
+      button.addEventListener("click", () => open(button.dataset.powerConfigure));
+    });
+    save.addEventListener("click", async () => {
+      const mapping = { solar_entities: [], consumption_entity: "", charging_entity: "", discharging_entity: "", soc_entity: "", capacity_entity: "" };
+      selectorsElement.querySelectorAll("[data-power-field]").forEach((selector) => {
+        if (selector.dataset.powerField === "solar_entities") mapping.solar_entities.push(selector.value || "");
+        else mapping[selector.dataset.powerField] = selector.value || "";
+      });
+      save.disabled = true;
+      result.textContent = "Sparar …";
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
+        if (!response?.success) throw new Error(response?.error || "power_save_failed");
+        this._applyPowerState(response);
+        await this.loadPowerHistory();
+        close();
+      } catch (error) {
+        const details = this._websocketErrorDetails(error);
+        save.disabled = false;
+        result.textContent = `Energikonfigurationen kunde inte sparas: ${details.code}: ${details.message}`;
+      }
+    });
+    cancel.addEventListener("click", close);
+    addSolar?.addEventListener("click", () => {
+      if (mode !== "solar" || solarCount >= 12) return;
+      solarCount += 1;
+      renderSelectors(this._powerState || {});
+    });
+  }
+
+  _applyPowerState(state) {
+    this._powerState = state || null;
+    const solarConfigured = Array.isArray(state?.solar_entities) && state.solar_entities.length > 0;
+    const loadConfigured = Boolean(state?.consumption_entity);
+    const batteryConfigured = Boolean(state?.charging_entity || state?.discharging_entity || state?.soc_entity || state?.capacity_entity);
+    const values = {
+      solar: solarConfigured ? [["Effekt just nu", state.solar_kw, "kW"]] : [],
+      consumption: loadConfigured ? [["Last just nu", state.consumption_kw, "kW"]] : [],
+      battery: batteryConfigured ? [["Laddning", state.charging_kw, "kW"], ["Urladdning", state.discharging_kw, "kW"], ["Laddnivå", state.soc_percent, "%"], ["Kapacitet", state.capacity_kwh, "kWh"]] : [],
+    };
+    for (const [cardType, rows] of Object.entries(values)) {
+      const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : cardType === "consumption" ? "consumption" : "solar"}"]`);
+      const summary = this.host.querySelector(`[data-power-summary="${cardType}"]`);
+      const configured = cardType === "solar" ? solarConfigured : cardType === "consumption" ? loadConfigured : batteryConfigured;
+      if (status) {
+        status.textContent = configured ? "" : "Ej konfigurerad";
+        status.hidden = configured;
+      }
+      if (!summary) continue;
+      const validRows = rows.filter(([, value]) => typeof value === "number" && Number.isFinite(value));
+      summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
+        const label = document.createElement("strong");
+        label.textContent = labelText;
+        const output = document.createElement("span");
+        output.textContent = `${this._formatNumber(value)} ${unit}`;
+        return [label, output];
+      }));
+      summary.hidden = validRows.length === 0;
+    }
+  }
+
+  async loadPowerState(loadHistory = false) {
+    if (!this.hass?.callWS) return;
+    try {
+      const state = await this.hass.callWS({ type: "elrakning/power_state" });
+      this._applyPowerState(state);
+      if (loadHistory) await this.loadPowerHistory();
+    } catch {
+      // Keep optional power cards unconfigured when state is unavailable.
+    }
+  }
+
+  async loadPowerHistory() {
+    if (!this.hass?.callWS) return;
+    const requestToken = ++this._powerHistoryRequestToken;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/power_history" });
+      if (requestToken !== this._powerHistoryRequestToken) return;
+      this._powerHistory = {
+        date: response?.date || null,
+        series: response?.success && response?.series && typeof response.series === "object" ? response.series : {},
+      };
+      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    } catch {
+      if (requestToken !== this._powerHistoryRequestToken) return;
+      this._powerHistory = { date: null, series: {} };
+    }
+  }
+
+  _appendPowerState(eventData) {
+    if (eventData?.state) {
+      this._applyPowerState(eventData.state);
+      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    }
   }
 
   async _recordMeterDiagnostic(level, event, message) {
@@ -2737,6 +2954,11 @@ class ElrakningPanel {
           .then((unsubscribe) => unsubscribe?.())
           .catch(() => {});
       }
+      if (this._powerEventUnsubscribePromise) {
+        Promise.resolve(this._powerEventUnsubscribePromise)
+          .then((unsubscribe) => unsubscribe?.())
+          .catch(() => {});
+      }
       if (this._diagnosticsEventUnsubscribePromise) {
         Promise.resolve(this._diagnosticsEventUnsubscribePromise)
           .then((unsubscribe) => unsubscribe?.())
@@ -2760,12 +2982,26 @@ class ElrakningPanel {
           if ([mapping.power_entity, mapping.energy_import_entity, mapping.energy_export_entity].includes(entityId)) {
             this.loadMeterState();
           }
+          const powerMapping = this._powerState || {};
+          const powerEntities = [
+            ...(Array.isArray(powerMapping.solar_entities) ? powerMapping.solar_entities : []),
+            powerMapping.consumption_entity,
+            powerMapping.charging_entity,
+            powerMapping.discharging_entity,
+            powerMapping.soc_entity,
+            powerMapping.capacity_entity,
+          ];
+          if (powerEntities.includes(entityId)) this.loadPowerState();
         },
         "state_changed",
       );
       this._meterPowerEventUnsubscribePromise = hass.connection.subscribeEvents(
         (event) => this._appendMeterPowerPoint(event.data),
         "elrakning_meter_power_update",
+      );
+      this._powerEventUnsubscribePromise = hass.connection.subscribeEvents(
+        (event) => this._appendPowerState(event.data),
+        "elrakning_power_update",
       );
       this._diagnosticsEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this._loadDiagnosticsState?.(),
@@ -2776,6 +3012,7 @@ class ElrakningPanel {
       this.loadProviderState();
       this.loadRetainedHistory();
       this.loadMeterState(true);
+      this.loadPowerState(true);
       this._loadDebugPreference();
       this._loadChartPreferences();
     }
@@ -2802,6 +3039,11 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._powerEventUnsubscribePromise) {
+      Promise.resolve(this._powerEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
     if (this._diagnosticsEventUnsubscribePromise) {
       Promise.resolve(this._diagnosticsEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -2811,6 +3053,7 @@ class ElrakningPanel {
     this._greenelyEventUnsubscribePromise = null;
     this._meterEventUnsubscribePromise = null;
     this._meterPowerEventUnsubscribePromise = null;
+    this._powerEventUnsubscribePromise = null;
     this._diagnosticsEventUnsubscribePromise = null;
     this._loadDiagnosticsState = null;
     this._eventConnection = null;
@@ -3178,6 +3421,24 @@ class ElrakningPanel {
     return buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs, maxDistanceMs);
   }
 
+  buildCanonicalPowerPoints(points, dayStart, dayEnd) {
+    const canonical = this.buildCanonicalMeterPoints(
+      (Array.isArray(points) ? points : []).map((point) => ({
+        timestamp: point.timestamp,
+        import_kw: point.value_kw,
+        export_kw: 0,
+      })),
+      dayStart,
+      dayEnd,
+    );
+    return canonical.map((point) => ({
+      timestamp: point.timestamp,
+      raw_timestamp: point.raw_timestamp,
+      value_kw: point.import_kw,
+      gap_before: point.gap_before,
+    }));
+  }
+
   buildMeterDisplaySegments(points, key) {
     const segments = [];
     let start = null;
@@ -3337,10 +3598,29 @@ class ElrakningPanel {
         .filter((point) => point.raw_timestamp !== null)
         .map((point) => [point.timestamp, point]),
     );
+    this._powerCanonicalPointMaps = Object.fromEntries(
+      Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
+        points.filter((point) => point.raw_timestamp !== null).map((point) => [point.timestamp, point]),
+      )]),
+    );
     const meterDisplayPoints = this.prepareMeterDisplayPoints(meterCanonicalPoints);
+    const powerCanonicalPoints = {};
+    const powerDisplayPoints = {};
+    const powerDisplayGeometry = {};
+    for (const key of ["solar", "consumption", "charging", "discharging"]) {
+      const rawPoints = Array.isArray(this._powerHistory?.series?.[key]?.points)
+        ? this._powerHistory.series[key].points.filter((point) => {
+          const timestamp = new Date(point.timestamp).getTime();
+          return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+        })
+        : [];
+      powerCanonicalPoints[key] = this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
+    }
     const meterMaximum = Math.max(
       0,
       ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
+        .filter(Number.isFinite),
+      ...Object.values(powerCanonicalPoints).flatMap((points) => points.map((point) => Number(point.value_kw)))
         .filter(Number.isFinite),
     );
     const meterBase = Math.max(10, meterMaximum);
@@ -3355,15 +3635,31 @@ class ElrakningPanel {
         .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`)
         .join("")
       : "";
+    const powerLinesFor = (key, className, visible) => {
+      powerDisplayPoints[key] = powerCanonicalPoints[key].filter((point) => Number.isFinite(point.value_kw));
+      return visible
+        ? this.buildMeterDisplaySegments(powerDisplayPoints[key].map((point) => ({ ...point, ["value_kw"]: point.value_kw })), "value_kw")
+          .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, "value_kw", x, meterY)}" />`)
+          .join("")
+        : "";
+    };
     const meterDisplayGeometry = {
       import_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "import_kw", x, meterY),
       export_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "export_kw", x, meterY),
     };
+    for (const key of ["solar", "consumption", "charging", "discharging"]) {
+      powerDisplayGeometry[key] = this.buildMeterDisplayGeometry(powerDisplayPoints[key] || [], "value_kw", x, meterY);
+    }
     const meterLines = [
       meterLinesFor("import_kw", "chart-meter-import", this._meterPowerVisible.import),
       meterLinesFor("export_kw", "chart-meter-export", this._meterPowerVisible.export),
+      powerLinesFor("solar", "chart-power-solar", this._previewLayersVisible.solar),
+      powerLinesFor("consumption", "chart-power-consumption", this._previewLayersVisible.consumption),
+      powerLinesFor("charging", "chart-power-charging", this._previewLayersVisible.charging),
+      powerLinesFor("discharging", "chart-power-discharging", this._previewLayersVisible.discharging),
     ].join("");
-    const meterVisible = meterPoints.length > 0 && (this._meterPowerVisible.import || this._meterPowerVisible.export);
+    const meterVisible = (meterPoints.length > 0 && (this._meterPowerVisible.import || this._meterPowerVisible.export))
+      || Object.values(powerDisplayPoints).some((points) => points.length > 0);
     const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
     const meterGrid = meterVisible
       ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />
@@ -3463,6 +3759,17 @@ class ElrakningPanel {
     if (this._meterPowerVisible.export && Number.isFinite(details?.export_kw)) {
       rows.push(`<span class="tooltip-value tooltip-meter-export">Export: ${this._formatNumber(details.export_kw)} kW</span>`);
     }
+    const powerRows = [
+      ["solar", "Sol", "tooltip-power-solar"],
+      ["consumption", "Last", "tooltip-power-consumption"],
+      ["charging", "Laddning", "tooltip-power-charging"],
+      ["discharging", "Urladdning", "tooltip-power-discharging"],
+    ];
+    for (const [key, label, className] of powerRows) {
+      if (this._previewLayersVisible[key] && Number.isFinite(details?.[`${key}_kw`])) {
+        rows.push(`<span class="tooltip-value ${className}">${label}: ${this._formatNumber(details[`${key}_kw`])} kW</span>`);
+      }
+    }
     return rows.join("");
   }
 
@@ -3521,6 +3828,10 @@ class ElrakningPanel {
       const meterValue = (key) => canonicalMeterPoint && Number.isFinite(Number(canonicalMeterPoint[key]))
         ? Number(canonicalMeterPoint[key])
         : null;
+      const powerValue = (key) => {
+        const point = this._powerCanonicalPointMaps?.[key]?.get(tooltipTimestamp);
+        return point && Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null;
+      };
       const barPrice = this._chartBarPrices?.[index];
       const hoverSnapshot = {
         hoverTime: tooltipTimestamp,
@@ -3528,10 +3839,10 @@ class ElrakningPanel {
         priceBarValue: barPrice ?? null,
         importValue: meterValue("import_kw"),
         exportValue: meterValue("export_kw"),
-        pvValue: null,
-        loadValue: null,
-        chargeValue: null,
-        dischargeValue: null,
+        pvValue: powerValue("solar"),
+        loadValue: powerValue("consumption"),
+        chargeValue: powerValue("charging"),
+        dischargeValue: powerValue("discharging"),
       };
       const baseDetails = this._chartTooltipDetails?.get(index) || {};
       const details = this._debugEnabled ? { ...baseDetails } : null;
@@ -3540,10 +3851,19 @@ class ElrakningPanel {
         else details.import_kw = Number(rawMeterPoint.import_kw);
         if (!rawMeterPoint || !Number.isFinite(Number(rawMeterPoint.export_kw))) delete details.export_kw;
         else details.export_kw = Number(rawMeterPoint.export_kw);
+        for (const [key, snapshotKey] of [["solar", "pvValue"], ["consumption", "loadValue"], ["charging", "chargeValue"], ["discharging", "dischargeValue"]]) {
+          const value = hoverSnapshot[snapshotKey];
+          if (Number.isFinite(value)) details[`${key}_kw`] = value;
+          else delete details[`${key}_kw`];
+        }
       }
       const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, {
         import_kw: hoverSnapshot.importValue,
         export_kw: hoverSnapshot.exportValue,
+        solar_kw: hoverSnapshot.pvValue,
+        consumption_kw: hoverSnapshot.loadValue,
+        charging_kw: hoverSnapshot.chargeValue,
+        discharging_kw: hoverSnapshot.dischargeValue,
       });
       const tooltipText = details ? createPriceDebugText({ time, value, details }) : "";
       if (details) {
@@ -3575,6 +3895,17 @@ class ElrakningPanel {
         if (this._meterPowerVisible.export && meterMarkerX !== null && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0 && Number.isFinite(exportDisplayY)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${meterMarkerX}" cy="${exportDisplayY}" r="4" />`);
         }
+        const powerMarkers = [
+          ["solar", "pvValue", "solar"],
+          ["consumption", "loadValue", "consumption"],
+          ["charging", "chargeValue", "charging"],
+          ["discharging", "dischargeValue", "discharging"],
+        ];
+        for (const [key, snapshotKey, className] of powerMarkers) {
+          const value = hoverSnapshot[snapshotKey];
+          if (!this._previewLayersVisible[key] || !Number.isFinite(value) || value <= 0) continue;
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" cx="${priceMarkerX}" cy="${hoverGeometry.meterY(value)}" r="4" />`);
+        }
         hoverMarkers.innerHTML = markers.join("");
       }
       tooltip.classList.toggle("debug-tooltip", Boolean(details));
@@ -3591,7 +3922,8 @@ class ElrakningPanel {
     };
     const hasVisibleTooltipLayer = this._spotBarsVisible
       || this._meterPowerVisible.import
-      || this._meterPowerVisible.export;
+      || this._meterPowerVisible.export
+      || Object.keys(this._previewLayersVisible).some((key) => this._previewLayersVisible[key]);
     svg.addEventListener("mousemove", (event) => {
       if (event.sourceCapabilities?.firesTouchEvents) return;
       if (!hasVisibleTooltipLayer) {

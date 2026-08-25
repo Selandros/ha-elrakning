@@ -13,6 +13,7 @@ from .const import DOMAIN, ELECTRICITY_PROVIDER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .meter import MeterManager
+from .power import PowerManager
 from .websocket import async_register_websocket_commands
 
 PANEL_PATH = DOMAIN
@@ -44,6 +45,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     meter_manager = MeterManager(hass, manager.async_diagnostic)
     await meter_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["meter_manager"] = meter_manager
+    power_manager = PowerManager(hass, manager.async_diagnostic)
+    await power_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["power_manager"] = power_manager
 
     integration_dir = Path(__file__).parent
     frontend_data = hass.data.setdefault(DOMAIN, {})
@@ -119,6 +123,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await manager.async_shutdown()
     if meter_manager := frontend_data.pop("meter_manager", None):
         await meter_manager.async_shutdown()
+    if power_manager := frontend_data.pop("power_manager", None):
+        await power_manager.async_shutdown()
     if frontend.async_panel_exists(hass, PANEL_PATH):
         frontend.async_remove_panel(hass, PANEL_PATH)
     return True

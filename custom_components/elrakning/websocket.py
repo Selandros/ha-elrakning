@@ -24,6 +24,7 @@ from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
 from .elhandel.providers.greenely_source import paginate_source
 from .meter import MeterManager
+from .power import PowerManager
 
 COMMAND = f"{DOMAIN}/price_data"
 GREENELY_TEST_COMMAND = f"{DOMAIN}/greenely_test"
@@ -47,6 +48,9 @@ METER_STATE_COMMAND = f"{DOMAIN}/meter_state"
 METER_SOURCE_COMMAND = f"{DOMAIN}/meter_source"
 METER_STORE_CLEAR_COMMAND = f"{DOMAIN}/meter_store_clear"
 METER_POWER_HISTORY_COMMAND = f"{DOMAIN}/meter_power_history"
+POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
+POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
+POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +82,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_meter_source)
     websocket_api.async_register_command(hass, websocket_meter_store_clear)
     websocket_api.async_register_command(hass, websocket_meter_power_history)
+    websocket_api.async_register_command(hass, websocket_power_save)
+    websocket_api.async_register_command(hass, websocket_power_state)
+    websocket_api.async_register_command(hass, websocket_power_history)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
 
 
@@ -504,6 +511,11 @@ def _meter_manager(hass) -> MeterManager | None:
     return manager if isinstance(manager, MeterManager) else None
 
 
+def _power_manager(hass) -> PowerManager | None:
+    manager = hass.data.get(DOMAIN, {}).get("power_manager")
+    return manager if isinstance(manager, PowerManager) else None
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): METER_SAVE_COMMAND,
@@ -604,6 +616,50 @@ async def websocket_meter_power_history(hass, connection, msg):
         "entity_id": msg.get("entity_id"),
         "points": [],
         "error": "meter_unavailable",
+    }
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): POWER_SAVE_COMMAND,
+        vol.Optional("solar_entities", default=[]): [str],
+        vol.Optional("consumption_entity", default=""): str,
+        vol.Optional("charging_entity", default=""): str,
+        vol.Optional("discharging_entity", default=""): str,
+        vol.Optional("soc_entity", default=""): str,
+        vol.Optional("capacity_entity", default=""): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_power_save(hass, connection, msg):
+    manager = _power_manager(hass)
+    try:
+        if manager is None:
+            raise RuntimeError("power_unavailable")
+        state = await manager.async_save_mapping(msg)
+    except Exception as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err) or "power_save_failed"})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command({vol.Required("type"): POWER_STATE_COMMAND})
+@websocket_api.async_response
+async def websocket_power_state(hass, connection, msg):
+    manager = _power_manager(hass)
+    state = await manager.async_state() if manager else {"configured": False}
+    connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command({vol.Required("type"): POWER_HISTORY_COMMAND})
+@websocket_api.async_response
+async def websocket_power_history(hass, connection, msg):
+    manager = _power_manager(hass)
+    result = await manager.async_history() if manager else {
+        "success": False,
+        "series": {},
+        "error": "power_unavailable",
     }
     connection.send_result(msg["id"], result)
 
