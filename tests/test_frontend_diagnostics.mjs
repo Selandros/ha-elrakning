@@ -502,11 +502,12 @@ assert.match(panelSource, /\.section-heading \{[\s\S]*justify-content: flex-star
 assert.match(panelSource, /\.price-heading-main \{[\s\S]*justify-content: flex-start/);
 assert.match(panelSource, /\.price-summary \{[\s\S]*display: grid[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
 assert.doesNotMatch(panelSource, /\.price-summary \{[^}]*flex-wrap:/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 1 1 260px/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*flex: 1 1 230px/);
 assert.match(panelSource, /\.price-summary \.price-value \{[\s\S]*min-width: 0[\s\S]*text-align: center[\s\S]*white-space: nowrap/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*min-width: min\(100%, 240px\)/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*width: min\(100%, 260px\)/);
-assert.match(panelSource, /\.price-section \.price-summary \{[\s\S]*gap: clamp\(4px, 1cqw, 8px\)/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*min-width: min\(100%, 215px\)/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*width: min\(100%, 230px\)/);
+assert.match(panelSource, /\.price-section \.price-summary \{[\s\S]*gap: clamp\(4px, \.8cqw, 6px\)/);
+assert.match(panelSource, /\.price-section \.section-heading \{[\s\S]*gap: clamp\(1px, \.5cqw, 2px\) clamp\(8px, 1\.5cqw, 12px\)/);
 assert.match(panelSource, /ResizeObserver\(updateLayoutState\)/);
 assert.match(panelSource, /price-summary-wrapped/);
 assert.match(panelSource, /price-summary-inline/);
@@ -630,7 +631,7 @@ assert.match(panelSource, /\.price-analysis-forecast \{[\s\S]*column-gap: \.3em[
 assert.match(panelSource, /\.price-analysis-sentence \{[\s\S]*flex: 0 1 auto[\s\S]*min-width: min-content[\s\S]*overflow-wrap: break-word/);
 assert.doesNotMatch(panelSource, /price-analysis-separator/);
 assert.doesNotMatch(panelSource, /@container price-card \(max-width: 480px\)[\s\S]*price-analysis/);
-assert.match(panelSource, /\.price-summary \{[\s\S]*gap: 8px/);
+assert.match(panelSource, /\.price-summary \{[\s\S]*gap: 6px/);
 assert.doesNotMatch(panelSource, /-webkit-line-clamp: 2/);
 assert.match(panelSource, /for \(const sentenceText of upcoming\.sentences \|\| \[upcoming\.forecast\]\)/);
 assert.match(panelSource, /sentence\.className = "price-analysis-sentence"/);
