@@ -91,6 +91,12 @@ def _hass(states):
 
 
 class PowerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_mapping_does_not_query_recorder(self):
+        manager = power.PowerManager(_hass({}))
+        result = await manager.async_history()
+        self.assertTrue(result["success"])
+        self.assertEqual(result["series"]["solar"]["points"], [])
+
     async def test_mapping_and_current_state_cover_solar_load_and_battery(self):
         states = {
             "sensor.mppt_1": _state(1000, "W"),
@@ -159,4 +165,3 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(points[1]["value_kw"], 1.5)
         self.assertEqual(points[2]["value_kw"], 1.7)
         self.assertEqual(second, first)
-

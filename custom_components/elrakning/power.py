@@ -180,6 +180,12 @@ class PowerManager:
             *self.mapping.get("solar_entities", []),
             *(self.mapping[field] for field in ("consumption_entity", "charging_entity", "discharging_entity") if self.mapping.get(field)),
         ]))
+        if not power_entities:
+            return {
+                "success": True,
+                "date": date,
+                "series": {key: {"points": []} for key in ("solar", "consumption", "charging", "discharging")},
+            }
         key = ("|".join(power_entities), date)
         task = self._history_inflight.get(key)
         if task is None:
