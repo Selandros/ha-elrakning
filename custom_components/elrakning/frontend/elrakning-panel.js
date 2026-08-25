@@ -1156,11 +1156,11 @@ class ElrakningPanel {
         .section-heading.price-summary-inline .price-summary .price-value > span,
         .section-heading.price-summary-inline .price-summary .price-value small,
         .section-heading.price-summary-inline .price-summary .price-value em {
-          font-size: clamp(10px, 1.4cqw, 15px);
+          font-size: clamp(11px, 1.5cqw, 15px);
         }
 
         .section-heading.price-summary-inline .price-summary .price-value strong {
-          font-size: clamp(10px, 1.6cqw, 17px);
+          font-size: clamp(11px, 1.7cqw, 17px);
         }
 
         .section-heading h2,
