@@ -265,7 +265,11 @@ def _electricity_provider_state(manager: ElhandelManager | None) -> dict:
 @websocket_api.websocket_command({vol.Required("type"): ELECTRICITY_PROVIDER_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_electricity_provider_state(hass, connection, msg):
-    connection.send_result(msg["id"], {"success": True, **_electricity_provider_state(_elhandel_manager(hass))})
+    manager = _elhandel_manager(hass)
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "electricity_manager_unavailable"})
+        return
+    connection.send_result(msg["id"], {"success": True, **_electricity_provider_state(manager)})
 
 
 @websocket_api.websocket_command(
@@ -303,7 +307,10 @@ async def websocket_electricity_provider_remove(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_electricity_history_state(hass, connection, msg):
     manager = _elhandel_manager(hass)
-    history = await manager.async_history_metadata() if manager else []
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "electricity_manager_unavailable"})
+        return
+    history = await manager.async_history_metadata()
     connection.send_result(msg["id"], {"success": True, "history": history})
 
 
@@ -582,8 +589,10 @@ async def websocket_meter_diagnostic(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_meter_state(hass, connection, msg):
     manager = _meter_manager(hass)
-    state = await manager.async_state() if manager else {"configured": False}
-    connection.send_result(msg["id"], {"success": True, **state})
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "meter_unavailable"})
+        return
+    connection.send_result(msg["id"], {"success": True, **await manager.async_state()})
 
 
 @websocket_api.websocket_command({vol.Required("type"): METER_SOURCE_COMMAND})
@@ -649,8 +658,10 @@ async def websocket_power_save(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_power_state(hass, connection, msg):
     manager = _power_manager(hass)
-    state = await manager.async_state() if manager else {"configured": False}
-    connection.send_result(msg["id"], {"success": True, **state})
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "power_unavailable"})
+        return
+    connection.send_result(msg["id"], {"success": True, **await manager.async_state()})
 
 
 @websocket_api.websocket_command({vol.Required("type"): POWER_HISTORY_COMMAND})
@@ -668,7 +679,7 @@ async def websocket_power_history(hass, connection, msg):
 def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     """Serialize backend data without creating a Home Assistant entity."""
     if data is None:
-        return {"error": "missing_integration", "periods": []}
+        return {"error": "integration_unavailable", "periods": []}
 
     manager = _elhandel_manager(hass)
     provider_state = manager.public_state() if manager else None

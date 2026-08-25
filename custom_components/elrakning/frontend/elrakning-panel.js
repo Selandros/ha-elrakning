@@ -454,6 +454,9 @@ class ElrakningPanel {
     this._powerHistory = { date: null, series: {} };
     this._powerHistoryRequestToken = 0;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [key, new Map()]));
+    this._backendHydrationPromise = null;
+    this._readyEventUnsubscribePromise = null;
+    this._connectionReadyListener = null;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
     this._averageLineVisible = true;
@@ -2288,6 +2291,7 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     try {
       const state = await this.hass.callWS({ type: "elrakning/power_state" });
+      if (state?.success === false && state.error === "power_unavailable") return;
       this._applyPowerState(state);
       if (loadHistory) await this.loadPowerHistory();
     } catch {
@@ -2300,6 +2304,7 @@ class ElrakningPanel {
     const requestToken = ++this._powerHistoryRequestToken;
     try {
       const response = await this.hass.callWS({ type: "elrakning/power_history" });
+      if (response?.error === "power_unavailable") return;
       if (requestToken !== this._powerHistoryRequestToken) return;
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
       for (const [key, points] of Object.entries(this._powerLivePoints)) {
@@ -2453,6 +2458,7 @@ class ElrakningPanel {
     if (!card || !list) return;
     try {
       const response = await this.hass.callWS({ type: "elrakning/electricity_history_state" });
+      if (response?.success === false && response.error === "electricity_manager_unavailable") return;
       const history = Array.isArray(response.history) ? response.history : [];
       list.replaceChildren(...history.map((item) => {
         const row = document.createElement("div");
@@ -3094,6 +3100,14 @@ class ElrakningPanel {
           .then((unsubscribe) => unsubscribe?.())
           .catch(() => {});
       }
+      if (this._readyEventUnsubscribePromise) {
+        Promise.resolve(this._readyEventUnsubscribePromise)
+          .then((unsubscribe) => unsubscribe?.())
+          .catch(() => {});
+      }
+      if (this._connectionReadyListener && this._eventConnection?.removeEventListener) {
+        this._eventConnection.removeEventListener("ready", this._connectionReadyListener);
+      }
       this._eventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this.loadPriceData(),
         "elrakning_price_update",
@@ -3137,14 +3151,14 @@ class ElrakningPanel {
         () => this._loadDiagnosticsState?.(),
         "elrakning_diagnostics_update",
       );
+      this._readyEventUnsubscribePromise = hass.connection.subscribeEvents(
+        () => this._refreshBackendState(true),
+        "elrakning_integration_ready",
+      );
+      this._connectionReadyListener = () => this._refreshBackendState(true);
+      hass.connection.addEventListener?.("ready", this._connectionReadyListener);
       this._eventConnection = hass.connection;
-      this.loadPriceData();
-      this.loadProviderState();
-      this.loadRetainedHistory();
-      this.loadMeterState(true);
-      this.loadPowerState(true);
-      this._loadDebugPreference();
-      this._loadChartPreferences();
+      this._refreshBackendState(true);
     }
   }
 
@@ -3179,12 +3193,23 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._readyEventUnsubscribePromise) {
+      Promise.resolve(this._readyEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
+    if (this._connectionReadyListener && this._eventConnection?.removeEventListener) {
+      this._eventConnection.removeEventListener("ready", this._connectionReadyListener);
+    }
     this._eventUnsubscribePromise = null;
     this._greenelyEventUnsubscribePromise = null;
     this._meterEventUnsubscribePromise = null;
     this._meterPowerEventUnsubscribePromise = null;
     this._powerEventUnsubscribePromise = null;
     this._diagnosticsEventUnsubscribePromise = null;
+    this._readyEventUnsubscribePromise = null;
+    this._connectionReadyListener = null;
+    this._backendHydrationPromise = null;
     this._loadDiagnosticsState = null;
     this._eventConnection = null;
     window.removeEventListener("resize", this._onThemeResize);
@@ -3197,12 +3222,30 @@ class ElrakningPanel {
     this._themeBackgroundReady = false;
   }
 
+  async _refreshBackendState(loadHistory = true) {
+    if (this._backendHydrationPromise) return this._backendHydrationPromise;
+    this._backendHydrationPromise = Promise.all([
+      this.loadPriceData(),
+      this.loadProviderState(),
+      this.loadRetainedHistory(),
+      this.loadMeterState(loadHistory),
+      this.loadPowerState(loadHistory),
+      this._loadDebugPreference(),
+      this._loadChartPreferences(),
+    ]).finally(() => {
+      this._backendHydrationPromise = null;
+    });
+    return this._backendHydrationPromise;
+  }
+
   async loadPriceData() {
     if (!this.hass?.callWS) return;
     try {
-      this.priceSnapshot = await this.hass.callWS({ type: "elrakning/price_data" });
+      const response = await this.hass.callWS({ type: "elrakning/price_data" });
+      if (response?.error === "integration_unavailable") return;
+      this.priceSnapshot = response;
     } catch {
-      this.priceSnapshot = { error: "data_unavailable", periods: [] };
+      return;
     }
     this.priceData = {
       source: "nord_pool",
@@ -3220,6 +3263,7 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     try {
       const state = await this.hass.callWS({ type: "elrakning/electricity_provider_state" });
+      if (state?.success === false && state.error === "electricity_manager_unavailable") return;
       this._applyProviderState(state);
     } catch {
       // Keep the optional Greenely UI unconfigured when state is unavailable.
@@ -3314,6 +3358,7 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     try {
       const state = await this.hass.callWS({ type: "elrakning/meter_state" });
+      if (state?.success === false && state.error === "meter_unavailable") return;
       this._applyMeterState(state);
       if (loadHistory) await this.loadMeterPowerHistory();
     } catch {
@@ -3331,6 +3376,7 @@ class ElrakningPanel {
       const request = { type: "elrakning/meter_power_history" };
       if (entityId) request.entity_id = entityId;
       const response = await this.hass.callWS(request);
+      if (response?.error === "meter_unavailable") return;
       if (requestToken !== this._meterHistoryRequestToken || entityId !== (this._meterState?.power_entity || null)) return;
       if (!response?.success) {
         this._meterHistorySummary = {

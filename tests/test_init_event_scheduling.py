@@ -104,3 +104,16 @@ def test_coordinator_interval_remains_fifteen_minutes():
     source = source_path.read_text(encoding="utf-8")
 
     assert "update_interval=timedelta(minutes=15)" in source
+
+
+def test_integration_ready_event_is_fired_after_runtime_components_are_ready():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert 'INTEGRATION_READY_EVENT = "elrakning_integration_ready"' in source_path.parents[0].joinpath("const.py").read_text(encoding="utf-8")
+    assert "await coordinator.async_config_entry_first_refresh()" in source
+    assert "await manager.async_load()" in source
+    assert "await meter_manager.async_load()" in source
+    assert "await power_manager.async_load()" in source
+    assert "async_register_websocket_commands(hass)" in source
+    assert "hass.bus.async_fire(INTEGRATION_READY_EVENT)" in source
+    assert source.index("async_register_websocket_commands(hass)") < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")

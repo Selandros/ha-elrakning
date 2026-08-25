@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
-from .const import DOMAIN, ELECTRICITY_PROVIDER_UPDATE_EVENT
+from .const import DOMAIN, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .meter import MeterManager
@@ -107,6 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             },
         )
 
+    hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True
 
 
