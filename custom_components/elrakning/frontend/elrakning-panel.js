@@ -689,12 +689,6 @@ class ElrakningPanel {
             <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
-          <article class="card power-card" data-power-card="consumption" data-config-card-key="consumption">
-            <div class="card-heading"><h2>Last</h2><span class="status" data-power-status="consumption">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="consumption" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
-            <div class="power-summary" data-power-summary="consumption" hidden></div>
-            <button type="button" class="configuration-control" data-power-configure="consumption">Konfigurera</button>
-          </article>
-
           <article class="card power-card" data-power-card="battery" data-config-card-key="battery">
             <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
@@ -735,7 +729,12 @@ class ElrakningPanel {
             <span class="price-filter-track" aria-hidden="true"><span></span></span>
           </label>
           <div class="meter-selectors" data-meter-selectors></div>
+          <div class="meter-load-section">
+            <h3>Husets last</h3>
+            <div class="meter-selectors" data-meter-consumption-selector></div>
+          </div>
           <button type="button" data-meter-clear>Rensa elmätare</button>
+          <button type="button" data-meter-clear-last>Rensa last</button>
           <div class="provider-actions">
             <button type="button" data-meter-cancel>Avbryt</button>
             <button type="button" data-meter-save disabled>Spara</button>
@@ -954,6 +953,16 @@ class ElrakningPanel {
           gap: 6px 18px;
           grid-template-columns: minmax(120px, auto) 1fr;
           margin-top: 14px;
+        }
+
+        .meter-load-section {
+          margin-top: 14px;
+        }
+
+        .meter-load-section h3 {
+          font-size: inherit;
+          font-weight: 500;
+          margin: 0 0 8px;
         }
 
         .power-summary {
@@ -1993,6 +2002,8 @@ class ElrakningPanel {
     for (const key of Object.keys(this._mainCards)) {
       if (typeof mainCards[key] === "boolean") this._mainCards[key] = mainCards[key];
     }
+    if (this._mainCards.consumption && !this._mainCards.elmatare) this._mainCards.elmatare = true;
+    this._mainCards.consumption = false;
   }
 
   _applyConfigurationCardsVisibility(visible, mainCards = this._mainCards) {
@@ -2166,6 +2177,7 @@ class ElrakningPanel {
         const key = toggle.dataset.mainCardToggle;
         if (!(key in this._mainCards)) return;
         this._mainCards[key] = input.checked;
+        if (key === "elmatare") this._mainCards.consumption = false;
         this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
         this._persistChartPreferences();
       });
@@ -2214,10 +2226,12 @@ class ElrakningPanel {
     const cancel = this.host.querySelector("[data-meter-cancel]");
     const save = this.host.querySelector("[data-meter-save]");
     const clear = this.host.querySelector("[data-meter-clear]");
+    const clearLast = this.host.querySelector("[data-meter-clear-last]");
     const result = this.host.querySelector("[data-meter-result]");
     const selectorsElement = this.host.querySelector("[data-meter-selectors]");
+    const consumptionSelectorElement = this.host.querySelector("[data-meter-consumption-selector]");
     const invertToggle = this.host.querySelector("[data-meter-invert-power]");
-    if (!open || !dialog || !cancel || !save || !result || !selectorsElement || !invertToggle) return;
+    if (!open || !dialog || !cancel || !save || !result || !selectorsElement || !consumptionSelectorElement || !invertToggle) return;
     const fields = [
       ["Effekt", "power_entity"],
       ["Import", "energy_import_entity"],
@@ -2226,6 +2240,23 @@ class ElrakningPanel {
     const close = () => {
       dialog.hidden = true;
       invertToggle.checked = false;
+      selectorsElement.replaceChildren();
+      consumptionSelectorElement.replaceChildren();
+    };
+    const renderEntitySelector = (container, labelText, field, value) => {
+      const label = document.createElement("label");
+      label.className = "meter-selector-label";
+      label.textContent = labelText;
+      const selector = document.createElement("ha-selector");
+      selector.dataset.meterField = field;
+      selector.hass = this.hass;
+      selector.selector = { entity: { filter: { domain: "sensor" }, multiple: false } };
+      selector.value = value || undefined;
+      selector.addEventListener("value-changed", (event) => {
+        selector.value = event.detail?.value;
+      });
+      label.append(selector);
+      container.replaceChildren(label);
     };
     const renderSelectors = (mapping) => {
       selectorsElement.replaceChildren(...fields.map(([labelText, field]) => {
@@ -2244,20 +2275,42 @@ class ElrakningPanel {
         return label;
       }));
     };
+    const renderConsumptionSelector = (state) => {
+      renderEntitySelector(consumptionSelectorElement, "Husets last", "consumption_entity", state?.consumption_entity);
+    };
+    const currentPowerMapping = () => {
+      const current = this._powerState || {};
+      return {
+        solar_entities: Array.isArray(current.solar_entities) ? [...current.solar_entities] : [],
+        consumption_entity: current.consumption_entity || "",
+        charging_entity: current.charging_entity || "",
+        discharging_entity: current.discharging_entity || "",
+        battery_power_entity: current.battery_power_entity || "",
+        invert_battery_power: current.invert_battery_power === true,
+        soc_entity: current.soc_entity || "",
+        capacity_entity: current.capacity_entity || "",
+      };
+    };
     open.addEventListener("click", async () => {
       dialog.hidden = false;
       save.disabled = true;
-      result.textContent = "Hämtar sparad mätarkonfiguration …";
+      result.textContent = "Hämtar sparad konfiguration …";
       try {
-        const response = await this.hass.callWS({ type: "elrakning/meter_state" });
-        this._applyMeterState(response);
-        renderSelectors(response);
-        invertToggle.checked = response.invert_power === true;
+        const [meterResponse, powerResponse] = await Promise.all([
+          this.hass.callWS({ type: "elrakning/meter_state" }),
+          this.hass.callWS({ type: "elrakning/power_state" }),
+        ]);
+        this._applyMeterState(meterResponse);
+        this._applyPowerState(powerResponse);
+        renderSelectors(meterResponse);
+        renderConsumptionSelector(powerResponse);
+        invertToggle.checked = meterResponse.invert_power === true;
         result.textContent = "Välj de entiteter som ska användas.";
         save.disabled = false;
       } catch {
         selectorsElement.replaceChildren();
-        result.textContent = "Mätarkonfigurationen kunde inte hämtas.";
+        consumptionSelectorElement.replaceChildren();
+        result.textContent = "Mätar- eller lastkonfigurationen kunde inte hämtas.";
       }
     });
     save.addEventListener("click", async () => {
@@ -2267,6 +2320,8 @@ class ElrakningPanel {
         return [field, typeof value === "string" && value ? value : ""];
       }));
       mapping.invert_power = invertToggle.checked;
+      const powerMapping = currentPowerMapping();
+      powerMapping.consumption_entity = consumptionSelectorElement.querySelector('[data-meter-field="consumption_entity"]')?.value || "";
       const payload = {
         type: "elrakning/meter_save",
         ...mapping,
@@ -2286,7 +2341,11 @@ class ElrakningPanel {
           throw new Error(response.error || "save_failed");
         }
         this._applyMeterState(response);
+        const powerResponse = await this.hass.callWS({ type: "elrakning/power_save", ...powerMapping });
+        if (!powerResponse?.success) throw new Error(powerResponse?.error || "power_save_failed");
+        this._applyPowerState(powerResponse);
         await this.loadMeterPowerHistory();
+        await this.loadPowerHistory();
         close();
       } catch (error) {
         const details = this._websocketErrorDetails(error);
@@ -2308,6 +2367,27 @@ class ElrakningPanel {
       } catch (error) {
         const details = this._websocketErrorDetails(error);
         result.textContent = `Elmätaren kunde inte rensas: ${details.code}: ${details.message}`;
+      }
+    });
+    clearLast?.addEventListener("click", async () => {
+      if (!window.confirm("Är du säker? Husets last rensas.")) return;
+      const mapping = currentPowerMapping();
+      mapping.consumption_entity = "";
+      save.disabled = true;
+      result.textContent = "Rensar last …";
+      try {
+        this._resetPowerLivePoints();
+        const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
+        if (!response?.success) throw new Error(response?.error || "power_clear_failed");
+        this._applyPowerState(response);
+        renderConsumptionSelector(response);
+        await this.loadPowerHistory();
+        save.disabled = false;
+        result.textContent = "Last rensad.";
+      } catch (error) {
+        const details = this._websocketErrorDetails(error);
+        save.disabled = false;
+        result.textContent = `Lasten kunde inte rensas: ${details.code}: ${details.message}`;
       }
     });
   }
@@ -2479,19 +2559,17 @@ class ElrakningPanel {
   _applyPowerState(state) {
     this._powerState = state || null;
     const solarConfigured = Array.isArray(state?.solar_entities) && state.solar_entities.length > 0;
-    const loadConfigured = Boolean(state?.consumption_entity);
     const batteryConfigured = Boolean(state?.charging_entity || state?.discharging_entity || state?.soc_entity || state?.capacity_entity);
     const batteryPowerConfigured = Boolean(state?.battery_power_entity);
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
     const values = {
       solar: solarConfigured ? [["Effekt just nu", state.solar_kw, "kW"]] : [],
-      consumption: loadConfigured ? [["Last just nu", state.consumption_kw, "kW"]] : [],
       battery: batteryIsConfigured ? [["Laddning", state.charging_kw, "kW"], ["Urladdning", state.discharging_kw, "kW"], ["Laddnivå", state.soc_percent, "%"], ["Kapacitet", state.capacity_kwh, "kWh"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
-      const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : cardType === "consumption" ? "consumption" : "solar"}"]`);
+      const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : "solar"}"]`);
       const summary = this.host.querySelector(`[data-power-summary="${cardType}"]`);
-      const configured = cardType === "solar" ? solarConfigured : cardType === "consumption" ? loadConfigured : batteryIsConfigured;
+      const configured = cardType === "solar" ? solarConfigured : batteryIsConfigured;
       if (status) {
         status.textContent = configured ? "" : "Ej konfigurerad";
         status.hidden = configured;
@@ -2509,6 +2587,38 @@ class ElrakningPanel {
       }));
       summary.hidden = validRows.length === 0;
     }
+    this._renderMergedMeterSummary();
+  }
+
+  _renderMergedMeterSummary() {
+    const meter = this._meterState || {};
+    const power = this._powerState || {};
+    const meterConfigured = meter.configured === true;
+    const loadConfigured = Boolean(power.consumption_entity);
+    const configured = meterConfigured || loadConfigured;
+    const status = this.host.querySelector("[data-meter-status]");
+    const summary = this.host.querySelector("[data-meter-summary]");
+    if (status) {
+      status.textContent = configured ? "" : "Ej konfigurerad";
+      status.hidden = configured;
+    }
+    if (!summary) return;
+    const rows = [];
+    if (loadConfigured) rows.push(["Husets last", displayPowerValue(power.consumption_kw), "kW"]);
+    if (meterConfigured) {
+      rows.push(["Nät just nu", displayPowerValue(meter.power_kw), "kW"]);
+      rows.push(["Import idag", meter.energy_import_kwh, "kWh"]);
+      rows.push(["Export idag", meter.energy_export_kwh, "kWh"]);
+    }
+    const validRows = rows.filter(([, value]) => typeof value === "number" && Number.isFinite(value));
+    summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
+      const label = document.createElement("strong");
+      label.textContent = labelText;
+      const output = document.createElement("span");
+      output.textContent = `${this._formatNumber(value)} ${unit}`;
+      return [label, output];
+    }));
+    summary.hidden = validRows.length === 0;
   }
 
   async loadPowerState(loadHistory = false) {
@@ -3549,34 +3659,14 @@ class ElrakningPanel {
   _applyMeterState(state) {
     this._meterState = state;
     const provider = this.host.querySelector('[data-provider-name="elmatare"]');
-    const summary = this.host.querySelector("[data-meter-summary]");
-    const status = this.host.querySelector("[data-meter-status]");
     const source = this.host.querySelector("[data-meter-source]");
-    const configured = state?.configured === true;
     const label = providerLabel(state?.provider_name, state?.device_name);
     if (provider) {
       provider.textContent = label;
       provider.hidden = !label;
     }
-    if (status) {
-      status.textContent = configured ? "" : "Ej konfigurerad";
-      status.hidden = configured;
-    }
-    if (source) source.hidden = !this._debugEnabled || !configured;
-    if (!summary) return;
-    const rows = [
-      ["Effekt just nu", displayPowerValue(state?.power_kw), "kW"],
-      ["Import idag", state?.energy_import_kwh, "kWh"],
-      ["Export idag", state?.energy_export_kwh, "kWh"],
-    ].filter(([, value]) => typeof value === "number" && Number.isFinite(value));
-    summary.replaceChildren(...rows.flatMap(([name, value, unit]) => {
-      const labelElement = document.createElement("strong");
-      labelElement.textContent = name;
-      const valueElement = document.createElement("span");
-      valueElement.textContent = `${this._formatNumber(value)} ${unit}`;
-      return [labelElement, valueElement];
-    }));
-    summary.hidden = rows.length === 0;
+    if (source) source.hidden = !this._debugEnabled || state?.configured !== true;
+    this._renderMergedMeterSummary();
   }
 
   async loadMeterState(loadHistory = false) {
