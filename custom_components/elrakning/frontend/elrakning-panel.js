@@ -637,6 +637,11 @@ class ElrakningPanel {
           <h2 id="meter-title">Elmätare</h2>
           <p data-meter-result></p>
           <div class="meter-selectors" data-meter-selectors></div>
+          <label class="price-filter-toggle meter-invert-toggle">
+            <span>Invertera effekt</span>
+            <input type="checkbox" data-meter-invert-power>
+            <span class="price-filter-track" aria-hidden="true"><span></span></span>
+          </label>
           <button type="button" data-meter-clear>Rensa elmätare</button>
           <div class="provider-actions">
             <button type="button" data-meter-cancel>Avbryt</button>
@@ -1984,13 +1989,17 @@ class ElrakningPanel {
     const clear = this.host.querySelector("[data-meter-clear]");
     const result = this.host.querySelector("[data-meter-result]");
     const selectorsElement = this.host.querySelector("[data-meter-selectors]");
-    if (!open || !dialog || !cancel || !save || !result || !selectorsElement) return;
+    const invertToggle = this.host.querySelector("[data-meter-invert-power]");
+    if (!open || !dialog || !cancel || !save || !result || !selectorsElement || !invertToggle) return;
     const fields = [
       ["Effekt", "power_entity"],
       ["Import", "energy_import_entity"],
       ["Export", "energy_export_entity"],
     ];
-    const close = () => { dialog.hidden = true; };
+    const close = () => {
+      dialog.hidden = true;
+      invertToggle.checked = false;
+    };
     const renderSelectors = (mapping) => {
       selectorsElement.replaceChildren(...fields.map(([labelText, field]) => {
         const label = document.createElement("label");
@@ -2016,6 +2025,7 @@ class ElrakningPanel {
         const response = await this.hass.callWS({ type: "elrakning/meter_state" });
         this._applyMeterState(response);
         renderSelectors(response);
+        invertToggle.checked = response.invert_power === true;
         result.textContent = "Välj de entiteter som ska användas.";
         save.disabled = false;
       } catch {
@@ -2029,6 +2039,7 @@ class ElrakningPanel {
         const value = selectorsElement.querySelector(`[data-meter-field="${field}"]`)?.value;
         return [field, typeof value === "string" && value ? value : ""];
       }));
+      mapping.invert_power = invertToggle.checked;
       const payload = {
         type: "elrakning/meter_save",
         ...mapping,
@@ -2065,6 +2076,7 @@ class ElrakningPanel {
         if (!response.success) throw new Error(response.error || "meter_store_clear_failed");
         this._applyMeterState(response);
         renderSelectors(response);
+        invertToggle.checked = false;
         result.textContent = "Elmätare rensad.";
       } catch (error) {
         const details = this._websocketErrorDetails(error);

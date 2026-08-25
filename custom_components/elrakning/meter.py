@@ -20,6 +20,7 @@ METER_FIELDS = (
     "energy_import_entity",
     "energy_export_entity",
 )
+METER_INVERT_FIELD = "invert_power"
 METER_POWER_UPDATE_EVENT = "elrakning_meter_power_update"
 
 
@@ -52,9 +53,16 @@ def _power_kw(state: State | Any) -> float | None:
     return value
 
 
-def normalize_power_state(state: State | Any) -> dict[str, Any] | None:
-    """Convert signed meter power into semantic import/export series."""
+def _normalized_power_kw(state: State | Any, invert_power: bool = False) -> float | None:
     power_kw = _power_kw(state)
+    if power_kw is not None and invert_power:
+        power_kw = -power_kw
+    return power_kw
+
+
+def normalize_power_state(state: State | Any, invert_power: bool = False) -> dict[str, Any] | None:
+    """Convert signed meter power into semantic import/export series."""
+    power_kw = _normalized_power_kw(state, invert_power)
     if power_kw is None:
         return None
     timestamp = getattr(state, "last_updated", None)
@@ -75,8 +83,9 @@ class MeterManager:
         self._diagnostic_callback = diagnostic_callback
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
+        self.mapping[METER_INVERT_FIELD] = False
         self._history_summary: dict[str, Any] | None = None
-        self._history_inflight: dict[tuple[str, str], asyncio.Task] = {}
+        self._history_inflight: dict[tuple[str, str, bool], asyncio.Task] = {}
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     async def _async_state_changed(self, event: Event) -> None:
@@ -84,7 +93,7 @@ class MeterManager:
         entity_id = event.data.get("entity_id")
         if entity_id != self.mapping.get("power_entity"):
             return
-        point = normalize_power_state(event.data.get("new_state"))
+        point = normalize_power_state(event.data.get("new_state"), bool(self.mapping.get(METER_INVERT_FIELD)))
         if point is not None:
             self.hass.bus.async_fire(
                 METER_POWER_UPDATE_EVENT,
@@ -110,9 +119,11 @@ class MeterManager:
             for field in METER_FIELDS:
                 value = cached.get(field)
                 self.mapping[field] = value.strip() if isinstance(value, str) and value.strip() else None
+            self.mapping[METER_INVERT_FIELD] = cached.get(METER_INVERT_FIELD) is True
 
     async def async_clear(self) -> dict[str, Any]:
         self.mapping = {field: None for field in METER_FIELDS}
+        self.mapping[METER_INVERT_FIELD] = False
         self._history_summary = None
         await self.store.async_remove()
         return await self.async_state()
@@ -123,7 +134,12 @@ class MeterManager:
                 raise ValueError("invalid_mapping")
             await self._diagnostic("INFO", "meter_mapping_received", "Meter mapping received")
             selected = {field: _text(mapping.get(field)) or None for field in METER_FIELDS}
-            for field, entity_id in selected.items():
+            invert_power = mapping.get(METER_INVERT_FIELD, False)
+            if not isinstance(invert_power, bool):
+                raise ValueError("invalid_invert_power")
+            selected[METER_INVERT_FIELD] = invert_power
+            for field in METER_FIELDS:
+                entity_id = selected[field]
                 if entity_id is None:
                     continue
                 if not valid_entity_id(entity_id):
@@ -164,7 +180,7 @@ class MeterManager:
                 divisor = 1000
             elif unit == "mwh":
                 divisor = 0.001
-            result[output] = _number(state, divisor)
+            result[output] = _normalized_power_kw(state, bool(self.mapping.get(METER_INVERT_FIELD))) if output == "power_kw" else _number(state, divisor)
         return result
 
     async def async_source(self) -> dict[str, Any]:
@@ -198,17 +214,19 @@ class MeterManager:
                 "first_timestamp": None,
                 "last_timestamp": None,
                 "max_abs_kw": None,
+                METER_INVERT_FIELD: bool(self.mapping.get(METER_INVERT_FIELD)),
             }
             self._history_summary = summary
             await self._diagnostic("INFO", "meter_history_request_success", "Meter history loaded · 0 points")
             return {"success": True, "entity_id": None, "date": date, "points": [], "history": summary}
-        key = (entity_id, date)
+        invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
+        key = (entity_id, date, invert_power)
         task = self._history_inflight.get(key)
         if task is None:
-            task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date))
+            task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date, invert_power))
             self._history_inflight[key] = task
 
-            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str] = key) -> None:
+            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool] = key) -> None:
                 if self._history_inflight.get(request_key) is completed:
                     self._history_inflight.pop(request_key, None)
 
@@ -221,6 +239,7 @@ class MeterManager:
         start,
         end,
         date: str,
+        invert_power: bool = False,
     ) -> dict[str, Any]:
         """Run one Recorder history operation shared by identical callers."""
         try:
@@ -255,7 +274,7 @@ class MeterManager:
             }
         points = []
         for state in history_by_entity.get(entity_id, []):
-            point = normalize_power_state(state)
+            point = normalize_power_state(state, invert_power)
             if point is not None:
                 points.append(point)
         points.sort(key=lambda point: point["timestamp"])
@@ -271,6 +290,7 @@ class MeterManager:
             "first_timestamp": points[0]["timestamp"] if points else None,
             "last_timestamp": points[-1]["timestamp"] if points else None,
             "max_abs_kw": round(max_abs_kw, 3) if max_abs_kw is not None else None,
+            METER_INVERT_FIELD: invert_power,
         }
         self._history_summary = summary
         await self._diagnostic(

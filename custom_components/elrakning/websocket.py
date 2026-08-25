@@ -522,6 +522,7 @@ def _power_manager(hass) -> PowerManager | None:
         vol.Optional("power_entity", default=""): str,
         vol.Optional("energy_import_entity", default=""): str,
         vol.Optional("energy_export_entity", default=""): str,
+        vol.Optional("invert_power", default=False): bool,
     }
 )
 @websocket_api.async_response

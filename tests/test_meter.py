@@ -119,6 +119,26 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(point["import_kw"], 0)
         self.assertEqual(point["export_kw"], 1.2)
 
+    def test_inverted_positive_power_is_export(self):
+        state = types.SimpleNamespace(
+            state="2400",
+            attributes={"unit_of_measurement": "W"},
+            last_updated=datetime(2026, 8, 23, 12, tzinfo=timezone.utc),
+        )
+        point = meter.normalize_power_state(state, True)
+        self.assertEqual(point["import_kw"], 0)
+        self.assertEqual(point["export_kw"], 2.4)
+
+    def test_inverted_negative_power_is_import(self):
+        state = types.SimpleNamespace(
+            state="-1.2",
+            attributes={"unit_of_measurement": "kW"},
+            last_updated=datetime(2026, 8, 23, 12, tzinfo=timezone.utc),
+        )
+        point = meter.normalize_power_state(state, True)
+        self.assertEqual(point["import_kw"], 1.2)
+        self.assertEqual(point["export_kw"], 0)
+
     def test_zero_power_has_no_direction(self):
         state = types.SimpleNamespace(
             state="0",
@@ -443,7 +463,115 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
         manager.mapping["power_entity"] = "sensor.power"
         state = await manager.async_clear()
         self.assertFalse(state["configured"])
-        self.assertTrue(all(value is None for value in manager.mapping.values()))
+        self.assertTrue(all(value is None for field, value in manager.mapping.items() if field != "invert_power"))
+        self.assertFalse(manager.mapping["invert_power"])
+
+    async def test_old_store_without_invert_power_defaults_to_false(self):
+        hass = _hass("sensor.power")
+        manager = meter.MeterManager(hass)
+        await manager.store.async_save({"power_entity": "sensor.power"})
+        await manager.async_load()
+        self.assertFalse(manager.mapping["invert_power"])
+        self.assertFalse((await manager.async_state())["invert_power"])
+
+    async def test_invert_power_is_saved_and_exposed_in_state_and_source(self):
+        hass = _hass("sensor.power")
+        manager = meter.MeterManager(hass)
+        state = await manager.async_save_mapping({"power_entity": "sensor.power", "invert_power": True})
+        self.assertTrue(state["invert_power"])
+        self.assertTrue((await manager.async_source())["mapping"]["invert_power"])
+        self.assertTrue(manager.store.data["invert_power"])
+
+    async def test_inverted_power_is_used_for_current_state(self):
+        hass = _hass("sensor.power")
+        hass.states.get("sensor.power").state = "-500"
+        manager = meter.MeterManager(hass)
+        await manager.async_save_mapping({"power_entity": "sensor.power", "invert_power": True})
+        self.assertEqual((await manager.async_state())["power_kw"], 0.5)
+
+    async def test_invert_power_changes_history_direction(self):
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda hass: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: {
+            "sensor.power": [types.SimpleNamespace(
+                state="-500",
+                attributes={"unit_of_measurement": "W"},
+                last_updated=datetime(2026, 8, 23, 11, tzinfo=timezone.utc),
+            )]
+        }
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {name: sys.modules.get(name) for name in (
+            "homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history"
+        )}
+        sys.modules.update({
+            "homeassistant.components": components,
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        })
+        try:
+            hass = _hass("sensor.power")
+            manager = meter.MeterManager(hass)
+            await manager.async_save_mapping({"power_entity": "sensor.power", "invert_power": True})
+            result = await manager.async_power_history()
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertEqual(result["points"][0]["import_kw"], 0.5)
+        self.assertEqual(result["points"][0]["export_kw"], 0)
+
+    async def test_invert_power_is_part_of_history_single_flight_identity(self):
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda hass: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: {"sensor.power": []}
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {name: sys.modules.get(name) for name in (
+            "homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history"
+        )}
+        sys.modules.update({
+            "homeassistant.components": components,
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        })
+        try:
+            calls = 0
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def async_add_executor_job(function, *args, **kwargs):
+                nonlocal calls
+                calls += 1
+                started.set()
+                await release.wait()
+                return function(*args, **kwargs)
+
+            hass = _hass("sensor.power")
+            hass.recorder.async_add_executor_job = async_add_executor_job
+            manager = meter.MeterManager(hass)
+            await manager.async_save_mapping({"power_entity": "sensor.power", "invert_power": False})
+            first = asyncio.create_task(manager.async_power_history())
+            await started.wait()
+            manager.mapping["invert_power"] = True
+            second = asyncio.create_task(manager.async_power_history())
+            for _ in range(3):
+                await asyncio.sleep(0)
+            self.assertEqual(calls, 2)
+            release.set()
+            await asyncio.gather(first, second)
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
 
     async def test_save_emits_diagnostics(self):
         hass = _hass("sensor.power")
