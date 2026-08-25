@@ -1861,6 +1861,10 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
+        .main-card-toggle[hidden] {
+          display: none !important;
+        }
+
         .main-card-toggle input {
           height: 0;
           opacity: 0;
@@ -1869,7 +1873,7 @@ class ElrakningPanel {
         }
 
         .main-card-track {
-          background: var(--divider-color);
+          background: #555;
           border-radius: 10px;
           display: inline-block;
           height: 16px;
@@ -1879,7 +1883,7 @@ class ElrakningPanel {
         }
 
         .main-card-track::after {
-          background: var(--primary-background-color);
+          background: #d8d8d8;
           border-radius: 50%;
           content: "";
           height: 11px;
