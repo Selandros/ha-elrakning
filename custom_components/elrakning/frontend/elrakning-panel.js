@@ -647,7 +647,7 @@ class ElrakningPanel {
             <div class="card-heading">
               <h2>Elhandel</h2>
               <span class="status" data-provider-status></span>
-              <label class="main-card-toggle" data-main-card-toggle="elhandel">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
+              <label class="main-card-toggle" data-main-card-toggle="elhandel" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elhandel" hidden></p>
             <div class="provider-summary" data-provider-summary hidden></div>
@@ -665,7 +665,7 @@ class ElrakningPanel {
             <div class="card-heading">
               <h2>Elnät</h2>
               <span class="status">Ej konfigurerad</span>
-              <label class="main-card-toggle" data-main-card-toggle="elnet">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
+              <label class="main-card-toggle" data-main-card-toggle="elnet" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elnet" hidden></p>
             <button type="button" class="configuration-control">Konfigurera</button>
@@ -675,7 +675,7 @@ class ElrakningPanel {
             <div class="card-heading">
               <h2>Elmätare</h2>
               <span class="status" data-meter-status>Ej konfigurerad</span>
-              <label class="main-card-toggle" data-main-card-toggle="elmatare">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
+              <label class="main-card-toggle" data-main-card-toggle="elmatare" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elmatare" hidden></p>
             <div class="meter-summary" data-meter-summary hidden></div>
@@ -684,19 +684,19 @@ class ElrakningPanel {
           </article>
 
           <article class="card power-card" data-power-card="solar" data-config-card-key="solar">
-            <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+            <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="solar" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
           <article class="card power-card" data-power-card="consumption" data-config-card-key="consumption">
-            <div class="card-heading"><h2>Last</h2><span class="status" data-power-status="consumption">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="consumption">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+            <div class="card-heading"><h2>Last</h2><span class="status" data-power-status="consumption">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="consumption" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="consumption" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="consumption">Konfigurera</button>
           </article>
 
           <article class="card power-card" data-power-card="battery" data-config-card-key="battery">
-            <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+            <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
