@@ -1092,13 +1092,13 @@ class ElrakningPanel {
         .price-summary {
           align-items: center;
           display: grid;
-          flex: 1 1 408px;
+          flex: 1 1 300px;
           grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 8px 20px;
+          gap: 8px 12px;
           justify-content: center;
-          min-width: min(100%, 360px);
+          min-width: min(100%, 280px);
           text-align: right;
-          width: min(100%, 408px);
+          width: min(100%, 300px);
         }
 
         .price-summary .price-value {
@@ -1385,7 +1385,7 @@ class ElrakningPanel {
           }
 
           .price-section .price-summary {
-            gap: clamp(4px, 2.1cqw, 20px);
+            gap: clamp(4px, 1.5cqw, 12px);
           }
 
           .price-section .chart-legend-swatch {
