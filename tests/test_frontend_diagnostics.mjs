@@ -513,6 +513,16 @@ assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{\n\s+
 assert.match(panelSource, /\.chart-bar \{[\s\S]*fill-opacity: \.72;[\s\S]*stroke: #111111;[\s\S]*stroke-width: \.7;/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke-opacity/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke: color-mix/);
+assert.match(panelSource, /\.chart-power-area \{[\s\S]*pointer-events: none;[\s\S]*stroke: none;[\s\S]*fill-opacity: \.18;/);
+assert.match(panelSource, /\.chart-power-area-solar \{ fill: var\(--solar-color\); \}/);
+assert.match(panelSource, /\.chart-power-area-export \{ fill: var\(--grid-export-color\); \}/);
+assert.match(panelSource, /buildMeterDisplayAreaMarkup\(points, key, className, x, meterY\)/);
+assert.match(panelSource, /buildMeterDisplayAreaMarkup\(powerDisplayPoints\.solar, "value_kw", "chart-power-area chart-power-area-solar"/);
+assert.match(panelSource, /buildMeterDisplayAreaMarkup\(meterDisplayPoints, "export_kw", "chart-power-area chart-power-area-export"/);
+assert.match(panelSource, /if \(segment\.length < 2\) return "";/);
+assert.match(panelSource, /\$\{bars\}\n      \$\{meterAreas\}\n      \$\{meterLines\}/);
+assert.doesNotMatch(panelSource, /buildMeterDisplayAreaMarkup\(powerDisplayPoints\.(?:consumption|charging|discharging)/);
+assert.doesNotMatch(panelSource, /buildMeterDisplayAreaMarkup\(meterDisplayPoints, "import_kw"/);
 assert.match(panelSource, /data-power-battery-mode/);
 assert.match(panelSource, /data-power-invert-battery/);
 assert.match(panelSource, /battery_power_entity/);

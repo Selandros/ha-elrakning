@@ -1734,6 +1734,15 @@ class ElrakningPanel {
           vector-effect: non-scaling-stroke;
         }
 
+        .chart-power-area {
+          pointer-events: none;
+          stroke: none;
+          fill-opacity: .18;
+        }
+
+        .chart-power-area-solar { fill: var(--solar-color); }
+        .chart-power-area-export { fill: var(--grid-export-color); }
+
         .chart-hover-markers {
           pointer-events: none;
         }
@@ -3910,6 +3919,18 @@ class ElrakningPanel {
     }).join("");
   }
 
+  buildMeterDisplayAreaMarkup(points, key, className, x, meterY) {
+    return this.buildMeterDisplaySegments(points, key).map((segment) => {
+      if (segment.length < 2) return "";
+      const first = segment[0];
+      const last = segment.at(-1);
+      const firstX = x(first.timestamp);
+      const lastX = x(last.timestamp);
+      const baselineY = meterY(0);
+      return `<path class="${className}" d="M ${firstX} ${baselineY} L ${firstX} ${meterY(first[key])} ${this.buildSmoothMeterPath(segment, key, x, meterY).slice(1)} L ${lastX} ${baselineY} Z" />`;
+    }).join("");
+  }
+
   renderPriceChart() {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
@@ -4042,6 +4063,14 @@ class ElrakningPanel {
       powerLinesFor("charging", "chart-power-charging", this._previewLayersVisible.charging),
       powerLinesFor("discharging", "chart-power-discharging", this._previewLayersVisible.discharging),
     ].join("");
+    const meterAreas = [
+      this._previewLayersVisible.solar
+        ? this.buildMeterDisplayAreaMarkup(powerDisplayPoints.solar, "value_kw", "chart-power-area chart-power-area-solar", x, meterY)
+        : "",
+      this._meterPowerVisible.export
+        ? this.buildMeterDisplayAreaMarkup(meterDisplayPoints, "export_kw", "chart-power-area chart-power-area-export", x, meterY)
+        : "",
+    ].join("");
     const meterVisible = (meterDisplayPoints.some((point) => isVisiblePowerValue(point.import_kw) || isVisiblePowerValue(point.export_kw))
       && (this._meterPowerVisible.import || this._meterPowerVisible.export))
       || Object.values(powerDisplayPoints).some((points) => points.some((point) => isVisiblePowerValue(point.value_kw)));
@@ -4105,6 +4134,7 @@ class ElrakningPanel {
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       ${meterGrid}
       ${bars}
+      ${meterAreas}
       ${meterLines}
       ${this._averageLineVisible ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
