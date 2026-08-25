@@ -1193,11 +1193,11 @@ class ElrakningPanel {
 
         .price-section {
           --solar-color: #77C2A1;
-          --consumption-color: #EA7671;
-          --grid-import-color: #F2A373;
+          --consumption-color: #E87570;
+          --grid-import-color: #F0A06A;
           --grid-export-color: #72AAF6;
-          --charging-color: #844A54;
-          --discharging-color: #E06681;
+          --charging-color: #B76A8F;
+          --discharging-color: #DF5C8A;
           container-name: price-card;
           container-type: inline-size;
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
