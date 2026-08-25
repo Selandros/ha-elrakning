@@ -3598,11 +3598,6 @@ class ElrakningPanel {
         .filter((point) => point.raw_timestamp !== null)
         .map((point) => [point.timestamp, point]),
     );
-    this._powerCanonicalPointMaps = Object.fromEntries(
-      Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
-        points.filter((point) => point.raw_timestamp !== null).map((point) => [point.timestamp, point]),
-      )]),
-    );
     const meterDisplayPoints = this.prepareMeterDisplayPoints(meterCanonicalPoints);
     const powerCanonicalPoints = {};
     const powerDisplayPoints = {};
@@ -3616,6 +3611,11 @@ class ElrakningPanel {
         : [];
       powerCanonicalPoints[key] = this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
     }
+    this._powerCanonicalPointMaps = Object.fromEntries(
+      Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
+        points.filter((point) => point.raw_timestamp !== null).map((point) => [point.timestamp, point]),
+      )]),
+    );
     const meterMaximum = Math.max(
       0,
       ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
