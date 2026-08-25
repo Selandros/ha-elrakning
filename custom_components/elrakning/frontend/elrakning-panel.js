@@ -1340,15 +1340,15 @@ class ElrakningPanel {
         }
 
         .chart-bar.cheap {
-          fill: color-mix(in srgb, var(--success-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: color-mix(in srgb, var(--success-color) 36%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-bar.normal {
-          fill: color-mix(in srgb, var(--warning-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: color-mix(in srgb, var(--warning-color) 36%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-bar.expensive {
-          fill: color-mix(in srgb, var(--error-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: color-mix(in srgb, var(--error-color) 36%, var(--ha-card-background, var(--card-background-color)));
         }
 
         @media (max-width: 600px) {
