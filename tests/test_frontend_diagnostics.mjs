@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -25,6 +25,22 @@ assert.equal(providerLabel("Greenely", "Kvartsprisavtal"), "Greenely · Kvartspr
 assert.equal(providerLabel(undefined, "Kvartsprisavtal"), "Kvartsprisavtal");
 assert.equal(providerLabel(undefined, undefined), "");
 assert.equal(POWER_DISPLAY_THRESHOLD_KW, 0.1);
+const thresholdPoints = (values) => values.map((value, index) => ({
+  timestamp: `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
+  value_kw: value,
+  gap_before: false,
+}));
+const risingSegments = buildThresholdClippedSegments(thresholdPoints([0.04, 1.19]), "value_kw");
+assert.equal(risingSegments.length, 1);
+assert.equal(risingSegments[0].length, 2);
+assert.equal(risingSegments[0][0].value_kw, 0.1);
+assert.equal(risingSegments[0][0].timestamp, new Date("2026-08-25T12:00:00Z").getTime() + (0.06 / 1.15) * 5 * 60 * 1000);
+const isolatedSegments = buildThresholdClippedSegments(thresholdPoints([0.03, 0.36, 0.04]), "value_kw");
+assert.deepEqual(isolatedSegments.map((segment) => segment.map((point) => point.value_kw)), [[0.1, 0.36, 0.1]]);
+const fallingSegments = buildThresholdClippedSegments(thresholdPoints([0.8, 0.3, 0.04]), "value_kw");
+assert.equal(fallingSegments[0].at(-1).value_kw, 0.1);
+assert.equal(buildThresholdClippedSegments(thresholdPoints([0.1, 0.05]), "value_kw").length, 0);
+assert.equal(buildThresholdClippedSegments(thresholdPoints([0.4, null, 1.2]), "value_kw").length, 0);
 assert.equal(isVisiblePowerValue(0), false);
 assert.equal(isVisiblePowerValue(0.01), false);
 assert.equal(isVisiblePowerValue(0.1), false);
@@ -389,9 +405,8 @@ assert.match(panelSource, /\.chart-meter-gridline \{\n\s+stroke: var\(--divider-
 assert.doesNotMatch(panelSource, /const meterPath =/);
 assert.match(panelSource, /prepareMeterDisplayPoints\(points\)/);
 assert.match(panelSource, /POWER_DISPLAY_THRESHOLD_KW = 0\.1/);
-assert.match(panelSource, /isVisiblePowerValue\(point\[key\]\)/);
-assert.match(panelSource, /import_kw: isVisiblePowerValue\(importKw\) \? importKw : null/);
-assert.match(panelSource, /export_kw: isVisiblePowerValue\(exportKw\) \? exportKw : null/);
+assert.match(panelSource, /import_kw: Number\.isFinite\(importKw\) \? importKw : null/);
+assert.match(panelSource, /export_kw: Number\.isFinite\(exportKw\) \? exportKw : null/);
 assert.match(panelSource, /powerDisplayPoints\[key\] = powerCanonicalPoints\[key\]\.map/);
 assert.match(panelSource, /meterDisplayPoints\.flatMap/);
 assert.match(panelSource, /isVisiblePowerValue\(details\?\.import_kw\)/);
@@ -404,13 +419,18 @@ assert.match(panelSource, /nearestMeterPoint\(points, slotTimestamp, maxDistance
 assert.match(panelSource, /raw_timestamp: hasSample \? selected\.timestamp : null/);
 assert.match(panelSource, /for \(let slotTimestamp = dayStartMs; slotTimestamp < dayEndMs; slotTimestamp \+= slotMs\)/);
 assert.match(panelSource, /buildMeterDisplaySegments\(points, key\)/);
+assert.match(panelSource, /buildThresholdClippedSegments\(points, key\)/);
+assert.match(panelSource, /POWER_DISPLAY_THRESHOLD_KW - previousValue/);
+assert.match(panelSource, /timestamp: previousTime \+ ratio \* \(currentTime - previousTime\)/);
+assert.match(panelSource, /synthetic: true/);
+assert.match(panelSource, /currentTime - previousTime === 5 \* 60 \* 1000/);
 assert.match(panelSource, /buildSmoothMeterPath\(segment, key, x, meterY\)/);
 assert.match(panelSource, /buildMeterDisplayMarkup\(points, key, className, x, meterY\)/);
-assert.match(panelSource, /if \(end >= start\) segments\.push\(points\.slice\(start, end \+ 1\)\)/);
 assert.match(panelSource, /if \(segment\.length < 2\) return ""/);
 assert.doesNotMatch(panelSource, /chart-power-point/);
 assert.doesNotMatch(panelSource, /chart-power-point\.chart-meter-import/);
 assert.doesNotMatch(panelSource, /chart-power-point\.chart-meter-export/);
+assert.doesNotMatch(panelSource, /value_kw: isVisiblePowerValue\(point\.value_kw\) \? point\.value_kw : null/);
 assert.match(panelSource, /segment\.coordinates\.length === 1/);
 assert.match(panelSource, /const lateDayFallback = !facts\.has_full_two_hour_window/);
 assert.match(panelSource, /normalizeMeterValue\(point\.import_kw\)/);

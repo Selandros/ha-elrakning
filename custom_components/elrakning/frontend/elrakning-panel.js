@@ -318,6 +318,69 @@ export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 *
   return canonical;
 }
 
+export function buildThresholdClippedSegments(points, key) {
+  const segments = [];
+  let segment = [];
+  const appendSegment = () => {
+    if (segment.length >= 2) segments.push(segment);
+    segment = [];
+  };
+  const crossingPoint = (previous, current) => {
+    const previousTime = new Date(previous.timestamp).getTime();
+    const currentTime = new Date(current.timestamp).getTime();
+    const previousValue = normalizeMeterValue(previous[key]);
+    const currentValue = normalizeMeterValue(current[key]);
+    const denominator = currentValue - previousValue;
+    if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime) || !Number.isFinite(denominator) || denominator === 0) return null;
+    const ratio = (POWER_DISPLAY_THRESHOLD_KW - previousValue) / denominator;
+    if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) return null;
+    return {
+      ...current,
+      timestamp: previousTime + ratio * (currentTime - previousTime),
+      raw_timestamp: null,
+      [key]: POWER_DISPLAY_THRESHOLD_KW,
+      synthetic: true,
+    };
+  };
+  (Array.isArray(points) ? points : []).forEach((point, index, source) => {
+    const value = normalizeMeterValue(point?.[key]);
+    if (!Number.isFinite(value)) {
+      appendSegment();
+      return;
+    }
+    const previous = source[index - 1];
+    const previousValue = normalizeMeterValue(previous?.[key]);
+    const previousTime = new Date(previous?.timestamp).getTime();
+    const currentTime = new Date(point.timestamp).getTime();
+    const contiguous = previous
+      && Number.isFinite(previousValue)
+      && Number.isFinite(previousTime)
+      && Number.isFinite(currentTime)
+      && currentTime - previousTime === 5 * 60 * 1000
+      && !point.gap_before;
+    if (!contiguous) {
+      appendSegment();
+      if (isVisiblePowerValue(value)) segment.push(point);
+      return;
+    }
+    const previousVisible = isVisiblePowerValue(previousValue);
+    const currentVisible = isVisiblePowerValue(value);
+    if (currentVisible) {
+      if (!previousVisible) {
+        const crossing = crossingPoint(previous, point);
+        if (crossing) segment.push(crossing);
+      }
+      segment.push(point);
+    } else if (previousVisible) {
+      const crossing = crossingPoint(previous, point);
+      if (crossing) segment.push(crossing);
+      appendSegment();
+    }
+  });
+  appendSegment();
+  return segments;
+}
+
 function monotoneEndpointTangent(point, nextPoint, followingPoint, slope, nextSlope) {
   const width = Math.abs(nextPoint.x - point.x);
   const nextWidth = Math.abs(followingPoint.x - nextPoint.x);
@@ -3570,8 +3633,8 @@ class ElrakningPanel {
       latestByTimestamp.set(timestamp, {
         timestamp,
         raw_timestamp: point.raw_timestamp ?? null,
-        import_kw: isVisiblePowerValue(importKw) ? importKw : null,
-        export_kw: isVisiblePowerValue(exportKw) ? exportKw : null,
+        import_kw: Number.isFinite(importKw) ? importKw : null,
+        export_kw: Number.isFinite(exportKw) ? exportKw : null,
         gap_before: Boolean(point.gap_before),
       });
     });
@@ -3603,18 +3666,11 @@ class ElrakningPanel {
   }
 
   buildMeterDisplaySegments(points, key) {
-    const segments = [];
-    let start = null;
-    points.forEach((point, index) => {
-      const active = isVisiblePowerValue(point[key]);
-      if (active && start === null) start = index;
-      if ((!active || index === points.length - 1) && start !== null) {
-        const end = active && index === points.length - 1 ? index : index - 1;
-        if (end >= start) segments.push(points.slice(start, end + 1));
-        start = null;
-      }
-    });
-    return segments;
+    return this.buildThresholdClippedSegments(points, key);
+  }
+
+  buildThresholdClippedSegments(points, key) {
+    return buildThresholdClippedSegments(points, key);
   }
 
   buildMeterDisplayCoordinates(segment, key, x, meterY) {
@@ -3779,7 +3835,7 @@ class ElrakningPanel {
       powerCanonicalPoints[key] = this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
       powerDisplayPoints[key] = powerCanonicalPoints[key].map((point) => ({
         ...point,
-        value_kw: isVisiblePowerValue(point.value_kw) ? point.value_kw : null,
+        value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
       }));
     }
     this._powerCanonicalPointMaps = Object.fromEntries(
