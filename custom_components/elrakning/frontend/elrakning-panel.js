@@ -356,6 +356,8 @@ export function buildThresholdClippedSegments(points, key) {
       && Number.isFinite(previousValue)
       && Number.isFinite(previousTime)
       && Number.isFinite(currentTime)
+      && previous.raw_timestamp != null
+      && point.raw_timestamp != null
       && currentTime - previousTime === 5 * 60 * 1000
       && !point.gap_before;
     if (!contiguous) {

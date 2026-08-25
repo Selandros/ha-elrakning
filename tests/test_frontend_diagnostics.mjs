@@ -27,6 +27,7 @@ assert.equal(providerLabel(undefined, undefined), "");
 assert.equal(POWER_DISPLAY_THRESHOLD_KW, 0.1);
 const thresholdPoints = (values) => values.map((value, index) => ({
   timestamp: `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
+  raw_timestamp: value === null ? null : `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
   value_kw: value,
   gap_before: false,
 }));
@@ -39,8 +40,15 @@ const isolatedSegments = buildThresholdClippedSegments(thresholdPoints([0.03, 0.
 assert.deepEqual(isolatedSegments.map((segment) => segment.map((point) => point.value_kw)), [[0.1, 0.36, 0.1]]);
 const fallingSegments = buildThresholdClippedSegments(thresholdPoints([0.8, 0.3, 0.04]), "value_kw");
 assert.equal(fallingSegments[0].at(-1).value_kw, 0.1);
+const openEndedSegments = buildThresholdClippedSegments(thresholdPoints([1.5, 2.66]), "value_kw");
+assert.equal(openEndedSegments[0].at(-1).value_kw, 2.66);
 assert.equal(buildThresholdClippedSegments(thresholdPoints([0.1, 0.05]), "value_kw").length, 0);
 assert.equal(buildThresholdClippedSegments(thresholdPoints([0.4, null, 1.2]), "value_kw").length, 0);
+const missingStartPoints = thresholdPoints([null, 1.19, 1.2]);
+assert.deepEqual(
+  buildThresholdClippedSegments(missingStartPoints, "value_kw")[0].map((point) => point.value_kw),
+  [1.19, 1.2],
+);
 assert.equal(isVisiblePowerValue(0), false);
 assert.equal(isVisiblePowerValue(0.01), false);
 assert.equal(isVisiblePowerValue(0.1), false);
