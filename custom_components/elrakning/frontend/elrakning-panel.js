@@ -1650,19 +1650,6 @@ class ElrakningPanel {
           vector-effect: non-scaling-stroke;
         }
 
-        .chart-power-point {
-          stroke: var(--ha-card-background, var(--card-background-color));
-          stroke-width: 1;
-          vector-effect: non-scaling-stroke;
-        }
-
-        .chart-power-point.chart-meter-import { fill: var(--grid-import-color); }
-        .chart-power-point.chart-meter-export { fill: var(--grid-export-color); }
-        .chart-power-point.chart-power-solar { fill: var(--solar-color); }
-        .chart-power-point.chart-power-consumption { fill: var(--consumption-color); }
-        .chart-power-point.chart-power-charging { fill: var(--charging-color); }
-        .chart-power-point.chart-power-discharging { fill: var(--discharging-color); }
-
         .chart-hover-markers {
           pointer-events: none;
         }
@@ -3700,10 +3687,7 @@ class ElrakningPanel {
 
   buildMeterDisplayMarkup(points, key, className, x, meterY) {
     return this.buildMeterDisplaySegments(points, key).map((segment) => {
-      if (segment.length === 1) {
-        const point = this.buildMeterDisplayCoordinates(segment, key, x, meterY)[0];
-        return `<circle class="${className} chart-power-point" cx="${point.x}" cy="${point.y}" r="2.4" />`;
-      }
+      if (segment.length < 2) return "";
       return `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
     }).join("");
   }
