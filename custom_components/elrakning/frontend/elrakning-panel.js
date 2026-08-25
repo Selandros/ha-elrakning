@@ -287,6 +287,13 @@ export function normalizeMeterValue(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
+
+export function isVisiblePowerValue(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > POWER_DISPLAY_THRESHOLD_KW;
+}
+
 export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const dayEndMs = new Date(dayEnd).getTime();
@@ -3419,8 +3426,8 @@ class ElrakningPanel {
       latestByTimestamp.set(timestamp, {
         timestamp,
         raw_timestamp: point.raw_timestamp ?? null,
-        import_kw: Number.isFinite(importKw) ? importKw : null,
-        export_kw: Number.isFinite(exportKw) ? exportKw : null,
+        import_kw: isVisiblePowerValue(importKw) ? importKw : null,
+        export_kw: isVisiblePowerValue(exportKw) ? exportKw : null,
         gap_before: Boolean(point.gap_before),
       });
     });
@@ -3455,17 +3462,11 @@ class ElrakningPanel {
     const segments = [];
     let start = null;
     points.forEach((point, index) => {
-      const active = Number(point[key]) > 0;
+      const active = isVisiblePowerValue(point[key]);
       if (active && start === null) start = index;
       if ((!active || index === points.length - 1) && start !== null) {
         const end = active && index === points.length - 1 ? index : index - 1;
-        const from = start > 0 && points[start - 1][key] === 0 && !points[start].gap_before
-          ? start - 1
-          : start;
-        const to = end < points.length - 1 && points[end + 1][key] === 0 && !points[end + 1].gap_before
-          ? end + 1
-          : end;
-        if (to - from > 0) segments.push(points.slice(from, to + 1));
+        if (end - start > 0) segments.push(points.slice(start, end + 1));
         start = null;
       }
     });
@@ -3622,6 +3623,10 @@ class ElrakningPanel {
         })
         : [];
       powerCanonicalPoints[key] = this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
+      powerDisplayPoints[key] = powerCanonicalPoints[key].map((point) => ({
+        ...point,
+        value_kw: isVisiblePowerValue(point.value_kw) ? point.value_kw : null,
+      }));
     }
     this._powerCanonicalPointMaps = Object.fromEntries(
       Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
@@ -3630,9 +3635,9 @@ class ElrakningPanel {
     );
     const meterMaximum = Math.max(
       0,
-      ...meterPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
+      ...meterDisplayPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
         .filter(Number.isFinite),
-      ...Object.values(powerCanonicalPoints).flatMap((points) => points.map((point) => Number(point.value_kw)))
+      ...Object.values(powerDisplayPoints).flatMap((points) => points.map((point) => Number(point.value_kw)))
         .filter(Number.isFinite),
     );
     const meterBase = Math.max(10, meterMaximum);
@@ -3648,9 +3653,8 @@ class ElrakningPanel {
         .join("")
       : "";
     const powerLinesFor = (key, className, visible) => {
-      powerDisplayPoints[key] = powerCanonicalPoints[key].filter((point) => Number.isFinite(point.value_kw));
       return visible
-        ? this.buildMeterDisplaySegments(powerDisplayPoints[key].map((point) => ({ ...point, ["value_kw"]: point.value_kw })), "value_kw")
+        ? this.buildMeterDisplaySegments(powerDisplayPoints[key], "value_kw")
           .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, "value_kw", x, meterY)}" />`)
           .join("")
         : "";
@@ -3670,8 +3674,9 @@ class ElrakningPanel {
       powerLinesFor("charging", "chart-power-charging", this._previewLayersVisible.charging),
       powerLinesFor("discharging", "chart-power-discharging", this._previewLayersVisible.discharging),
     ].join("");
-    const meterVisible = (meterPoints.length > 0 && (this._meterPowerVisible.import || this._meterPowerVisible.export))
-      || Object.values(powerDisplayPoints).some((points) => points.length > 0);
+    const meterVisible = (meterDisplayPoints.some((point) => isVisiblePowerValue(point.import_kw) || isVisiblePowerValue(point.export_kw))
+      && (this._meterPowerVisible.import || this._meterPowerVisible.export))
+      || Object.values(powerDisplayPoints).some((points) => points.some((point) => isVisiblePowerValue(point.value_kw)));
     const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
     const meterGrid = meterVisible
       ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />
@@ -3765,10 +3770,10 @@ class ElrakningPanel {
     if (this._spotBarsVisible && Number.isFinite(comparisonPrice)) {
       rows.push(`<span class="tooltip-value">Spotpris: ${this.formatPrice(comparisonPrice)}</span>`);
     }
-    if (this._meterPowerVisible.import && Number.isFinite(details?.import_kw)) {
+    if (this._meterPowerVisible.import && isVisiblePowerValue(details?.import_kw)) {
       rows.push(`<span class="tooltip-value tooltip-meter-import">Import: ${this._formatNumber(details.import_kw)} kW</span>`);
     }
-    if (this._meterPowerVisible.export && Number.isFinite(details?.export_kw)) {
+    if (this._meterPowerVisible.export && isVisiblePowerValue(details?.export_kw)) {
       rows.push(`<span class="tooltip-value tooltip-meter-export">Export: ${this._formatNumber(details.export_kw)} kW</span>`);
     }
     const powerRows = [
@@ -3778,7 +3783,7 @@ class ElrakningPanel {
       ["discharging", "Urladdning", "tooltip-power-discharging"],
     ];
     for (const [key, label, className] of powerRows) {
-      if (this._previewLayersVisible[key] && Number.isFinite(details?.[`${key}_kw`])) {
+      if (this._previewLayersVisible[key] && isVisiblePowerValue(details?.[`${key}_kw`])) {
         rows.push(`<span class="tooltip-value ${className}">${label}: ${this._formatNumber(details[`${key}_kw`])} kW</span>`);
       }
     }
@@ -3898,13 +3903,13 @@ class ElrakningPanel {
         const importDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.meterSampleTime);
-        if (this._meterPowerVisible.import && meterMarkerX !== null && Number.isFinite(hoverSnapshot.importValue) && hoverSnapshot.importValue > 0 && Number.isFinite(importDisplayY)) {
+        if (this._meterPowerVisible.import && meterMarkerX !== null && isVisiblePowerValue(hoverSnapshot.importValue) && Number.isFinite(importDisplayY)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${meterMarkerX}" cy="${importDisplayY}" r="4" />`);
         }
         const exportDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.meterSampleTime);
-        if (this._meterPowerVisible.export && meterMarkerX !== null && Number.isFinite(hoverSnapshot.exportValue) && hoverSnapshot.exportValue > 0 && Number.isFinite(exportDisplayY)) {
+        if (this._meterPowerVisible.export && meterMarkerX !== null && isVisiblePowerValue(hoverSnapshot.exportValue) && Number.isFinite(exportDisplayY)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${meterMarkerX}" cy="${exportDisplayY}" r="4" />`);
         }
         const powerMarkers = [
@@ -3915,7 +3920,7 @@ class ElrakningPanel {
         ];
         for (const [key, snapshotKey, className] of powerMarkers) {
           const value = hoverSnapshot[snapshotKey];
-          if (!this._previewLayersVisible[key] || !Number.isFinite(value) || value <= 0) continue;
+          if (!this._previewLayersVisible[key] || !isVisiblePowerValue(value)) continue;
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" cx="${priceMarkerX}" cy="${hoverGeometry.meterY(value)}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");

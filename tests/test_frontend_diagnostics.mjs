@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, nearestMeterPoint, normalizeMeterValue, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -24,6 +24,15 @@ assert.equal(diagnosticComponent("price"), "Pris");
 assert.equal(providerLabel("Greenely", "Kvartsprisavtal"), "Greenely · Kvartsprisavtal");
 assert.equal(providerLabel(undefined, "Kvartsprisavtal"), "Kvartsprisavtal");
 assert.equal(providerLabel(undefined, undefined), "");
+assert.equal(POWER_DISPLAY_THRESHOLD_KW, 0.1);
+assert.equal(isVisiblePowerValue(0), false);
+assert.equal(isVisiblePowerValue(0.01), false);
+assert.equal(isVisiblePowerValue(0.1), false);
+assert.equal(isVisiblePowerValue(0.11), true);
+for (const series of ["import", "export", "solar", "consumption", "charging", "discharging"]) {
+  assert.equal(isVisiblePowerValue(0.1), false, `${series} threshold`);
+  assert.equal(isVisiblePowerValue(0.11), true, `${series} threshold`);
+}
 const lowPriceDay = priceColorBands([1.7, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 8, 12, 18, 20, 35.8]);
 assert.equal(priceCategory(1.7, lowPriceDay), "cheap");
 assert.equal(priceCategory(8, lowPriceDay), "normal");
@@ -379,6 +388,15 @@ assert.match(panelSource, /opacity: \.82/);
 assert.match(panelSource, /\.chart-meter-gridline \{\n\s+stroke: var\(--divider-color\);\n\s+stroke-width: 1;\n\s+opacity: \.28;/);
 assert.doesNotMatch(panelSource, /const meterPath =/);
 assert.match(panelSource, /prepareMeterDisplayPoints\(points\)/);
+assert.match(panelSource, /POWER_DISPLAY_THRESHOLD_KW = 0\.1/);
+assert.match(panelSource, /isVisiblePowerValue\(point\[key\]\)/);
+assert.match(panelSource, /import_kw: isVisiblePowerValue\(importKw\) \? importKw : null/);
+assert.match(panelSource, /export_kw: isVisiblePowerValue\(exportKw\) \? exportKw : null/);
+assert.match(panelSource, /powerDisplayPoints\[key\] = powerCanonicalPoints\[key\]\.map/);
+assert.match(panelSource, /meterDisplayPoints\.flatMap/);
+assert.match(panelSource, /isVisiblePowerValue\(details\?\.import_kw\)/);
+assert.match(panelSource, /isVisiblePowerValue\(details\?\.export_kw\)/);
+assert.match(panelSource, /isVisiblePowerValue\(value\)/);
 assert.match(panelSource, /latestByTimestamp = new Map\(\)/);
 assert.doesNotMatch(panelSource, /smoothSignedMeterPoints/);
 assert.match(panelSource, /buildCanonicalMeterPoints\(points, dayStart, dayEnd, slotMs = 5 \* 60 \* 1000, maxDistanceMs = 2\.5 \* 60 \* 1000\)/);
@@ -388,14 +406,14 @@ assert.match(panelSource, /for \(let slotTimestamp = dayStartMs; slotTimestamp <
 assert.match(panelSource, /buildMeterDisplaySegments\(points, key\)/);
 assert.match(panelSource, /buildSmoothMeterPath\(segment, key, x, meterY\)/);
 assert.match(panelSource, /<path class=\"\$\{className\}\" d=\"\$\{this\.buildSmoothMeterPath/);
-assert.match(panelSource, /if \(to - from > 0\) segments\.push\(points\.slice\(from, to \+ 1\)\)/);
+assert.match(panelSource, /if \(end - start > 0\) segments\.push\(points\.slice\(start, end \+ 1\)\)/);
 assert.match(panelSource, /const lateDayFallback = !facts\.has_full_two_hour_window/);
 assert.match(panelSource, /normalizeMeterValue\(point\.import_kw\)/);
 assert.match(panelSource, /normalizeMeterValue\(point\.export_kw\)/);
 assert.doesNotMatch(panelSource, /import_kw: Number\(point\.import_kw\) \|\| 0/);
 assert.doesNotMatch(panelSource, /export_kw: Number\(point\.export_kw\) \|\| 0/);
-assert.match(panelSource, /points\[start - 1\]\[key\] === 0/);
-assert.match(panelSource, /points\[end \+ 1\]\[key\] === 0/);
+assert.doesNotMatch(panelSource, /points\[start - 1\]\[key\] === 0/);
+assert.doesNotMatch(panelSource, /points\[end \+ 1\]\[key\] === 0/);
 assert.match(panelSource, /if \(segment\.length < 2\) return \"\"/);
 assert.match(panelSource, /const meterCanonicalPoints = this\.buildCanonicalMeterPoints/);
 assert.match(panelSource, /const meterDisplayPoints = this\.prepareMeterDisplayPoints\(meterCanonicalPoints\)/);
@@ -549,8 +567,8 @@ assert.match(panelSource, /function positionChartTooltip\(chart, tooltip, client
 assert.match(panelSource, /const angleStep = Math\.PI \/ 45/);
 assert.match(panelSource, /const obstacleRects = obstacles\.map/);
 assert.match(panelSource, /querySelectorAll\("\.chart-hover-marker"\)/);
-assert.match(panelSource, /Number\.isFinite\(details\?\.import_kw\)/);
-assert.match(panelSource, /Number\.isFinite\(details\?\.export_kw\)/);
+assert.match(panelSource, /isVisiblePowerValue\(details\?\.import_kw\)/);
+assert.match(panelSource, /isVisiblePowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /const hoverSnapshot = \{[\s\S]*hoverTime: tooltipTimestamp/);
 assert.match(panelSource, /const canonicalMeterPoint = this\._meterCanonicalPointAt\(tooltipTimestamp\)/);
 assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
@@ -558,8 +576,8 @@ assert.match(panelSource, /meterSampleTime: canonicalMeterPoint \? canonicalMete
 assert.match(panelSource, /priceBarValue: barPrice \?\? null/);
 assert.match(panelSource, /importValue: meterValue\("import_kw"\)/);
 assert.match(panelSource, /exportValue: meterValue\("export_kw"\)/);
-assert.match(panelSource, /hoverSnapshot\.importValue > 0/);
-assert.match(panelSource, /hoverSnapshot\.exportValue > 0/);
+assert.match(panelSource, /isVisiblePowerValue\(hoverSnapshot\.importValue\)/);
+assert.match(panelSource, /isVisiblePowerValue\(hoverSnapshot\.exportValue\)/);
 assert.match(panelSource, /_buildVisibleTooltipRows\(comparisonPrice, \{[\s\S]*hoverSnapshot\.importValue/);
 assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /buildMeterDisplayCoordinates\(segment, key, x, meterY\)/);
@@ -620,8 +638,8 @@ assert.match(panelSource, /this\._priceComparisonVisible\.electricity/);
 assert.match(panelSource, /rows\.push\(`<span class="tooltip-value">Spotpris: \$\{this\.formatPrice\(comparisonPrice\)\}<\/span>`\)/);
 assert.doesNotMatch(panelSource, /<span class="tooltip-value">Elhandel:/);
 assert.doesNotMatch(panelSource, /<span class="tooltip-value">Elnät:/);
-assert.match(panelSource, /this\._meterPowerVisible\.import && Number\.isFinite\(details\?\.import_kw\)/);
-assert.match(panelSource, /this\._meterPowerVisible\.export && Number\.isFinite\(details\?\.export_kw\)/);
+assert.match(panelSource, /this\._meterPowerVisible\.import && isVisiblePowerValue\(details\?\.import_kw\)/);
+assert.match(panelSource, /this\._meterPowerVisible\.export && isVisiblePowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /tooltip-meter-import/);
 assert.match(panelSource, /tooltip-meter-export/);
 assert.match(panelSource, /tooltip\.innerHTML =/);
