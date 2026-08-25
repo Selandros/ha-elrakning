@@ -453,6 +453,7 @@ class ElrakningPanel {
     this._powerState = null;
     this._powerHistory = { date: null, series: {} };
     this._powerHistoryRequestToken = 0;
+    this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [key, new Map()]));
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
     this._averageLineVisible = true;
@@ -643,12 +644,12 @@ class ElrakningPanel {
         <div class="meter-dialog-card">
           <h2 id="meter-title">Elmätare</h2>
           <p data-meter-result></p>
-          <div class="meter-selectors" data-meter-selectors></div>
           <label class="price-filter-toggle meter-invert-toggle">
             <span>Invertera effekt</span>
             <input type="checkbox" data-meter-invert-power>
             <span class="price-filter-track" aria-hidden="true"><span></span></span>
           </label>
+          <div class="meter-selectors" data-meter-selectors></div>
           <button type="button" data-meter-clear>Rensa elmätare</button>
           <div class="provider-actions">
             <button type="button" data-meter-cancel>Avbryt</button>
@@ -669,6 +670,7 @@ class ElrakningPanel {
           <p data-power-result></p>
           <div class="meter-selectors" data-power-selectors></div>
           <button type="button" data-power-add-solar hidden>Lägg till solentitet</button>
+          <button type="button" data-power-clear>Rensa</button>
           <div class="provider-actions">
             <button type="button" data-power-cancel>Avbryt</button>
             <button type="button" data-power-save disabled>Spara</button>
@@ -1376,6 +1378,18 @@ class ElrakningPanel {
           user-select: none;
         }
 
+        .meter-invert-toggle {
+          font-size: 12px;
+          gap: 8px;
+          margin: 12px 0 16px;
+        }
+
+        .meter-invert-toggle .price-filter-track {
+          height: 20px;
+          --knob-size: 14px;
+          --track-padding: 2px;
+        }
+
         .price-filter-toggle input {
           height: 1px;
           opacity: 0;
@@ -1632,6 +1646,19 @@ class ElrakningPanel {
           opacity: .82;
           vector-effect: non-scaling-stroke;
         }
+
+        .chart-power-point {
+          stroke: var(--ha-card-background, var(--card-background-color));
+          stroke-width: 1;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .chart-power-point.chart-meter-import { fill: var(--grid-import-color); }
+        .chart-power-point.chart-meter-export { fill: var(--grid-export-color); }
+        .chart-power-point.chart-power-solar { fill: var(--solar-color); }
+        .chart-power-point.chart-power-consumption { fill: var(--consumption-color); }
+        .chart-power-point.chart-power-charging { fill: var(--charging-color); }
+        .chart-power-point.chart-power-discharging { fill: var(--discharging-color); }
 
         .chart-hover-markers {
           pointer-events: none;
@@ -1911,6 +1938,7 @@ class ElrakningPanel {
         this._previewLayersVisible[layer] = !this._previewLayersVisible[layer];
         button.classList.toggle("active", this._previewLayersVisible[layer]);
         button.setAttribute("aria-pressed", String(this._previewLayersVisible[layer]));
+        this.renderPriceChart();
         this._persistChartPreferences();
       });
     }
@@ -2099,6 +2127,7 @@ class ElrakningPanel {
     const save = this.host.querySelector("[data-power-save]");
     const cancel = this.host.querySelector("[data-power-cancel]");
     const addSolar = this.host.querySelector("[data-power-add-solar]");
+    const clear = this.host.querySelector("[data-power-clear]");
     if (!dialog || !selectorsElement || !result || !save || !cancel) return;
     let mode = "solar";
     let solarCount = 2;
@@ -2129,6 +2158,7 @@ class ElrakningPanel {
     const open = async (selectedMode) => {
       mode = selectedMode;
       dialog.hidden = false;
+      if (clear) clear.textContent = ({ solar: "Rensa sol", consumption: "Rensa last", battery: "Rensa batteri" })[mode];
       save.disabled = true;
       result.textContent = "Hämtar sparad konfiguration …";
       try {
@@ -2148,14 +2178,27 @@ class ElrakningPanel {
       button.addEventListener("click", () => open(button.dataset.powerConfigure));
     });
     save.addEventListener("click", async () => {
-      const mapping = { solar_entities: [], consumption_entity: "", charging_entity: "", discharging_entity: "", soc_entity: "", capacity_entity: "" };
+      const current = this._powerState || {};
+      const mapping = {
+        solar_entities: Array.isArray(current.solar_entities) ? [...current.solar_entities] : [],
+        consumption_entity: current.consumption_entity || "",
+        charging_entity: current.charging_entity || "",
+        discharging_entity: current.discharging_entity || "",
+        soc_entity: current.soc_entity || "",
+        capacity_entity: current.capacity_entity || "",
+      };
       selectorsElement.querySelectorAll("[data-power-field]").forEach((selector) => {
         if (selector.dataset.powerField === "solar_entities") mapping.solar_entities.push(selector.value || "");
         else mapping[selector.dataset.powerField] = selector.value || "";
       });
+      if (mode === "solar") {
+        mapping.solar_entities = Array.from(selectorsElement.querySelectorAll('[data-power-field="solar_entities"]'))
+          .map((selector) => selector.value || "");
+      }
       save.disabled = true;
       result.textContent = "Sparar …";
       try {
+        this._resetPowerLivePoints();
         const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
         if (!response?.success) throw new Error(response?.error || "power_save_failed");
         this._applyPowerState(response);
@@ -2168,6 +2211,41 @@ class ElrakningPanel {
       }
     });
     cancel.addEventListener("click", close);
+    clear?.addEventListener("click", async () => {
+      const labels = { solar: "Sol", consumption: "Last", battery: "Batteri" };
+      if (!window.confirm(`Är du säker? ${labels[mode]} rensas.`)) return;
+      const current = this._powerState || {};
+      const mapping = {
+        solar_entities: Array.isArray(current.solar_entities) ? [...current.solar_entities] : [],
+        consumption_entity: current.consumption_entity || "",
+        charging_entity: current.charging_entity || "",
+        discharging_entity: current.discharging_entity || "",
+        soc_entity: current.soc_entity || "",
+        capacity_entity: current.capacity_entity || "",
+      };
+      if (mode === "solar") mapping.solar_entities = [];
+      if (mode === "consumption") mapping.consumption_entity = "";
+      if (mode === "battery") {
+        mapping.charging_entity = "";
+        mapping.discharging_entity = "";
+        mapping.soc_entity = "";
+        mapping.capacity_entity = "";
+      }
+      save.disabled = true;
+      result.textContent = "Rensar …";
+      try {
+        this._resetPowerLivePoints();
+        const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
+        if (!response?.success) throw new Error(response?.error || "power_clear_failed");
+        this._applyPowerState(response);
+        await this.loadPowerHistory();
+        close();
+      } catch (error) {
+        const details = this._websocketErrorDetails(error);
+        save.disabled = false;
+        result.textContent = `Energikonfigurationen kunde inte rensas: ${details.code}: ${details.message}`;
+      }
+    });
     addSolar?.addEventListener("click", () => {
       if (mode !== "solar" || solarCount >= 12) return;
       solarCount += 1;
@@ -2223,9 +2301,16 @@ class ElrakningPanel {
     try {
       const response = await this.hass.callWS({ type: "elrakning/power_history" });
       if (requestToken !== this._powerHistoryRequestToken) return;
+      const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
+      for (const [key, points] of Object.entries(this._powerLivePoints)) {
+        if (!points.size) continue;
+        const merged = new Map((Array.isArray(series[key]?.points) ? series[key].points : []).map((point) => [point.timestamp, point]));
+        for (const [timestamp, point] of points) merged.set(timestamp, point);
+        series[key] = { ...(series[key] || {}), points: [...merged.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp)) };
+      }
       this._powerHistory = {
         date: response?.date || null,
-        series: response?.success && response?.series && typeof response.series === "object" ? response.series : {},
+        series,
       };
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
@@ -2237,8 +2322,34 @@ class ElrakningPanel {
   _appendPowerState(eventData) {
     if (eventData?.state) {
       this._applyPowerState(eventData.state);
+      for (const entry of eventData.points || []) this._appendPowerPoint(entry.series, entry.point);
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     }
+  }
+
+  _resetPowerLivePoints() {
+    for (const points of Object.values(this._powerLivePoints)) points.clear();
+  }
+
+  _appendPowerPoint(series, point) {
+    if (!(series in this._powerLivePoints) || !point?.timestamp || !Number.isFinite(Number(point.value_kw))) return;
+    const timestamp = new Date(point.timestamp);
+    if (Number.isNaN(timestamp.getTime())) return;
+    const date = timestamp.toLocaleDateString("sv-SE");
+    if (this._powerHistory.date && date !== this._powerHistory.date) return;
+    this._powerLivePoints[series].set(timestamp.toISOString(), {
+      timestamp: timestamp.toISOString(),
+      value_kw: Number(point.value_kw),
+    });
+    const existing = Array.isArray(this._powerHistory.series?.[series]?.points)
+      ? [...this._powerHistory.series[series].points]
+      : [];
+    const byTimestamp = new Map(existing.map((item) => [item.timestamp, item]));
+    byTimestamp.set(timestamp.toISOString(), this._powerLivePoints[series].get(timestamp.toISOString()));
+    this._powerHistory.series = {
+      ...this._powerHistory.series,
+      [series]: { ...(this._powerHistory.series?.[series] || {}), points: [...byTimestamp.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp)) },
+    };
   }
 
   async _recordMeterDiagnostic(level, event, message) {
@@ -3466,7 +3577,7 @@ class ElrakningPanel {
       if (active && start === null) start = index;
       if ((!active || index === points.length - 1) && start !== null) {
         const end = active && index === points.length - 1 ? index : index - 1;
-        if (end - start > 0) segments.push(points.slice(start, end + 1));
+        if (end >= start) segments.push(points.slice(start, end + 1));
         start = null;
       }
     });
@@ -3497,6 +3608,9 @@ class ElrakningPanel {
   meterDisplayYAt(geometry, timestamp, x) {
     const targetX = x(timestamp);
     for (const segment of Array.isArray(geometry) ? geometry : []) {
+      if (segment.coordinates.length === 1 && Math.abs(targetX - segment.coordinates[0].x) < 1) {
+        return segment.coordinates[0].y;
+      }
       for (const pathSegment of segment.pathSegments) {
         const { start, control1, control2, end } = pathSegment;
         const minX = Math.min(start.x, end.x);
@@ -3536,6 +3650,16 @@ class ElrakningPanel {
       path.push(`C ${control1.x} ${control1.y} ${control2.x} ${control2.y} ${end.x} ${end.y}`);
     });
     return path.join(" ");
+  }
+
+  buildMeterDisplayMarkup(points, key, className, x, meterY) {
+    return this.buildMeterDisplaySegments(points, key).map((segment) => {
+      if (segment.length === 1) {
+        const point = this.buildMeterDisplayCoordinates(segment, key, x, meterY)[0];
+        return `<circle class="${className} chart-power-point" cx="${point.x}" cy="${point.y}" r="2.4" />`;
+      }
+      return `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
+    }).join("");
   }
 
   renderPriceChart() {
@@ -3648,15 +3772,11 @@ class ElrakningPanel {
     const meterRange = Math.ceil(meterBase / meterStep) * meterStep;
     const meterY = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / meterRange) * plotHeight;
     const meterLinesFor = (key, className, visible) => visible
-      ? this.buildMeterDisplaySegments(meterDisplayPoints, key)
-        .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`)
-        .join("")
+      ? this.buildMeterDisplayMarkup(meterDisplayPoints, key, className, x, meterY)
       : "";
     const powerLinesFor = (key, className, visible) => {
       return visible
-        ? this.buildMeterDisplaySegments(powerDisplayPoints[key], "value_kw")
-          .map((segment) => `<path class="${className}" d="${this.buildSmoothMeterPath(segment, "value_kw", x, meterY)}" />`)
-          .join("")
+        ? this.buildMeterDisplayMarkup(powerDisplayPoints[key], "value_kw", className, x, meterY)
         : "";
     };
     const meterDisplayGeometry = {

@@ -128,6 +128,34 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "invalid_power_unit"):
             await manager.async_save_mapping({"solar_entities": ["sensor.energy"]})
 
+    async def test_state_change_event_contains_live_series_point(self):
+        states = {
+            "sensor.solar": _state(0.36, "kW"),
+            "sensor.load": _state(1.2, "kW"),
+        }
+        fired = []
+
+        async def async_add_executor_job(function, *args, **kwargs):
+            return function(*args, **kwargs)
+
+        hass = types.SimpleNamespace(
+            states=types.SimpleNamespace(get=states.get),
+            bus=types.SimpleNamespace(
+                async_listen=lambda *args: lambda: None,
+                async_fire=lambda *args: fired.append(args),
+            ),
+            recorder=types.SimpleNamespace(async_add_executor_job=async_add_executor_job),
+        )
+        manager = power.PowerManager(hass)
+        await manager.async_save_mapping({"solar_entities": ["sensor.solar"], "consumption_entity": "sensor.load"})
+        changed = _state(0.36, "kW", datetime(2026, 8, 23, 12, 5, tzinfo=timezone.utc))
+        await manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.solar", "new_state": changed}))
+        self.assertEqual(fired[0][0], power.POWER_UPDATE_EVENT)
+        self.assertEqual(fired[0][1]["points"], [{
+            "series": "solar",
+            "point": {"timestamp": changed.last_updated.isoformat(), "value_kw": 0.36},
+        }])
+
     async def test_history_sums_mppt_timelines_without_array_index_merging(self):
         states = {"sensor.mppt_1": _state(0, "W"), "sensor.mppt_2": _state(0, "W")}
         hass = _hass(states)

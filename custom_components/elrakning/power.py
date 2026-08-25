@@ -74,9 +74,26 @@ class PowerManager:
         }
         if entity_id not in selected:
             return
+        state = await self.async_state()
+        new_state = event.data.get("new_state")
+        timestamp = getattr(new_state, "last_updated", None)
+        points = []
+        if entity_id in self.mapping.get("solar_entities", []):
+            point = {"timestamp": timestamp.isoformat(), "value_kw": state["solar_kw"]} if timestamp and state.get("solar_kw") is not None else None
+            if point:
+                points.append({"series": "solar", "point": point})
+        for field, series in (
+            ("consumption_entity", "consumption"),
+            ("charging_entity", "charging"),
+            ("discharging_entity", "discharging"),
+        ):
+            if entity_id == self.mapping.get(field):
+                value = state.get(f"{series}_kw")
+                if timestamp and value is not None:
+                    points.append({"series": series, "point": {"timestamp": timestamp.isoformat(), "value_kw": value}})
         self.hass.bus.async_fire(
             POWER_UPDATE_EVENT,
-            {"entity_id": entity_id, "state": await self.async_state()},
+            {"entity_id": entity_id, "state": state, "points": points},
         )
 
     async def async_shutdown(self) -> None:
@@ -176,9 +193,13 @@ class PowerManager:
         start = dt_util.start_of_local_day(now)
         end = dt_util.start_of_local_day(now + timedelta(days=1))
         date = start.date().isoformat()
+        mapping = {
+            "solar_entities": list(self.mapping.get("solar_entities", [])),
+            **{field: self.mapping.get(field) for field in POWER_FIELDS},
+        }
         power_entities = list(dict.fromkeys([
-            *self.mapping.get("solar_entities", []),
-            *(self.mapping[field] for field in ("consumption_entity", "charging_entity", "discharging_entity") if self.mapping.get(field)),
+            *mapping["solar_entities"],
+            *(mapping[field] for field in ("consumption_entity", "charging_entity", "discharging_entity") if mapping.get(field)),
         ]))
         if not power_entities:
             return {
@@ -186,15 +207,19 @@ class PowerManager:
                 "date": date,
                 "series": {key: {"points": []} for key in ("solar", "consumption", "charging", "discharging")},
             }
-        key = ("|".join(power_entities), date)
+        mapping_key = "|".join(
+            [f"solar={','.join(mapping['solar_entities'])}"]
+            + [f"{field}={mapping.get(field) or ''}" for field in POWER_FIELDS]
+        )
+        key = (mapping_key, date)
         task = self._history_inflight.get(key)
         if task is None:
-            task = asyncio.create_task(self._async_history_fetch(power_entities, start, end, date))
+            task = asyncio.create_task(self._async_history_fetch(power_entities, mapping, start, end, date))
             self._history_inflight[key] = task
             task.add_done_callback(lambda completed, request_key=key: self._history_inflight.pop(request_key, None) if self._history_inflight.get(request_key) is completed else None)
         return await asyncio.shield(task)
 
-    async def _async_history_fetch(self, entities: list[str], start, end, date: str) -> dict[str, Any]:
+    async def _async_history_fetch(self, entities: list[str], mapping: dict[str, Any], start, end, date: str) -> dict[str, Any]:
         try:
             from homeassistant.components.recorder import get_instance, history
 
@@ -215,12 +240,12 @@ class PowerManager:
         raw = {}
         for entity_id in entities:
             raw[entity_id] = [point for state in history_by_entity.get(entity_id, []) if (point := _power_history_point(state))]
-        solar_entities = self.mapping.get("solar_entities", [])
+        solar_entities = mapping.get("solar_entities", [])
         series = {
             "solar": {"points": self._sum_solar_history(solar_entities, raw)},
-            "consumption": {"points": self._points_for_entity(self.mapping.get("consumption_entity"), raw)},
-            "charging": {"points": self._points_for_entity(self.mapping.get("charging_entity"), raw)},
-            "discharging": {"points": self._points_for_entity(self.mapping.get("discharging_entity"), raw)},
+            "consumption": {"points": self._points_for_entity(mapping.get("consumption_entity"), raw)},
+            "charging": {"points": self._points_for_entity(mapping.get("charging_entity"), raw)},
+            "discharging": {"points": self._points_for_entity(mapping.get("discharging_entity"), raw)},
         }
         return {"success": True, "date": date, "series": series}
 
