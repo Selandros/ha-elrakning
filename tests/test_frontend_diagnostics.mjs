@@ -509,7 +509,8 @@ assert.match(panelSource, /priceCategory\(prices\[currentIndex\], colorBands\)/)
 assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, var\(--success-color\) 41%,/);
 assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 41%,/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 41%,/);
-assert.match(panelSource, /\.chart-bar \{[\s\S]*stroke: color-mix\(in srgb, var\(--primary-text-color\) 24%, transparent\)/);
+assert.match(panelSource, /\.chart-bar \{[\s\S]*stroke: #111111;[\s\S]*stroke-width: \.7;/);
+assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke: color-mix/);
 assert.match(panelSource, /data-power-battery-mode/);
 assert.match(panelSource, /data-power-invert-battery/);
 assert.match(panelSource, /battery_power_entity/);

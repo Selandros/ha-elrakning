@@ -1768,7 +1768,7 @@ class ElrakningPanel {
 
         .chart-bar {
           cursor: default;
-          stroke: color-mix(in srgb, var(--primary-text-color) 24%, transparent);
+          stroke: #111111;
           stroke-width: .7;
           vector-effect: non-scaling-stroke;
         }
