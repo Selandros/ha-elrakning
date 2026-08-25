@@ -1741,7 +1741,11 @@ class ElrakningPanel {
         }
 
         .chart-power-area-solar { fill: var(--solar-color); }
+        .chart-power-area-import { fill: var(--grid-import-color); }
         .chart-power-area-export { fill: var(--grid-export-color); }
+        .chart-power-area-consumption { fill: var(--consumption-color); }
+        .chart-power-area-charging { fill: var(--charging-color); }
+        .chart-power-area-discharging { fill: var(--discharging-color); }
 
         .chart-hover-markers {
           pointer-events: none;
@@ -4067,8 +4071,20 @@ class ElrakningPanel {
       this._previewLayersVisible.solar
         ? this.buildMeterDisplayAreaMarkup(powerDisplayPoints.solar, "value_kw", "chart-power-area chart-power-area-solar", x, meterY)
         : "",
+      this._meterPowerVisible.import
+        ? this.buildMeterDisplayAreaMarkup(meterDisplayPoints, "import_kw", "chart-power-area chart-power-area-import", x, meterY)
+        : "",
       this._meterPowerVisible.export
         ? this.buildMeterDisplayAreaMarkup(meterDisplayPoints, "export_kw", "chart-power-area chart-power-area-export", x, meterY)
+        : "",
+      this._previewLayersVisible.consumption
+        ? this.buildMeterDisplayAreaMarkup(powerDisplayPoints.consumption, "value_kw", "chart-power-area chart-power-area-consumption", x, meterY)
+        : "",
+      this._previewLayersVisible.charging
+        ? this.buildMeterDisplayAreaMarkup(powerDisplayPoints.charging, "value_kw", "chart-power-area chart-power-area-charging", x, meterY)
+        : "",
+      this._previewLayersVisible.discharging
+        ? this.buildMeterDisplayAreaMarkup(powerDisplayPoints.discharging, "value_kw", "chart-power-area chart-power-area-discharging", x, meterY)
         : "",
     ].join("");
     const meterVisible = (meterDisplayPoints.some((point) => isVisiblePowerValue(point.import_kw) || isVisiblePowerValue(point.export_kw))
