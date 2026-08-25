@@ -18,7 +18,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data
-from .elhandel.manager import CHART_LAYER_DEFAULTS, ElhandelManager
+from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
@@ -478,20 +478,25 @@ async def websocket_chart_layers(hass, connection, msg):
         return
     chart_layers = await manager.async_get_chart_layers(connection.user.id)
     configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
+    main_cards = await manager.async_get_main_cards(connection.user.id)
     connection.send_result(msg["id"], {
         "success": True,
         "chart_layers": chart_layers,
         "configuration_cards_visible": configuration_cards_visible,
+        "main_cards": main_cards,
     })
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): CHART_LAYERS_SET_COMMAND,
-        vol.Required("chart_layers"): {
+        vol.Optional("chart_layers", default={}): {
             vol.Optional(key): bool for key in CHART_LAYER_DEFAULTS
         },
         vol.Optional("configuration_cards_visible"): bool,
+        vol.Optional("main_cards", default={}): {
+            vol.Optional(key): bool for key in MAIN_CARD_DEFAULTS
+        },
     }
 )
 @websocket_api.async_response
@@ -500,16 +505,22 @@ async def websocket_chart_layers_set(hass, connection, msg):
     if not manager or not getattr(connection, "user", None):
         connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
         return
-    chart_layers = await manager.async_set_chart_layers(connection.user.id, msg["chart_layers"])
+    chart_layers = await manager.async_get_chart_layers(connection.user.id)
+    if "chart_layers" in msg:
+        chart_layers = await manager.async_set_chart_layers(connection.user.id, msg["chart_layers"])
     configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
     if "configuration_cards_visible" in msg:
         configuration_cards_visible = await manager.async_set_configuration_cards_visible(
             connection.user.id, msg["configuration_cards_visible"]
         )
+    main_cards = await manager.async_get_main_cards(connection.user.id)
+    if "main_cards" in msg:
+        main_cards = await manager.async_set_main_cards(connection.user.id, msg["main_cards"])
     connection.send_result(msg["id"], {
         "success": True,
         "chart_layers": chart_layers,
         "configuration_cards_visible": configuration_cards_visible,
+        "main_cards": main_cards,
     })
 
 

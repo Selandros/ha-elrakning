@@ -337,6 +337,22 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stored["users"]["user-a"]["configuration_cards_visible"])
         self.assertTrue(stored["users"]["user-b"]["configuration_cards_visible"])
 
+    async def test_main_cards_are_defaulted_per_user_and_partial_updates_are_preserved(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        first = await manager.async_get_main_cards("user-a")
+        self.assertEqual(set(first), {"elhandel", "elnet", "elmatare", "solar", "consumption", "battery"})
+        self.assertFalse(any(first.values()))
+        updated = await manager.async_set_main_cards("user-a", {"battery": True})
+        self.assertTrue(updated["battery"])
+        self.assertFalse(updated["solar"])
+        updated = await manager.async_set_main_cards("user-a", {"solar": True})
+        self.assertTrue(updated["battery"])
+        self.assertTrue(updated["solar"])
+        other_user = await manager.async_get_main_cards("user-b")
+        self.assertFalse(any(other_user.values()))
+
 
 class _Connection:
     def __init__(self):

@@ -38,6 +38,14 @@ CHART_LAYER_DEFAULTS = {
     "discharging": True,
 }
 CONFIGURATION_CARDS_VISIBLE_DEFAULT = True
+MAIN_CARD_DEFAULTS = {
+    "elhandel": False,
+    "elnet": False,
+    "elmatare": False,
+    "solar": False,
+    "consumption": False,
+    "battery": False,
+}
 
 
 class ElhandelManager:
@@ -184,6 +192,33 @@ class ElhandelManager:
         }
         await self.chart_preferences_store.async_save({"users": users})
         return result
+
+    async def async_get_main_cards(self, user_id: str) -> dict[str, bool]:
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) else {}
+        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
+        main_cards = user_state.get("main_cards", {}) if isinstance(user_state, dict) else {}
+        result = {
+            key: main_cards[key] if isinstance(main_cards, dict) and isinstance(main_cards.get(key), bool) else default
+            for key, default in MAIN_CARD_DEFAULTS.items()
+        }
+        if not isinstance(users, dict):
+            users = {}
+        if not isinstance(users.get(user_id), dict) or users[user_id].get("main_cards") != result:
+            users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "main_cards": result}
+            await self.chart_preferences_store.async_save({"users": users})
+        return result
+
+    async def async_set_main_cards(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
+        current = await self.async_get_main_cards(user_id)
+        for key, value in updates.items():
+            if key in MAIN_CARD_DEFAULTS and isinstance(value, bool):
+                current[key] = value
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
+        users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "main_cards": current}
+        await self.chart_preferences_store.async_save({"users": users})
+        return current
 
     def async_start_refresh(self, reason: str = "startup") -> None:
         if not self.lifecycle.has_refresh_unsubscribe():

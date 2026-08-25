@@ -509,6 +509,14 @@ class ElrakningPanel {
     this._debugEnabled = false;
     this._debugPreferenceChanged = false;
     this._configurationCardsVisible = true;
+    this._mainCards = {
+      elhandel: false,
+      elnet: false,
+      elmatare: false,
+      solar: false,
+      consumption: false,
+      battery: false,
+    };
     this._diagnosticEntries = [];
     this._chartTouch = null;
     this._chartDebugCopyText = "";
@@ -635,10 +643,11 @@ class ElrakningPanel {
         </section>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
-          <article class="card" data-provider-card="elhandel">
+          <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
             <div class="card-heading">
               <h2>Elhandel</h2>
               <span class="status" data-provider-status></span>
+              <label class="main-card-toggle" data-main-card-toggle="elhandel">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elhandel" hidden></p>
             <div class="provider-summary" data-provider-summary hidden></div>
@@ -647,47 +656,49 @@ class ElrakningPanel {
               <div data-retained-history-list></div>
             </div>
             <p class="provider-processing-error" data-provider-processing-error hidden>Fel vid senaste hämtning</p>
-            <button type="button" data-electricity-configure>Konfigurera</button>
+            <button type="button" class="configuration-control" data-electricity-configure>Konfigurera</button>
             <button type="button" data-provider-source hidden>Vad har vi för data?</button>
             <button type="button" data-greenely-parse-latest hidden>Tolka senaste</button>
           </article>
 
-            <article class="card" data-provider-card="elnet">
+            <article class="card" data-provider-card="elnet" data-config-card-key="elnet">
             <div class="card-heading">
               <h2>Elnät</h2>
               <span class="status">Ej konfigurerad</span>
+              <label class="main-card-toggle" data-main-card-toggle="elnet">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elnet" hidden></p>
-            <button type="button">Konfigurera</button>
+            <button type="button" class="configuration-control">Konfigurera</button>
           </article>
 
-          <article class="card" data-provider-card="elmatare">
+          <article class="card" data-provider-card="elmatare" data-config-card-key="elmatare">
             <div class="card-heading">
               <h2>Elmätare</h2>
               <span class="status" data-meter-status>Ej konfigurerad</span>
+              <label class="main-card-toggle" data-main-card-toggle="elmatare">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elmatare" hidden></p>
             <div class="meter-summary" data-meter-summary hidden></div>
-            <button type="button" data-meter-configure>Konfigurera</button>
+            <button type="button" class="configuration-control" data-meter-configure>Konfigurera</button>
             <button type="button" data-meter-source hidden>Visa mätardata</button>
           </article>
 
-          <article class="card power-card" data-power-card="solar">
-            <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span></div>
+          <article class="card power-card" data-power-card="solar" data-config-card-key="solar">
+            <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="solar" hidden></div>
-            <button type="button" data-power-configure="solar">Konfigurera</button>
+            <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
-          <article class="card power-card" data-power-card="consumption">
-            <div class="card-heading"><h2>Last</h2><span class="status" data-power-status="consumption">Ej konfigurerad</span></div>
+          <article class="card power-card" data-power-card="consumption" data-config-card-key="consumption">
+            <div class="card-heading"><h2>Last</h2><span class="status" data-power-status="consumption">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="consumption">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="consumption" hidden></div>
-            <button type="button" data-power-configure="consumption">Konfigurera</button>
+            <button type="button" class="configuration-control" data-power-configure="consumption">Konfigurera</button>
           </article>
 
-          <article class="card power-card" data-power-card="battery">
-            <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span></div>
+          <article class="card power-card" data-power-card="battery" data-config-card-key="battery">
+            <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery">Main<input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
-            <button type="button" data-power-configure="battery">Konfigurera</button>
+            <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
 
         </section>
@@ -1830,6 +1841,61 @@ class ElrakningPanel {
           display: flex;
           flex-direction: column;
           gap: 8px;
+          position: relative;
+        }
+
+        .card-heading:has(.main-card-toggle) h2 {
+          padding-right: 44px;
+        }
+
+        .main-card-toggle {
+          align-items: center;
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          display: inline-flex;
+          font-size: 12px;
+          gap: 4px;
+          position: absolute;
+          right: 0;
+          top: 0;
+          white-space: nowrap;
+        }
+
+        .main-card-toggle input {
+          height: 0;
+          opacity: 0;
+          position: absolute;
+          width: 0;
+        }
+
+        .main-card-track {
+          background: var(--divider-color);
+          border-radius: 10px;
+          display: inline-block;
+          height: 16px;
+          position: relative;
+          transition: background-color 120ms ease;
+          width: 27px;
+        }
+
+        .main-card-track::after {
+          background: var(--primary-background-color);
+          border-radius: 50%;
+          content: "";
+          height: 11px;
+          left: 2px;
+          position: absolute;
+          top: 2px;
+          transition: transform 120ms ease;
+          width: 11px;
+        }
+
+        .main-card-toggle input:checked + .main-card-track {
+          background: var(--primary-color);
+        }
+
+        .main-card-toggle input:checked + .main-card-track::after {
+          transform: translateX(12px);
         }
 
         h2 {
@@ -1868,6 +1934,7 @@ class ElrakningPanel {
     this._bindPowerDialog();
     this._bindDebugToggle();
     this._bindConfigurationCardsToggle();
+    this._bindMainCardToggles();
     this._bindProviderSourceDialog();
     this._bindMeterSourceDialog();
     this._bindDiagnostics();
@@ -1903,12 +1970,32 @@ class ElrakningPanel {
     };
   }
 
-  _applyConfigurationCardsVisibility(visible) {
+  _applyMainCardState(mainCards) {
+    if (!mainCards || typeof mainCards !== "object") return;
+    for (const key of Object.keys(this._mainCards)) {
+      if (typeof mainCards[key] === "boolean") this._mainCards[key] = mainCards[key];
+    }
+  }
+
+  _applyConfigurationCardsVisibility(visible, mainCards = this._mainCards) {
     if (typeof visible !== "boolean") return;
     this._configurationCardsVisible = visible;
     const cards = this.host.querySelector("[data-configuration-cards]");
     const button = this.host.querySelector("[data-config-cards-toggle]");
-    if (cards) cards.hidden = !visible;
+    this._applyMainCardState(mainCards);
+    const anyMainCard = Object.values(this._mainCards).some(Boolean);
+    if (cards) cards.hidden = !visible && !anyMainCard;
+    for (const card of this.host.querySelectorAll("[data-config-card-key]")) {
+      const key = card.dataset.configCardKey;
+      card.hidden = !visible && !this._mainCards[key];
+    }
+    for (const toggle of this.host.querySelectorAll("[data-main-card-toggle]")) {
+      const key = toggle.dataset.mainCardToggle;
+      const input = toggle.querySelector("input");
+      toggle.hidden = !visible;
+      if (input && typeof this._mainCards[key] === "boolean") input.checked = this._mainCards[key];
+    }
+    for (const control of this.host.querySelectorAll(".configuration-control")) control.hidden = !visible;
     if (button) {
       button.classList.toggle("active", visible);
       button.setAttribute("aria-pressed", String(visible));
@@ -1947,7 +2034,7 @@ class ElrakningPanel {
     try {
       const response = await this.hass.callWS({ type: "elrakning/ui_preferences/get" });
       this._applyChartLayerState(response.chart_layers);
-      this._applyConfigurationCardsVisibility(response.configuration_cards_visible);
+      this._applyConfigurationCardsVisibility(response.configuration_cards_visible, response.main_cards);
       this._chartPreferencesReady = true;
       this._syncChartLayerButtons();
       this.renderPriceChart();
@@ -1963,6 +2050,7 @@ class ElrakningPanel {
         type: "elrakning/ui_preferences/set",
         chart_layers: this._chartLayerState(),
         configuration_cards_visible: this._configurationCardsVisible,
+        main_cards: this._mainCards,
       });
     } catch (error) {
       console.warn("Elrakning chart preference persistence failed", error);
@@ -2044,6 +2132,20 @@ class ElrakningPanel {
       this._persistChartPreferences();
     });
     this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
+  }
+
+  _bindMainCardToggles() {
+    for (const toggle of this.host.querySelectorAll("[data-main-card-toggle]")) {
+      const input = toggle.querySelector("input");
+      if (!input) continue;
+      input.addEventListener("change", () => {
+        const key = toggle.dataset.mainCardToggle;
+        if (!(key in this._mainCards)) return;
+        this._mainCards[key] = input.checked;
+        this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
+        this._persistChartPreferences();
+      });
+    }
   }
 
   async _loadDebugPreference() {
@@ -3230,6 +3332,7 @@ class ElrakningPanel {
             powerMapping.consumption_entity,
             powerMapping.charging_entity,
             powerMapping.discharging_entity,
+            powerMapping.battery_power_entity,
             powerMapping.soc_entity,
             powerMapping.capacity_entity,
           ];
