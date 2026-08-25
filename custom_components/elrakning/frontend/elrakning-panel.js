@@ -2138,6 +2138,12 @@ class ElrakningPanel {
     for (const toggle of this.host.querySelectorAll("[data-main-card-toggle]")) {
       const input = toggle.querySelector("input");
       if (!input) continue;
+      toggle.addEventListener("click", (event) => {
+        if (event.target === input) return;
+        event.preventDefault();
+        input.checked = !input.checked;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       input.addEventListener("change", () => {
         const key = toggle.dataset.mainCardToggle;
         if (!(key in this._mainCards)) return;
