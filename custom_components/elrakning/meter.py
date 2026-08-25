@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import timedelta
 from collections.abc import Awaitable, Callable
@@ -75,6 +76,7 @@ class MeterManager:
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
         self._history_summary: dict[str, Any] | None = None
+        self._history_inflight: dict[tuple[str, str], asyncio.Task] = {}
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     async def _async_state_changed(self, event: Event) -> None:
@@ -91,6 +93,9 @@ class MeterManager:
 
     async def async_shutdown(self) -> None:
         """Unsubscribe from Home Assistant state changes."""
+        for task in self._history_inflight.values():
+            task.cancel()
+        self._history_inflight.clear()
         if self._state_unsub:
             self._state_unsub()
             self._state_unsub = None
@@ -197,6 +202,27 @@ class MeterManager:
             self._history_summary = summary
             await self._diagnostic("INFO", "meter_history_request_success", "Meter history loaded · 0 points")
             return {"success": True, "entity_id": None, "date": date, "points": [], "history": summary}
+        key = (entity_id, date)
+        task = self._history_inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date))
+            self._history_inflight[key] = task
+
+            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str] = key) -> None:
+                if self._history_inflight.get(request_key) is completed:
+                    self._history_inflight.pop(request_key, None)
+
+            task.add_done_callback(clear_inflight)
+        return await asyncio.shield(task)
+
+    async def _async_power_history_fetch(
+        self,
+        entity_id: str,
+        start,
+        end,
+        date: str,
+    ) -> dict[str, Any]:
+        """Run one Recorder history operation shared by identical callers."""
         try:
             from homeassistant.components.recorder import get_instance, history
 
