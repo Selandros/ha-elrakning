@@ -20,6 +20,7 @@ POWER_FIELDS = (
     "consumption_entity",
     "charging_entity",
     "discharging_entity",
+    "battery_power_entity",
     "soc_entity",
     "capacity_entity",
 )
@@ -33,6 +34,13 @@ def _clean_entity(value: Any) -> str | None:
 def _positive_power(state: State | Any) -> float | None:
     value = _power_kw(state)
     return abs(value) if value is not None else None
+
+
+def _split_signed_power(value: float | None, invert: bool = False) -> tuple[float | None, float | None]:
+    if value is None:
+        return None, None
+    signed = -value if invert else value
+    return max(signed, 0), max(-signed, 0)
 
 
 def _state_number(state: State | Any, units: set[str], divisor: float = 1) -> float | None:
@@ -56,6 +64,14 @@ def _power_history_point(state: State | Any) -> dict[str, Any] | None:
     return {"timestamp": timestamp.isoformat(), "value_kw": value}
 
 
+def _signed_power_history_point(state: State | Any, invert: bool = False) -> dict[str, Any] | None:
+    value = _power_kw(state)
+    timestamp = getattr(state, "last_updated", None)
+    if value is None or timestamp is None:
+        return None
+    return {"timestamp": timestamp.isoformat(), "value_kw": -value if invert else value}
+
+
 class PowerManager:
     """Persist selected power sensors and expose live/history series."""
 
@@ -63,7 +79,7 @@ class PowerManager:
         self.hass = hass
         self._diagnostic_callback = diagnostic_callback
         self.store = Store(hass, 1, STORE_KEY)
-        self.mapping: dict[str, Any] = {"solar_entities": [], **{field: None for field in POWER_FIELDS}}
+        self.mapping: dict[str, Any] = {"solar_entities": [], **{field: None for field in POWER_FIELDS}, "invert_battery_power": False}
         self._history_inflight: dict[tuple[str, str], asyncio.Task] = {}
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
@@ -91,6 +107,16 @@ class PowerManager:
                 value = state.get(f"{series}_kw")
                 if timestamp and value is not None:
                     points.append({"series": series, "point": {"timestamp": timestamp.isoformat(), "value_kw": value}})
+        if entity_id == self.mapping.get("battery_power_entity"):
+            charging, discharging = _split_signed_power(
+                _power_kw(new_state),
+                bool(self.mapping.get("invert_battery_power")),
+            )
+            if timestamp and charging is not None and discharging is not None:
+                points.extend([
+                    {"series": "charging", "point": {"timestamp": timestamp.isoformat(), "value_kw": charging}},
+                    {"series": "discharging", "point": {"timestamp": timestamp.isoformat(), "value_kw": discharging}},
+                ])
         self.hass.bus.async_fire(
             POWER_UPDATE_EVENT,
             {"entity_id": entity_id, "state": state, "points": points},
@@ -114,6 +140,7 @@ class PowerManager:
         )) if isinstance(solar, list) else []
         for field in POWER_FIELDS:
             self.mapping[field] = _clean_entity(cached.get(field))
+        self.mapping["invert_battery_power"] = cached.get("invert_battery_power") is True
 
     async def async_save_mapping(self, mapping: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(mapping, dict):
@@ -125,6 +152,15 @@ class PowerManager:
         selected_solar = [value for value in selected_solar if value]
         selected = {"solar_entities": selected_solar}
         selected.update({field: _clean_entity(mapping.get(field)) for field in POWER_FIELDS})
+        invert_battery_power = mapping.get("invert_battery_power", False)
+        if not isinstance(invert_battery_power, bool):
+            raise ValueError("invalid_invert_battery_power")
+        selected["invert_battery_power"] = invert_battery_power
+        if selected["battery_power_entity"]:
+            selected["charging_entity"] = None
+            selected["discharging_entity"] = None
+        else:
+            selected["battery_power_entity"] = None
         for entity_id in selected_solar:
             if not valid_entity_id(entity_id):
                 raise ValueError(f"invalid_entity_id:{entity_id}")
@@ -141,7 +177,7 @@ class PowerManager:
             state = self.hass.states.get(entity_id)
             if state is None:
                 raise ValueError(f"entity_not_found:{field}")
-            self._validate_unit(entity_id, state, field in {"consumption_entity", "charging_entity", "discharging_entity"}, field)
+            self._validate_unit(entity_id, state, field in {"consumption_entity", "charging_entity", "discharging_entity", "battery_power_entity"}, field)
         self.mapping = selected
         await self.store.async_save(self.mapping)
         return await self.async_state()
@@ -164,8 +200,8 @@ class PowerManager:
         result.update({
             "solar_kw": sum(solar_values) if solar_values else None,
             "consumption_kw": self._power_value("consumption_entity"),
-            "charging_kw": self._power_value("charging_entity"),
-            "discharging_kw": self._power_value("discharging_entity"),
+            "charging_kw": self._battery_power_value("charging"),
+            "discharging_kw": self._battery_power_value("discharging"),
             "soc_percent": self._attribute_value("soc_entity", {"%", "percent"}),
             "capacity_kwh": self._capacity_kwh(),
         })
@@ -174,6 +210,16 @@ class PowerManager:
     def _power_value(self, field: str) -> float | None:
         entity_id = self.mapping.get(field)
         return _positive_power(self.hass.states.get(entity_id)) if entity_id else None
+
+    def _battery_power_value(self, direction: str) -> float | None:
+        entity_id = self.mapping.get("battery_power_entity")
+        if entity_id:
+            charging, discharging = _split_signed_power(
+                _power_kw(self.hass.states.get(entity_id)),
+                bool(self.mapping.get("invert_battery_power")),
+            )
+            return charging if direction == "charging" else discharging
+        return self._power_value(f"{direction}_entity")
 
     def _attribute_value(self, field: str, units: set[str]) -> float | None:
         entity_id = self.mapping.get(field)
@@ -196,10 +242,11 @@ class PowerManager:
         mapping = {
             "solar_entities": list(self.mapping.get("solar_entities", [])),
             **{field: self.mapping.get(field) for field in POWER_FIELDS},
+            "invert_battery_power": bool(self.mapping.get("invert_battery_power")),
         }
         power_entities = list(dict.fromkeys([
             *mapping["solar_entities"],
-            *(mapping[field] for field in ("consumption_entity", "charging_entity", "discharging_entity") if mapping.get(field)),
+            *(mapping[field] for field in ("consumption_entity", "charging_entity", "discharging_entity", "battery_power_entity") if mapping.get(field)),
         ]))
         if not power_entities:
             return {
@@ -210,6 +257,7 @@ class PowerManager:
         mapping_key = "|".join(
             [f"solar={','.join(mapping['solar_entities'])}"]
             + [f"{field}={mapping.get(field) or ''}" for field in POWER_FIELDS]
+            + [f"invert_battery_power={bool(mapping.get('invert_battery_power'))}"]
         )
         key = (mapping_key, date)
         task = self._history_inflight.get(key)
@@ -238,16 +286,32 @@ class PowerManager:
         except Exception:
             return {"success": False, "date": date, "series": {}, "error": "history_unavailable"}
         raw = {}
+        battery_entity = mapping.get("battery_power_entity")
+        invert_battery_power = bool(mapping.get("invert_battery_power"))
         for entity_id in entities:
-            raw[entity_id] = [point for state in history_by_entity.get(entity_id, []) if (point := _power_history_point(state))]
+            point_builder = _signed_power_history_point if entity_id == battery_entity else _power_history_point
+            raw[entity_id] = [
+                point for state in history_by_entity.get(entity_id, [])
+                if (point := point_builder(state, invert_battery_power) if entity_id == battery_entity else point_builder(state))
+            ]
         solar_entities = mapping.get("solar_entities", [])
         series = {
             "solar": {"points": self._sum_solar_history(solar_entities, raw)},
             "consumption": {"points": self._points_for_entity(mapping.get("consumption_entity"), raw)},
-            "charging": {"points": self._points_for_entity(mapping.get("charging_entity"), raw)},
-            "discharging": {"points": self._points_for_entity(mapping.get("discharging_entity"), raw)},
+            "charging": {"points": self._battery_history_points("charging", mapping, raw)},
+            "discharging": {"points": self._battery_history_points("discharging", mapping, raw)},
         }
         return {"success": True, "date": date, "series": series}
+
+    @staticmethod
+    def _battery_history_points(direction: str, mapping: dict[str, Any], raw: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        battery_entity = mapping.get("battery_power_entity")
+        if battery_entity:
+            points = raw.get(battery_entity, [])
+            if direction == "charging":
+                return [{**point, "value_kw": max(point["value_kw"], 0)} for point in points]
+            return [{**point, "value_kw": max(-point["value_kw"], 0)} for point in points]
+        return PowerManager._points_for_entity(mapping.get(f"{direction}_entity"), raw)
 
     @staticmethod
     def _points_for_entity(entity_id: str | None, raw: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

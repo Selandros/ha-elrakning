@@ -91,6 +91,12 @@ def _hass(states):
 
 
 class PowerTests(unittest.IsolatedAsyncioTestCase):
+    def test_signed_battery_power_is_split_with_optional_inversion(self):
+        self.assertEqual(power._split_signed_power(3.2), (3.2, 0))
+        self.assertEqual(power._split_signed_power(-3.2), (0, 3.2))
+        self.assertEqual(power._split_signed_power(3.2, True), (0, 3.2))
+        self.assertEqual(power._split_signed_power(-3.2, True), (3.2, 0))
+
     async def test_empty_mapping_does_not_query_recorder(self):
         manager = power.PowerManager(_hass({}))
         result = await manager.async_history()
@@ -155,6 +161,64 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
             "series": "solar",
             "point": {"timestamp": changed.last_updated.isoformat(), "value_kw": 0.36},
         }])
+
+    async def test_combined_battery_state_and_live_event_are_split(self):
+        states = {"sensor.battery_power": _state(-2.5, "kW")}
+        fired = []
+        hass = types.SimpleNamespace(
+            states=types.SimpleNamespace(get=states.get),
+            bus=types.SimpleNamespace(
+                async_listen=lambda *args: lambda: None,
+                async_fire=lambda *args: fired.append(args),
+            ),
+            recorder=types.SimpleNamespace(async_add_executor_job=lambda function, *args, **kwargs: function(*args, **kwargs)),
+        )
+        manager = power.PowerManager(hass)
+        result = await manager.async_save_mapping({
+            "battery_power_entity": "sensor.battery_power",
+            "invert_battery_power": False,
+        })
+        self.assertEqual(result["charging_kw"], 0)
+        self.assertEqual(result["discharging_kw"], 2.5)
+        changed = _state(3.0, "kW", datetime(2026, 8, 23, 12, 5, tzinfo=timezone.utc))
+        await manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.battery_power", "new_state": changed}))
+        self.assertEqual(
+            fired[-1][1]["points"],
+            [
+                {"series": "charging", "point": {"timestamp": changed.last_updated.isoformat(), "value_kw": 3.0}},
+                {"series": "discharging", "point": {"timestamp": changed.last_updated.isoformat(), "value_kw": 0}},
+            ],
+        )
+
+    async def test_combined_battery_history_preserves_sign_before_split(self):
+        states = {"sensor.battery_power": _state(0, "kW")}
+        hass = _hass(states)
+        manager = power.PowerManager(hass)
+        await manager.async_save_mapping({"battery_power_entity": "sensor.battery_power"})
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda _: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: {
+            "sensor.battery_power": [
+                _state(2, "kW", datetime(2026, 8, 23, 10, tzinfo=timezone.utc)),
+                _state(-1.5, "kW", datetime(2026, 8, 23, 10, 5, tzinfo=timezone.utc)),
+            ]
+        }
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {name: sys.modules.get(name) for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")}
+        sys.modules.update({"homeassistant.components": components, "homeassistant.components.recorder": recorder, "homeassistant.components.recorder.history": history})
+        try:
+            result = await manager.async_history()
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertEqual([point["value_kw"] for point in result["series"]["charging"]["points"]], [2, 0])
+        self.assertEqual([point["value_kw"] for point in result["series"]["discharging"]["points"]], [0, 1.5])
 
     async def test_history_sums_mppt_timelines_without_array_index_merging(self):
         states = {"sensor.mppt_1": _state(0, "W"), "sensor.mppt_2": _state(0, "W")}

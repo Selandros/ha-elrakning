@@ -294,6 +294,12 @@ export function isVisiblePowerValue(value) {
   return Number.isFinite(numeric) && numeric > POWER_DISPLAY_THRESHOLD_KW;
 }
 
+export function displayPowerValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.abs(numeric) <= POWER_DISPLAY_THRESHOLD_KW ? 0 : numeric;
+}
+
 export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const dayEndMs = new Date(dayEnd).getTime();
@@ -736,6 +742,8 @@ class ElrakningPanel {
         <div class="meter-dialog-card">
           <h2 id="power-title">Konfigurera energi</h2>
           <p data-power-result></p>
+          <label data-power-battery-mode-wrap hidden>Batterieffekt<select data-power-battery-mode><option value="separate">Separata sensorer</option><option value="combined">Kombinerad sensor</option></select></label>
+          <label data-power-invert-battery-wrap hidden>Invertera batterieffekt<input type="checkbox" data-power-invert-battery></label>
           <div class="meter-selectors" data-power-selectors></div>
           <button type="button" data-power-add-solar hidden>Lägg till solentitet</button>
           <button type="button" data-power-clear>Rensa</button>
@@ -1749,6 +1757,9 @@ class ElrakningPanel {
 
         .chart-bar {
           cursor: default;
+          stroke: color-mix(in srgb, var(--primary-text-color) 24%, transparent);
+          stroke-width: .7;
+          vector-effect: non-scaling-stroke;
         }
 
         .chart-tooltip {
@@ -2183,17 +2194,28 @@ class ElrakningPanel {
     const cancel = this.host.querySelector("[data-power-cancel]");
     const addSolar = this.host.querySelector("[data-power-add-solar]");
     const clear = this.host.querySelector("[data-power-clear]");
+    const batteryModeWrap = this.host.querySelector("[data-power-battery-mode-wrap]");
+    const batteryModeSelect = this.host.querySelector("[data-power-battery-mode]");
+    const invertBatteryWrap = this.host.querySelector("[data-power-invert-battery-wrap]");
+    const invertBatteryToggle = this.host.querySelector("[data-power-invert-battery]");
     if (!dialog || !selectorsElement || !result || !save || !cancel) return;
     let mode = "solar";
+    let batteryMode = "separate";
     let solarCount = 2;
     const fieldsFor = (selectedMode) => selectedMode === "solar"
       ? Array.from({ length: solarCount }, (_, index) => [`Solproduktion ${index + 1}`, "solar_entities", true])
       : selectedMode === "consumption"
         ? [["Förbrukning", "consumption_entity", false]]
-        : [["Laddning", "charging_entity", false], ["Urladdning", "discharging_entity", false], ["Batteriets laddnivå", "soc_entity", false], ["Batterikapacitet", "capacity_entity", false]];
+        : [
+          ...(batteryMode === "combined" ? [["Batterieffekt", "battery_power_entity", false]] : [["Laddning", "charging_entity", false], ["Urladdning", "discharging_entity", false]]),
+          ["Batteriets laddnivå", "soc_entity", false],
+          ["Batterikapacitet", "capacity_entity", false],
+        ];
     const close = () => { dialog.hidden = true; selectorsElement.replaceChildren(); };
     const renderSelectors = (state) => {
       const fields = fieldsFor(mode);
+      if (batteryModeWrap) batteryModeWrap.hidden = mode !== "battery";
+      if (invertBatteryWrap) invertBatteryWrap.hidden = mode !== "battery" || batteryMode !== "combined";
       selectorsElement.replaceChildren(...fields.map(([labelText, field, multiple], index) => {
         const label = document.createElement("label");
         label.className = "meter-selector-label";
@@ -2219,6 +2241,9 @@ class ElrakningPanel {
       try {
         const state = await this.hass.callWS({ type: "elrakning/power_state" });
         solarCount = Math.max(2, state?.solar_entities?.length || 0);
+        batteryMode = state?.battery_power_entity ? "combined" : "separate";
+        if (batteryModeSelect) batteryModeSelect.value = batteryMode;
+        if (invertBatteryToggle) invertBatteryToggle.checked = state?.invert_battery_power === true;
         this._applyPowerState(state);
         renderSelectors(state);
         if (addSolar) addSolar.hidden = mode !== "solar";
@@ -2232,6 +2257,10 @@ class ElrakningPanel {
     this.host.querySelectorAll("[data-power-configure]").forEach((button) => {
       button.addEventListener("click", () => open(button.dataset.powerConfigure));
     });
+    batteryModeSelect?.addEventListener("change", () => {
+      batteryMode = batteryModeSelect.value === "combined" ? "combined" : "separate";
+      renderSelectors(this._powerState || {});
+    });
     save.addEventListener("click", async () => {
       const current = this._powerState || {};
       const mapping = {
@@ -2239,6 +2268,8 @@ class ElrakningPanel {
         consumption_entity: current.consumption_entity || "",
         charging_entity: current.charging_entity || "",
         discharging_entity: current.discharging_entity || "",
+        battery_power_entity: current.battery_power_entity || "",
+        invert_battery_power: batteryMode === "combined" && invertBatteryToggle?.checked === true,
         soc_entity: current.soc_entity || "",
         capacity_entity: current.capacity_entity || "",
       };
@@ -2249,6 +2280,13 @@ class ElrakningPanel {
       if (mode === "solar") {
         mapping.solar_entities = Array.from(selectorsElement.querySelectorAll('[data-power-field="solar_entities"]'))
           .map((selector) => selector.value || "");
+      }
+      if (mode === "battery" && batteryMode === "combined") {
+        mapping.charging_entity = "";
+        mapping.discharging_entity = "";
+      } else if (mode === "battery") {
+        mapping.battery_power_entity = "";
+        mapping.invert_battery_power = false;
       }
       save.disabled = true;
       result.textContent = "Sparar …";
@@ -2275,14 +2313,18 @@ class ElrakningPanel {
         consumption_entity: current.consumption_entity || "",
         charging_entity: current.charging_entity || "",
         discharging_entity: current.discharging_entity || "",
+        battery_power_entity: current.battery_power_entity || "",
+        invert_battery_power: false,
         soc_entity: current.soc_entity || "",
         capacity_entity: current.capacity_entity || "",
       };
       if (mode === "solar") mapping.solar_entities = [];
       if (mode === "consumption") mapping.consumption_entity = "";
       if (mode === "battery") {
+        mapping.battery_power_entity = "";
         mapping.charging_entity = "";
         mapping.discharging_entity = "";
+        mapping.invert_battery_power = false;
         mapping.soc_entity = "";
         mapping.capacity_entity = "";
       }
@@ -2313,21 +2355,25 @@ class ElrakningPanel {
     const solarConfigured = Array.isArray(state?.solar_entities) && state.solar_entities.length > 0;
     const loadConfigured = Boolean(state?.consumption_entity);
     const batteryConfigured = Boolean(state?.charging_entity || state?.discharging_entity || state?.soc_entity || state?.capacity_entity);
+    const batteryPowerConfigured = Boolean(state?.battery_power_entity);
+    const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
     const values = {
       solar: solarConfigured ? [["Effekt just nu", state.solar_kw, "kW"]] : [],
       consumption: loadConfigured ? [["Last just nu", state.consumption_kw, "kW"]] : [],
-      battery: batteryConfigured ? [["Laddning", state.charging_kw, "kW"], ["Urladdning", state.discharging_kw, "kW"], ["Laddnivå", state.soc_percent, "%"], ["Kapacitet", state.capacity_kwh, "kWh"]] : [],
+      battery: batteryIsConfigured ? [["Laddning", state.charging_kw, "kW"], ["Urladdning", state.discharging_kw, "kW"], ["Laddnivå", state.soc_percent, "%"], ["Kapacitet", state.capacity_kwh, "kWh"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
       const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : cardType === "consumption" ? "consumption" : "solar"}"]`);
       const summary = this.host.querySelector(`[data-power-summary="${cardType}"]`);
-      const configured = cardType === "solar" ? solarConfigured : cardType === "consumption" ? loadConfigured : batteryConfigured;
+      const configured = cardType === "solar" ? solarConfigured : cardType === "consumption" ? loadConfigured : batteryIsConfigured;
       if (status) {
         status.textContent = configured ? "" : "Ej konfigurerad";
         status.hidden = configured;
       }
       if (!summary) continue;
-      const validRows = rows.filter(([, value]) => typeof value === "number" && Number.isFinite(value));
+      const validRows = rows
+        .map(([labelText, value, unit]) => [labelText, unit === "kW" ? displayPowerValue(value) : value, unit])
+        .filter(([, value]) => typeof value === "number" && Number.isFinite(value));
       summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
         const label = document.createElement("strong");
         label.textContent = labelText;
@@ -3392,7 +3438,7 @@ class ElrakningPanel {
     if (source) source.hidden = !this._debugEnabled || !configured;
     if (!summary) return;
     const rows = [
-      ["Effekt just nu", state?.power_kw, "kW"],
+      ["Effekt just nu", displayPowerValue(state?.power_kw), "kW"],
       ["Import idag", state?.energy_import_kwh, "kWh"],
       ["Export idag", state?.energy_export_kwh, "kWh"],
     ].filter(([, value]) => typeof value === "number" && Number.isFinite(value));

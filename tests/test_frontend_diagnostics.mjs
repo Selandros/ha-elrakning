@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, formatDiagnosticsText, generateUpcomingPriceAnalysis, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -25,6 +25,10 @@ assert.equal(providerLabel("Greenely", "Kvartsprisavtal"), "Greenely · Kvartspr
 assert.equal(providerLabel(undefined, "Kvartsprisavtal"), "Kvartsprisavtal");
 assert.equal(providerLabel(undefined, undefined), "");
 assert.equal(POWER_DISPLAY_THRESHOLD_KW, 0.1);
+assert.equal(displayPowerValue(0.1), 0);
+assert.equal(displayPowerValue(-0.1), 0);
+assert.equal(displayPowerValue(0.11), 0.11);
+assert.equal(displayPowerValue("not-a-number"), null);
 const thresholdPoints = (values) => values.map((value, index) => ({
   timestamp: `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
   raw_timestamp: value === null ? null : `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
@@ -488,6 +492,12 @@ assert.match(panelSource, /priceCategory\(prices\[currentIndex\], colorBands\)/)
 assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, var\(--success-color\) 41%,/);
 assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 41%,/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 41%,/);
+assert.match(panelSource, /\.chart-bar \{[\s\S]*stroke: color-mix\(in srgb, var\(--primary-text-color\) 24%, transparent\)/);
+assert.match(panelSource, /data-power-battery-mode/);
+assert.match(panelSource, /data-power-invert-battery/);
+assert.match(panelSource, /battery_power_entity/);
+assert.match(panelSource, /invert_battery_power/);
+assert.match(panelSource, /displayPowerValue\(value\)/);
 assert.doesNotMatch(panelSource, /\.chart-bar\.cheap \{[^}]*opacity:/);
 assert.doesNotMatch(panelSource, /\.chart-bar\.normal \{[^}]*opacity:/);
 assert.doesNotMatch(panelSource, /\.chart-bar\.expensive \{[^}]*opacity:/);

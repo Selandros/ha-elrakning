@@ -637,6 +637,8 @@ async def websocket_meter_power_history(hass, connection, msg):
         vol.Optional("consumption_entity", default=""): str,
         vol.Optional("charging_entity", default=""): str,
         vol.Optional("discharging_entity", default=""): str,
+        vol.Optional("battery_power_entity", default=""): str,
+        vol.Optional("invert_battery_power", default=False): bool,
         vol.Optional("soc_entity", default=""): str,
         vol.Optional("capacity_entity", default=""): str,
     }
