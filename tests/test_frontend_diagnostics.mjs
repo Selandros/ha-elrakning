@@ -510,7 +510,8 @@ assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, v
 assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 36%,/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 36%,/);
 assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{\n\s+fill: color-mix\(in srgb, [^\n]+ 36%,/g) || []).length, 3);
-assert.match(panelSource, /\.chart-bar \{[\s\S]*stroke: #111111;[\s\S]*stroke-width: \.7;/);
+assert.match(panelSource, /\.chart-bar \{[\s\S]*fill-opacity: \.72;[\s\S]*stroke: #111111;[\s\S]*stroke-width: \.7;/);
+assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke-opacity/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke: color-mix/);
 assert.match(panelSource, /data-power-battery-mode/);
 assert.match(panelSource, /data-power-invert-battery/);

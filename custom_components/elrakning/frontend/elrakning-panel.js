@@ -1768,6 +1768,7 @@ class ElrakningPanel {
 
         .chart-bar {
           cursor: default;
+          fill-opacity: .72;
           stroke: #111111;
           stroke-width: .7;
           vector-effect: non-scaling-stroke;
