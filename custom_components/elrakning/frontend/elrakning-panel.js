@@ -752,9 +752,15 @@ class ElrakningPanel {
         <div class="meter-dialog-card">
           <h2 id="power-title">Konfigurera energi</h2>
           <p data-power-result></p>
-          <label data-power-battery-mode-wrap hidden>Batterieffekt<select data-power-battery-mode><option value="separate">Separata sensorer</option><option value="combined">Kombinerad sensor</option></select></label>
-          <label data-power-invert-battery-wrap hidden>Invertera batterieffekt<input type="checkbox" data-power-invert-battery></label>
+          <div class="battery-mode-wrap" data-power-battery-mode-wrap hidden>
+            <span class="battery-mode-title">Batterieffekt</span>
+            <div class="battery-mode-control" data-power-battery-mode role="radiogroup" aria-label="Batterieffekt">
+              <label class="battery-mode-option"><input type="radio" name="battery-mode" value="combined"><span>Kombinerad sensor</span></label>
+              <label class="battery-mode-option"><input type="radio" name="battery-mode" value="separate"><span>Separata sensorer</span></label>
+            </div>
+          </div>
           <div class="meter-selectors" data-power-selectors></div>
+          <label class="battery-invert-row" data-power-invert-battery-wrap hidden>Invertera batterieffekt<input type="checkbox" data-power-invert-battery></label>
           <button type="button" data-power-add-solar hidden>Lägg till solentitet</button>
           <button type="button" data-power-clear>Rensa</button>
           <div class="provider-actions">
@@ -945,6 +951,80 @@ class ElrakningPanel {
           display: grid;
           font-weight: 500;
           gap: 6px;
+        }
+
+        .battery-mode-wrap {
+          display: grid;
+          gap: 8px;
+          margin-top: 16px;
+        }
+
+        .battery-mode-title {
+          color: var(--primary-text-color);
+          font-weight: 500;
+        }
+
+        .battery-mode-control {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          max-width: 460px;
+        }
+
+        .battery-mode-option {
+          align-items: center;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          color: var(--primary-text-color);
+          cursor: pointer;
+          display: flex;
+          justify-content: center;
+          min-height: 42px;
+          padding: 8px 12px;
+          text-align: center;
+        }
+
+        .battery-mode-option:first-child {
+          border-radius: 8px 0 0 8px;
+        }
+
+        .battery-mode-option:last-child {
+          border-left: 0;
+          border-radius: 0 8px 8px 0;
+        }
+
+        .battery-mode-option input {
+          height: 1px;
+          margin: -1px;
+          opacity: 0;
+          position: absolute;
+          width: 1px;
+        }
+
+        .battery-mode-option:has(input:checked) {
+          background: var(--primary-color);
+          border-color: var(--primary-color);
+          color: var(--text-primary-color, white);
+          font-weight: 600;
+        }
+
+        .battery-mode-option:focus-within {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+
+        .battery-invert-row {
+          align-items: center;
+          display: flex;
+          gap: 10px;
+          margin-top: 16px;
+        }
+
+        @media (max-width: 420px) {
+          .battery-mode-option {
+            font-size: 13px;
+            padding-left: 6px;
+            padding-right: 6px;
+          }
         }
 
         .meter-summary {
@@ -2401,7 +2481,7 @@ class ElrakningPanel {
     const addSolar = this.host.querySelector("[data-power-add-solar]");
     const clear = this.host.querySelector("[data-power-clear]");
     const batteryModeWrap = this.host.querySelector("[data-power-battery-mode-wrap]");
-    const batteryModeSelect = this.host.querySelector("[data-power-battery-mode]");
+    const batteryModeOptions = Array.from(this.host.querySelectorAll("[data-power-battery-mode] input[type=radio]"));
     const invertBatteryWrap = this.host.querySelector("[data-power-invert-battery-wrap]");
     const invertBatteryToggle = this.host.querySelector("[data-power-invert-battery]");
     if (!dialog || !selectorsElement || !result || !save || !cancel) return;
@@ -2421,6 +2501,7 @@ class ElrakningPanel {
     const renderSelectors = (state) => {
       const fields = fieldsFor(mode);
       if (batteryModeWrap) batteryModeWrap.hidden = mode !== "battery";
+      batteryModeOptions.forEach((option) => { option.checked = option.value === batteryMode; });
       if (invertBatteryWrap) invertBatteryWrap.hidden = mode !== "battery" || batteryMode !== "combined";
       selectorsElement.replaceChildren(...fields.map(([labelText, field, multiple], index) => {
         const label = document.createElement("label");
@@ -2437,6 +2518,13 @@ class ElrakningPanel {
         label.append(selector);
         return label;
       }));
+      if (invertBatteryWrap) {
+        if (mode === "battery" && batteryMode === "combined" && selectorsElement.children.length > 1) {
+          selectorsElement.insertBefore(invertBatteryWrap, selectorsElement.children[1]);
+        } else {
+          selectorsElement.parentElement.insertBefore(invertBatteryWrap, selectorsElement.nextElementSibling);
+        }
+      }
     };
     const open = async (selectedMode) => {
       mode = selectedMode;
@@ -2448,7 +2536,7 @@ class ElrakningPanel {
         const state = await this.hass.callWS({ type: "elrakning/power_state" });
         solarCount = Math.max(2, state?.solar_entities?.length || 0);
         batteryMode = state?.battery_power_entity ? "combined" : "separate";
-        if (batteryModeSelect) batteryModeSelect.value = batteryMode;
+        batteryModeOptions.forEach((option) => { option.checked = option.value === batteryMode; });
         if (invertBatteryToggle) invertBatteryToggle.checked = state?.invert_battery_power === true;
         this._applyPowerState(state);
         renderSelectors(state);
@@ -2463,10 +2551,11 @@ class ElrakningPanel {
     this.host.querySelectorAll("[data-power-configure]").forEach((button) => {
       button.addEventListener("click", () => open(button.dataset.powerConfigure));
     });
-    batteryModeSelect?.addEventListener("change", () => {
-      batteryMode = batteryModeSelect.value === "combined" ? "combined" : "separate";
+    batteryModeOptions.forEach((option) => option.addEventListener("change", () => {
+      if (!option.checked) return;
+      batteryMode = option.value === "combined" ? "combined" : "separate";
       renderSelectors(this._powerState || {});
-    });
+    }));
     save.addEventListener("click", async () => {
       const current = this._powerState || {};
       const mapping = {

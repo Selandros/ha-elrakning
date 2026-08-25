@@ -541,7 +541,14 @@ assert.match(panelSource, /buildMeterDisplayAreaMarkup\(powerDisplayPoints\.disc
 assert.match(panelSource, /if \(segment\.length < 2\) return "";/);
 assert.match(panelSource, /\$\{bars\}\n      \$\{meterAreas\}\n      \$\{meterLines\}/);
 assert.equal((panelSource.match(/buildMeterDisplayAreaMarkup\(/g) || []).length, 7);
-assert.match(panelSource, /data-power-battery-mode/);
+assert.match(panelSource, /data-power-battery-mode role="radiogroup"/);
+assert.doesNotMatch(panelSource, /data-power-battery-mode><select/);
+assert.match(panelSource, /value="combined"><span>Kombinerad sensor/);
+assert.match(panelSource, /value="separate"><span>Separata sensorer/);
+assert.match(panelSource, /batteryModeOptions\.forEach/);
+assert.match(panelSource, /battery-mode-option:has\(input:checked\)/);
+assert.match(panelSource, /battery-mode-option:focus-within/);
+assert.match(panelSource, /data-power-selectors><\/div>\n\s+<label class="battery-invert-row" data-power-invert-battery-wrap/);
 assert.match(panelSource, /data-power-invert-battery/);
 assert.match(panelSource, /battery_power_entity/);
 assert.match(panelSource, /invert_battery_power/);
