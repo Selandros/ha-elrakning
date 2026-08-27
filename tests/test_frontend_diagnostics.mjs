@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -43,6 +43,20 @@ assert.equal(integratePowerHistoryKwh([
   powerPoints([1, 1, 1])[0],
   powerPoints([1, 1, 1])[2],
 ], integrationStart, integrationEnd, new Date("2026-08-23T00:10:00")), 0);
+const solarBalance = buildEnergyBalance(31.9, 15.8);
+assert.equal(solarBalance.total, 31.9);
+assert.equal(solarBalance.external, 15.8);
+assert.ok(Math.abs(solarBalance.local - 16.1) < 1e-12);
+assert.ok(Math.abs(solarBalance.localPercent - 16.1 / 31.9 * 100) < 1e-12);
+assert.ok(Math.abs(solarBalance.externalPercent - 15.8 / 31.9 * 100) < 1e-12);
+const consumptionBalance = buildEnergyBalance(16.5, 0.4);
+assert.equal(consumptionBalance.total, 16.5);
+assert.equal(consumptionBalance.external, 0.4);
+assert.ok(Math.abs(consumptionBalance.local - 16.1) < 1e-12);
+assert.ok(Math.abs(consumptionBalance.localPercent - 16.1 / 16.5 * 100) < 1e-12);
+assert.ok(Math.abs(consumptionBalance.externalPercent - 0.4 / 16.5 * 100) < 1e-12);
+assert.equal(buildEnergyBalance(0, 2).local, 0);
+assert.equal(buildEnergyBalance(null, 2).local, null);
 const thresholdPoints = (values) => values.map((value, index) => ({
   timestamp: `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
   raw_timestamp: value === null ? null : `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
@@ -388,6 +402,14 @@ assert.match(panelSource, /_calculatePowerEnergy\("solar"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("consumption"\)/);
 assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
+assert.match(panelSource, /data-daily-energy/);
+assert.match(panelSource, /Dagens energi/);
+assert.match(panelSource, /Använt lokalt/);
+assert.match(panelSource, /Lokalt försörjt/);
+assert.match(panelSource, /buildEnergyBalance\(solarAvailable \? power\.solar_energy_kwh : null, exportKwh\)/);
+assert.match(panelSource, /buildEnergyBalance\(consumptionAvailable \? power\.consumption_energy_kwh : null, importKwh\)/);
+assert.match(panelSource, /Math\.max\(0, Math\.min\(100/);
+assert.match(panelSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(panelSource, /\["Import idag", "energy_import_entity"\]/);
 assert.match(panelSource, /\["Export idag", "energy_export_entity"\]/);
 assert.match(panelSource, /Byt sensor/);

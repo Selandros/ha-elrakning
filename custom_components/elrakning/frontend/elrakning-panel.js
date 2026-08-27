@@ -348,6 +348,19 @@ export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Dat
   return energyKwh;
 }
 
+export function buildEnergyBalance(totalKwh, externalKwh) {
+  const total = Number.isFinite(totalKwh) ? totalKwh : null;
+  const external = Number.isFinite(externalKwh) ? externalKwh : null;
+  const local = total !== null && external !== null ? Math.max(total - external, 0) : null;
+  return {
+    total,
+    external,
+    local,
+    localPercent: total > 0 && local !== null ? local / total * 100 : null,
+    externalPercent: total > 0 && external !== null ? external / total * 100 : null,
+  };
+}
+
 export function buildThresholdClippedSegments(points, key) {
   const segments = [];
   let segment = [];
@@ -665,6 +678,13 @@ class ElrakningPanel {
             </button>
           </div>
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
+        </section>
+
+        <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
+          <div class="card-heading">
+            <h2 id="daily-energy-title">Dagens energi</h2>
+          </div>
+          <div class="daily-energy-grid" data-daily-energy-grid></div>
         </section>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
@@ -1076,6 +1096,98 @@ class ElrakningPanel {
           gap: 6px 18px;
           grid-template-columns: minmax(120px, auto) 1fr;
           margin-top: 14px;
+        }
+
+        .daily-energy-card {
+          --daily-energy-local-color: var(--solar-color, #77C2A1);
+          --daily-energy-export-color: var(--grid-export-color, #72AAF6);
+          --daily-energy-import-color: var(--grid-import-color, #F0A06A);
+          grid-column: 1 / -1;
+          min-height: 0;
+        }
+
+        .daily-energy-grid {
+          display: grid;
+          gap: 24px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          margin-top: 14px;
+        }
+
+        .daily-energy-part {
+          min-width: 0;
+        }
+
+        .daily-energy-part-heading,
+        .daily-energy-part-labels,
+        .daily-energy-part-values {
+          align-items: baseline;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 12px;
+        }
+
+        .daily-energy-part-heading strong {
+          color: var(--primary-text-color);
+          font-weight: 600;
+        }
+
+        .daily-energy-total {
+          color: var(--primary-text-color);
+          font-weight: 600;
+          text-align: right;
+          white-space: nowrap;
+        }
+
+        .daily-energy-bar {
+          background: var(--divider-color);
+          border-radius: 999px;
+          display: flex;
+          height: 12px;
+          margin: 8px 0 7px;
+          overflow: hidden;
+        }
+
+        .daily-energy-segment {
+          min-width: 0;
+          transition: width 120ms ease;
+        }
+
+        .daily-energy-segment.local {
+          background: var(--daily-energy-local-color);
+        }
+
+        .daily-energy-segment.supply {
+          background: var(--daily-energy-local-color);
+        }
+
+        .daily-energy-segment.export {
+          background: var(--daily-energy-export-color);
+        }
+
+        .daily-energy-segment.import {
+          background: var(--daily-energy-import-color);
+        }
+
+        .daily-energy-part-labels {
+          color: var(--secondary-text-color);
+          font-weight: 500;
+        }
+
+        .daily-energy-part-labels span:last-child,
+        .daily-energy-part-values span:last-child {
+          text-align: right;
+        }
+
+        .daily-energy-part-values {
+          color: var(--secondary-text-color);
+          font-size: var(--price-card-text-size);
+          margin-top: 2px;
+        }
+
+        @media (max-width: 700px) {
+          .daily-energy-grid {
+            grid-template-columns: 1fr;
+          }
         }
 
         .provider-dialog[hidden], .provider-source-dialog[hidden] {
@@ -2791,6 +2903,81 @@ class ElrakningPanel {
       return [label, output];
     }));
     summary.hidden = validRows.length === 0;
+    this._renderDailyEnergyCard();
+  }
+
+  _renderDailyEnergyCard() {
+    const card = this.host.querySelector("[data-daily-energy]");
+    const grid = this.host.querySelector("[data-daily-energy-grid]");
+    if (!card || !grid) return;
+    const power = this._powerState || {};
+    const meter = this._meterState || {};
+    const solarConfigured = Array.isArray(power.solar_entities) && power.solar_entities.length > 0;
+    const consumptionConfigured = Boolean(power.consumption_entity);
+    const powerEnergyAvailable = (key) => Array.isArray(this._powerHistory?.series?.[key]?.points)
+      && this._powerHistory.series[key].points.some((point) => Number.isFinite(new Date(point.timestamp).getTime()) && Number.isFinite(Number(point.value_kw)));
+    const solarAvailable = solarConfigured && powerEnergyAvailable("solar") && Number.isFinite(power.solar_energy_kwh);
+    const consumptionAvailable = consumptionConfigured && powerEnergyAvailable("consumption") && Number.isFinite(power.consumption_energy_kwh);
+    const energyValue = (entityKey, validKey, valueKey) => (
+      meter[entityKey] && meter[validKey] !== false && Number.isFinite(meter[valueKey]) ? meter[valueKey] : null
+    );
+    const exportKwh = energyValue("energy_export_entity", "energy_export_valid", "energy_export_kwh");
+    const importKwh = energyValue("energy_import_entity", "energy_import_valid", "energy_import_kwh");
+    const hasAnyPart = solarConfigured || consumptionConfigured;
+    card.hidden = !hasAnyPart;
+    if (!hasAnyPart) {
+      grid.replaceChildren();
+      return;
+    }
+    const clampPercent = (value) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+    const formatEnergy = (value) => Number.isFinite(value) ? `${this._formatNumber(value)} kWh` : "—";
+    const formatPercent = (value) => Number.isFinite(value) ? `${this._formatNumber(value)} %` : "—";
+    const balancePart = ({ title, total, totalAvailable, firstLabel, firstValue, firstPercent, secondLabel, secondValue, secondPercent, firstClass, secondClass }) => {
+      const firstWidth = clampPercent(firstPercent);
+      const secondWidth = clampPercent(secondPercent);
+      return `<section class="daily-energy-part">
+        <div class="daily-energy-part-heading"><strong>${title}</strong><span class="daily-energy-total">${totalAvailable ? formatEnergy(total) : "—"}</span></div>
+        <div class="daily-energy-bar" aria-hidden="true"><span class="daily-energy-segment ${firstClass}" style="width: ${firstWidth}%"></span><span class="daily-energy-segment ${secondClass}" style="width: ${secondWidth}%"></span></div>
+        <div class="daily-energy-part-labels"><span>${firstLabel}</span><span>${secondLabel}</span></div>
+        <div class="daily-energy-part-values"><span>${formatEnergy(firstValue)} · ${formatPercent(firstPercent)}</span><span>${formatEnergy(secondValue)} · ${formatPercent(secondPercent)}</span></div>
+      </section>`;
+    };
+    const solarBalance = buildEnergyBalance(solarAvailable ? power.solar_energy_kwh : null, exportKwh);
+    const consumptionBalance = buildEnergyBalance(consumptionAvailable ? power.consumption_energy_kwh : null, importKwh);
+    const markup = [];
+    if (solarConfigured) {
+      const total = solarBalance.total;
+      markup.push(balancePart({
+        title: "Solproduktion",
+        total,
+        totalAvailable: total !== null,
+        firstLabel: "Använt lokalt",
+        firstValue: solarBalance.local,
+        firstPercent: solarBalance.localPercent,
+        secondLabel: "Export",
+        secondValue: solarBalance.external,
+        secondPercent: solarBalance.externalPercent,
+        firstClass: "local",
+        secondClass: "export",
+      }));
+    }
+    if (consumptionConfigured) {
+      const total = consumptionBalance.total;
+      markup.push(balancePart({
+        title: "Förbrukning",
+        total,
+        totalAvailable: total !== null,
+        firstLabel: "Lokalt försörjt",
+        firstValue: consumptionBalance.local,
+        firstPercent: consumptionBalance.localPercent,
+        secondLabel: "Import",
+        secondValue: consumptionBalance.external,
+        secondPercent: consumptionBalance.externalPercent,
+        firstClass: "supply",
+        secondClass: "import",
+      }));
+    }
+    grid.innerHTML = markup.join("");
   }
 
   async loadPowerState(loadHistory = false) {
