@@ -57,6 +57,10 @@ assert.ok(Math.abs(consumptionBalance.localPercent - 16.1 / 16.5 * 100) < 1e-12)
 assert.ok(Math.abs(consumptionBalance.externalPercent - 0.4 / 16.5 * 100) < 1e-12);
 assert.equal(buildEnergyBalance(0, 2).local, 0);
 assert.equal(buildEnergyBalance(null, 2).local, null);
+assert.equal(integratePowerHistoryKwh(powerPoints([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")), 1);
+assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([2, 2, 2, 2, 2, 2, 2]), integrationStart, integrationEnd, new Date("2026-08-23T00:30:00")) - 1) < 1e-12);
+assert.equal(buildEnergyBalance(25, 30).local, 0);
+assert.equal(buildEnergyBalance(25, 30).externalPercent, 120);
 const thresholdPoints = (values) => values.map((value, index) => ({
   timestamp: `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
   raw_timestamp: value === null ? null : `2026-08-25T12:${String(index * 5).padStart(2, "0")}:00Z`,
@@ -400,7 +404,13 @@ assert.match(panelSource, /\["Producerat idag", this\._powerState\.solar_energy_
 assert.match(panelSource, /integratePowerHistoryKwh\(points, dayStart, dayEnd, now\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("solar"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("consumption"\)/);
+assert.match(panelSource, /_calculatePowerEnergy\("charging"\)/);
+assert.match(panelSource, /_calculatePowerEnergy\("discharging"\)/);
 assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
+assert.match(panelSource, /\["Laddat idag", this\._powerState\.charging_energy_kwh, "kWh"\]/);
+assert.match(panelSource, /\["Urladdat idag", this\._powerState\.discharging_energy_kwh, "kWh"\]/);
+assert.match(panelSource, /\["Kapacitetsutnyttjande", capacityUtilizationPercent, "%"\]/);
+assert.match(panelSource, /className = "power-summary-divider"/);
 assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
 assert.match(panelSource, /data-daily-energy/);
 assert.match(panelSource, /Dagens energi/);

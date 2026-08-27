@@ -1098,6 +1098,12 @@ class ElrakningPanel {
           margin-top: 14px;
         }
 
+        .power-summary-divider {
+          border-top: 1px solid var(--divider-color);
+          grid-column: 1 / -1;
+          margin: 6px 0;
+        }
+
         .daily-energy-card {
           --daily-energy-local-color: var(--solar-color, #77C2A1);
           --daily-energy-export-color: var(--grid-export-color, #72AAF6);
@@ -2815,14 +2821,21 @@ class ElrakningPanel {
       ...state,
       solar_energy_kwh: this._calculatePowerEnergy("solar"),
       consumption_energy_kwh: this._calculatePowerEnergy("consumption"),
+      charging_energy_kwh: this._calculatePowerEnergy("charging"),
+      discharging_energy_kwh: this._calculatePowerEnergy("discharging"),
     } : null;
     const solarConfigured = Array.isArray(this._powerState?.solar_entities) && this._powerState.solar_entities.length > 0;
     const batteryConfigured = Boolean(this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
     const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
+    const capacityUtilizationPercent = Number.isFinite(Number(this._powerState?.discharging_energy_kwh))
+      && Number.isFinite(Number(this._powerState?.capacity_kwh))
+      && Number(this._powerState.capacity_kwh) > 0
+      ? Number(this._powerState.discharging_energy_kwh) / Number(this._powerState.capacity_kwh) * 100
+      : null;
     const values = {
       solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"], ["Producerat idag", this._powerState.solar_energy_kwh, "kWh"]] : [],
-      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"]] : [],
+      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"], ["Laddat idag", this._powerState.charging_energy_kwh, "kWh"], ["Urladdat idag", this._powerState.discharging_energy_kwh, "kWh"], ["Kapacitetsutnyttjande", capacityUtilizationPercent, "%"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
       const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : "solar"}"]`);
@@ -2836,13 +2849,20 @@ class ElrakningPanel {
       const validRows = rows
         .map(([labelText, value, unit]) => [labelText, unit === "kW" ? displayPowerValue(value) : value, unit])
         .filter(([, value]) => typeof value === "number" && Number.isFinite(value));
-      summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
+      const summaryNodes = [];
+      validRows.forEach(([labelText, value, unit], index) => {
+        if (cardType === "battery" && index === 4) {
+          const divider = document.createElement("div");
+          divider.className = "power-summary-divider";
+          summaryNodes.push(divider);
+        }
         const label = document.createElement("strong");
         label.textContent = labelText;
         const output = document.createElement("span");
         output.textContent = `${this._formatNumber(value)} ${unit}`;
-        return [label, output];
-      }));
+        summaryNodes.push(label, output);
+      });
+      summary.replaceChildren(...summaryNodes);
       summary.hidden = validRows.length === 0;
     }
     this._renderMergedMeterSummary();
