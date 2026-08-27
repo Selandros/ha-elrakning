@@ -935,7 +935,9 @@ assert.match(panelSource, /chart\.addEventListener\("touchmove"[\s\S]*periodAt\(
 assert.match(panelSource, /const clearTouchHover = \(\) => \{[\s\S]*tooltip\.hidden = true/);
 assert.doesNotMatch(panelSource, /_pinnedPeriod/);
 assert.doesNotMatch(panelSource, /touchend[\s\S]*copyChartDebugText/);
-assert.match(panelSource, /\.soc-tooltip \{[\s\S]*transform: translate\(-50%, -100%\);/);
+assert.match(panelSource, /positionChartTooltip\(chart, tooltip, event\.clientX, event\.clientY, \[\], this\._tooltipOrbit\)/);
+assert.doesNotMatch(panelSource, /tooltip\.style\.top = `\$\{pointY \/ height \* rect\.height\}px`/);
+assert.doesNotMatch(panelSource, /\.soc-tooltip \{[\s\S]*transform: translate\(-50%, -100%\);/);
 
 const technicalOutput = formatDiagnosticsText([
   { level: "DEBUG", component: "source", event: "debug_event", message: "Technical detail" },

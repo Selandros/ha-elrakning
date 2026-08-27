@@ -1392,7 +1392,6 @@ class ElrakningPanel {
           padding: 6px 8px;
           pointer-events: none;
           position: absolute;
-          transform: translate(-50%, -100%);
           white-space: nowrap;
           z-index: 2;
         }
@@ -3282,10 +3281,9 @@ class ElrakningPanel {
       const pointX = x(point.timestamp);
       const pointY = y(point.value);
       tooltip.innerHTML = `<strong>${new Date(point.timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</strong><span>Laddnivå: ${this._formatNumber(point.value)} %</span>`;
-      tooltip.style.left = `${pointX / width * rect.width}px`;
-      tooltip.style.top = `${pointY / height * rect.height}px`;
       tooltip.hidden = false;
       hover.innerHTML = `<circle class="soc-hover-point" cx="${pointX}" cy="${pointY}" r="4" />`;
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointermove", update);
     svg.addEventListener("pointerdown", update);
