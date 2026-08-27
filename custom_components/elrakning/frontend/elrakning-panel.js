@@ -1253,7 +1253,7 @@ class ElrakningPanel {
           margin-top: 2px;
         }
 
-        .soc-card-heading {
+        .card-heading.soc-card-heading {
           align-items: baseline;
           flex-direction: row;
           justify-content: space-between;

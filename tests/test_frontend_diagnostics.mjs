@@ -438,6 +438,7 @@ assert.match(panelSource, /class="capacity-utilization-title">Utnyttjande<\/h2>/
 assert.match(panelSource, /Kapacitetsutnyttjande/);
 assert.match(panelSource, /capacity-battery-fill/);
 assert.match(panelSource, /class="card-heading soc-card-heading"/);
+assert.match(panelSource, /\.card-heading\.soc-card-heading \{[\s\S]*flex-direction: row;/);
 assert.match(panelSource, /soc-card-heading \.capacity-utilization-title/);
 assert.match(panelSource, /height: calc\(100% - 7px\);/);
 assert.match(panelSource, /margin-top: 7px;/);
