@@ -115,10 +115,6 @@ def test_midnight_schedule_and_lifecycle_contract_are_present():
     assert "second=0" in source
     assert 'frontend_data["midnight_refresh_unsub"]' in source
     assert 'frontend_data.pop("midnight_refresh_unsub", None)' in source
-    assert 'frontend_data["price_prefetch_unsub"]' in source
-    assert 'frontend_data.pop("price_prefetch_unsub", None)' in source
-    assert "hour=23" in source
-    assert "async_prefetch_next_day" in source
     assert "async_schedule_midnight_recovery" in source
     assert "async_request_refresh" in source
     assert "set_interval" not in source
@@ -127,10 +123,15 @@ def test_midnight_schedule_and_lifecycle_contract_are_present():
 def test_price_recovery_is_bounded_and_cancelable():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "coordinator.py"
     source = source_path.read_text(encoding="utf-8")
-    assert "_prefetched_price_data" in source
+    assert "_price_data_by_date" in source
+    assert "_active_price_date" in source
+    assert "async_get_price_data" in source
+    assert "refresh=True" in source
     assert "_async_fetch_date(target_date)" in source
     assert "for delay in (15, 30, 60, 120, 240)" in source
     assert "cancel_midnight_recovery" in source
+    assert "_NEXT_DAY_PREFETCH_START_HOUR = 14" in source
+    assert "at most once per local hour" in source
 
 
 def test_coordinator_interval_remains_fifteen_minutes():

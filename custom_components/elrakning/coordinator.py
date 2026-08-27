@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import NORD_POOL_DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+_NEXT_DAY_PREFETCH_START_HOUR = 14
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,9 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.entry = entry
-        self._prefetched_price_data: PriceData | None = None
+        self._price_data_by_date: dict[date, PriceData] = {}
+        self._active_price_date: date | None = None
+        self._next_day_last_attempt: tuple[date, datetime] | None = None
         self._midnight_recovery_task: asyncio.Task | None = None
         super().__init__(
             hass,
@@ -56,14 +59,50 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
 
     async def _async_update_data(self) -> PriceData:
         """Fetch today's periods through the Core Nord Pool service."""
+        now = dt_util.now()
+        today = now.date()
+        cached = self._price_data_by_date.get(today)
+        if self._active_price_date != today and cached and cached.periods:
+            current = cached
+        else:
+            current = await self.async_get_price_data(today, refresh=True)
+        self._active_price_date = today
+        if now.hour >= _NEXT_DAY_PREFETCH_START_HOUR:
+            await self._async_maybe_prefetch_next_day(now, today)
+        return current
+
+    async def async_get_price_data(self, target_date: date, *, refresh: bool = False) -> PriceData:
+        """Return cached data for a local date, fetching it when needed."""
+        cached = self._price_data_by_date.get(target_date)
+        if cached and cached.periods and not refresh:
+            return cached
+        data = await self._async_fetch_date(target_date)
+        if data.periods:
+            self._cache_price_data(data)
+        return data
+
+    def _cache_price_data(self, data: PriceData) -> None:
+        """Keep the current, next, and explicitly requested date bounded."""
+        self._price_data_by_date[data.date] = data
         today = dt_util.now().date()
-        if self._prefetched_price_data and self._prefetched_price_data.date == today:
-            prefetched = self._prefetched_price_data
-            self._prefetched_price_data = None
-            return prefetched
-        if self._prefetched_price_data and self._prefetched_price_data.date != today:
-            self._prefetched_price_data = None
-        return await self._async_fetch_date(today)
+        keep_dates = {today, today + timedelta(days=1), data.date}
+        self._price_data_by_date = {
+            target_date: cached
+            for target_date, cached in self._price_data_by_date.items()
+            if target_date in keep_dates
+        }
+
+    async def _async_maybe_prefetch_next_day(self, now: datetime, today: date) -> None:
+        """Try tomorrow at most once per local hour until it is cached."""
+        tomorrow = today + timedelta(days=1)
+        cached = self._price_data_by_date.get(tomorrow)
+        if cached and cached.periods:
+            return
+        attempt_hour = now.replace(minute=0, second=0, microsecond=0)
+        if self._next_day_last_attempt == (today, attempt_hour):
+            return
+        self._next_day_last_attempt = (today, attempt_hour)
+        await self.async_get_price_data(tomorrow)
 
     async def _async_fetch_date(self, target_date: date) -> PriceData:
         """Fetch and normalize one local Nord Pool date."""
@@ -108,11 +147,7 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
     async def async_prefetch_next_day(self) -> None:
         """Cache tomorrow's prices once before the local day changes."""
         target_date = dt_util.now().date() + timedelta(days=1)
-        if self._prefetched_price_data and self._prefetched_price_data.date == target_date:
-            return
-        data = await self._async_fetch_date(target_date)
-        if data.periods:
-            self._prefetched_price_data = data
+        await self.async_get_price_data(target_date)
 
     def async_schedule_midnight_recovery(self) -> None:
         """Start bounded retries only when the new day is unavailable."""
