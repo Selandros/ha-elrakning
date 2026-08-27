@@ -569,7 +569,7 @@ class ElrakningPanel {
     this._powerState = null;
     this._powerHistory = { date: null, series: {} };
     this._powerHistoryRequestToken = 0;
-    this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [key, new Map()]));
+    this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
     this._connectionReadyListener = null;
@@ -685,6 +685,13 @@ class ElrakningPanel {
             <h2 id="daily-energy-title">Dagens energi</h2>
           </div>
           <div class="daily-energy-grid" data-daily-energy-grid></div>
+        </section>
+
+        <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
+          <div class="card-heading">
+            <h2 id="soc-title">Batteri SOC</h2>
+          </div>
+          <div class="soc-chart" data-soc-chart></div>
         </section>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
@@ -1194,6 +1201,77 @@ class ElrakningPanel {
           .daily-energy-grid {
             grid-template-columns: 1fr;
           }
+        }
+
+        .soc-card {
+          min-height: 0;
+        }
+
+        .soc-chart {
+          margin-top: 12px;
+          position: relative;
+        }
+
+        .soc-chart-svg {
+          aspect-ratio: 960 / 180;
+          display: block;
+          height: auto;
+          max-width: 100%;
+          width: 100%;
+        }
+
+        .soc-gridline {
+          stroke: var(--divider-color);
+          stroke-width: 1;
+          opacity: .5;
+        }
+
+        .soc-label {
+          fill: var(--secondary-text-color);
+          font-size: var(--card-chart-label-size);
+        }
+
+        .soc-area {
+          fill: var(--primary-color);
+          fill-opacity: .14;
+          stroke: none;
+        }
+
+        .soc-line {
+          fill: none;
+          stroke: var(--primary-color);
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 2;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .soc-hover-point {
+          fill: var(--primary-color);
+          stroke: var(--ha-card-background, var(--card-background-color));
+          stroke-width: 2;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .soc-tooltip {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          box-shadow: var(--ha-card-box-shadow, none);
+          color: var(--primary-text-color);
+          font-size: var(--price-card-text-size);
+          line-height: 1.25;
+          padding: 6px 8px;
+          pointer-events: none;
+          position: absolute;
+          transform: translate(-50%, -100%);
+          white-space: nowrap;
+          z-index: 2;
+        }
+
+        .soc-tooltip strong {
+          display: block;
+          font-weight: 600;
         }
 
         .provider-dialog[hidden], .provider-source-dialog[hidden] {
@@ -2866,6 +2944,7 @@ class ElrakningPanel {
       summary.hidden = validRows.length === 0;
     }
     this._renderMergedMeterSummary();
+    this._renderSocChart();
   }
 
   _calculatePowerEnergy(seriesKey) {
@@ -3000,6 +3079,86 @@ class ElrakningPanel {
     grid.innerHTML = markup.join("");
   }
 
+  _renderSocChart() {
+    const card = this.host.querySelector("[data-soc-card]");
+    const chart = this.host.querySelector("[data-soc-chart]");
+    if (!card || !chart) return;
+    const configured = Boolean(this._powerState?.soc_entity);
+    card.hidden = !configured;
+    if (!configured) {
+      chart.replaceChildren();
+      return;
+    }
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const points = (Array.isArray(this._powerHistory?.series?.soc?.points) ? this._powerHistory.series.soc.points : [])
+      .map((point) => ({
+        timestamp: new Date(point.timestamp).getTime(),
+        value: Number(point.value_percent),
+      }))
+      .filter((point) => Number.isFinite(point.timestamp) && point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime() && Number.isFinite(point.value))
+      .sort((left, right) => left.timestamp - right.timestamp);
+    if (!points.length) {
+      chart.textContent = "Ingen historik idag";
+      return;
+    }
+    const width = 960;
+    const height = 180;
+    const plot = { left: 32, right: 8, top: 10, bottom: 28 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const x = (timestamp) => plot.left + ((timestamp - dayStart.getTime()) / (dayEnd.getTime() - dayStart.getTime())) * plotWidth;
+    const y = (value) => plot.top + (1 - Math.max(0, Math.min(100, value)) / 100) * plotHeight;
+    const intervals = points.slice(1).map((point, index) => point.timestamp - points[index].timestamp).filter((interval) => interval > 0);
+    const typicalInterval = intervals.length ? intervals.slice().sort((left, right) => left - right)[Math.floor(intervals.length / 2)] : 0;
+    const maxGap = Math.max(30 * 60 * 1000, typicalInterval * 4, 2 * 60 * 60 * 1000);
+    const segments = [];
+    let segment = [points[0]];
+    points.slice(1).forEach((point, index) => {
+      if (point.timestamp - points[index].timestamp > maxGap) {
+        segments.push(segment);
+        segment = [];
+      }
+      segment.push(point);
+    });
+    segments.push(segment);
+    const lineMarkup = segments.filter((segment) => segment.length >= 2).map((segment) => {
+      const coordinates = segment.map((point) => `${x(point.timestamp)} ${y(point.value)}`).join(" L ");
+      const area = `M ${x(segment[0].timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(segment.at(-1).timestamp)} ${plot.top + plotHeight} Z`;
+      return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
+    }).join("");
+    const gridMarkup = [0, 25, 50, 75, 100].map((level) => `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" x="2" y="${y(level) + 4}">${level}</text>`).join("");
+    const timeLabels = [0, 6, 12, 18, 24].map((hour) => `<text class="soc-label" text-anchor="middle" x="${plot.left + (hour / 24) * plotWidth}" y="${height - 6}">${String(hour).padStart(2, "0")}</text>`).join("");
+    chart.innerHTML = `<svg class="soc-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
+      ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>${timeLabels}
+    </svg><div class="soc-tooltip" hidden></div>`;
+    const svg = chart.querySelector(".soc-chart-svg");
+    const tooltip = chart.querySelector(".soc-tooltip");
+    const hover = chart.querySelector(".soc-hover");
+    const clear = () => {
+      tooltip.hidden = true;
+      hover.replaceChildren();
+    };
+    const update = (event) => {
+      const rect = svg.getBoundingClientRect();
+      const timestamp = dayStart.getTime() + Math.max(0, Math.min(rect.width, event.clientX - rect.left)) / rect.width * (dayEnd.getTime() - dayStart.getTime());
+      const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
+      const pointX = x(point.timestamp);
+      const pointY = y(point.value);
+      tooltip.innerHTML = `<strong>${new Date(point.timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</strong><span>Laddnivå: ${this._formatNumber(point.value)} %</span>`;
+      tooltip.style.left = `${pointX / width * rect.width}px`;
+      tooltip.style.top = `${pointY / height * rect.height}px`;
+      tooltip.hidden = false;
+      hover.innerHTML = `<circle class="soc-hover-point" cx="${pointX}" cy="${pointY}" r="4" />`;
+    };
+    svg.addEventListener("pointermove", update);
+    svg.addEventListener("pointerdown", update);
+    svg.addEventListener("pointerleave", clear);
+    svg.addEventListener("pointercancel", clear);
+  }
+
   async loadPowerState(loadHistory = false) {
     if (!this.hass?.callWS) return;
     try {
@@ -3053,14 +3212,15 @@ class ElrakningPanel {
   }
 
   _appendPowerPoint(series, point) {
-    if (!(series in this._powerLivePoints) || !point?.timestamp || !Number.isFinite(Number(point.value_kw))) return;
+    const valueKey = series === "soc" ? "value_percent" : "value_kw";
+    if (!(series in this._powerLivePoints) || !point?.timestamp || !Number.isFinite(Number(point[valueKey]))) return;
     const timestamp = new Date(point.timestamp);
     if (Number.isNaN(timestamp.getTime())) return;
     const date = timestamp.toLocaleDateString("sv-SE");
     if (this._powerHistory.date && date !== this._powerHistory.date) return;
     this._powerLivePoints[series].set(timestamp.toISOString(), {
       timestamp: timestamp.toISOString(),
-      value_kw: Number(point.value_kw),
+      [valueKey]: Number(point[valueKey]),
     });
     const existing = Array.isArray(this._powerHistory.series?.[series]?.points)
       ? [...this._powerHistory.series[series].points]

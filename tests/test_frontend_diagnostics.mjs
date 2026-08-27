@@ -406,6 +406,7 @@ assert.match(panelSource, /_calculatePowerEnergy\("solar"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("consumption"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("charging"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("discharging"\)/);
+assert.match(panelSource, /_powerLivePoints = Object\.fromEntries\(\["solar", "consumption", "charging", "discharging", "soc"\]/);
 assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /\["Laddat idag", this\._powerState\.charging_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /\["Urladdat idag", this\._powerState\.discharging_energy_kwh, "kWh"\]/);
@@ -420,6 +421,14 @@ assert.match(panelSource, /buildEnergyBalance\(solarAvailable \? power\.solar_en
 assert.match(panelSource, /buildEnergyBalance\(consumptionAvailable \? power\.consumption_energy_kwh : null, importKwh\)/);
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100/);
 assert.match(panelSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+assert.match(panelSource, /data-soc-card/);
+assert.match(panelSource, /Batteri SOC/);
+assert.match(panelSource, /series\?\.soc\?\.points/);
+assert.match(panelSource, /value_percent/);
+assert.match(panelSource, /Math\.max\(0, Math\.min\(100, value\)\)/);
+assert.match(panelSource, /Ingen historik idag/);
+assert.match(panelSource, /Laddnivå: \$\{this\._formatNumber\(point\.value\)\} %/);
+assert.doesNotMatch(panelSource, /integratePowerHistoryKwh\([^)]*soc/);
 assert.match(panelSource, /\["Import idag", "energy_import_entity"\]/);
 assert.match(panelSource, /\["Export idag", "energy_export_entity"\]/);
 assert.match(panelSource, /Byt sensor/);
@@ -888,7 +897,7 @@ assert.match(panelSource, /chart\.addEventListener\("touchmove"[\s\S]*periodAt\(
 assert.match(panelSource, /const clearTouchHover = \(\) => \{[\s\S]*tooltip\.hidden = true/);
 assert.doesNotMatch(panelSource, /_pinnedPeriod/);
 assert.doesNotMatch(panelSource, /touchend[\s\S]*copyChartDebugText/);
-assert.doesNotMatch(panelSource, /transform: translate\(-50%, -100%\)/);
+assert.match(panelSource, /\.soc-tooltip \{[\s\S]*transform: translate\(-50%, -100%\);/);
 
 const technicalOutput = formatDiagnosticsText([
   { level: "DEBUG", component: "source", event: "debug_event", message: "Technical detail" },

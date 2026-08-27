@@ -102,6 +102,7 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
         result = await manager.async_history()
         self.assertTrue(result["success"])
         self.assertEqual(result["series"]["solar"]["points"], [])
+        self.assertEqual(result["series"]["soc"]["points"], [])
 
     async def test_mapping_and_current_state_cover_solar_load_and_battery(self):
         states = {
@@ -162,6 +163,37 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
             "point": {"timestamp": changed.last_updated.isoformat(), "value_kw": 0.36},
         }])
 
+    async def test_soc_state_change_event_contains_live_series_point(self):
+        states = {"sensor.soc": _state(73, "%")}
+        fired = []
+        hass = types.SimpleNamespace(
+            states=types.SimpleNamespace(get=states.get),
+            bus=types.SimpleNamespace(
+                async_listen=lambda *args: lambda: None,
+                async_fire=lambda *args: fired.append(args),
+            ),
+            recorder=types.SimpleNamespace(async_add_executor_job=lambda function, *args, **kwargs: function(*args, **kwargs)),
+        )
+        manager = power.PowerManager(hass)
+        await manager.async_save_mapping({"soc_entity": "sensor.soc"})
+        changed = _state(82, "%", datetime(2026, 8, 23, 12, 5, tzinfo=timezone.utc))
+        states["sensor.soc"] = changed
+        await manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.soc", "new_state": changed}))
+        self.assertEqual(fired[0][1]["points"], [{
+            "series": "soc",
+            "point": {"timestamp": changed.last_updated.isoformat(), "value_percent": 82},
+        }])
+
+    def test_soc_history_point_validates_supported_units(self):
+        timestamp = datetime(2026, 8, 23, 12, tzinfo=timezone.utc)
+        self.assertEqual(power._soc_history_point(_state(82, "%", timestamp)), {
+            "timestamp": timestamp.isoformat(),
+            "value_percent": 82,
+        })
+        self.assertEqual(power._soc_history_point(_state(82, "percent", timestamp))["value_percent"], 82)
+        self.assertIsNone(power._soc_history_point(_state("unknown", "%", timestamp)))
+        self.assertIsNone(power._soc_history_point(_state(82, "kWh", timestamp)))
+
     async def test_combined_battery_state_and_live_event_are_split(self):
         states = {"sensor.battery_power": _state(-2.5, "kW")}
         fired = []
@@ -219,6 +251,40 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
                     sys.modules[name] = original
         self.assertEqual([point["value_kw"] for point in result["series"]["charging"]["points"]], [2, 0])
         self.assertEqual([point["value_kw"] for point in result["series"]["discharging"]["points"]], [0, 1.5])
+
+    async def test_history_fetch_includes_soc_and_returns_validated_soc_series(self):
+        states = {"sensor.soc": _state(82, "%")}
+        hass = _hass(states)
+        manager = power.PowerManager(hass)
+        await manager.async_save_mapping({"soc_entity": "sensor.soc"})
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        captured = []
+        recorder.get_instance = lambda _: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: (
+            captured.append(kwargs["entity_ids"]) or {
+                "sensor.soc": [
+                    _state(81, "%", datetime(2026, 8, 23, 10, tzinfo=timezone.utc)),
+                    _state("unknown", "%", datetime(2026, 8, 23, 10, 5, tzinfo=timezone.utc)),
+                    _state(82, "percent", datetime(2026, 8, 23, 10, 10, tzinfo=timezone.utc)),
+                ]
+            }
+        )
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {name: sys.modules.get(name) for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")}
+        sys.modules.update({"homeassistant.components": components, "homeassistant.components.recorder": recorder, "homeassistant.components.recorder.history": history})
+        try:
+            result = await manager.async_history()
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertEqual(captured, [["sensor.soc"]])
+        self.assertEqual([point["value_percent"] for point in result["series"]["soc"]["points"]], [81, 82])
 
     async def test_history_sums_mppt_timelines_without_array_index_merging(self):
         states = {"sensor.mppt_1": _state(0, "W"), "sensor.mppt_2": _state(0, "W")}

@@ -72,6 +72,14 @@ def _signed_power_history_point(state: State | Any, invert: bool = False) -> dic
     return {"timestamp": timestamp.isoformat(), "value_kw": -value if invert else value}
 
 
+def _soc_history_point(state: State | Any) -> dict[str, Any] | None:
+    value = _state_number(state, {"%", "percent"})
+    timestamp = getattr(state, "last_updated", None)
+    if value is None or timestamp is None:
+        return None
+    return {"timestamp": timestamp.isoformat(), "value_percent": value}
+
+
 class PowerManager:
     """Persist selected power sensors and expose live/history series."""
 
@@ -117,6 +125,10 @@ class PowerManager:
                     {"series": "charging", "point": {"timestamp": timestamp.isoformat(), "value_kw": charging}},
                     {"series": "discharging", "point": {"timestamp": timestamp.isoformat(), "value_kw": discharging}},
                 ])
+        if entity_id == self.mapping.get("soc_entity"):
+            value = state.get("soc_percent")
+            if timestamp and value is not None:
+                points.append({"series": "soc", "point": {"timestamp": timestamp.isoformat(), "value_percent": value}})
         self.hass.bus.async_fire(
             POWER_UPDATE_EVENT,
             {"entity_id": entity_id, "state": state, "points": points},
@@ -247,12 +259,13 @@ class PowerManager:
         power_entities = list(dict.fromkeys([
             *mapping["solar_entities"],
             *(mapping[field] for field in ("consumption_entity", "charging_entity", "discharging_entity", "battery_power_entity") if mapping.get(field)),
+            *([mapping["soc_entity"]] if mapping.get("soc_entity") else []),
         ]))
         if not power_entities:
             return {
                 "success": True,
                 "date": date,
-                "series": {key: {"points": []} for key in ("solar", "consumption", "charging", "discharging")},
+                "series": {key: {"points": []} for key in ("solar", "consumption", "charging", "discharging", "soc")},
             }
         mapping_key = "|".join(
             [f"solar={','.join(mapping['solar_entities'])}"]
@@ -287,9 +300,10 @@ class PowerManager:
             return {"success": False, "date": date, "series": {}, "error": "history_unavailable"}
         raw = {}
         battery_entity = mapping.get("battery_power_entity")
+        soc_entity = mapping.get("soc_entity")
         invert_battery_power = bool(mapping.get("invert_battery_power"))
         for entity_id in entities:
-            point_builder = _signed_power_history_point if entity_id == battery_entity else _power_history_point
+            point_builder = _soc_history_point if entity_id == soc_entity else (_signed_power_history_point if entity_id == battery_entity else _power_history_point)
             raw[entity_id] = [
                 point for state in history_by_entity.get(entity_id, [])
                 if (point := point_builder(state, invert_battery_power) if entity_id == battery_entity else point_builder(state))
@@ -300,6 +314,7 @@ class PowerManager:
             "consumption": {"points": self._points_for_entity(mapping.get("consumption_entity"), raw)},
             "charging": {"points": self._battery_history_points("charging", mapping, raw)},
             "discharging": {"points": self._battery_history_points("discharging", mapping, raw)},
+            "soc": {"points": self._points_for_entity(soc_entity, raw)},
         }
         return {"success": True, "date": date, "series": series}
 
