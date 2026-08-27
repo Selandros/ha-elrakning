@@ -1216,6 +1216,7 @@ class ElrakningPanel {
         }
 
         .soc-card {
+          --soc-color: var(--solar-color, #77C2A1);
           min-height: 0;
         }
 
@@ -1244,14 +1245,14 @@ class ElrakningPanel {
         }
 
         .soc-area {
-          fill: var(--primary-color);
-          fill-opacity: .14;
+          fill: var(--soc-color);
+          fill-opacity: .3;
           stroke: none;
         }
 
         .soc-line {
           fill: none;
-          stroke: var(--primary-color);
+          stroke: var(--soc-color);
           stroke-linecap: round;
           stroke-linejoin: round;
           stroke-width: 2;
@@ -1259,7 +1260,7 @@ class ElrakningPanel {
         }
 
         .soc-hover-point {
-          fill: var(--primary-color);
+          fill: var(--soc-color);
           stroke: var(--ha-card-background, var(--card-background-color));
           stroke-width: 2;
           vector-effect: non-scaling-stroke;
