@@ -435,6 +435,10 @@ assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: mi
 assert.match(panelSource, /data-capacity-utilization/);
 assert.match(panelSource, /Kapacitetsutnyttjande/);
 assert.match(panelSource, /capacity-battery-fill/);
+assert.match(panelSource, /class="card-heading soc-card-heading"/);
+assert.match(panelSource, /soc-card-heading \.capacity-utilization-title/);
+assert.match(panelSource, /height: calc\(100% - 7px\);/);
+assert.match(panelSource, /margin-top: 7px;/);
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPercent\)\)/);
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);

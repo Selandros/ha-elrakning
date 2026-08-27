@@ -689,8 +689,9 @@ class ElrakningPanel {
           </section>
 
           <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
-            <div class="card-heading">
+            <div class="card-heading soc-card-heading">
               <h2 id="soc-title">Batteri SOC</h2>
+              <h2 class="capacity-utilization-title">Kapacitetsutnyttjande</h2>
             </div>
             <div class="soc-card-content">
               <div class="soc-chart" data-soc-chart></div>
@@ -1252,6 +1253,22 @@ class ElrakningPanel {
           margin-top: 2px;
         }
 
+        .soc-card-heading {
+          align-items: baseline;
+          flex-direction: row;
+          justify-content: space-between;
+        }
+
+        .soc-card-heading .capacity-utilization-title {
+          color: var(--primary-text-color);
+          font-size: inherit;
+          font-weight: inherit;
+          line-height: inherit;
+          margin: 0;
+          max-width: 30%;
+          text-align: right;
+        }
+
         .soc-chart {
           margin: 0 -8px 0 0;
           position: relative;
@@ -1261,27 +1278,19 @@ class ElrakningPanel {
           align-items: center;
           display: flex;
           flex-direction: column;
-          justify-content: center;
+          justify-content: stretch;
           min-width: 0;
-          padding: 4px 0;
-        }
-
-        .capacity-utilization-title {
-          color: var(--secondary-text-color);
-          font-size: var(--price-card-text-size);
-          font-weight: 600;
-          line-height: 1.2;
-          margin-bottom: 8px;
-          max-width: 100%;
-          text-align: center;
+          padding: 0;
         }
 
         .capacity-battery {
           border: 2px solid var(--divider-color);
           border-radius: 12px;
           box-sizing: border-box;
-          height: 148px;
+          align-self: stretch;
+          height: calc(100% - 7px);
           max-height: 100%;
+          margin-top: 7px;
           overflow: visible;
           position: relative;
           width: min(76px, 70%);
@@ -1331,6 +1340,12 @@ class ElrakningPanel {
 
           .capacity-utilization {
             min-height: 170px;
+          }
+
+          .capacity-battery {
+            align-self: center;
+            height: 148px;
+            margin-top: 0;
           }
         }
 
@@ -3216,7 +3231,7 @@ class ElrakningPanel {
     const capacityFill = Number.isFinite(capacityUtilizationPercent)
       ? Math.max(0, Math.min(100, capacityUtilizationPercent))
       : 0;
-    capacityIndicator.innerHTML = `<strong class="capacity-utilization-title">Kapacitetsutnyttjande</strong><div class="capacity-battery" role="img" aria-label="Kapacitetsutnyttjande ${capacityLabel}"><span class="capacity-battery-fill" style="height: ${capacityFill}%"></span><span class="capacity-battery-value">${capacityLabel}</span></div>`;
+    capacityIndicator.innerHTML = `<div class="capacity-battery" role="img" aria-label="Kapacitetsutnyttjande ${capacityLabel}"><span class="capacity-battery-fill" style="height: ${capacityFill}%"></span><span class="capacity-battery-value">${capacityLabel}</span></div>`;
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart);
