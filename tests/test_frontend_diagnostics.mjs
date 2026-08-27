@@ -433,7 +433,7 @@ assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.chart-hover-marker-soc \{ fill: var\(--soc-color\); \}/);
 assert.match(panelSource, /class="chart-hover-marker chart-hover-marker-soc"/);
 assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) max-content;/);
-assert.match(panelSource, /\.soc-card-heading h2 \{[\s\S]*white-space: nowrap;/);
+assert.match(panelSource, /\.soc-card-heading > h2 \{[\s\S]*font-family: inherit;[\s\S]*font-size: 19px;[\s\S]*font-weight: 500;[\s\S]*line-height: normal;[\s\S]*margin: 0;[\s\S]*padding: 0;[\s\S]*white-space: nowrap;/);
 assert.match(panelSource, /data-capacity-utilization/);
 assert.match(panelSource, /class="capacity-utilization-title">Utnyttjande<\/h2>/);
 assert.match(panelSource, /Kapacitetsutnyttjande/);

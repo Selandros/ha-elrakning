@@ -1260,20 +1260,20 @@ class ElrakningPanel {
           width: 100%;
         }
 
-        .soc-card-heading h2 {
+        .soc-card-heading > h2 {
+          color: var(--primary-text-color);
+          font-family: inherit;
+          font-size: 19px;
+          font-weight: 500;
+          line-height: normal;
+          margin: 0;
+          padding: 0;
           min-width: 0;
           white-space: nowrap;
         }
 
         .soc-card-heading .capacity-utilization-title {
-          color: var(--primary-text-color);
-          font-size: inherit;
-          font-weight: inherit;
-          line-height: inherit;
-          margin: 0;
-          min-width: 0;
           max-width: none;
-          white-space: nowrap;
           text-align: right;
           justify-self: end;
         }
