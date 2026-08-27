@@ -324,6 +324,30 @@ export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 *
   return canonical;
 }
 
+export function integratePowerSeries(points, dayStart, dayEnd, now = new Date(), slotMs = 5 * 60 * 1000) {
+  const canonical = buildCanonicalMeterPoints(
+    (Array.isArray(points) ? points : []).map((point) => ({
+      timestamp: point.timestamp,
+      import_kw: point.value_kw,
+      export_kw: 0,
+    })),
+    dayStart,
+    dayEnd,
+    slotMs,
+  );
+  const nowMs = new Date(now).getTime();
+  const samples = canonical.filter((point) => point.raw_timestamp !== null && point.timestamp <= nowMs);
+  let energyKwh = 0;
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    if (current.timestamp - previous.timestamp !== slotMs || current.gap_before) continue;
+    if (!Number.isFinite(previous.import_kw) || !Number.isFinite(current.import_kw)) continue;
+    energyKwh += ((previous.import_kw + current.import_kw) / 2) * (slotMs / (60 * 60 * 1000));
+  }
+  return energyKwh;
+}
+
 export function buildThresholdClippedSegments(points, key) {
   const segments = [];
   let segment = [];
@@ -2675,14 +2699,14 @@ class ElrakningPanel {
   }
 
   _applyPowerState(state) {
-    this._powerState = state || null;
-    const solarConfigured = Array.isArray(state?.solar_entities) && state.solar_entities.length > 0;
-    const batteryConfigured = Boolean(state?.charging_entity || state?.discharging_entity || state?.soc_entity || state?.capacity_entity);
-    const batteryPowerConfigured = Boolean(state?.battery_power_entity);
+    this._powerState = state ? { ...state, solar_energy_kwh: this._calculateSolarEnergy() } : null;
+    const solarConfigured = Array.isArray(this._powerState?.solar_entities) && this._powerState.solar_entities.length > 0;
+    const batteryConfigured = Boolean(this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
+    const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
     const values = {
-      solar: solarConfigured ? [["Effekt just nu", state.solar_kw, "kW"]] : [],
-      battery: batteryIsConfigured ? [["Laddning", state.charging_kw, "kW"], ["Urladdning", state.discharging_kw, "kW"], ["Laddnivå", state.soc_percent, "%"], ["Kapacitet", state.capacity_kwh, "kWh"]] : [],
+      solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"], ["Producerat idag", this._powerState.solar_energy_kwh, "kWh"]] : [],
+      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
       const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : "solar"}"]`);
@@ -2706,6 +2730,20 @@ class ElrakningPanel {
       summary.hidden = validRows.length === 0;
     }
     this._renderMergedMeterSummary();
+  }
+
+  _calculateSolarEnergy() {
+    const points = this._powerHistory?.series?.solar?.points;
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    return integratePowerSeries(points, dayStart, dayEnd, now);
+  }
+
+  _refreshSolarEnergyState() {
+    if (!this._powerState) return;
+    this._applyPowerState(this._powerState);
   }
 
   _renderMergedMeterSummary() {
@@ -2778,10 +2816,12 @@ class ElrakningPanel {
         date: response?.date || null,
         series,
       };
+      this._refreshSolarEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
       this._powerHistory = { date: null, series: {} };
+      this._refreshSolarEnergyState();
     }
   }
 
@@ -2789,6 +2829,7 @@ class ElrakningPanel {
     if (eventData?.state) {
       this._applyPowerState(eventData.state);
       for (const entry of eventData.points || []) this._appendPowerPoint(entry.series, entry.point);
+      this._refreshSolarEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     }
   }
