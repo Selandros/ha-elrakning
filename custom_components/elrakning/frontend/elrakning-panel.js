@@ -2080,7 +2080,7 @@ class ElrakningPanel {
 
   _effectiveChartLayerState() {
     const layers = this._chartLayerState();
-    if (!this._hoverIsolatedLayer || !layers[this._hoverIsolatedLayer]) return layers;
+    if (!this._hoverIsolatedLayer) return layers;
     return Object.fromEntries(Object.keys(layers).map((key) => [key, key === this._hoverIsolatedLayer]));
   }
 
@@ -2176,7 +2176,7 @@ class ElrakningPanel {
   _bindChartLegend() {
     const bindHoverIsolation = (button, layer) => {
       button.addEventListener("pointerenter", (event) => {
-        if (event.pointerType === "touch" || !this._chartLayerState()[layer]) return;
+        if (event.pointerType === "touch" || button.disabled) return;
         this._hoverIsolatedLayer = layer;
         this.renderPriceChart();
       });
