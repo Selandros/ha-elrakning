@@ -582,10 +582,11 @@ assert.match(panelSource, /\.price-value strong\.expensive \{[\s\S]*color: var\(
 assert.match(panelSource, /if \(key === "lowest"\) element\.classList\.add\("cheap"\)/);
 assert.match(panelSource, /if \(key === "highest"\) element\.classList\.add\("expensive"\)/);
 assert.match(panelSource, /priceCategory\(prices\[currentIndex\], colorBands\)/);
-assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, var\(--success-color\) 36%,/);
-assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 36%,/);
-assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 36%,/);
-assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{\n\s+fill: color-mix\(in srgb, [^\n]+ 36%,/g) || []).length, 3);
+assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, var\(--success-color\) 41%,/);
+assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 41%,/);
+assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 41%,/);
+assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{\n\s+fill: color-mix\(in srgb, [^\n]+ 41%,/g) || []).length, 3);
+assert.match(panelSource, /\.daily-energy-segment \{\n\s+filter: brightness\(\.84\) saturate\(\.9\);/);
 assert.match(panelSource, /\.chart-bar \{[\s\S]*fill-opacity: \.72;[\s\S]*stroke: #111111;[\s\S]*stroke-width: \.7;/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke-opacity/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke: color-mix/);
