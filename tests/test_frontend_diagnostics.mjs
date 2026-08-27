@@ -439,8 +439,9 @@ assert.match(panelSource, /class="capacity-utilization-title">Utnyttjande<\/h2>/
 assert.match(panelSource, /Kapacitetsutnyttjande/);
 assert.match(panelSource, /capacity-battery-fill/);
 assert.match(panelSource, /class="card-heading soc-card-heading"/);
-assert.match(panelSource, /\.card-heading\.soc-card-heading \{[\s\S]*flex-direction: row;/);
+assert.match(panelSource, /\.card-heading\.soc-card-heading \{[\s\S]*display: grid;[\s\S]*grid-template-columns: minmax\(0, 1fr\) max-content;[\s\S]*width: 100%;/);
 assert.match(panelSource, /soc-card-heading \.capacity-utilization-title/);
+assert.match(panelSource, /justify-self: end;/);
 assert.match(panelSource, /height: calc\(100% - 7px\);/);
 assert.match(panelSource, /margin-top: 7px;/);
 assert.match(panelSource, /\.capacity-battery \{[\s\S]*max-width: 72px;[\s\S]*min-width: 44px;[\s\S]*width: fit-content;/);

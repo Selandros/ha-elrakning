@@ -1255,8 +1255,9 @@ class ElrakningPanel {
 
         .card-heading.soc-card-heading {
           align-items: baseline;
-          flex-direction: row;
-          justify-content: space-between;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) max-content;
+          width: 100%;
         }
 
         .soc-card-heading h2 {
@@ -1274,6 +1275,7 @@ class ElrakningPanel {
           max-width: none;
           white-space: nowrap;
           text-align: right;
+          justify-self: end;
         }
 
         .soc-chart {
