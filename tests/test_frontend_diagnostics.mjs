@@ -449,8 +449,8 @@ assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPerc
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);
 assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.soc-card-content \{\n\s+grid-template-columns: 1fr;/);
-assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 320;/);
-assert.match(panelSource, /const height = 320;/);
+assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 340;/);
+assert.match(panelSource, /const height = 340;/);
 assert.match(panelSource, /const plot = \{ left: 32, right: 8, top: 8, bottom: 32 \};/);
 assert.match(panelSource, /series\?\.soc\?\.points/);
 assert.match(panelSource, /value_percent/);
