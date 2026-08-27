@@ -1242,12 +1242,12 @@ class ElrakningPanel {
         }
 
         .soc-chart {
-          margin-top: 12px;
+          margin-top: 8px;
           position: relative;
         }
 
         .soc-chart-svg {
-          aspect-ratio: 960 / 180;
+          aspect-ratio: 960 / 240;
           display: block;
           height: auto;
           max-width: 100%;
@@ -3139,8 +3139,8 @@ class ElrakningPanel {
       return;
     }
     const width = 960;
-    const height = 180;
-    const plot = { left: 32, right: 8, top: 10, bottom: 28 };
+    const height = 240;
+    const plot = { left: 32, right: 8, top: 12, bottom: 34 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const x = (timestamp) => plot.left + ((timestamp - dayStart.getTime()) / (dayEnd.getTime() - dayStart.getTime())) * plotWidth;
