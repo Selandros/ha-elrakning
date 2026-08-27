@@ -1169,7 +1169,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-segment {
-          filter: brightness(.84) saturate(.9);
+          filter: brightness(.78) saturate(.9);
           min-width: 0;
           transition: width 120ms ease;
         }

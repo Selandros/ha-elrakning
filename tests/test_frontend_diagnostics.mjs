@@ -598,7 +598,7 @@ assert.match(panelSource, /\.chart-bar\.cheap \{\n\s+fill: color-mix\(in srgb, v
 assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, var\(--warning-color\) 41%,/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--error-color\) 41%,/);
 assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{\n\s+fill: color-mix\(in srgb, [^\n]+ 41%,/g) || []).length, 3);
-assert.match(panelSource, /\.daily-energy-segment \{\n\s+filter: brightness\(\.84\) saturate\(\.9\);/);
+assert.match(panelSource, /\.daily-energy-segment \{\n\s+filter: brightness\(\.78\) saturate\(\.9\);/);
 assert.match(panelSource, /daily-energy-percent first/);
 assert.match(panelSource, /daily-energy-percent second/);
 assert.match(panelSource, /\.daily-energy-percent\.first \{\n\s+left: 6px;/);
