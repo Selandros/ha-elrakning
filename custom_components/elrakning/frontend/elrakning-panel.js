@@ -1249,7 +1249,7 @@ class ElrakningPanel {
           align-items: stretch;
           display: grid;
           gap: 12px;
-          grid-template-columns: minmax(0, 7fr) minmax(112px, 3fr);
+          grid-template-columns: minmax(0, 7fr) minmax(96px, 3fr);
           margin-top: 2px;
         }
 
@@ -1275,7 +1275,7 @@ class ElrakningPanel {
         }
 
         .capacity-utilization {
-          align-items: center;
+          align-items: flex-end;
           display: flex;
           flex-direction: column;
           justify-content: stretch;
@@ -1293,7 +1293,7 @@ class ElrakningPanel {
           margin-top: 7px;
           overflow: visible;
           position: relative;
-          width: min(76px, 70%);
+          width: 52px;
         }
 
         .capacity-battery::before {
