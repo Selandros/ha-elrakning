@@ -2335,14 +2335,22 @@ class ElrakningPanel {
     if (!open || !dialog || !cancel || !save || !result || !selectorsElement || !consumptionSelectorElement || !invertToggle) return;
     const fields = [
       ["Effekt", "power_entity"],
-      ["Import", "energy_import_entity"],
-      ["Export", "energy_export_entity"],
+      ["Import idag", "energy_import_entity"],
+      ["Export idag", "energy_export_entity"],
     ];
     const close = () => {
       dialog.hidden = true;
       invertToggle.checked = false;
       selectorsElement.replaceChildren();
       consumptionSelectorElement.replaceChildren();
+    };
+    const selectorConfig = (field) => {
+      if (field !== "energy_import_entity" && field !== "energy_export_entity") return { domain: "sensor" };
+      const energyEntities = Object.entries(this.hass?.states || {})
+        .filter(([, state]) => state?.attributes?.device_class === "energy"
+          && ["Wh", "kWh", "MWh"].includes(state?.attributes?.unit_of_measurement))
+        .map(([entityId]) => entityId);
+      return { domain: "sensor", device_class: "energy", entity_id: energyEntities };
     };
     const renderEntitySelector = (container, labelText, field, value) => {
       const label = document.createElement("label");
@@ -2351,7 +2359,7 @@ class ElrakningPanel {
       const selector = document.createElement("ha-selector");
       selector.dataset.meterField = field;
       selector.hass = this.hass;
-      selector.selector = { entity: { filter: { domain: "sensor" }, multiple: false } };
+      selector.selector = { entity: { filter: selectorConfig(field), multiple: false } };
       selector.value = value || undefined;
       selector.addEventListener("value-changed", (event) => {
         selector.value = event.detail?.value;
@@ -2367,7 +2375,7 @@ class ElrakningPanel {
         const selector = document.createElement("ha-selector");
         selector.dataset.meterField = field;
         selector.hass = this.hass;
-        selector.selector = { entity: { filter: { domain: "sensor" }, multiple: false } };
+        selector.selector = { entity: { filter: selectorConfig(field), multiple: false } };
         selector.value = mapping?.[field] || undefined;
         selector.addEventListener("value-changed", (event) => {
           selector.value = event.detail?.value;
@@ -2717,15 +2725,24 @@ class ElrakningPanel {
     if (loadConfigured) rows.push(["Husets last", displayPowerValue(power.consumption_kw), "kW"]);
     if (meterConfigured) {
       rows.push(["Nät just nu", displayPowerValue(meter.power_kw), "kW"]);
-      rows.push(["Import idag", meter.energy_import_kwh, "kWh"]);
-      rows.push(["Export idag", meter.energy_export_kwh, "kWh"]);
+      if (meter.energy_import_entity && meter.energy_import_valid === false) {
+        rows.push(["Import idag", "Byt sensor", ""]);
+      } else if (typeof meter.energy_import_kwh === "number") {
+        rows.push(["Import idag", meter.energy_import_kwh, "kWh"]);
+      }
+      if (meter.energy_export_entity && meter.energy_export_valid === false) {
+        rows.push(["Export idag", "Byt sensor", ""]);
+      } else if (typeof meter.energy_export_kwh === "number") {
+        rows.push(["Export idag", meter.energy_export_kwh, "kWh"]);
+      }
     }
-    const validRows = rows.filter(([, value]) => typeof value === "number" && Number.isFinite(value));
+    const validRows = rows.filter(([, value, unit]) =>
+      unit === "" ? value === "Byt sensor" : typeof value === "number" && Number.isFinite(value));
     summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
       const label = document.createElement("strong");
       label.textContent = labelText;
       const output = document.createElement("span");
-      output.textContent = `${this._formatNumber(value)} ${unit}`;
+      output.textContent = unit ? `${this._formatNumber(value)} ${unit}` : value;
       return [label, output];
     }));
     summary.hidden = validRows.length === 0;

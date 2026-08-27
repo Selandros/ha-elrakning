@@ -22,6 +22,7 @@ METER_FIELDS = (
 )
 METER_INVERT_FIELD = "invert_power"
 METER_POWER_UPDATE_EVENT = "elrakning_meter_power_update"
+ENERGY_UNIT_FACTORS = {"wh": 0.001, "kwh": 1, "mwh": 1000}
 
 
 def _text(value: Any) -> str:
@@ -33,7 +34,30 @@ def _number(state, divisor: float) -> float | None:
         value = float(state.state)
     except (TypeError, ValueError):
         return None
-    return value / divisor
+    return value / divisor if value == value and value not in (float("inf"), float("-inf")) else None
+
+
+def _energy_kwh(state: State | Any) -> float | None:
+    """Normalize a genuine energy sensor state to kWh."""
+    attributes = getattr(state, "attributes", {})
+    if str(attributes.get("device_class", "")).lower() != "energy":
+        return None
+    factor = ENERGY_UNIT_FACTORS.get(_text(attributes.get("unit_of_measurement")).lower())
+    if factor is None:
+        return None
+    try:
+        value = float(state.state)
+    except (TypeError, ValueError):
+        return None
+    return value * factor if value == value and value not in (float("inf"), float("-inf")) else None
+
+
+def _is_energy_sensor(state: State | Any) -> bool:
+    attributes = getattr(state, "attributes", {})
+    return (
+        str(attributes.get("device_class", "")).lower() == "energy"
+        and _text(attributes.get("unit_of_measurement")).lower() in ENERGY_UNIT_FACTORS
+    )
 
 
 def _power_kw(state: State | Any) -> float | None:
@@ -146,6 +170,12 @@ class MeterManager:
                     raise ValueError(f"invalid_entity_id:{field}")
                 if self.hass.states.get(entity_id) is None:
                     raise ValueError(f"entity_not_found:{field}")
+                if field in ("energy_import_entity", "energy_export_entity"):
+                    state = self.hass.states.get(entity_id)
+                    if str(state.attributes.get("device_class", "")).lower() != "energy":
+                        raise ValueError(f"invalid_energy_device_class:{field}")
+                    if _text(state.attributes.get("unit_of_measurement")).lower() not in ENERGY_UNIT_FACTORS:
+                        raise ValueError(f"invalid_energy_unit:{field}")
             await self._diagnostic("INFO", "meter_validation_success", "Meter mapping validated")
             self.mapping = selected
             self._history_summary = None
@@ -163,7 +193,13 @@ class MeterManager:
 
     async def async_state(self) -> dict[str, Any]:
         result = {**self.mapping, "configured": any(self.mapping[field] for field in METER_FIELDS)}
-        result.update({"power_kw": None, "energy_import_kwh": None, "energy_export_kwh": None})
+        result.update({
+            "power_kw": None,
+            "energy_import_kwh": None,
+            "energy_export_kwh": None,
+            "energy_import_valid": None,
+            "energy_export_valid": None,
+        })
         for field, output, divisor in (
             ("power_entity", "power_kw", 1000),
             ("energy_import_entity", "energy_import_kwh", 1),
@@ -172,15 +208,20 @@ class MeterManager:
             entity_id = self.mapping[field]
             state = self.hass.states.get(entity_id) if entity_id else None
             if state is None:
+                if output == "energy_import_kwh":
+                    result["energy_import_valid"] = False if entity_id else None
+                elif output == "energy_export_kwh":
+                    result["energy_export_valid"] = False if entity_id else None
                 continue
             unit = _text(state.attributes.get("unit_of_measurement")).lower()
             if output == "power_kw":
                 divisor = 1000 if unit == "w" else 1
-            elif unit == "wh":
-                divisor = 1000
-            elif unit == "mwh":
-                divisor = 0.001
-            result[output] = _normalized_power_kw(state, bool(self.mapping.get(METER_INVERT_FIELD))) if output == "power_kw" else _number(state, divisor)
+            else:
+                valid = _is_energy_sensor(state)
+                result["energy_import_valid" if output == "energy_import_kwh" else "energy_export_valid"] = valid
+                result[output] = _energy_kwh(state) if valid else None
+                continue
+            result[output] = _normalized_power_kw(state, bool(self.mapping.get(METER_INVERT_FIELD)))
         return result
 
     async def async_source(self) -> dict[str, Any]:

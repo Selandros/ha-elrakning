@@ -77,7 +77,10 @@ def _hass(*entity_ids):
     states = {
         entity_id: types.SimpleNamespace(
             state="0",
-            attributes={"unit_of_measurement": "W"},
+            attributes={
+                "unit_of_measurement": "kWh" if entity_id in {"sensor.import", "sensor.export"} else "W",
+                "device_class": "energy" if entity_id in {"sensor.import", "sensor.export"} else "power",
+            },
         )
         for entity_id in entity_ids
     }
@@ -94,6 +97,47 @@ def _hass(*entity_ids):
 
 
 class MeterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_power_units_are_accepted(self):
+        for unit in ("W", "kW"):
+            hass = _hass("sensor.power")
+            hass.states.get("sensor.power").attributes["unit_of_measurement"] = unit
+            manager = meter.MeterManager(hass)
+            state = await manager.async_save_mapping({"power_entity": "sensor.power"})
+            self.assertEqual(state["power_entity"], "sensor.power")
+
+    async def test_energy_units_are_normalized_and_accepted(self):
+        for field, entity_id, output, valid_key in (
+            ("energy_import_entity", "sensor.import", "energy_import_kwh", "energy_import_valid"),
+            ("energy_export_entity", "sensor.export", "energy_export_kwh", "energy_export_valid"),
+        ):
+            for unit, value, expected in (("Wh", "1200", 1.2), ("kWh", "1.2", 1.2), ("MWh", "0.0012", 1.2)):
+                hass = _hass(entity_id)
+                entity = hass.states.get(entity_id)
+                entity.attributes.update({"unit_of_measurement": unit, "device_class": "energy"})
+                entity.state = value
+                manager = meter.MeterManager(hass)
+                state = await manager.async_save_mapping({field: entity_id})
+                self.assertEqual(state[output], expected)
+                self.assertTrue(state[valid_key])
+
+    async def test_power_units_are_rejected_for_energy_mapping(self):
+        for unit in ("W", "kW"):
+            hass = _hass("sensor.import")
+            entity = hass.states.get("sensor.import")
+            entity.attributes.update({"unit_of_measurement": unit, "device_class": "power"})
+            manager = meter.MeterManager(hass)
+            with self.assertRaisesRegex(ValueError, "invalid_energy"):
+                await manager.async_save_mapping({"energy_import_entity": "sensor.import"})
+
+    async def test_old_invalid_energy_mapping_is_retained_but_marked_invalid(self):
+        hass = _hass("sensor.import")
+        entity = hass.states.get("sensor.import")
+        entity.attributes.update({"unit_of_measurement": "kW", "device_class": "power"})
+        manager = meter.MeterManager(hass)
+        manager.mapping["energy_import_entity"] = "sensor.import"
+        state = await manager.async_state()
+        self.assertFalse(state["energy_import_valid"])
+        self.assertIsNone(state["energy_import_kwh"])
     def test_positive_power_is_import(self):
         state = types.SimpleNamespace(
             state="2400",
