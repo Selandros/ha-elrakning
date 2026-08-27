@@ -1247,7 +1247,7 @@ class ElrakningPanel {
         }
 
         .soc-chart-svg {
-          aspect-ratio: 960 / 280;
+          aspect-ratio: 960 / 320;
           display: block;
           height: auto;
           max-width: 100%;
@@ -3139,7 +3139,7 @@ class ElrakningPanel {
       return;
     }
     const width = 960;
-    const height = 280;
+    const height = 320;
     const plot = { left: 32, right: 8, top: 8, bottom: 32 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;

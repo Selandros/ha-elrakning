@@ -432,8 +432,8 @@ assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*f
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-hover-point \{[\s\S]*fill: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 2px -8px 0;/);
-assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 280;/);
-assert.match(panelSource, /const height = 280;/);
+assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 320;/);
+assert.match(panelSource, /const height = 320;/);
 assert.match(panelSource, /const plot = \{ left: 32, right: 8, top: 8, bottom: 32 \};/);
 assert.match(panelSource, /series\?\.soc\?\.points/);
 assert.match(panelSource, /value_percent/);
