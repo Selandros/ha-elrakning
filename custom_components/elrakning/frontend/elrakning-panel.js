@@ -1222,7 +1222,7 @@ class ElrakningPanel {
 
         .daily-energy-part-values {
           color: var(--secondary-text-color);
-          font-size: var(--price-card-text-size);
+          font-size: inherit;
           margin-top: 2px;
         }
 

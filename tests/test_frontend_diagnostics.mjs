@@ -606,6 +606,8 @@ assert.match(panelSource, /\.daily-energy-percent\.second \{\n\s+right: 6px;/);
 assert.match(panelSource, /\.daily-energy-bar \{[\s\S]*height: 24px;/);
 assert.match(panelSource, /\.daily-energy-percent \{[\s\S]*font-size: 12px;[\s\S]*line-height: 24px;/);
 assert.match(panelSource, /<div class="daily-energy-part-values"><span>\$\{formatEnergy\(firstValue\)\}<\/span><span>\$\{formatEnergy\(secondValue\)\}<\/span><\/div>/);
+assert.match(panelSource, /\.daily-energy-part-values \{[\s\S]*font-size: inherit;/);
+assert.doesNotMatch(panelSource, /\.daily-energy-part-values \{[^}]*font-size: var\(--price-card-text-size\);/);
 assert.match(panelSource, /\.chart-bar \{[\s\S]*fill-opacity: \.72;[\s\S]*stroke: #111111;[\s\S]*stroke-width: \.7;/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke-opacity/);
 assert.doesNotMatch(panelSource, /\.chart-bar \{[^}]*stroke: color-mix/);
