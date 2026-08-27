@@ -431,7 +431,13 @@ assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--solar-color, #7
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-hover-point \{[\s\S]*fill: var\(--soc-color\);/);
-assert.match(panelSource, /\.soc-chart \{\n\s+margin: 2px -8px 0;/);
+assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 7fr\) minmax\(112px, 3fr\);/);
+assert.match(panelSource, /data-capacity-utilization/);
+assert.match(panelSource, /Kapacitetsutnyttjande/);
+assert.match(panelSource, /capacity-battery-fill/);
+assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPercent\)\)/);
+assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
+assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);
 assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 320;/);
 assert.match(panelSource, /const height = 320;/);
 assert.match(panelSource, /const plot = \{ left: 32, right: 8, top: 8, bottom: 32 \};/);

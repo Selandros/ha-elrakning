@@ -692,7 +692,10 @@ class ElrakningPanel {
             <div class="card-heading">
               <h2 id="soc-title">Batteri SOC</h2>
             </div>
-            <div class="soc-chart" data-soc-chart></div>
+            <div class="soc-card-content">
+              <div class="soc-chart" data-soc-chart></div>
+              <div class="capacity-utilization" data-capacity-utilization></div>
+            </div>
           </section>
         </div>
 
@@ -1241,9 +1244,94 @@ class ElrakningPanel {
           min-height: 0;
         }
 
+        .soc-card-content {
+          align-items: stretch;
+          display: grid;
+          gap: 12px;
+          grid-template-columns: minmax(0, 7fr) minmax(112px, 3fr);
+          margin-top: 2px;
+        }
+
         .soc-chart {
-          margin: 2px -8px 0;
+          margin: 0 -8px 0 0;
           position: relative;
+        }
+
+        .capacity-utilization {
+          align-items: center;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-width: 0;
+          padding: 4px 0;
+        }
+
+        .capacity-utilization-title {
+          color: var(--secondary-text-color);
+          font-size: var(--price-card-text-size);
+          font-weight: 600;
+          line-height: 1.2;
+          margin-bottom: 8px;
+          max-width: 100%;
+          text-align: center;
+        }
+
+        .capacity-battery {
+          border: 2px solid var(--divider-color);
+          border-radius: 12px;
+          box-sizing: border-box;
+          height: 148px;
+          max-height: 100%;
+          overflow: visible;
+          position: relative;
+          width: min(76px, 70%);
+        }
+
+        .capacity-battery::before {
+          background: var(--divider-color);
+          border-radius: 4px 4px 0 0;
+          content: "";
+          height: 7px;
+          left: 50%;
+          position: absolute;
+          top: -9px;
+          transform: translateX(-50%);
+          width: 28px;
+        }
+
+        .capacity-battery-fill {
+          background: var(--soc-color);
+          border-radius: 8px;
+          bottom: 0;
+          left: 0;
+          opacity: .82;
+          position: absolute;
+          right: 0;
+          transition: height 120ms ease;
+        }
+
+        .capacity-battery-value {
+          align-items: center;
+          color: var(--primary-text-color);
+          display: flex;
+          font-size: var(--price-card-text-size);
+          font-weight: 700;
+          inset: 0;
+          justify-content: center;
+          position: absolute;
+          text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
+          white-space: nowrap;
+          z-index: 1;
+        }
+
+        @media (max-width: 700px) {
+          .soc-card-content {
+            grid-template-columns: 1fr;
+          }
+
+          .capacity-utilization {
+            min-height: 170px;
+          }
         }
 
         .soc-chart-svg {
@@ -2940,11 +3028,7 @@ class ElrakningPanel {
     const batteryConfigured = Boolean(this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
     const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
-    const capacityUtilizationPercent = Number.isFinite(Number(this._powerState?.discharging_energy_kwh))
-      && Number.isFinite(Number(this._powerState?.capacity_kwh))
-      && Number(this._powerState.capacity_kwh) > 0
-      ? Number(this._powerState.discharging_energy_kwh) / Number(this._powerState.capacity_kwh) * 100
-      : null;
+    const capacityUtilizationPercent = this._capacityUtilizationPercent();
     const values = {
       solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"], ["Producerat idag", this._powerState.solar_energy_kwh, "kWh"]] : [],
       battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"], ["Laddat idag", this._powerState.charging_energy_kwh, "kWh"], ["Urladdat idag", this._powerState.discharging_energy_kwh, "kWh"], ["Kapacitetsutnyttjande", capacityUtilizationPercent, "%"]] : [],
@@ -3116,13 +3200,23 @@ class ElrakningPanel {
   _renderSocChart() {
     const card = this.host.querySelector("[data-soc-card]");
     const chart = this.host.querySelector("[data-soc-chart]");
-    if (!card || !chart) return;
+    const capacityIndicator = this.host.querySelector("[data-capacity-utilization]");
+    if (!card || !chart || !capacityIndicator) return;
     const configured = Boolean(this._powerState?.soc_entity);
     card.hidden = !configured;
     if (!configured) {
       chart.replaceChildren();
+      capacityIndicator.replaceChildren();
       return;
     }
+    const capacityUtilizationPercent = this._capacityUtilizationPercent();
+    const capacityLabel = Number.isFinite(capacityUtilizationPercent)
+      ? `${this._formatNumber(capacityUtilizationPercent)} %`
+      : "—";
+    const capacityFill = Number.isFinite(capacityUtilizationPercent)
+      ? Math.max(0, Math.min(100, capacityUtilizationPercent))
+      : 0;
+    capacityIndicator.innerHTML = `<strong class="capacity-utilization-title">Kapacitetsutnyttjande</strong><div class="capacity-battery" role="img" aria-label="Kapacitetsutnyttjande ${capacityLabel}"><span class="capacity-battery-fill" style="height: ${capacityFill}%"></span><span class="capacity-battery-value">${capacityLabel}</span></div>`;
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart);
@@ -3191,6 +3285,14 @@ class ElrakningPanel {
     svg.addEventListener("pointerdown", update);
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
+  }
+
+  _capacityUtilizationPercent() {
+    const discharged = Number(this._powerState?.discharging_energy_kwh);
+    const capacity = Number(this._powerState?.capacity_kwh);
+    return Number.isFinite(discharged) && Number.isFinite(capacity) && capacity > 0
+      ? discharged / capacity * 100
+      : null;
   }
 
   async loadPowerState(loadHistory = false) {
