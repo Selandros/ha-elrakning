@@ -1162,9 +1162,10 @@ class ElrakningPanel {
           background: var(--divider-color);
           border-radius: 999px;
           display: flex;
-          height: 12px;
+          height: 18px;
           margin: 8px 0 7px;
           overflow: hidden;
+          position: relative;
         }
 
         .daily-energy-segment {
@@ -1187,6 +1188,26 @@ class ElrakningPanel {
 
         .daily-energy-segment.import {
           background: var(--daily-energy-import-color);
+        }
+
+        .daily-energy-percent {
+          color: #fff;
+          font-size: 10px;
+          font-weight: 600;
+          line-height: 18px;
+          position: absolute;
+          text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
+          top: 0;
+          white-space: nowrap;
+          z-index: 1;
+        }
+
+        .daily-energy-percent.first {
+          left: 6px;
+        }
+
+        .daily-energy-percent.second {
+          right: 6px;
         }
 
         .daily-energy-part-labels {
@@ -3049,9 +3070,9 @@ class ElrakningPanel {
       const secondWidth = clampPercent(secondPercent);
       return `<section class="daily-energy-part">
         <div class="daily-energy-part-heading"><strong>${title}</strong><span class="daily-energy-total">${totalAvailable ? formatEnergy(total) : "—"}</span></div>
-        <div class="daily-energy-bar" aria-hidden="true"><span class="daily-energy-segment ${firstClass}" style="width: ${firstWidth}%"></span><span class="daily-energy-segment ${secondClass}" style="width: ${secondWidth}%"></span></div>
+        <div class="daily-energy-bar" aria-hidden="true"><span class="daily-energy-segment ${firstClass}" style="width: ${firstWidth}%"></span><span class="daily-energy-segment ${secondClass}" style="width: ${secondWidth}%"></span><span class="daily-energy-percent first">${formatPercent(firstPercent)}</span><span class="daily-energy-percent second">${formatPercent(secondPercent)}</span></div>
         <div class="daily-energy-part-labels"><span>${firstLabel}</span><span>${secondLabel}</span></div>
-        <div class="daily-energy-part-values"><span>${formatEnergy(firstValue)} · ${formatPercent(firstPercent)}</span><span>${formatEnergy(secondValue)} · ${formatPercent(secondPercent)}</span></div>
+        <div class="daily-energy-part-values"><span>${formatEnergy(firstValue)}</span><span>${formatEnergy(secondValue)}</span></div>
       </section>`;
     };
     const solarBalance = buildEnergyBalance(solarAvailable ? power.solar_energy_kwh : null, exportKwh);
