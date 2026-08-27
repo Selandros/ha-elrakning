@@ -441,6 +441,7 @@ assert.match(panelSource, /soc-card-heading \.capacity-utilization-title/);
 assert.match(panelSource, /height: calc\(100% - 7px\);/);
 assert.match(panelSource, /margin-top: 7px;/);
 assert.match(panelSource, /\.capacity-battery \{[\s\S]*width: 52px;/);
+assert.match(panelSource, /\.capacity-battery-value \{[\s\S]*font-size: inherit;/);
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPercent\)\)/);
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);

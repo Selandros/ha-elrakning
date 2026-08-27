@@ -1323,7 +1323,7 @@ class ElrakningPanel {
           align-items: center;
           color: var(--primary-text-color);
           display: flex;
-          font-size: var(--price-card-text-size);
+          font-size: inherit;
           font-weight: 700;
           inset: 0;
           justify-content: center;
