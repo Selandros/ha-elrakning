@@ -431,7 +431,8 @@ assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--solar-color, #7
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-hover-point \{[\s\S]*fill: var\(--soc-color\);/);
-assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 7fr\) minmax\(96px, 3fr\);/);
+assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 7fr\) minmax\(52px, 3fr\);/);
+assert.match(panelSource, /\.soc-card-heading h2 \{[\s\S]*white-space: nowrap;/);
 assert.match(panelSource, /data-capacity-utilization/);
 assert.match(panelSource, /class="capacity-utilization-title">Utnyttjande<\/h2>/);
 assert.match(panelSource, /Kapacitetsutnyttjande/);
@@ -445,6 +446,7 @@ assert.match(panelSource, /\.capacity-battery-value \{[\s\S]*font-size: inherit;
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPercent\)\)/);
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);
+assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.soc-card-content \{\n\s+grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 320;/);
 assert.match(panelSource, /const height = 320;/);
 assert.match(panelSource, /const plot = \{ left: 32, right: 8, top: 8, bottom: 32 \};/);

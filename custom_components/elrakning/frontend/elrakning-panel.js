@@ -1249,7 +1249,7 @@ class ElrakningPanel {
           align-items: stretch;
           display: grid;
           gap: 12px;
-          grid-template-columns: minmax(0, 7fr) minmax(96px, 3fr);
+          grid-template-columns: minmax(0, 7fr) minmax(52px, 3fr);
           margin-top: 2px;
         }
 
@@ -1259,13 +1259,20 @@ class ElrakningPanel {
           justify-content: space-between;
         }
 
+        .soc-card-heading h2 {
+          min-width: 0;
+          white-space: nowrap;
+        }
+
         .soc-card-heading .capacity-utilization-title {
           color: var(--primary-text-color);
           font-size: inherit;
           font-weight: inherit;
           line-height: inherit;
           margin: 0;
-          max-width: 30%;
+          min-width: 0;
+          max-width: none;
+          white-space: nowrap;
           text-align: right;
         }
 
@@ -1331,22 +1338,6 @@ class ElrakningPanel {
           text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
           white-space: nowrap;
           z-index: 1;
-        }
-
-        @media (max-width: 700px) {
-          .soc-card-content {
-            grid-template-columns: 1fr;
-          }
-
-          .capacity-utilization {
-            min-height: 170px;
-          }
-
-          .capacity-battery {
-            align-self: center;
-            height: 148px;
-            margin-top: 0;
-          }
         }
 
         .soc-chart-svg {
