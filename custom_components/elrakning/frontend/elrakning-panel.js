@@ -691,7 +691,7 @@ class ElrakningPanel {
           <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
             <div class="card-heading soc-card-heading">
               <h2 id="soc-title">Batteri SOC</h2>
-              <h2 class="capacity-utilization-title">Kapacitetsutnyttjande</h2>
+              <h2 class="capacity-utilization-title">Utnyttjande</h2>
             </div>
             <div class="soc-card-content">
               <div class="soc-chart" data-soc-chart></div>

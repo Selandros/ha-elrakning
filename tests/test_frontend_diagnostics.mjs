@@ -433,6 +433,7 @@ assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-hover-point \{[\s\S]*fill: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 7fr\) minmax\(112px, 3fr\);/);
 assert.match(panelSource, /data-capacity-utilization/);
+assert.match(panelSource, /class="capacity-utilization-title">Utnyttjande<\/h2>/);
 assert.match(panelSource, /Kapacitetsutnyttjande/);
 assert.match(panelSource, /capacity-battery-fill/);
 assert.match(panelSource, /class="card-heading soc-card-heading"/);
