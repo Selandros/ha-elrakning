@@ -30,6 +30,12 @@ def _schedule_price_update(hass: HomeAssistant) -> None:
 async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> None:
     """Refresh the coordinator once at the local start of each day."""
     await coordinator.async_request_refresh()
+    coordinator.async_schedule_midnight_recovery()
+
+
+async def _async_prefetch_next_day(coordinator: ElrakningCoordinator, _now) -> None:
+    """Prefetch the next local day's prices before midnight."""
+    await coordinator.async_prefetch_next_day()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -65,6 +71,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         partial(_async_midnight_refresh, coordinator),
         hour=0,
+        minute=0,
+        second=0,
+    )
+    frontend_data["price_prefetch_unsub"] = async_track_time_change(
+        hass,
+        partial(_async_prefetch_next_day, coordinator),
+        hour=23,
         minute=0,
         second=0,
     )
@@ -120,6 +133,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
         unsubscribe()
+    if unsubscribe := frontend_data.pop("price_prefetch_unsub", None):
+        unsubscribe()
+    coordinator.cancel_midnight_recovery()
     if manager := frontend_data.pop("elhandel_manager", None):
         await manager.async_shutdown()
     if meter_manager := frontend_data.pop("meter_manager", None):

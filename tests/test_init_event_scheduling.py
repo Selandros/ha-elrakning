@@ -75,6 +75,9 @@ class _Coordinator:
     async def async_request_refresh(self):
         self.refresh_calls += 1
 
+    def async_schedule_midnight_recovery(self):
+        pass
+
 
 def test_midnight_callback_requests_one_coordinator_refresh():
     callback = _load_midnight_refresh()
@@ -83,6 +86,23 @@ def test_midnight_callback_requests_one_coordinator_refresh():
     asyncio.run(callback(coordinator, object()))
 
     assert coordinator.refresh_calls == 1
+
+
+def test_midnight_callback_starts_recovery_after_refresh():
+    callback = _load_midnight_refresh()
+
+    class RecoveryCoordinator(_Coordinator):
+        def __init__(self):
+            super().__init__()
+            self.recovery_calls = 0
+
+        def async_schedule_midnight_recovery(self):
+            self.recovery_calls += 1
+
+    coordinator = RecoveryCoordinator()
+    asyncio.run(callback(coordinator, object()))
+
+    assert coordinator.recovery_calls == 1
 
 
 def test_midnight_schedule_and_lifecycle_contract_are_present():
@@ -95,8 +115,22 @@ def test_midnight_schedule_and_lifecycle_contract_are_present():
     assert "second=0" in source
     assert 'frontend_data["midnight_refresh_unsub"]' in source
     assert 'frontend_data.pop("midnight_refresh_unsub", None)' in source
+    assert 'frontend_data["price_prefetch_unsub"]' in source
+    assert 'frontend_data.pop("price_prefetch_unsub", None)' in source
+    assert "hour=23" in source
+    assert "async_prefetch_next_day" in source
+    assert "async_schedule_midnight_recovery" in source
     assert "async_request_refresh" in source
     assert "set_interval" not in source
+
+
+def test_price_recovery_is_bounded_and_cancelable():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "coordinator.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert "_prefetched_price_data" in source
+    assert "_async_fetch_date(target_date)" in source
+    assert "for delay in (15, 30, 60, 120, 240)" in source
+    assert "cancel_midnight_recovery" in source
 
 
 def test_coordinator_interval_remains_fifteen_minutes():
