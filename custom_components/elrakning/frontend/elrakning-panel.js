@@ -1374,13 +1374,6 @@ class ElrakningPanel {
           vector-effect: non-scaling-stroke;
         }
 
-        .soc-hover-point {
-          fill: var(--soc-color);
-          stroke: var(--ha-card-background, var(--card-background-color));
-          stroke-width: 2;
-          vector-effect: non-scaling-stroke;
-        }
-
         .soc-tooltip {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
@@ -2210,6 +2203,7 @@ class ElrakningPanel {
         .chart-hover-marker-consumption { fill: var(--consumption-color); }
         .chart-hover-marker-charging { fill: var(--charging-color); }
         .chart-hover-marker-discharging { fill: var(--discharging-color); }
+        .chart-hover-marker-soc { fill: var(--soc-color); }
 
         .tooltip-power-solar { color: var(--solar-color); }
         .tooltip-power-consumption { color: var(--consumption-color); }
@@ -3282,7 +3276,7 @@ class ElrakningPanel {
       const pointY = y(point.value);
       tooltip.innerHTML = `<strong>${new Date(point.timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</strong><span>Laddnivå: ${this._formatNumber(point.value)} %</span>`;
       tooltip.hidden = false;
-      hover.innerHTML = `<circle class="soc-hover-point" cx="${pointX}" cy="${pointY}" r="4" />`;
+      hover.innerHTML = `<circle class="chart-hover-marker chart-hover-marker-soc" cx="${pointX}" cy="${pointY}" r="4" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointermove", update);

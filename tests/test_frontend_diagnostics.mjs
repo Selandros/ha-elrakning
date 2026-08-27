@@ -430,7 +430,8 @@ assert.match(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-r
 assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--solar-color, #77C2A1\);/);
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
-assert.match(panelSource, /\.soc-hover-point \{[\s\S]*fill: var\(--soc-color\);/);
+assert.match(panelSource, /\.chart-hover-marker-soc \{ fill: var\(--soc-color\); \}/);
+assert.match(panelSource, /class="chart-hover-marker chart-hover-marker-soc"/);
 assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 7fr\) minmax\(52px, 3fr\);/);
 assert.match(panelSource, /\.soc-card-heading h2 \{[\s\S]*white-space: nowrap;/);
 assert.match(panelSource, /data-capacity-utilization/);
