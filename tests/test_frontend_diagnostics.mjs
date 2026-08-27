@@ -432,7 +432,7 @@ assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*f
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.chart-hover-marker-soc \{ fill: var\(--soc-color\); \}/);
 assert.match(panelSource, /class="chart-hover-marker chart-hover-marker-soc"/);
-assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 7fr\) minmax\(52px, 3fr\);/);
+assert.match(panelSource, /\.soc-card-content \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) max-content;/);
 assert.match(panelSource, /\.soc-card-heading h2 \{[\s\S]*white-space: nowrap;/);
 assert.match(panelSource, /data-capacity-utilization/);
 assert.match(panelSource, /class="capacity-utilization-title">Utnyttjande<\/h2>/);
@@ -443,7 +443,7 @@ assert.match(panelSource, /\.card-heading\.soc-card-heading \{[\s\S]*flex-direct
 assert.match(panelSource, /soc-card-heading \.capacity-utilization-title/);
 assert.match(panelSource, /height: calc\(100% - 7px\);/);
 assert.match(panelSource, /margin-top: 7px;/);
-assert.match(panelSource, /\.capacity-battery \{[\s\S]*width: 52px;/);
+assert.match(panelSource, /\.capacity-battery \{[\s\S]*max-width: 72px;[\s\S]*min-width: 44px;[\s\S]*width: fit-content;/);
 assert.match(panelSource, /\.capacity-battery-value \{[\s\S]*font-size: inherit;/);
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPercent\)\)/);
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);

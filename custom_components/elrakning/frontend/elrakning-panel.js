@@ -1248,8 +1248,8 @@ class ElrakningPanel {
         .soc-card-content {
           align-items: stretch;
           display: grid;
-          gap: 12px;
-          grid-template-columns: minmax(0, 7fr) minmax(52px, 3fr);
+          gap: 8px;
+          grid-template-columns: minmax(0, 1fr) max-content;
           margin-top: 2px;
         }
 
@@ -1291,16 +1291,21 @@ class ElrakningPanel {
         }
 
         .capacity-battery {
+          align-items: center;
           border: 2px solid var(--divider-color);
           border-radius: 12px;
           box-sizing: border-box;
           align-self: stretch;
+          display: grid;
           height: calc(100% - 7px);
           max-height: 100%;
           margin-top: 7px;
+          max-width: 72px;
+          min-width: 44px;
           overflow: visible;
+          padding: 0 8px;
           position: relative;
-          width: 52px;
+          width: fit-content;
         }
 
         .capacity-battery::before {
@@ -1332,9 +1337,9 @@ class ElrakningPanel {
           display: flex;
           font-size: inherit;
           font-weight: 700;
-          inset: 0;
+          inset: auto;
           justify-content: center;
-          position: absolute;
+          position: relative;
           text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
           white-space: nowrap;
           z-index: 1;
