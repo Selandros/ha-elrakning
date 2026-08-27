@@ -680,19 +680,21 @@ class ElrakningPanel {
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
         </section>
 
-        <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
-          <div class="card-heading">
-            <h2 id="daily-energy-title">Dagens energi</h2>
-          </div>
-          <div class="daily-energy-grid" data-daily-energy-grid></div>
-        </section>
+        <div class="daily-energy-row">
+          <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
+            <div class="card-heading">
+              <h2 id="daily-energy-title">Dagens energi</h2>
+            </div>
+            <div class="daily-energy-grid" data-daily-energy-grid></div>
+          </section>
 
-        <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
-          <div class="card-heading">
-            <h2 id="soc-title">Batteri SOC</h2>
-          </div>
-          <div class="soc-chart" data-soc-chart></div>
-        </section>
+          <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
+            <div class="card-heading">
+              <h2 id="soc-title">Batteri SOC</h2>
+            </div>
+            <div class="soc-chart" data-soc-chart></div>
+          </section>
+        </div>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
           <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
@@ -1111,11 +1113,16 @@ class ElrakningPanel {
           margin: 6px 0;
         }
 
+        .daily-energy-row {
+          display: grid;
+          gap: 16px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .daily-energy-card {
           --daily-energy-local-color: var(--solar-color, #77C2A1);
           --daily-energy-export-color: var(--grid-export-color, #72AAF6);
           --daily-energy-import-color: var(--grid-import-color, #F0A06A);
-          grid-column: 1 / -1;
           min-height: 0;
         }
 
@@ -1199,6 +1206,10 @@ class ElrakningPanel {
         }
 
         @media (max-width: 700px) {
+          .daily-energy-row {
+            grid-template-columns: 1fr;
+          }
+
           .daily-energy-grid {
             grid-template-columns: 1fr;
           }
