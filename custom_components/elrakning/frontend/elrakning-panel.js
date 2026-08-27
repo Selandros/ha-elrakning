@@ -1162,7 +1162,7 @@ class ElrakningPanel {
           background: var(--divider-color);
           border-radius: 999px;
           display: flex;
-          height: 18px;
+          height: 24px;
           margin: 8px 0 7px;
           overflow: hidden;
           position: relative;
@@ -1192,9 +1192,9 @@ class ElrakningPanel {
 
         .daily-energy-percent {
           color: #fff;
-          font-size: 10px;
+          font-size: 12px;
           font-weight: 600;
-          line-height: 18px;
+          line-height: 24px;
           position: absolute;
           text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
           top: 0;
