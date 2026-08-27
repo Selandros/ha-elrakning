@@ -324,7 +324,7 @@ export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 *
   return canonical;
 }
 
-export function integratePowerSeries(points, dayStart, dayEnd, now = new Date(), slotMs = 5 * 60 * 1000) {
+export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Date(), slotMs = 5 * 60 * 1000) {
   const canonical = buildCanonicalMeterPoints(
     (Array.isArray(points) ? points : []).map((point) => ({
       timestamp: point.timestamp,
@@ -2699,7 +2699,11 @@ class ElrakningPanel {
   }
 
   _applyPowerState(state) {
-    this._powerState = state ? { ...state, solar_energy_kwh: this._calculateSolarEnergy() } : null;
+    this._powerState = state ? {
+      ...state,
+      solar_energy_kwh: this._calculatePowerEnergy("solar"),
+      consumption_energy_kwh: this._calculatePowerEnergy("consumption"),
+    } : null;
     const solarConfigured = Array.isArray(this._powerState?.solar_entities) && this._powerState.solar_entities.length > 0;
     const batteryConfigured = Boolean(this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
     const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
@@ -2732,16 +2736,16 @@ class ElrakningPanel {
     this._renderMergedMeterSummary();
   }
 
-  _calculateSolarEnergy() {
-    const points = this._powerHistory?.series?.solar?.points;
+  _calculatePowerEnergy(seriesKey) {
+    const points = this._powerHistory?.series?.[seriesKey]?.points;
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
-    return integratePowerSeries(points, dayStart, dayEnd, now);
+    return integratePowerHistoryKwh(points, dayStart, dayEnd, now);
   }
 
-  _refreshSolarEnergyState() {
+  _refreshPowerEnergyState() {
     if (!this._powerState) return;
     this._applyPowerState(this._powerState);
   }
@@ -2760,7 +2764,10 @@ class ElrakningPanel {
     }
     if (!summary) return;
     const rows = [];
-    if (loadConfigured) rows.push(["Husets last", displayPowerValue(power.consumption_kw), "kW"]);
+    if (loadConfigured) {
+      rows.push(["Husets last", displayPowerValue(power.consumption_kw), "kW"]);
+      rows.push(["Förbrukat idag", power.consumption_energy_kwh, "kWh"]);
+    }
     if (meterConfigured) {
       rows.push(["Nät just nu", displayPowerValue(meter.power_kw), "kW"]);
       if (meter.energy_import_entity && meter.energy_import_valid === false) {
@@ -2816,12 +2823,12 @@ class ElrakningPanel {
         date: response?.date || null,
         series,
       };
-      this._refreshSolarEnergyState();
+      this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
       this._powerHistory = { date: null, series: {} };
-      this._refreshSolarEnergyState();
+      this._refreshPowerEnergyState();
     }
   }
 
@@ -2829,7 +2836,7 @@ class ElrakningPanel {
     if (eventData?.state) {
       this._applyPowerState(eventData.state);
       for (const entry of eventData.points || []) this._appendPowerPoint(entry.series, entry.point);
-      this._refreshSolarEnergyState();
+      this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     }
   }

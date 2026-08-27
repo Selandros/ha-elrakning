@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerSeries, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCanonicalMeterPoints, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -35,11 +35,11 @@ const powerPoints = (values) => values.map((value, index) => ({
   timestamp: new Date(integrationStart.getTime() + index * 5 * 60 * 1000).toISOString(),
   value_kw: value,
 }));
-assert.equal(integratePowerSeries(powerPoints([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")), 1);
-assert.ok(Math.abs(integratePowerSeries(powerPoints([5, 5, 5, 5, 5, 5, 5]), integrationStart, integrationEnd, new Date("2026-08-23T00:30:00")) - 2.5) < 1e-12);
-assert.ok(Math.abs(integratePowerSeries(powerPoints([0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3, 2, 7 / 3, 8 / 3, 3, 10 / 3, 11 / 3, 4]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")) - 2) < 1e-12);
-assert.equal(integratePowerSeries(powerPoints([0.05, 0.05]), integrationStart, integrationEnd, new Date("2026-08-23T00:05:00")), 0.004166666666666667);
-assert.equal(integratePowerSeries([
+assert.equal(integratePowerHistoryKwh(powerPoints([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")), 1);
+assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([5, 5, 5, 5, 5, 5, 5]), integrationStart, integrationEnd, new Date("2026-08-23T00:30:00")) - 2.5) < 1e-12);
+assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3, 2, 7 / 3, 8 / 3, 3, 10 / 3, 11 / 3, 4]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")) - 2) < 1e-12);
+assert.equal(integratePowerHistoryKwh(powerPoints([0.05, 0.05]), integrationStart, integrationEnd, new Date("2026-08-23T00:05:00")), 0.004166666666666667);
+assert.equal(integratePowerHistoryKwh([
   powerPoints([1, 1, 1])[0],
   powerPoints([1, 1, 1])[2],
 ], integrationStart, integrationEnd, new Date("2026-08-23T00:10:00")), 0);
@@ -383,8 +383,11 @@ assert.match(panelSource, /Husets last/);
 assert.match(panelSource, /Nät just nu/);
 assert.match(panelSource, /displayPowerValue\(power\.consumption_kw\)/);
 assert.match(panelSource, /\["Producerat idag", this\._powerState\.solar_energy_kwh, "kWh"\]/);
-assert.match(panelSource, /integratePowerSeries\(points, dayStart, dayEnd, now\)/);
-assert.match(panelSource, /this\._refreshSolarEnergyState\(\)/);
+assert.match(panelSource, /integratePowerHistoryKwh\(points, dayStart, dayEnd, now\)/);
+assert.match(panelSource, /_calculatePowerEnergy\("solar"\)/);
+assert.match(panelSource, /_calculatePowerEnergy\("consumption"\)/);
+assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
+assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
 assert.match(panelSource, /\["Import idag", "energy_import_entity"\]/);
 assert.match(panelSource, /\["Export idag", "energy_export_entity"\]/);
 assert.match(panelSource, /Byt sensor/);
