@@ -2283,22 +2283,39 @@ class ElrakningPanel {
           min-height: 0;
         }
 
+        [data-configuration-cards] {
+          gap: 16px;
+          grid-template-columns: repeat(12, minmax(0, 1fr));
+        }
+
         [data-configuration-cards] > .configuration-card {
+          --configuration-accent: var(--primary-color);
           align-content: start;
+          background: linear-gradient(145deg, color-mix(in srgb, var(--configuration-accent) 8%, var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)))), var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color))));
+          border-top: 2px solid var(--configuration-accent);
           display: flex;
           flex-direction: column;
           gap: 0;
-          min-height: 0;
+          min-height: 214px;
         }
+
+        [data-configuration-cards] > .configuration-card-elhandel { grid-column: span 5; --configuration-accent: #9b9dea; }
+        [data-configuration-cards] > .configuration-card-elnet { grid-column: span 3; --configuration-accent: var(--el-import-color); }
+        [data-configuration-cards] > .configuration-card-elmatare { grid-column: span 4; --configuration-accent: var(--el-consumption-color); }
+        [data-configuration-cards] > .configuration-card-solar { grid-column: span 6; --configuration-accent: var(--el-solar-color); }
+        [data-configuration-cards] > .configuration-card-battery { grid-column: span 6; --configuration-accent: var(--el-charging-color); }
 
         [data-configuration-cards] > .configuration-card .card-heading {
           align-items: center;
           flex-direction: row;
-          min-height: 24px;
+          min-height: 28px;
         }
 
         [data-configuration-cards] > .configuration-card .card-heading h2 {
           flex: 1 1 auto;
+          font-size: 21px;
+          font-weight: 600;
+          letter-spacing: -.01em;
           min-width: 0;
           overflow: hidden;
           padding-right: 0;
@@ -2306,14 +2323,17 @@ class ElrakningPanel {
         }
 
         [data-configuration-cards] > .configuration-card .status {
-          background: color-mix(in srgb, var(--secondary-text-color) 10%, transparent);
-          border: 1px solid color-mix(in srgb, var(--secondary-text-color) 20%, transparent);
+          background: color-mix(in srgb, var(--configuration-accent) 14%, transparent);
+          border: 1px solid color-mix(in srgb, var(--configuration-accent) 34%, transparent);
           border-radius: 999px;
+          color: var(--primary-text-color);
           flex: 0 0 auto;
-          font-size: 12px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: .02em;
           line-height: 1;
           margin-right: 38px;
-          padding: 5px 8px;
+          padding: 6px 9px;
         }
 
         [data-configuration-cards] > .configuration-card .provider {
@@ -2321,7 +2341,7 @@ class ElrakningPanel {
           font-size: 15px;
           font-weight: 600;
           line-height: 1.3;
-          margin-top: 14px;
+          margin-top: 16px;
         }
 
         [data-configuration-cards] > .configuration-card .provider-summary,
@@ -2329,13 +2349,15 @@ class ElrakningPanel {
         [data-configuration-cards] > .configuration-card .power-summary {
           column-gap: 12px;
           grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-          margin-top: 16px;
-          row-gap: 8px;
+          margin-top: 18px;
+          row-gap: 9px;
         }
 
         [data-configuration-cards] > .configuration-card .provider-summary strong,
         [data-configuration-cards] > .configuration-card .meter-summary strong,
         [data-configuration-cards] > .configuration-card .power-summary strong {
+          color: color-mix(in srgb, var(--primary-text-color) 82%, var(--secondary-text-color));
+          font-size: 14px;
           min-width: 0;
           overflow-wrap: normal;
           word-break: normal;
@@ -2344,6 +2366,9 @@ class ElrakningPanel {
         [data-configuration-cards] > .configuration-card .provider-summary span,
         [data-configuration-cards] > .configuration-card .meter-summary span,
         [data-configuration-cards] > .configuration-card .power-summary span {
+          color: var(--primary-text-color);
+          font-size: 16px;
+          font-weight: 600;
           min-width: 0;
           text-align: right;
           white-space: normal;
@@ -2351,14 +2376,23 @@ class ElrakningPanel {
 
         [data-configuration-cards] > .configuration-card .configuration-control {
           align-self: flex-start;
+          border: 1px solid color-mix(in srgb, var(--configuration-accent) 45%, transparent);
+          background: color-mix(in srgb, var(--configuration-accent) 15%, transparent);
+          color: var(--primary-text-color);
+          cursor: pointer;
           margin-top: auto;
+          transition: background-color 120ms ease, border-color 120ms ease;
+        }
+
+        [data-configuration-cards] > .configuration-card .configuration-control:hover {
+          background: color-mix(in srgb, var(--configuration-accent) 25%, transparent);
         }
 
         .configuration-empty {
-          border-left: 3px solid var(--primary-color);
+          border-left: 3px solid var(--configuration-accent, var(--primary-color));
           color: var(--secondary-text-color);
-          line-height: 1.45;
-          margin-top: 20px;
+          line-height: 1.5;
+          margin-top: 22px;
           max-width: 28ch;
           padding-left: 12px;
         }
@@ -2367,19 +2401,44 @@ class ElrakningPanel {
           align-items: center;
           color: var(--secondary-text-color);
           display: flex;
-          font-size: 12px;
-          font-weight: 600;
+          font-size: 11px;
+          font-weight: 700;
           gap: 8px;
-          letter-spacing: .04em;
-          margin: 10px 0 2px;
+          letter-spacing: .08em;
+          margin: 11px 0 2px;
           text-transform: uppercase;
         }
 
         [data-configuration-cards] > .configuration-card .power-summary-divider::after {
-          background: var(--divider-color);
+          background: color-mix(in srgb, var(--configuration-accent) 45%, var(--divider-color));
           content: "";
           flex: 1;
           height: 1px;
+        }
+
+        @media (max-width: 980px) {
+          [data-configuration-cards] {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          [data-configuration-cards] > .configuration-card {
+            grid-column: span 1;
+          }
+
+          [data-configuration-cards] > .configuration-card-elhandel {
+            grid-column: span 2;
+          }
+        }
+
+        @media (max-width: 620px) {
+          [data-configuration-cards] {
+            grid-template-columns: minmax(0, 1fr);
+          }
+
+          [data-configuration-cards] > .configuration-card,
+          [data-configuration-cards] > .configuration-card-elhandel {
+            grid-column: span 1;
+          }
         }
 
         .card-heading {
