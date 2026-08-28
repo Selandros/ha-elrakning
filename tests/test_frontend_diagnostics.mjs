@@ -430,6 +430,7 @@ assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-e
 assert.match(panelSource, /\.daily-energy-card \{[\s\S]*min-width: 0;/);
 assert.match(panelSource, /\.daily-energy-part-heading > \*,[\s\S]*\.daily-energy-part-values > \* \{[\s\S]*min-width: 0;[\s\S]*overflow-wrap: break-word;/);
 assert.match(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-part-heading \{\n\s+display: block;/);
+assert.match(panelSource, /\.daily-energy-part-labels,[\s\S]*\.daily-energy-part-values \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
 assert.match(panelSource, /\.daily-energy-total \{[\s\S]*text-align: right;\n\s+\}/);
 assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--solar-color, #77C2A1\);/);
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);

@@ -1259,6 +1259,7 @@ class ElrakningPanel {
           .daily-energy-part-labels,
           .daily-energy-part-values {
             gap: 4px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
 
