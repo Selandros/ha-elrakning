@@ -1184,8 +1184,8 @@ class ElrakningPanel {
           background: var(--divider-color);
           border-radius: 999px;
           display: flex;
-          height: clamp(16px, 5cqw, 24px);
-          margin: 8px 0 7px;
+          height: clamp(20px, 6cqw, 30px);
+          margin: clamp(8px, 1.5cqw, 11px) 0 clamp(7px, 1.3cqw, 10px);
           overflow: hidden;
           position: relative;
         }
@@ -1214,9 +1214,9 @@ class ElrakningPanel {
 
         .daily-energy-percent {
           color: #fff;
-          font-size: clamp(9px, 2.5cqw, 12px);
+          font-size: clamp(10px, 2.7cqw, 14px);
           font-weight: 600;
-          line-height: clamp(16px, 5cqw, 24px);
+          line-height: clamp(20px, 6cqw, 30px);
           position: absolute;
           text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
           top: 0;
