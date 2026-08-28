@@ -714,8 +714,11 @@ class ElrakningPanel {
           </section>
         </div>
 
-        <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
-          <article class="card configuration-card configuration-card-elhandel" data-provider-card="elhandel" data-config-card-key="elhandel">
+        <section class="configuration-surfaces" data-configuration-cards aria-label="Elräkningens konfigurationskort">
+          <section class="configuration-surface configuration-surface-commerce" aria-label="Avtal och nät">
+            <p class="configuration-surface-label">Avtal och nät</p>
+            <div class="configuration-surface-grid configuration-surface-grid-commerce">
+          <article class="configuration-module configuration-card-elhandel" data-provider-card="elhandel" data-config-card-key="elhandel">
             <div class="card-heading">
               <h2>Elhandel</h2>
               <span class="status" data-provider-status></span>
@@ -733,7 +736,7 @@ class ElrakningPanel {
             <button type="button" data-greenely-parse-latest hidden>Tolka senaste</button>
           </article>
 
-            <article class="card configuration-card configuration-card-elnet" data-provider-card="elnet" data-config-card-key="elnet">
+            <article class="configuration-module configuration-card-elnet" data-provider-card="elnet" data-config-card-key="elnet">
             <div class="card-heading">
               <h2>Elnät</h2>
               <span class="status">Ej konfigurerad</span>
@@ -743,8 +746,13 @@ class ElrakningPanel {
             <p class="configuration-empty">Konfigurera nätdata för att se effekt och import/export.</p>
             <button type="button" class="configuration-control">Konfigurera</button>
           </article>
+            </div>
+          </section>
 
-          <article class="card configuration-card configuration-card-elmatare" data-provider-card="elmatare" data-config-card-key="elmatare">
+          <section class="configuration-surface configuration-surface-power" aria-label="Energi och batteri">
+            <p class="configuration-surface-label">Energi och batteri</p>
+            <div class="configuration-surface-grid configuration-surface-grid-power">
+          <article class="configuration-module configuration-card-elmatare" data-provider-card="elmatare" data-config-card-key="elmatare">
             <div class="card-heading">
               <h2>Elmätare</h2>
               <span class="status" data-meter-status>Ej konfigurerad</span>
@@ -756,18 +764,19 @@ class ElrakningPanel {
             <button type="button" data-meter-source hidden>Visa mätardata</button>
           </article>
 
-          <article class="card configuration-card power-card configuration-card-solar" data-power-card="solar" data-config-card-key="solar">
+          <article class="configuration-module power-card configuration-card-solar" data-power-card="solar" data-config-card-key="solar">
             <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="solar" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
-          <article class="card configuration-card power-card configuration-card-battery" data-power-card="battery" data-config-card-key="battery">
+          <article class="configuration-module power-card configuration-card-battery" data-power-card="battery" data-config-card-key="battery">
             <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
-
+            </div>
+          </section>
         </section>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
@@ -2302,31 +2311,65 @@ class ElrakningPanel {
         }
 
         [data-configuration-cards] {
+          display: grid;
           gap: 16px;
           grid-template-columns: repeat(12, minmax(0, 1fr));
+          margin-top: 16px;
         }
 
-        [data-configuration-cards] > .configuration-card {
+        .configuration-surface {
+          background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
+          border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
+          box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
+          box-sizing: border-box;
+          grid-column: 1 / -1;
+          min-width: 0;
+          overflow: hidden;
+          padding: 18px 20px 20px;
+        }
+
+        .configuration-surface-label {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          letter-spacing: .06em;
+          margin: 0 0 16px;
+          text-transform: uppercase;
+        }
+
+        .configuration-surface-grid {
+          display: grid;
+          gap: 20px;
+          min-width: 0;
+        }
+
+        .configuration-surface-grid-commerce {
+          grid-template-columns: minmax(0, 5fr) minmax(220px, 3fr);
+        }
+
+        .configuration-surface-grid-power {
+          grid-template-columns: minmax(0, 4fr) minmax(0, 3fr) minmax(0, 3fr);
+        }
+
+        .configuration-module {
           align-content: start;
           display: flex;
           flex-direction: column;
-          gap: 0;
-          min-height: 214px;
+          min-width: 0;
         }
 
-        [data-configuration-cards] > .configuration-card-elhandel { grid-column: span 5; }
-        [data-configuration-cards] > .configuration-card-elnet { grid-column: span 3; }
-        [data-configuration-cards] > .configuration-card-elmatare { grid-column: span 4; }
-        [data-configuration-cards] > .configuration-card-solar { grid-column: span 6; }
-        [data-configuration-cards] > .configuration-card-battery { grid-column: span 6; }
+        .configuration-module + .configuration-module {
+          border-left: 1px solid var(--divider-color);
+          padding-left: 20px;
+        }
 
-        [data-configuration-cards] > .configuration-card .card-heading {
+        [data-configuration-cards] .configuration-module .card-heading {
           align-items: center;
           flex-direction: row;
           min-height: 28px;
         }
 
-        [data-configuration-cards] > .configuration-card .card-heading h2 {
+        [data-configuration-cards] .configuration-module .card-heading h2 {
           flex: 1 1 auto;
           font-size: 20px;
           font-weight: 500;
@@ -2336,7 +2379,7 @@ class ElrakningPanel {
           text-overflow: ellipsis;
         }
 
-        [data-configuration-cards] > .configuration-card .status {
+        [data-configuration-cards] .configuration-module .status {
           color: var(--secondary-text-color);
           flex: 0 0 auto;
           font-size: 12px;
@@ -2344,7 +2387,7 @@ class ElrakningPanel {
           margin-right: 38px;
         }
 
-        [data-configuration-cards] > .configuration-card .provider {
+        [data-configuration-cards] .configuration-module .provider {
           color: var(--primary-text-color);
           font-size: 15px;
           font-weight: 600;
@@ -2352,18 +2395,18 @@ class ElrakningPanel {
           margin-top: 14px;
         }
 
-        [data-configuration-cards] > .configuration-card .provider-summary,
-        [data-configuration-cards] > .configuration-card .meter-summary,
-        [data-configuration-cards] > .configuration-card .power-summary {
+        [data-configuration-cards] .configuration-module .provider-summary,
+        [data-configuration-cards] .configuration-module .meter-summary,
+        [data-configuration-cards] .configuration-module .power-summary {
           column-gap: 12px;
           grid-template-columns: minmax(0, 1fr) minmax(0, auto);
           margin-top: 16px;
           row-gap: 8px;
         }
 
-        [data-configuration-cards] > .configuration-card .provider-summary strong,
-        [data-configuration-cards] > .configuration-card .meter-summary strong,
-        [data-configuration-cards] > .configuration-card .power-summary strong {
+        [data-configuration-cards] .configuration-module .provider-summary strong,
+        [data-configuration-cards] .configuration-module .meter-summary strong,
+        [data-configuration-cards] .configuration-module .power-summary strong {
           color: var(--secondary-text-color);
           font-size: 13px;
           min-width: 0;
@@ -2371,9 +2414,9 @@ class ElrakningPanel {
           word-break: normal;
         }
 
-        [data-configuration-cards] > .configuration-card .provider-summary span,
-        [data-configuration-cards] > .configuration-card .meter-summary span,
-        [data-configuration-cards] > .configuration-card .power-summary span {
+        [data-configuration-cards] .configuration-module .provider-summary span,
+        [data-configuration-cards] .configuration-module .meter-summary span,
+        [data-configuration-cards] .configuration-module .power-summary span {
           color: var(--primary-text-color);
           font-size: 15px;
           font-weight: 600;
@@ -2382,7 +2425,7 @@ class ElrakningPanel {
           white-space: normal;
         }
 
-        [data-configuration-cards] > .configuration-card .configuration-control {
+        [data-configuration-cards] .configuration-module .configuration-control {
           align-self: flex-start;
           background: var(--primary-color);
           border: 0;
@@ -2392,7 +2435,7 @@ class ElrakningPanel {
           transition: filter 120ms ease;
         }
 
-        [data-configuration-cards] > .configuration-card .configuration-control:hover {
+        [data-configuration-cards] .configuration-module .configuration-control:hover {
           filter: brightness(1.08);
         }
 
@@ -2407,7 +2450,7 @@ class ElrakningPanel {
           padding: 12px;
         }
 
-        [data-configuration-cards] > .configuration-card .power-summary-divider {
+        [data-configuration-cards] .configuration-module .power-summary-divider {
           align-items: center;
           color: var(--secondary-text-color);
           display: flex;
@@ -2419,14 +2462,14 @@ class ElrakningPanel {
           text-transform: uppercase;
         }
 
-        [data-configuration-cards] > .configuration-card .power-summary-divider::after {
+        [data-configuration-cards] .configuration-module .power-summary-divider::after {
           background: var(--divider-color);
           content: "";
           flex: 1;
           height: 1px;
         }
 
-        [data-configuration-cards] > .configuration-card .configuration-data-bar {
+        [data-configuration-cards] .configuration-module .configuration-data-bar {
           background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
           border-radius: 999px;
           display: flex;
@@ -2458,34 +2501,44 @@ class ElrakningPanel {
           background: var(--el-discharging-color);
         }
 
-        [data-configuration-cards] > .configuration-card-elhandel .provider-summary span:last-child,
-        [data-configuration-cards] > .configuration-card-solar .power-summary span:last-child,
-        [data-configuration-cards] > .configuration-card-elmatare .meter-summary span:nth-of-type(2) {
+        [data-configuration-cards] .configuration-card-elhandel .provider-summary span:last-child,
+        [data-configuration-cards] .configuration-card-solar .power-summary span:last-child,
+        [data-configuration-cards] .configuration-card-elmatare .meter-summary span:nth-of-type(2) {
           font-size: 18px;
         }
 
         @media (max-width: 980px) {
-          [data-configuration-cards] {
+          .configuration-surface-grid-commerce,
+          .configuration-surface-grid-power {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          [data-configuration-cards] > .configuration-card {
-            grid-column: span 1;
+          .configuration-surface-grid-power .configuration-card-elmatare {
+            grid-column: 1 / -1;
           }
 
-          [data-configuration-cards] > .configuration-card-elhandel {
-            grid-column: span 2;
+          .configuration-surface-grid-power .configuration-card-elmatare + .configuration-module {
+            border-left: 0;
+            padding-left: 0;
           }
         }
 
         @media (max-width: 620px) {
-          [data-configuration-cards] {
+          .configuration-surface {
+            padding-left: 16px;
+            padding-right: 16px;
+          }
+
+          .configuration-surface-grid-commerce,
+          .configuration-surface-grid-power {
             grid-template-columns: minmax(0, 1fr);
           }
 
-          [data-configuration-cards] > .configuration-card,
-          [data-configuration-cards] > .configuration-card-elhandel {
-            grid-column: span 1;
+          .configuration-module + .configuration-module {
+            border-left: 0;
+            border-top: 1px solid var(--divider-color);
+            padding-left: 0;
+            padding-top: 18px;
           }
         }
 
