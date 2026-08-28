@@ -1312,7 +1312,7 @@ class ElrakningPanel {
 
         .soc-label {
           fill: var(--secondary-text-color);
-          font-size: var(--card-chart-label-size);
+          font-size: calc(var(--card-chart-label-size) * 2);
         }
 
         .soc-area {
@@ -3187,7 +3187,7 @@ class ElrakningPanel {
     }
     const width = 960;
     const height = 340;
-    const plot = { left: 32, right: 8, top: 8, bottom: 32 };
+    const plot = { left: 44, right: 8, top: 8, bottom: 8 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const x = (timestamp) => plot.left + ((timestamp - dayStart.getTime()) / (dayEnd.getTime() - dayStart.getTime())) * plotWidth;
@@ -3211,9 +3211,8 @@ class ElrakningPanel {
       return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
     }).join("");
     const gridMarkup = [0, 25, 50, 75, 100].map((level) => `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" x="2" y="${y(level) + 4}">${level}</text>`).join("");
-    const timeLabels = [0, 6, 12, 18, 24].map((hour) => `<text class="soc-label" text-anchor="middle" x="${plot.left + (hour / 24) * plotWidth}" y="${height - 6}">${String(hour).padStart(2, "0")}</text>`).join("");
     chart.innerHTML = `<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
-      ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>${timeLabels}
+      ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>
     </svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".soc-chart-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
