@@ -690,12 +690,14 @@ class ElrakningPanel {
 
           <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
             <div class="card-heading soc-card-heading">
-              <h2 id="soc-title">Batteri SOC</h2>
-              <h2 class="capacity-utilization-title">Utnyttjande</h2>
+              <h2 id="soc-title" class="visually-hidden">Batteri SOC</h2>
             </div>
             <div class="soc-card-content">
               <div class="soc-chart" data-soc-chart></div>
-              <div class="capacity-utilization" data-capacity-utilization></div>
+              <div class="capacity-utilization">
+                <h2 class="capacity-utilization-title">Utnyttjande</h2>
+                <div data-capacity-utilization></div>
+              </div>
             </div>
           </section>
         </div>
@@ -1270,16 +1272,6 @@ class ElrakningPanel {
             grid-template-columns: 1fr;
           }
 
-          .soc-card-heading {
-            gap: 2px;
-            grid-template-columns: 1fr;
-          }
-
-          .soc-card-heading .capacity-utilization-title {
-            justify-self: start;
-            text-align: left;
-          }
-
           .soc-card-content {
             gap: 6px;
             grid-template-columns: 1fr;
@@ -1300,18 +1292,24 @@ class ElrakningPanel {
           align-items: stretch;
           display: grid;
           gap: 8px;
-          grid-template-columns: minmax(0, 1fr) max-content;
+          grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
           margin-top: 2px;
         }
 
-        .card-heading.soc-card-heading {
-          align-items: baseline;
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) max-content;
-          width: 100%;
+        .visually-hidden {
+          border: 0;
+          clip: rect(0 0 0 0);
+          clip-path: inset(50%);
+          height: 1px;
+          margin: -1px;
+          overflow: hidden;
+          padding: 0;
+          position: absolute;
+          white-space: nowrap;
+          width: 1px;
         }
 
-        .soc-card-heading > h2 {
+        .capacity-utilization-title {
           color: var(--primary-text-color);
           font-family: inherit;
           font-size: 19px;
@@ -1321,12 +1319,7 @@ class ElrakningPanel {
           padding: 0;
           min-width: 0;
           white-space: nowrap;
-        }
-
-        .soc-card-heading .capacity-utilization-title {
-          max-width: none;
           text-align: right;
-          justify-self: end;
         }
 
         .soc-chart {
@@ -1335,12 +1328,31 @@ class ElrakningPanel {
         }
 
         .capacity-utilization {
-          align-items: flex-end;
+          align-items: stretch;
           display: flex;
           flex-direction: column;
-          justify-content: stretch;
+          justify-content: flex-start;
           min-width: 0;
           padding: 0;
+        }
+
+        .capacity-utilization > [data-capacity-utilization] {
+          align-items: center;
+          display: flex;
+          flex: 1;
+          justify-content: center;
+          min-height: 0;
+        }
+
+        @container (max-width: 220px) {
+          .soc-card-content {
+            gap: 6px;
+            grid-template-columns: 1fr;
+          }
+
+          .capacity-utilization-title {
+            text-align: left;
+          }
         }
 
         .capacity-battery {
