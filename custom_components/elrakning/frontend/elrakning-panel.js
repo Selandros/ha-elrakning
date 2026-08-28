@@ -1128,6 +1128,7 @@ class ElrakningPanel {
           --daily-energy-export-color: var(--grid-export-color, #72AAF6);
           --daily-energy-import-color: var(--grid-import-color, #F0A06A);
           min-height: 0;
+          min-width: 0;
         }
 
         .daily-energy-grid {
@@ -1159,7 +1160,6 @@ class ElrakningPanel {
           color: var(--primary-text-color);
           font-weight: 600;
           text-align: right;
-          white-space: nowrap;
         }
 
         .daily-energy-bar {
@@ -1231,10 +1231,6 @@ class ElrakningPanel {
         }
 
         @media (max-width: 700px) {
-          .daily-energy-row {
-            grid-template-columns: 1fr;
-          }
-
           .daily-energy-grid {
             grid-template-columns: 1fr;
           }
@@ -1243,6 +1239,7 @@ class ElrakningPanel {
         .soc-card {
           --soc-color: var(--solar-color, #77C2A1);
           min-height: 0;
+          min-width: 0;
         }
 
         .soc-card-content {
