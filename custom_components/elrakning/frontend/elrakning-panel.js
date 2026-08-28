@@ -1297,6 +1297,16 @@ class ElrakningPanel {
           width: 100%;
         }
 
+        .soc-label-rail {
+          bottom: 8px;
+          left: 0;
+          pointer-events: none;
+          position: absolute;
+          right: auto;
+          top: 8px;
+          width: 36px;
+        }
+
         .soc-chart-svg {
           display: block;
           height: 100%;
@@ -1312,10 +1322,18 @@ class ElrakningPanel {
         }
 
         .soc-label {
-          fill: var(--secondary-text-color);
-          font-size: 16px;
+          color: var(--secondary-text-color);
+          font-size: 10px;
           font-weight: 400;
+          line-height: 1;
+          position: absolute;
+          right: 0;
+          transform: translateY(-50%);
         }
+
+        .soc-label.top { top: 0; }
+        .soc-label.middle { top: 50%; }
+        .soc-label.bottom { top: 100%; }
 
         .soc-area {
           fill: var(--soc-color);
@@ -3239,13 +3257,11 @@ class ElrakningPanel {
       const area = `M ${x(segment[0].timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(segment.at(-1).timestamp)} ${plot.top + plotHeight} Z`;
       return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
     }).join("");
-    const labelTopSafe = plot.top + 30;
-    const labelBottomSafe = plot.top + plotHeight;
     const gridMarkup = [0, 50, 100].map((level) => {
-      const labelY = Math.max(labelTopSafe, Math.min(labelBottomSafe, y(level) + 4));
-      return `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" text-anchor="end" x="${plot.left - 12}" y="${labelY}">${level}</text>`;
+      return `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`;
     }).join("");
-    chart.innerHTML = `<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
+    const labelMarkup = `<div class="soc-label-rail" aria-hidden="true"><span class="soc-label top">100</span><span class="soc-label middle">50</span><span class="soc-label bottom">0</span></div>`;
+    chart.innerHTML = `${labelMarkup}<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
       ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>
     </svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".soc-chart-svg");
