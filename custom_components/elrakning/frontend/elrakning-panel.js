@@ -683,7 +683,7 @@ class ElrakningPanel {
         <div class="daily-energy-row">
           <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
             <div class="card-heading">
-              <h2 id="daily-energy-title">Dagens energi</h2>
+              <h2 id="daily-energy-title" class="visually-hidden">Dagens energi</h2>
             </div>
             <div class="daily-energy-grid" data-daily-energy-grid></div>
           </section>

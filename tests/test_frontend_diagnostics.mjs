@@ -415,6 +415,7 @@ assert.match(panelSource, /className = "power-summary-divider"/);
 assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
 assert.match(panelSource, /data-daily-energy/);
 assert.match(panelSource, /Dagens energi/);
+assert.match(panelSource, /id="daily-energy-title" class="visually-hidden">Dagens energi<\/h2>/);
 assert.equal((panelSource.match(/firstLabel: "Lokalt"/g) || []).length, 2);
 assert.doesNotMatch(panelSource, /Använt lokalt/);
 assert.doesNotMatch(panelSource, /Lokalt försörjt/);
