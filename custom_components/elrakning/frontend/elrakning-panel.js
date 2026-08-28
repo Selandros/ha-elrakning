@@ -695,8 +695,10 @@ class ElrakningPanel {
             <div class="soc-card-content">
               <div class="soc-chart" data-soc-chart></div>
               <div class="capacity-utilization">
-                <h2 class="capacity-utilization-title">Utnyttjande</h2>
-                <div data-capacity-utilization></div>
+                <div class="capacity-utilization-content">
+                  <h2 class="capacity-utilization-title">Utnyttjande</h2>
+                  <div data-capacity-utilization></div>
+                </div>
               </div>
             </div>
           </section>
@@ -1308,14 +1310,14 @@ class ElrakningPanel {
         .capacity-utilization-title {
           color: var(--primary-text-color);
           font-family: inherit;
-          font-size: clamp(12px, 2cqw, 19px);
+          font-size: 19px;
           font-weight: 500;
           line-height: normal;
           margin: 0;
           padding: 0;
           min-width: 0;
           white-space: nowrap;
-          text-align: right;
+          text-align: center;
         }
 
         .soc-chart {
@@ -1324,12 +1326,27 @@ class ElrakningPanel {
         }
 
         .capacity-utilization {
-          align-items: stretch;
+          align-items: center;
           display: flex;
           flex-direction: column;
           justify-content: flex-start;
           min-width: 0;
           padding: 0;
+        }
+
+        .capacity-utilization-content {
+          align-items: center;
+          display: flex;
+          flex: 1;
+          flex-direction: column;
+          max-width: 100%;
+          min-width: 0;
+          width: fit-content;
+        }
+
+        .capacity-utilization-title {
+          box-sizing: border-box;
+          width: 100%;
         }
 
         .capacity-utilization > [data-capacity-utilization] {
@@ -1338,6 +1355,7 @@ class ElrakningPanel {
           flex: 1;
           justify-content: center;
           min-height: 0;
+          width: 100%;
         }
 
         .capacity-battery {
@@ -1385,7 +1403,7 @@ class ElrakningPanel {
           align-items: center;
           color: var(--primary-text-color);
           display: flex;
-          font-size: clamp(10px, 1.6cqw, 16px);
+          font-size: min(16px, 1.6cqw);
           font-weight: 700;
           inset: auto;
           justify-content: center;
@@ -2452,6 +2470,7 @@ class ElrakningPanel {
     this._bindMainInvoiceParser();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
+    this._setupCapacityUtilizationWidthObserver();
     this.renderPriceChart();
   }
 
@@ -2469,6 +2488,36 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
     this._priceHeaderLayoutObserver.observe(heading);
     updateLayoutState();
+  }
+
+  _syncCapacityUtilizationWidth() {
+    const section = this.host.querySelector(".capacity-utilization");
+    const content = this.host.querySelector(".capacity-utilization-content");
+    const battery = this.host.querySelector(".capacity-battery");
+    const title = this.host.querySelector(".capacity-utilization-title");
+    if (!section || !content || !title) return;
+    if (!battery) {
+      content.style.width = "";
+      title.style.fontSize = "";
+      return;
+    }
+    const batteryWidth = battery.getBoundingClientRect().width;
+    if (!Number.isFinite(batteryWidth) || batteryWidth <= 0) return;
+    content.style.width = `${batteryWidth}px`;
+    title.style.fontSize = "";
+    const titleWidth = title.scrollWidth;
+    const titleFontSize = Number.parseFloat(getComputedStyle(title).fontSize);
+    if (titleWidth > batteryWidth && titleFontSize > 0) {
+      title.style.fontSize = `${Math.max(1, titleFontSize * batteryWidth / titleWidth)}px`;
+    }
+  }
+
+  _setupCapacityUtilizationWidthObserver() {
+    const section = this.host.querySelector(".capacity-utilization");
+    if (!section || !("ResizeObserver" in window)) return;
+    this._capacityUtilizationWidthObserver = new ResizeObserver(() => this._syncCapacityUtilizationWidth());
+    this._capacityUtilizationWidthObserver.observe(section);
+    this._syncCapacityUtilizationWidth();
   }
 
   _chartLayerState() {
@@ -3268,6 +3317,7 @@ class ElrakningPanel {
     if (!configured) {
       chart.replaceChildren();
       capacityIndicator.replaceChildren();
+      this._syncCapacityUtilizationWidth();
       return;
     }
     const capacityUtilizationPercent = this._capacityUtilizationPercent();
@@ -3278,6 +3328,7 @@ class ElrakningPanel {
       ? Math.max(0, Math.min(100, capacityUtilizationPercent))
       : 0;
     capacityIndicator.innerHTML = `<div class="capacity-battery" role="img" aria-label="Kapacitetsutnyttjande ${capacityLabel}"><span class="capacity-battery-fill" style="height: ${capacityFill}%"></span><span class="capacity-battery-value">${capacityLabel}</span></div>`;
+    this._syncCapacityUtilizationWidth();
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart);
@@ -4292,6 +4343,8 @@ class ElrakningPanel {
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
     this._priceHeaderLayoutObserver = null;
+    this._capacityUtilizationWidthObserver?.disconnect();
+    this._capacityUtilizationWidthObserver = null;
     this._themeBackgroundReady = false;
   }
 
