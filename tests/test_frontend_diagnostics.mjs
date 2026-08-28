@@ -425,7 +425,8 @@ assert.match(panelSource, /Math\.max\(0, Math\.min\(100/);
 assert.match(panelSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(panelSource, /data-soc-card/);
 assert.match(panelSource, /Batteri SOC/);
-assert.match(panelSource, /\.daily-energy-row \{\n\s+display: grid;\n\s+gap: 16px;\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: start;\n\s+display: grid;\n\s+gap: 16px;\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: start;\n\s+display: grid;/);
 assert.match(panelSource, /daily-energy-row[\s\S]*data-daily-energy[\s\S]*data-soc-card/);
 assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-row \{\n\s+grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.daily-energy-card \{[\s\S]*min-width: 0;/);
@@ -464,7 +465,7 @@ assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPerc
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);
 assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.soc-card-content \{\n\s+grid-template-columns: 1fr;/);
-assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*height: 340px;[\s\S]*width: 100%;/);
+assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*height: 103px;[\s\S]*width: 100%;/);
 assert.doesNotMatch(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 340;/);
 assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}"/);
 assert.match(panelSource, /const height = 340;/);

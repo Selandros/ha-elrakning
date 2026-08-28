@@ -1120,6 +1120,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-row {
+          align-items: start;
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1412,7 +1413,7 @@ class ElrakningPanel {
 
         .soc-chart-svg {
           display: block;
-          height: 340px;
+          height: 103px;
           max-width: 100%;
           width: 100%;
         }
