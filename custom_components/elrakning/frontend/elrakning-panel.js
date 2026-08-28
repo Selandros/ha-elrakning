@@ -3237,7 +3237,7 @@ class ElrakningPanel {
     const labelBottomSafe = plot.top + plotHeight;
     const gridMarkup = [0, 50, 100].map((level) => {
       const labelY = Math.max(labelTopSafe, Math.min(labelBottomSafe, y(level) + 4));
-      return `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" text-anchor="end" x="${plot.left - 4}" y="${labelY}">${level}</text>`;
+      return `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" text-anchor="end" x="${plot.left - 12}" y="${labelY}">${level}</text>`;
     }).join("");
     chart.innerHTML = `<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
       ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>

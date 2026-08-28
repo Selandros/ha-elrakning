@@ -480,7 +480,7 @@ assert.match(panelSource, /\[0, 50, 100\]\.map\(\(level\)/);
 assert.match(panelSource, /const labelTopSafe = plot\.top \+ 30;/);
 assert.match(panelSource, /const labelBottomSafe = plot\.top \+ plotHeight;/);
 assert.match(panelSource, /const labelY = Math\.max\(labelTopSafe, Math\.min\(labelBottomSafe, y\(level\) \+ 4\)\);/);
-assert.match(panelSource, /class="soc-label" text-anchor="end" x="\$\{plot\.left - 4\}"/);
+assert.match(panelSource, /class="soc-label" text-anchor="end" x="\$\{plot\.left - 12\}"/);
 assert.doesNotMatch(panelSource, /const timeLabels =/);
 assert.doesNotMatch(panelSource, /\$\{timeLabels\}/);
 assert.match(panelSource, /series\?\.soc\?\.points/);
