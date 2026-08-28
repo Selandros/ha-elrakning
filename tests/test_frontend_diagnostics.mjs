@@ -449,8 +449,8 @@ assert.match(panelSource, /\.daily-energy-percent \{[\s\S]*font-size: clamp\(10p
 assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4px, 1\.25cqw, 6px\);/);
 assert.match(panelSource, /\.daily-energy-percent\.second \{[\s\S]*right: clamp\(4px, 1\.25cqw, 6px\);/);
 assert.match(panelSource, /\.daily-energy-total \{[\s\S]*text-align: right;\n\s+\}/);
-assert.match(panelSource, /:host \{[\s\S]*--el-soc-color: #6AAFC0;/);
-assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-soc-color\);[\s\S]*display: flex;[\s\S]*flex-direction: column;/);
+assert.doesNotMatch(panelSource, /--el-soc-color/);
+assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-solar-color\);[\s\S]*display: flex;[\s\S]*flex-direction: column;/);
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.chart-hover-marker-soc \{ fill: var\(--soc-color\); \}/);
@@ -651,9 +651,9 @@ assert.match(panelSource, /\.chart-bar\.normal \{\n\s+fill: color-mix\(in srgb, 
 assert.match(panelSource, /\.chart-bar\.expensive \{\n\s+fill: color-mix\(in srgb, var\(--el-price-expensive-color\) 41%,/);
 assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{\n\s+fill: color-mix\(in srgb, [^\n]+ 41%,/g) || []).length, 3);
 assert.doesNotMatch(panelSource, /\.daily-energy-segment \{\n\s+filter:/);
-assert.match(panelSource, /\.daily-energy-segment\.local \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-local-color\) 82%,/);
-assert.match(panelSource, /\.daily-energy-segment\.export \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-export-color\) 82%,/);
-assert.match(panelSource, /\.daily-energy-segment\.import \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-import-color\) 82%,/);
+assert.match(panelSource, /\.daily-energy-segment\.local \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-local-color\) 70%,/);
+assert.match(panelSource, /\.daily-energy-segment\.export \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-export-color\) 70%,/);
+assert.match(panelSource, /\.daily-energy-segment\.import \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-import-color\) 70%,/);
 assert.match(panelSource, /daily-energy-percent first/);
 assert.match(panelSource, /daily-energy-percent second/);
 assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4px, 1\.25cqw, 6px\);/);

@@ -851,7 +851,6 @@ class ElrakningPanel {
           --el-price-normal-color: #B9A05D;
           --el-price-expensive-color: #E4687D;
           --el-solar-color: #77C2A1;
-          --el-soc-color: #6AAFC0;
           --el-consumption-color: #E87570;
           --el-import-color: #F0A06A;
           --el-export-color: #72AAF6;
@@ -1206,19 +1205,19 @@ class ElrakningPanel {
         }
 
         .daily-energy-segment.local {
-          background: color-mix(in srgb, var(--daily-energy-local-color) 82%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-local-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.supply {
-          background: color-mix(in srgb, var(--daily-energy-local-color) 82%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-local-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.export {
-          background: color-mix(in srgb, var(--daily-energy-export-color) 82%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-export-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.import {
-          background: color-mix(in srgb, var(--daily-energy-import-color) 82%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-import-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-percent {
@@ -1284,7 +1283,7 @@ class ElrakningPanel {
         }
 
         .soc-card {
-          --soc-color: var(--el-soc-color);
+          --soc-color: var(--el-solar-color);
           display: flex;
           flex-direction: column;
           min-height: 0;
