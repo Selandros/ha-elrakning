@@ -1313,7 +1313,8 @@ class ElrakningPanel {
 
         .soc-label {
           fill: var(--secondary-text-color);
-          font-size: 30px;
+          font-size: 16px;
+          font-weight: 400;
         }
 
         .soc-area {

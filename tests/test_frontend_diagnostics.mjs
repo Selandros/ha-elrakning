@@ -474,7 +474,7 @@ assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*overflow: visible;/);
 assert.doesNotMatch(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 340;/);
 assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}"/);
 assert.match(panelSource, /const height = 340;/);
-assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 30px;/);
+assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 16px;[\s\S]*font-weight: 400;/);
 assert.match(panelSource, /const plot = \{ left: 44, right: 8, top: 8, bottom: 8 \};/);
 assert.match(panelSource, /const xStart = dayStart\.getTime\(\);/);
 assert.match(panelSource, /const xEnd = points\.at\(-1\)\.timestamp;/);
