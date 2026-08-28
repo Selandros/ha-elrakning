@@ -1238,6 +1238,14 @@ class ElrakningPanel {
         }
 
         @media (max-width: 700px) {
+          .daily-energy-card {
+            padding: 12px;
+          }
+
+          .daily-energy-grid {
+            gap: 8px;
+          }
+
           .daily-energy-part-heading {
             display: block;
           }
