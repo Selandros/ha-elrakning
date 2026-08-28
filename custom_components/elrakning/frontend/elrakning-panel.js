@@ -1121,7 +1121,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-row {
-          align-items: start;
+          align-items: stretch;
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1276,6 +1276,8 @@ class ElrakningPanel {
 
         .soc-card {
           --soc-color: var(--solar-color, #77C2A1);
+          display: flex;
+          flex-direction: column;
           min-height: 0;
           min-width: 0;
         }
@@ -1285,7 +1287,9 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
-          margin-top: 2px;
+          flex: 1;
+          margin-top: 0;
+          min-height: 0;
         }
 
         .visually-hidden {
@@ -1393,7 +1397,7 @@ class ElrakningPanel {
 
         .soc-chart-svg {
           display: block;
-          height: 103px;
+          height: 100%;
           max-width: 100%;
           width: 100%;
         }
@@ -2333,6 +2337,10 @@ class ElrakningPanel {
         }
 
         .card.daily-energy-card {
+          min-height: 0;
+        }
+
+        .card.soc-card {
           min-height: 0;
         }
 
