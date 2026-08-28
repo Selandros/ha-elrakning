@@ -1145,7 +1145,7 @@ class ElrakningPanel {
           display: grid;
           gap: 24px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          margin-top: 14px;
+          margin-top: 0;
         }
 
         .daily-energy-part {
