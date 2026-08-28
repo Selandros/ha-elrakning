@@ -1127,7 +1127,7 @@ class ElrakningPanel {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        @container (max-width: 520px) {
+        @container (max-width: 540px) {
           .daily-energy-row {
             grid-template-columns: 1fr;
           }
@@ -1304,7 +1304,7 @@ class ElrakningPanel {
         .capacity-utilization-title {
           color: var(--primary-text-color);
           font-family: inherit;
-          font-size: 19px;
+          font-size: clamp(12px, 2cqw, 19px);
           font-weight: 500;
           line-height: normal;
           margin: 0;
@@ -1381,7 +1381,7 @@ class ElrakningPanel {
           align-items: center;
           color: var(--primary-text-color);
           display: flex;
-          font-size: inherit;
+          font-size: clamp(10px, 1.6cqw, 16px);
           font-weight: 700;
           inset: auto;
           justify-content: center;

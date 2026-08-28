@@ -434,7 +434,7 @@ assert.match(panelSource, /\.daily-energy-part-heading > \*,[\s\S]*\.daily-energ
 assert.match(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-part-heading \{\n\s+display: block;/);
 assert.match(panelSource, /\.daily-energy-part-labels,[\s\S]*\.daily-energy-part-values \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
 assert.match(panelSource, /\.page \{[\s\S]*container-type: inline-size;/);
-assert.match(panelSource, /@container \(max-width: 520px\) \{[\s\S]*\.daily-energy-row \{[\s\S]*grid-template-columns: 1fr;/);
+assert.match(panelSource, /@container \(max-width: 540px\) \{[\s\S]*\.daily-energy-row \{[\s\S]*grid-template-columns: 1fr;/);
 assert.doesNotMatch(panelSource, /@container \(max-width: 220px\) \{[\s\S]*\.daily-energy-grid \{[\s\S]*grid-template-columns: 1fr;/);
 assert.doesNotMatch(panelSource, /@container \(max-width: 220px\) \{[\s\S]*\.soc-card-content \{[\s\S]*grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.daily-energy-bar \{[\s\S]*height: clamp\(16px, 5cqw, 24px\);/);
@@ -462,7 +462,7 @@ assert.doesNotMatch(panelSource, /@container \(max-width: 220px\) \{[\s\S]*\.soc
 assert.match(panelSource, /height: calc\(100% - 7px\);/);
 assert.match(panelSource, /margin-top: 7px;/);
 assert.match(panelSource, /\.capacity-battery \{[\s\S]*max-width: 72px;[\s\S]*min-width: 44px;[\s\S]*width: fit-content;/);
-assert.match(panelSource, /\.capacity-battery-value \{[\s\S]*font-size: inherit;/);
+assert.match(panelSource, /\.capacity-battery-value \{[\s\S]*font-size: clamp\(10px, 1\.6cqw, 16px\);/);
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100, capacityUtilizationPercent\)\)/);
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{\n\s+margin: 0 -8px 0 0;/);
