@@ -1151,6 +1151,13 @@ class ElrakningPanel {
           gap: 12px;
         }
 
+        .daily-energy-part-heading > *,
+        .daily-energy-part-labels > *,
+        .daily-energy-part-values > * {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+
         .daily-energy-part-heading strong {
           color: var(--primary-text-color);
           font-weight: 600;
