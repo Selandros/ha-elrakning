@@ -1312,7 +1312,7 @@ class ElrakningPanel {
 
         .soc-label {
           fill: var(--secondary-text-color);
-          font-size: calc(var(--card-chart-label-size) * 2);
+          font-size: calc(var(--card-chart-label-size) * 3);
         }
 
         .soc-area {
