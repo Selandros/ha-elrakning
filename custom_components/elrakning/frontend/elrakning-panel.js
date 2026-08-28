@@ -1155,7 +1155,7 @@ class ElrakningPanel {
         .daily-energy-part-labels > *,
         .daily-energy-part-values > * {
           min-width: 0;
-          overflow-wrap: anywhere;
+          overflow-wrap: break-word;
         }
 
         .daily-energy-part-heading strong {
@@ -1235,6 +1235,23 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: inherit;
           margin-top: 2px;
+        }
+
+        @media (max-width: 700px) {
+          .daily-energy-part-heading {
+            display: block;
+          }
+
+          .daily-energy-part-heading strong,
+          .daily-energy-total {
+            display: block;
+            text-align: left;
+          }
+
+          .daily-energy-part-labels,
+          .daily-energy-part-values {
+            gap: 4px;
+          }
         }
 
         .soc-card {
