@@ -1372,9 +1372,8 @@ class ElrakningPanel {
         }
 
         .soc-chart-svg {
-          aspect-ratio: 960 / 340;
           display: block;
-          height: auto;
+          height: 340px;
           max-width: 100%;
           width: 100%;
         }
@@ -3289,7 +3288,7 @@ class ElrakningPanel {
     }).join("");
     const gridMarkup = [0, 25, 50, 75, 100].map((level) => `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" x="2" y="${y(level) + 4}">${level}</text>`).join("");
     const timeLabels = [0, 6, 12, 18, 24].map((hour) => `<text class="soc-label" text-anchor="middle" x="${plot.left + (hour / 24) * plotWidth}" y="${height - 6}">${String(hour).padStart(2, "0")}</text>`).join("");
-    chart.innerHTML = `<svg class="soc-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
+    chart.innerHTML = `<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
       ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>${timeLabels}
     </svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".soc-chart-svg");
