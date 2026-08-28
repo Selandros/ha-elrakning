@@ -449,7 +449,8 @@ assert.match(panelSource, /\.daily-energy-percent \{[\s\S]*font-size: clamp\(10p
 assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4px, 1\.25cqw, 6px\);/);
 assert.match(panelSource, /\.daily-energy-percent\.second \{[\s\S]*right: clamp\(4px, 1\.25cqw, 6px\);/);
 assert.match(panelSource, /\.daily-energy-total \{[\s\S]*text-align: right;\n\s+\}/);
-assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-solar-color\);[\s\S]*display: flex;[\s\S]*flex-direction: column;/);
+assert.match(panelSource, /:host \{[\s\S]*--el-soc-color: #6AAFC0;/);
+assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-soc-color\);[\s\S]*display: flex;[\s\S]*flex-direction: column;/);
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.chart-hover-marker-soc \{ fill: var\(--soc-color\); \}/);

@@ -851,6 +851,7 @@ class ElrakningPanel {
           --el-price-normal-color: #B9A05D;
           --el-price-expensive-color: #E4687D;
           --el-solar-color: #77C2A1;
+          --el-soc-color: #6AAFC0;
           --el-consumption-color: #E87570;
           --el-import-color: #F0A06A;
           --el-export-color: #72AAF6;
@@ -1283,7 +1284,7 @@ class ElrakningPanel {
         }
 
         .soc-card {
-          --soc-color: var(--el-solar-color);
+          --soc-color: var(--el-soc-color);
           display: flex;
           flex-direction: column;
           min-height: 0;
