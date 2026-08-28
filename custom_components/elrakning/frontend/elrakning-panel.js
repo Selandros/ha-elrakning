@@ -870,6 +870,7 @@ class ElrakningPanel {
 
         .page {
           box-sizing: border-box;
+          container-type: inline-size;
           max-width: 960px;
           min-height: 100%;
           margin: 0 auto;
@@ -1126,6 +1127,12 @@ class ElrakningPanel {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
+        @container (max-width: 520px) {
+          .daily-energy-row {
+            grid-template-columns: 1fr;
+          }
+        }
+
         .daily-energy-card {
           --daily-energy-local-color: var(--solar-color, #77C2A1);
           --daily-energy-export-color: var(--grid-export-color, #72AAF6);
@@ -1267,22 +1274,6 @@ class ElrakningPanel {
           }
         }
 
-        @container (max-width: 220px) {
-          .daily-energy-grid {
-            gap: 12px;
-            grid-template-columns: 1fr;
-          }
-
-          .soc-card-content {
-            gap: 6px;
-            grid-template-columns: 1fr;
-          }
-
-          .capacity-utilization {
-            align-items: flex-start;
-          }
-        }
-
         .soc-card {
           --soc-color: var(--solar-color, #77C2A1);
           min-height: 0;
@@ -1343,17 +1334,6 @@ class ElrakningPanel {
           flex: 1;
           justify-content: center;
           min-height: 0;
-        }
-
-        @container (max-width: 220px) {
-          .soc-card-content {
-            gap: 6px;
-            grid-template-columns: 1fr;
-          }
-
-          .capacity-utilization-title {
-            text-align: left;
-          }
         }
 
         .capacity-battery {
