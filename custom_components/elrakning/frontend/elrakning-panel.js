@@ -847,6 +847,21 @@ class ElrakningPanel {
           --card-title-size: clamp(20px, 5.2cqw, 24px);
           --price-card-text-size: clamp(10px, 2.7cqw, 12px);
           --card-legend-size: var(--price-card-text-size);
+          --el-price-cheap-color: #67C98C;
+          --el-price-normal-color: #B9A05D;
+          --el-price-expensive-color: #E4687D;
+          --el-solar-color: #77C2A1;
+          --el-consumption-color: #E87570;
+          --el-import-color: #F0A06A;
+          --el-export-color: #72AAF6;
+          --el-charging-color: #B76A8F;
+          --el-discharging-color: #DF5C8A;
+          --solar-color: var(--el-solar-color);
+          --consumption-color: var(--el-consumption-color);
+          --grid-import-color: var(--el-import-color);
+          --grid-export-color: var(--el-export-color);
+          --charging-color: var(--el-charging-color);
+          --discharging-color: var(--el-discharging-color);
           display: block;
           height: 100%;
           min-height: 0;
@@ -1128,9 +1143,9 @@ class ElrakningPanel {
         }
 
         .daily-energy-card {
-          --daily-energy-local-color: var(--solar-color, #77C2A1);
-          --daily-energy-export-color: var(--grid-export-color, #72AAF6);
-          --daily-energy-import-color: var(--grid-import-color, #F0A06A);
+          --daily-energy-local-color: var(--el-solar-color);
+          --daily-energy-export-color: var(--el-export-color);
+          --daily-energy-import-color: var(--el-import-color);
           min-height: 0;
           min-width: 0;
         }
@@ -1185,25 +1200,24 @@ class ElrakningPanel {
         }
 
         .daily-energy-segment {
-          filter: brightness(.78) saturate(.9);
           min-width: 0;
           transition: width 120ms ease;
         }
 
         .daily-energy-segment.local {
-          background: var(--daily-energy-local-color);
+          background: color-mix(in srgb, var(--daily-energy-local-color) 82%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.supply {
-          background: var(--daily-energy-local-color);
+          background: color-mix(in srgb, var(--daily-energy-local-color) 82%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.export {
-          background: var(--daily-energy-export-color);
+          background: color-mix(in srgb, var(--daily-energy-export-color) 82%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.import {
-          background: var(--daily-energy-import-color);
+          background: color-mix(in srgb, var(--daily-energy-import-color) 82%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-percent {
@@ -1269,7 +1283,7 @@ class ElrakningPanel {
         }
 
         .soc-card {
-          --soc-color: var(--solar-color, #77C2A1);
+          --soc-color: var(--el-solar-color);
           display: flex;
           flex-direction: column;
           min-height: 0;
@@ -1600,12 +1614,12 @@ class ElrakningPanel {
         }
 
         .price-section {
-          --solar-color: #77C2A1;
-          --consumption-color: #E87570;
-          --grid-import-color: #F0A06A;
-          --grid-export-color: #72AAF6;
-          --charging-color: #B76A8F;
-          --discharging-color: #DF5C8A;
+          --solar-color: var(--el-solar-color);
+          --consumption-color: var(--el-consumption-color);
+          --grid-import-color: var(--el-import-color);
+          --grid-export-color: var(--el-export-color);
+          --charging-color: var(--el-charging-color);
+          --discharging-color: var(--el-discharging-color);
           container-name: price-card;
           container-type: inline-size;
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
@@ -1671,23 +1685,23 @@ class ElrakningPanel {
         }
 
         .price-value.current strong.cheap {
-          color: var(--success-color);
+          color: var(--el-price-cheap-color);
         }
 
         .price-value strong.cheap {
-          color: var(--success-color);
+          color: var(--el-price-cheap-color);
         }
 
         .price-value.current strong.normal {
-          color: var(--warning-color);
+          color: var(--el-price-normal-color);
         }
 
         .price-value.current strong.expensive {
-          color: var(--error-color);
+          color: var(--el-price-expensive-color);
         }
 
         .price-value strong.expensive {
-          color: var(--error-color);
+          color: var(--el-price-expensive-color);
         }
 
         .price-value small, .price-value em {
@@ -1748,15 +1762,15 @@ class ElrakningPanel {
         }
 
         .chart-bar.cheap {
-          fill: color-mix(in srgb, var(--success-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: color-mix(in srgb, var(--el-price-cheap-color) 41%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-bar.normal {
-          fill: color-mix(in srgb, var(--warning-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: color-mix(in srgb, var(--el-price-normal-color) 41%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-bar.expensive {
-          fill: color-mix(in srgb, var(--error-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: color-mix(in srgb, var(--el-price-expensive-color) 41%, var(--ha-card-background, var(--card-background-color)));
         }
 
         @media (max-width: 600px) {
@@ -1796,15 +1810,15 @@ class ElrakningPanel {
         }
 
         .price-analysis-status.cheap {
-          color: var(--success-color);
+          color: var(--el-price-cheap-color);
         }
 
         .price-analysis-status.normal {
-          color: var(--warning-color);
+          color: var(--el-price-normal-color);
         }
 
         .price-analysis-status.expensive {
-          color: var(--error-color);
+          color: var(--el-price-expensive-color);
         }
 
         .price-analysis-forecast {
@@ -2049,7 +2063,7 @@ class ElrakningPanel {
         }
 
         .chart-legend-swatch.average {
-          background: var(--warning-color);
+          background: var(--el-price-normal-color);
         }
 
         .empty-chart {
@@ -2092,7 +2106,7 @@ class ElrakningPanel {
         }
 
         .chart-average {
-          stroke: var(--warning-color);
+          stroke: var(--el-price-normal-color);
           stroke-dasharray: 5 4;
           stroke-width: 1.5;
         }
