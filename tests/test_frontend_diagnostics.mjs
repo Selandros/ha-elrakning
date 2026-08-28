@@ -476,7 +476,7 @@ assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none"
 assert.match(panelSource, /const height = 340;/);
 assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 30px;/);
 assert.match(panelSource, /const plot = \{ left: 44, right: 8, top: 8, bottom: 8 \};/);
-assert.match(panelSource, /\[0, 25, 50, 75, 100\]\.map\(\(level\)/);
+assert.match(panelSource, /\[0, 50, 100\]\.map\(\(level\)/);
 assert.match(panelSource, /const labelTopSafe = plot\.top \+ 30;/);
 assert.match(panelSource, /const labelBottomSafe = plot\.top \+ plotHeight;/);
 assert.match(panelSource, /const labelY = Math\.max\(labelTopSafe, Math\.min\(labelBottomSafe, y\(level\) \+ 4\)\);/);
