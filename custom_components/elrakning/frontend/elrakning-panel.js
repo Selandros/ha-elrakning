@@ -1127,7 +1127,7 @@ class ElrakningPanel {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        @container (max-width: 540px) {
+        @container (max-width: 760px) {
           .daily-energy-row {
             grid-template-columns: 1fr;
           }
