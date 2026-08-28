@@ -1349,7 +1349,7 @@ class ElrakningPanel {
           width: 100%;
         }
 
-        .capacity-utilization > [data-capacity-utilization] {
+        .capacity-utilization-content > [data-capacity-utilization] {
           align-items: center;
           display: flex;
           flex: 1;
