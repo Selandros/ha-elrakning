@@ -1230,12 +1230,6 @@ class ElrakningPanel {
           margin-top: 2px;
         }
 
-        @media (max-width: 700px) {
-          .daily-energy-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
         .soc-card {
           --soc-color: var(--solar-color, #77C2A1);
           min-height: 0;
