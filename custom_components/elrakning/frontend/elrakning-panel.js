@@ -34,6 +34,24 @@ export function providerLabel(providerName, agreementName) {
     .join(" · ");
 }
 
+function createDataRatioBar(segments, ariaLabel) {
+  const validSegments = segments.filter((segment) => Number.isFinite(segment.value) && segment.value >= 0);
+  const total = validSegments.reduce((sum, segment) => sum + segment.value, 0);
+  if (!total) return null;
+  const bar = document.createElement("div");
+  bar.className = "configuration-data-bar";
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", ariaLabel);
+  validSegments.forEach((segment) => {
+    if (!segment.value) return;
+    const part = document.createElement("span");
+    part.className = `configuration-data-bar-segment ${segment.className}`;
+    part.style.width = `${segment.value / total * 100}%`;
+    bar.append(part);
+  });
+  return bar;
+}
+
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -2408,6 +2426,44 @@ class ElrakningPanel {
           height: 1px;
         }
 
+        [data-configuration-cards] > .configuration-card .configuration-data-bar {
+          background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
+          border-radius: 999px;
+          display: flex;
+          grid-column: 1 / -1;
+          height: 8px;
+          margin: 4px 0 2px;
+          overflow: hidden;
+        }
+
+        .configuration-data-bar-segment {
+          display: block;
+          height: 100%;
+          min-width: 2px;
+        }
+
+        .configuration-data-bar-segment.import {
+          background: var(--el-import-color);
+        }
+
+        .configuration-data-bar-segment.export {
+          background: var(--el-export-color);
+        }
+
+        .configuration-data-bar-segment.charging {
+          background: var(--el-charging-color);
+        }
+
+        .configuration-data-bar-segment.discharging {
+          background: var(--el-discharging-color);
+        }
+
+        [data-configuration-cards] > .configuration-card-elhandel .provider-summary span:last-child,
+        [data-configuration-cards] > .configuration-card-solar .power-summary span:last-child,
+        [data-configuration-cards] > .configuration-card-elmatare .meter-summary span:nth-of-type(2) {
+          font-size: 18px;
+        }
+
         @media (max-width: 980px) {
           [data-configuration-cards] {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3217,6 +3273,12 @@ class ElrakningPanel {
         .map(([labelText, value, unit]) => [labelText, unit === "kW" ? displayPowerValue(value) : value, unit])
         .filter(([, value]) => typeof value === "number" && Number.isFinite(value));
       const summaryNodes = [];
+      const flowBar = cardType === "battery"
+        ? createDataRatioBar([
+          { value: Number(this._powerState.charging_kw), className: "charging" },
+          { value: Number(this._powerState.discharging_kw), className: "discharging" },
+        ], "Batteriflöde just nu")
+        : null;
       validRows.forEach(([labelText, value, unit], index) => {
         if (cardType === "battery" && index === 4) {
           const divider = document.createElement("div");
@@ -3229,6 +3291,7 @@ class ElrakningPanel {
         const output = document.createElement("span");
         output.textContent = `${this._formatNumber(value)} ${unit}`;
         summaryNodes.push(label, output);
+        if (flowBar && index === 1) summaryNodes.push(flowBar);
       });
       summary.replaceChildren(...summaryNodes);
       summary.hidden = validRows.length === 0;
@@ -3285,13 +3348,21 @@ class ElrakningPanel {
     }
     const validRows = rows.filter(([, value, unit]) =>
       unit === "" ? value === "Byt sensor" : typeof value === "number" && Number.isFinite(value));
-    summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
+    const summaryNodes = validRows.flatMap(([labelText, value, unit]) => {
       const label = document.createElement("strong");
       label.textContent = labelText;
       const output = document.createElement("span");
       output.textContent = unit ? `${this._formatNumber(value)} ${unit}` : value;
       return [label, output];
-    }));
+    });
+    const flowBar = meterConfigured
+      ? createDataRatioBar([
+        { value: Number(validRows.find(([label]) => label === "Import idag")?.[1]), className: "import" },
+        { value: Number(validRows.find(([label]) => label === "Export idag")?.[1]), className: "export" },
+      ], "Dagens nätbalans")
+      : null;
+    if (flowBar) summaryNodes.push(flowBar);
+    summary.replaceChildren(...summaryNodes);
     summary.hidden = validRows.length === 0;
     this._renderDailyEnergyCard();
   }
