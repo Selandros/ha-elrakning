@@ -2354,6 +2354,7 @@ class ElrakningPanel {
     this._bindMainInvoiceParser();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
+    this._setupSocCardHeightObserver();
     this.renderPriceChart();
   }
 
@@ -2371,6 +2372,26 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
     this._priceHeaderLayoutObserver.observe(heading);
     updateLayoutState();
+  }
+
+  _syncSocCardHeight() {
+    const energyCard = this.host.querySelector("[data-daily-energy]");
+    const socCard = this.host.querySelector("[data-soc-card]");
+    if (!energyCard || !socCard) return;
+    if (energyCard.hidden || socCard.hidden) {
+      socCard.style.height = "";
+      return;
+    }
+    const height = energyCard.getBoundingClientRect().height;
+    if (Number.isFinite(height) && height > 0) socCard.style.height = `${height}px`;
+  }
+
+  _setupSocCardHeightObserver() {
+    const energyCard = this.host.querySelector("[data-daily-energy]");
+    if (!energyCard || !("ResizeObserver" in window)) return;
+    this._socCardHeightObserver = new ResizeObserver(() => this._syncSocCardHeight());
+    this._socCardHeightObserver.observe(energyCard);
+    this._syncSocCardHeight();
   }
 
   _chartLayerState() {
@@ -3026,6 +3047,7 @@ class ElrakningPanel {
     }
     this._renderMergedMeterSummary();
     this._renderSocChart();
+    this._syncSocCardHeight();
   }
 
   _calculatePowerEnergy(seriesKey) {
@@ -4183,6 +4205,8 @@ class ElrakningPanel {
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
     this._priceHeaderLayoutObserver = null;
+    this._socCardHeightObserver?.disconnect();
+    this._socCardHeightObserver = null;
     this._themeBackgroundReady = false;
   }
 
