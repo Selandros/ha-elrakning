@@ -692,15 +692,7 @@ class ElrakningPanel {
             <div class="card-heading soc-card-heading">
               <h2 id="soc-title" class="visually-hidden">Batteri SOC</h2>
             </div>
-            <div class="soc-card-content">
-              <div class="soc-chart" data-soc-chart></div>
-              <div class="capacity-utilization">
-                <div class="capacity-utilization-content">
-                  <h2 class="capacity-utilization-title">Utnyttjande</h2>
-                  <div data-capacity-utilization></div>
-                </div>
-              </div>
-            </div>
+            <div class="soc-chart" data-soc-chart></div>
           </section>
         </div>
 
@@ -1284,16 +1276,6 @@ class ElrakningPanel {
           min-width: 0;
         }
 
-        .soc-card-content {
-          align-items: stretch;
-          display: grid;
-          gap: 8px;
-          grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
-          flex: 1;
-          margin-top: 0;
-          min-height: 0;
-        }
-
         .visually-hidden {
           border: 0;
           clip: rect(0 0 0 0);
@@ -1307,110 +1289,12 @@ class ElrakningPanel {
           width: 1px;
         }
 
-        .capacity-utilization-title {
-          color: var(--primary-text-color);
-          font-family: inherit;
-          font-size: 19px;
-          font-weight: 500;
-          line-height: normal;
-          margin: 0;
-          padding: 0;
-          min-width: 0;
-          white-space: nowrap;
-          text-align: center;
-        }
-
         .soc-chart {
-          margin: 0 -8px 0 0;
-          position: relative;
-        }
-
-        .capacity-utilization {
-          align-items: center;
-          display: flex;
-          flex-direction: column;
-          justify-content: flex-start;
-          min-width: 0;
-          padding: 0;
-        }
-
-        .capacity-utilization-content {
-          align-items: center;
-          display: flex;
           flex: 1;
-          flex-direction: column;
-          max-width: 100%;
-          min-width: 0;
-          width: fit-content;
-        }
-
-        .capacity-utilization-title {
-          box-sizing: border-box;
-          width: 100%;
-        }
-
-        .capacity-utilization-content > [data-capacity-utilization] {
-          align-items: center;
-          display: flex;
-          flex: 1;
-          justify-content: center;
+          margin: 0;
           min-height: 0;
+          position: relative;
           width: 100%;
-        }
-
-        .capacity-battery {
-          align-items: center;
-          border: 2px solid var(--divider-color);
-          border-radius: 12px;
-          box-sizing: border-box;
-          align-self: stretch;
-          display: grid;
-          height: calc(100% - 7px);
-          max-height: 100%;
-          margin-top: 7px;
-          max-width: 72px;
-          min-width: 44px;
-          overflow: visible;
-          padding: 0 8px;
-          position: relative;
-          width: fit-content;
-        }
-
-        .capacity-battery::before {
-          background: var(--divider-color);
-          border-radius: 4px 4px 0 0;
-          content: "";
-          height: 7px;
-          left: 50%;
-          position: absolute;
-          top: -9px;
-          transform: translateX(-50%);
-          width: 28px;
-        }
-
-        .capacity-battery-fill {
-          background: var(--soc-color);
-          border-radius: 8px;
-          bottom: 0;
-          left: 0;
-          opacity: .82;
-          position: absolute;
-          right: 0;
-          transition: height 120ms ease;
-        }
-
-        .capacity-battery-value {
-          align-items: center;
-          color: var(--primary-text-color);
-          display: flex;
-          font-size: min(16px, 1.6cqw);
-          font-weight: 700;
-          inset: auto;
-          justify-content: center;
-          position: relative;
-          text-shadow: 0 1px 2px rgb(0 0 0 / 55%);
-          white-space: nowrap;
-          z-index: 1;
         }
 
         .soc-chart-svg {
@@ -2470,7 +2354,6 @@ class ElrakningPanel {
     this._bindMainInvoiceParser();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
-    this._setupCapacityUtilizationWidthObserver();
     this.renderPriceChart();
   }
 
@@ -2488,36 +2371,6 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
     this._priceHeaderLayoutObserver.observe(heading);
     updateLayoutState();
-  }
-
-  _syncCapacityUtilizationWidth() {
-    const section = this.host.querySelector(".capacity-utilization");
-    const content = this.host.querySelector(".capacity-utilization-content");
-    const battery = this.host.querySelector(".capacity-battery");
-    const title = this.host.querySelector(".capacity-utilization-title");
-    if (!section || !content || !title) return;
-    if (!battery) {
-      content.style.width = "";
-      title.style.fontSize = "";
-      return;
-    }
-    const batteryWidth = battery.getBoundingClientRect().width;
-    if (!Number.isFinite(batteryWidth) || batteryWidth <= 0) return;
-    content.style.width = `${batteryWidth}px`;
-    title.style.fontSize = "";
-    const titleWidth = title.scrollWidth;
-    const titleFontSize = Number.parseFloat(getComputedStyle(title).fontSize);
-    if (titleWidth > batteryWidth && titleFontSize > 0) {
-      title.style.fontSize = `${Math.max(1, titleFontSize * batteryWidth / titleWidth)}px`;
-    }
-  }
-
-  _setupCapacityUtilizationWidthObserver() {
-    const section = this.host.querySelector(".capacity-utilization");
-    if (!section || !("ResizeObserver" in window)) return;
-    this._capacityUtilizationWidthObserver = new ResizeObserver(() => this._syncCapacityUtilizationWidth());
-    this._capacityUtilizationWidthObserver.observe(section);
-    this._syncCapacityUtilizationWidth();
   }
 
   _chartLayerState() {
@@ -3310,25 +3163,13 @@ class ElrakningPanel {
   _renderSocChart() {
     const card = this.host.querySelector("[data-soc-card]");
     const chart = this.host.querySelector("[data-soc-chart]");
-    const capacityIndicator = this.host.querySelector("[data-capacity-utilization]");
-    if (!card || !chart || !capacityIndicator) return;
+    if (!card || !chart) return;
     const configured = Boolean(this._powerState?.soc_entity);
     card.hidden = !configured;
     if (!configured) {
       chart.replaceChildren();
-      capacityIndicator.replaceChildren();
-      this._syncCapacityUtilizationWidth();
       return;
     }
-    const capacityUtilizationPercent = this._capacityUtilizationPercent();
-    const capacityLabel = Number.isFinite(capacityUtilizationPercent)
-      ? `${this._formatNumber(capacityUtilizationPercent)} %`
-      : "—";
-    const capacityFill = Number.isFinite(capacityUtilizationPercent)
-      ? Math.max(0, Math.min(100, capacityUtilizationPercent))
-      : 0;
-    capacityIndicator.innerHTML = `<div class="capacity-battery" role="img" aria-label="Kapacitetsutnyttjande ${capacityLabel}"><span class="capacity-battery-fill" style="height: ${capacityFill}%"></span><span class="capacity-battery-value">${capacityLabel}</span></div>`;
-    this._syncCapacityUtilizationWidth();
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart);
@@ -4343,8 +4184,6 @@ class ElrakningPanel {
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
     this._priceHeaderLayoutObserver = null;
-    this._capacityUtilizationWidthObserver?.disconnect();
-    this._capacityUtilizationWidthObserver = null;
     this._themeBackgroundReady = false;
   }
 
