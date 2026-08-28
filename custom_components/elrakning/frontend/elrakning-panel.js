@@ -1304,7 +1304,7 @@ class ElrakningPanel {
           position: absolute;
           right: auto;
           top: 8px;
-          width: 44px;
+          width: 4.583333%;
         }
 
         .soc-chart-svg {
