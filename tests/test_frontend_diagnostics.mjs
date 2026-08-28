@@ -473,9 +473,10 @@ assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*height: 100%;[\s\S]*width: 1
 assert.doesNotMatch(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 340;/);
 assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}"/);
 assert.match(panelSource, /const height = 340;/);
-assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: calc\(var\(--card-chart-label-size\) \* 3\);/);
+assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 30px;/);
 assert.match(panelSource, /const plot = \{ left: 44, right: 8, top: 8, bottom: 8 \};/);
 assert.match(panelSource, /\[0, 25, 50, 75, 100\]\.map\(\(level\)/);
+assert.match(panelSource, /class="soc-label" text-anchor="end" x="\$\{plot\.left - 4\}"/);
 assert.doesNotMatch(panelSource, /const timeLabels =/);
 assert.doesNotMatch(panelSource, /\$\{timeLabels\}/);
 assert.match(panelSource, /series\?\.soc\?\.points/);

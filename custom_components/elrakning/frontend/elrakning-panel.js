@@ -1312,7 +1312,7 @@ class ElrakningPanel {
 
         .soc-label {
           fill: var(--secondary-text-color);
-          font-size: calc(var(--card-chart-label-size) * 3);
+          font-size: 30px;
         }
 
         .soc-area {
@@ -3232,7 +3232,7 @@ class ElrakningPanel {
       const area = `M ${x(segment[0].timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(segment.at(-1).timestamp)} ${plot.top + plotHeight} Z`;
       return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
     }).join("");
-    const gridMarkup = [0, 25, 50, 75, 100].map((level) => `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" x="2" y="${y(level) + 4}">${level}</text>`).join("");
+    const gridMarkup = [0, 25, 50, 75, 100].map((level) => `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="soc-label" text-anchor="end" x="${plot.left - 4}" y="${y(level) + 4}">${level}</text>`).join("");
     chart.innerHTML = `<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
       ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>
     </svg><div class="soc-tooltip" hidden></div>`;
