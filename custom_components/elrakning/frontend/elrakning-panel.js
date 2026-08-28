@@ -2332,6 +2332,10 @@ class ElrakningPanel {
           -webkit-backdrop-filter: var(--ha-card-backdrop-filter, none);
         }
 
+        .card.daily-energy-card {
+          min-height: 0;
+        }
+
         .card-heading {
           display: flex;
           flex-direction: column;
