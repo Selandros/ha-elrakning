@@ -476,6 +476,10 @@ assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none"
 assert.match(panelSource, /const height = 340;/);
 assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 30px;/);
 assert.match(panelSource, /const plot = \{ left: 44, right: 8, top: 8, bottom: 8 \};/);
+assert.match(panelSource, /const xStart = dayStart\.getTime\(\);/);
+assert.match(panelSource, /const xEnd = points\.at\(-1\)\.timestamp;/);
+assert.match(panelSource, /const xDuration = Math\.max\(1, xEnd - xStart\);/);
+assert.match(panelSource, /const timestamp = xStart \+ pointerRatio \* xDuration;/);
 assert.match(panelSource, /\[0, 50, 100\]\.map\(\(level\)/);
 assert.match(panelSource, /const labelTopSafe = plot\.top \+ 30;/);
 assert.match(panelSource, /const labelBottomSafe = plot\.top \+ plotHeight;/);

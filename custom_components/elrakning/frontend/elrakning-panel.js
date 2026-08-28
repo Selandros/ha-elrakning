@@ -3213,7 +3213,12 @@ class ElrakningPanel {
     const plot = { left: 44, right: 8, top: 8, bottom: 8 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
-    const x = (timestamp) => plot.left + ((timestamp - dayStart.getTime()) / (dayEnd.getTime() - dayStart.getTime())) * plotWidth;
+    const xStart = dayStart.getTime();
+    const xEnd = points.at(-1).timestamp;
+    const xDuration = Math.max(1, xEnd - xStart);
+    const x = (timestamp) => xEnd <= xStart
+      ? width - plot.right
+      : plot.left + ((timestamp - xStart) / xDuration) * plotWidth;
     const y = (value) => plot.top + (1 - Math.max(0, Math.min(100, value)) / 100) * plotHeight;
     const intervals = points.slice(1).map((point, index) => point.timestamp - points[index].timestamp).filter((interval) => interval > 0);
     const typicalInterval = intervals.length ? intervals.slice().sort((left, right) => left - right)[Math.floor(intervals.length / 2)] : 0;
@@ -3251,7 +3256,8 @@ class ElrakningPanel {
     };
     const update = (event) => {
       const rect = svg.getBoundingClientRect();
-      const timestamp = dayStart.getTime() + Math.max(0, Math.min(rect.width, event.clientX - rect.left)) / rect.width * (dayEnd.getTime() - dayStart.getTime());
+      const pointerRatio = rect.width > 0 ? Math.max(0, Math.min(rect.width, event.clientX - rect.left)) / rect.width : 0;
+      const timestamp = xStart + pointerRatio * xDuration;
       const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
       const pointX = x(point.timestamp);
       const pointY = y(point.value);
