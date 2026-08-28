@@ -697,7 +697,7 @@ class ElrakningPanel {
         </div>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
-          <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
+          <article class="card configuration-card configuration-card-elhandel" data-provider-card="elhandel" data-config-card-key="elhandel">
             <div class="card-heading">
               <h2>Elhandel</h2>
               <span class="status" data-provider-status></span>
@@ -715,17 +715,18 @@ class ElrakningPanel {
             <button type="button" data-greenely-parse-latest hidden>Tolka senaste</button>
           </article>
 
-            <article class="card" data-provider-card="elnet" data-config-card-key="elnet">
+            <article class="card configuration-card configuration-card-elnet" data-provider-card="elnet" data-config-card-key="elnet">
             <div class="card-heading">
               <h2>Elnät</h2>
               <span class="status">Ej konfigurerad</span>
               <label class="main-card-toggle" data-main-card-toggle="elnet" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elnet" hidden></p>
+            <p class="configuration-empty">Konfigurera nätdata för att se effekt och import/export.</p>
             <button type="button" class="configuration-control">Konfigurera</button>
           </article>
 
-          <article class="card" data-provider-card="elmatare" data-config-card-key="elmatare">
+          <article class="card configuration-card configuration-card-elmatare" data-provider-card="elmatare" data-config-card-key="elmatare">
             <div class="card-heading">
               <h2>Elmätare</h2>
               <span class="status" data-meter-status>Ej konfigurerad</span>
@@ -737,13 +738,13 @@ class ElrakningPanel {
             <button type="button" data-meter-source hidden>Visa mätardata</button>
           </article>
 
-          <article class="card power-card" data-power-card="solar" data-config-card-key="solar">
+          <article class="card configuration-card power-card configuration-card-solar" data-power-card="solar" data-config-card-key="solar">
             <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="solar" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
-          <article class="card power-card" data-power-card="battery" data-config-card-key="battery">
+          <article class="card configuration-card power-card configuration-card-battery" data-power-card="battery" data-config-card-key="battery">
             <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
@@ -2282,6 +2283,105 @@ class ElrakningPanel {
           min-height: 0;
         }
 
+        [data-configuration-cards] > .configuration-card {
+          align-content: start;
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          min-height: 0;
+        }
+
+        [data-configuration-cards] > .configuration-card .card-heading {
+          align-items: center;
+          flex-direction: row;
+          min-height: 24px;
+        }
+
+        [data-configuration-cards] > .configuration-card .card-heading h2 {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow: hidden;
+          padding-right: 0;
+          text-overflow: ellipsis;
+        }
+
+        [data-configuration-cards] > .configuration-card .status {
+          background: color-mix(in srgb, var(--secondary-text-color) 10%, transparent);
+          border: 1px solid color-mix(in srgb, var(--secondary-text-color) 20%, transparent);
+          border-radius: 999px;
+          flex: 0 0 auto;
+          font-size: 12px;
+          line-height: 1;
+          margin-right: 38px;
+          padding: 5px 8px;
+        }
+
+        [data-configuration-cards] > .configuration-card .provider {
+          color: var(--primary-text-color);
+          font-size: 15px;
+          font-weight: 600;
+          line-height: 1.3;
+          margin-top: 14px;
+        }
+
+        [data-configuration-cards] > .configuration-card .provider-summary,
+        [data-configuration-cards] > .configuration-card .meter-summary,
+        [data-configuration-cards] > .configuration-card .power-summary {
+          column-gap: 12px;
+          grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+          margin-top: 16px;
+          row-gap: 8px;
+        }
+
+        [data-configuration-cards] > .configuration-card .provider-summary strong,
+        [data-configuration-cards] > .configuration-card .meter-summary strong,
+        [data-configuration-cards] > .configuration-card .power-summary strong {
+          min-width: 0;
+          overflow-wrap: normal;
+          word-break: normal;
+        }
+
+        [data-configuration-cards] > .configuration-card .provider-summary span,
+        [data-configuration-cards] > .configuration-card .meter-summary span,
+        [data-configuration-cards] > .configuration-card .power-summary span {
+          min-width: 0;
+          text-align: right;
+          white-space: normal;
+        }
+
+        [data-configuration-cards] > .configuration-card .configuration-control {
+          align-self: flex-start;
+          margin-top: auto;
+        }
+
+        .configuration-empty {
+          border-left: 3px solid var(--primary-color);
+          color: var(--secondary-text-color);
+          line-height: 1.45;
+          margin-top: 20px;
+          max-width: 28ch;
+          padding-left: 12px;
+        }
+
+        [data-configuration-cards] > .configuration-card .power-summary-divider {
+          align-items: center;
+          color: var(--secondary-text-color);
+          display: flex;
+          font-size: 12px;
+          font-weight: 600;
+          gap: 8px;
+          letter-spacing: .04em;
+          margin: 10px 0 2px;
+          text-transform: uppercase;
+        }
+
+        [data-configuration-cards] > .configuration-card .power-summary-divider::after {
+          background: var(--divider-color);
+          content: "";
+          flex: 1;
+          height: 1px;
+        }
+
         .card-heading {
           display: flex;
           flex-direction: column;
@@ -3070,6 +3170,7 @@ class ElrakningPanel {
         if (cardType === "battery" && index === 4) {
           const divider = document.createElement("div");
           divider.className = "power-summary-divider";
+          divider.textContent = "Idag";
           summaryNodes.push(divider);
         }
         const label = document.createElement("strong");
