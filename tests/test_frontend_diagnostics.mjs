@@ -428,9 +428,11 @@ assert.match(panelSource, /\.daily-energy-row \{\n\s+display: grid;\n\s+gap: 16p
 assert.match(panelSource, /daily-energy-row[\s\S]*data-daily-energy[\s\S]*data-soc-card/);
 assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-row \{\n\s+grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.daily-energy-card \{[\s\S]*min-width: 0;/);
-assert.match(panelSource, /\.daily-energy-part-heading > \*,[\s\S]*\.daily-energy-part-values > \* \{[\s\S]*min-width: 0;[\s\S]*overflow-wrap: break-word;/);
+assert.match(panelSource, /\.daily-energy-part-heading > \*,[\s\S]*\.daily-energy-part-values > \* \{[\s\S]*min-width: 0;[\s\S]*overflow-wrap: normal;[\s\S]*word-break: normal;/);
 assert.match(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-part-heading \{\n\s+display: block;/);
 assert.match(panelSource, /\.daily-energy-part-labels,[\s\S]*\.daily-energy-part-values \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+assert.match(panelSource, /@container \(max-width: 220px\) \{[\s\S]*\.daily-energy-grid \{[\s\S]*grid-template-columns: 1fr;/);
+assert.match(panelSource, /@container \(max-width: 220px\) \{[\s\S]*\.soc-card-content \{[\s\S]*grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.daily-energy-bar \{[\s\S]*height: clamp\(16px, 5cqw, 24px\);/);
 assert.match(panelSource, /\.daily-energy-percent \{[\s\S]*font-size: clamp\(9px, 2\.5cqw, 12px\);[\s\S]*line-height: clamp\(16px, 5cqw, 24px\);/);
 assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4px, 1\.25cqw, 6px\);/);
