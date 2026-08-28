@@ -470,6 +470,7 @@ assert.doesNotMatch(panelSource, /@container \(max-width: 220px\) \{[\s\S]*\.soc
 assert.match(panelSource, /_capacityUtilizationPercent\(\)/);
 assert.match(panelSource, /\.soc-chart \{[\s\S]*flex: 1;[\s\S]*margin: 0;[\s\S]*min-height: 0;[\s\S]*width: 100%;/);
 assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*height: 100%;[\s\S]*width: 100%;/);
+assert.match(panelSource, /\.soc-chart-svg \{[\s\S]*overflow: visible;/);
 assert.doesNotMatch(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 340;/);
 assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}"/);
 assert.match(panelSource, /const height = 340;/);

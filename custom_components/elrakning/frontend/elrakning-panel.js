@@ -1301,6 +1301,7 @@ class ElrakningPanel {
           display: block;
           height: 100%;
           max-width: 100%;
+          overflow: visible;
           width: 100%;
         }
 
