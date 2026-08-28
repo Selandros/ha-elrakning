@@ -475,7 +475,7 @@ assert.doesNotMatch(panelSource, /\.soc-chart-svg \{[\s\S]*aspect-ratio: 960 \/ 
 assert.match(panelSource, /<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}"/);
 assert.match(panelSource, /const height = 340;/);
 assert.match(panelSource, /\.soc-label-rail \{[\s\S]*position: absolute;[\s\S]*width: 4\.583333%;/);
-assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 10px;[\s\S]*font-weight: 400;[\s\S]*position: absolute;[\s\S]*left: 50%;[\s\S]*transform: translate\(-50%, -50%\);/);
+assert.match(panelSource, /\.soc-label \{[\s\S]*font-size: 10px;[\s\S]*font-weight: 400;[\s\S]*position: absolute;[\s\S]*left: 0;[\s\S]*right: 0;[\s\S]*text-align: center;[\s\S]*transform: translateY\(-50%\);/);
 assert.match(panelSource, /const plot = \{ left: 44, right: 8, top: 8, bottom: 8 \};/);
 assert.match(panelSource, /const xStart = dayStart\.getTime\(\);/);
 assert.match(panelSource, /const xEnd = points\.at\(-1\)\.timestamp;/);

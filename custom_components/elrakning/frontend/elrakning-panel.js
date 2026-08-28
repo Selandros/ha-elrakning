@@ -1327,8 +1327,10 @@ class ElrakningPanel {
           font-weight: 400;
           line-height: 1;
           position: absolute;
-          left: 50%;
-          transform: translate(-50%, -50%);
+          left: 0;
+          right: 0;
+          text-align: center;
+          transform: translateY(-50%);
         }
 
         .soc-label.top { top: 0; }
