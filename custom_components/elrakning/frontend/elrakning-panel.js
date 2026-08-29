@@ -1495,12 +1495,6 @@ class ElrakningPanel {
           margin-top: 12px;
         }
 
-        .invoice-summary {
-          color: var(--secondary-text-color);
-          margin-top: 12px;
-          white-space: pre-line;
-        }
-
         .retained-history {
           border-top: 1px solid var(--divider-color);
           margin-top: 16px;
@@ -3955,12 +3949,6 @@ class ElrakningPanel {
     return typeof value === "number" && Number.isFinite(value)
       ? value.toLocaleString("sv-SE", { maximumFractionDigits: 2 })
       : "–";
-  }
-
-  _formatInvoiceState(state) {
-    if (state === "Paid") return "Betald";
-    if (state === "Cancelled" || state === "Canceled") return "Makulerad";
-    return state || "";
   }
 
   _bindMainInvoiceParser() {
