@@ -15,7 +15,7 @@ def test_eon_source_data_command_and_manager_path_exist():
 
 
 def test_source_data_reuses_manager_session_instead_of_logging_in_inline():
-    method = manager_text().split("    async def async_source_data", 1)[1].split("    def public_state", 1)[0]
+    method = manager_text().split("    async def async_source_data", 1)[1].split("    async def async_app_test_login", 1)[0]
     assert "_get_app_session" in method
     assert "async_login" not in method
 

@@ -21,6 +21,12 @@ assert.match(eonPanelSource, /elrakning\/eon_grid_app_save/);
 assert.match(eonPanelSource, /data-eon-grid-source/);
 assert.match(eonPanelSource, /elrakning\/eon_grid_source_data/);
 assert.match(eonPanelSource, /data-provider-source-dialog/);
+assert.match(eonPanelSource, /data-eon-api-tests/);
+assert.match(eonPanelSource, /data-eon-test-login="app"/);
+assert.match(eonPanelSource, /data-eon-test-login="web"/);
+assert.match(eonPanelSource, /eon_app_test_login/);
+assert.match(eonPanelSource, /eon_web_test_login/);
+assert.match(eonPanelSource, /eon_test_comparison/);
 
 assert.match(output, /^Elräkning diagnostics/m);
 assert.match(output, /Version: 0\.0\.64/);

@@ -58,7 +58,14 @@ manager_module = _load_manager()
 
 def _manager(config=None):
     manager = object.__new__(manager_module.EonGridManager)
+    manager.hass = object()
     manager._web_session = object()
+    manager._app_test_session = None
+    manager._app_test_source = None
+    manager._app_test_summary = None
+    manager._app_test_locations = []
+    manager._web_test_locations = []
+    manager._web_test_state = {"status": "not_configured"}
     manager._config = lambda: config or {"web": {"cookies": {"MyEonSession": "cookie"}, "customer_id": "web-customer"}}
     return manager
 
@@ -266,6 +273,50 @@ def test_source_redaction_removes_identifiers_and_credentials():
     })
     assert all(value == "[redacted]" for key, value in redacted.items() if key != "safe")
     assert redacted["safe"] == "kept"
+
+
+def test_app_test_login_uses_only_its_isolated_app_session():
+    calls = []
+
+    class _AppSession:
+        def __init__(self, hass):
+            calls.append("created")
+
+        async def async_login(self, account_id, password):
+            calls.append((account_id, password))
+
+    original = manager_module.EonAppSession
+    manager_module.EonAppSession = _AppSession
+    try:
+        result = asyncio.run(_manager().async_app_test_login("synthetic-account", "synthetic-password"))
+    finally:
+        manager_module.EonAppSession = original
+    assert result["status"] == "authenticated"
+    assert calls == ["created", ("synthetic-account", "synthetic-password")]
+
+
+def test_web_test_login_never_falls_back_to_app_auth():
+    class _UnexpectedAppSession:
+        def __init__(self, hass):
+            raise AssertionError("app auth was used")
+
+    original = manager_module.EonAppSession
+    manager_module.EonAppSession = _UnexpectedAppSession
+    try:
+        result = asyncio.run(_manager().async_web_test_login("synthetic-account", "synthetic-password"))
+    finally:
+        manager_module.EonAppSession = original
+    assert result["status"] == "browser_attestation_required"
+
+
+def test_app_and_web_comparison_reports_pod_and_installation_matches_without_values():
+    app = [{"point_of_delivery_number": "shared-pod", "installation_identifier": "app-id"}]
+    web = [{"point_of_delivery_number": "shared-pod", "installation_identifier": "web-id"}]
+    fields = manager_module._comparison_fields(app, web)
+    assert fields[1] == {"field": "POD match", "app": "ja", "web": "ja"}
+    assert fields[2] == {"field": "Installation ID match", "app": "nej", "web": "nej"}
+    web[0]["installation_identifier"] = "app-id"
+    assert manager_module._comparison_fields(app, web)[2]["app"] == "ja"
 
 
 def test_web_api_request_uses_bearer_without_explicit_web_cookies():

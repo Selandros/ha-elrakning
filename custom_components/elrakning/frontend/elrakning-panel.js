@@ -834,7 +834,7 @@ class ElrakningPanel {
             <button type="button" data-greenely-parse-latest hidden>Tolka senaste</button>
           </article>
 
-            <article class="card" data-provider-card="elnet" data-config-card-key="elnet">
+          <article class="card" data-provider-card="elnet" data-config-card-key="elnet">
               <div class="card-heading">
                 <h2>Elnät</h2>
                 <span class="status" data-eon-grid-status>Ej konfigurerad</span>
@@ -870,6 +870,36 @@ class ElrakningPanel {
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
 
+        </section>
+        <section class="card eon-api-test-card" data-eon-api-tests hidden aria-labelledby="eon-api-tests-title">
+          <div class="card-heading"><h2 id="eon-api-tests-title">E.ON API-test</h2><span class="status">Endast diagnostik</span></div>
+          <div class="eon-api-test-grid">
+            <section class="eon-api-test-section" data-eon-test-section="app">
+              <h3>E.ON App API</h3>
+              <label>Konto-ID / användarnamn<input type="text" data-eon-test-account="app" autocomplete="off"></label>
+              <label>Lösenord<input type="password" data-eon-test-password="app" autocomplete="off"></label>
+              <p class="provider-result" data-eon-test-status="app" aria-live="polite">Inte konfigurerad</p>
+              <button type="button" data-eon-test-login="app">Logga in</button>
+              <button type="button" data-eon-test-source="app">Vad har vi för data?</button>
+              <button type="button" data-eon-test-logout="app">Logga ut / rensa testsession</button>
+              <pre data-eon-test-output="app"></pre>
+            </section>
+            <section class="eon-api-test-section" data-eon-test-section="web">
+              <h3>E.ON Webb API</h3>
+              <label>Konto-ID / användarnamn<input type="text" data-eon-test-account="web" autocomplete="off"></label>
+              <label>Lösenord<input type="password" data-eon-test-password="web" autocomplete="off"></label>
+              <p class="provider-result" data-eon-test-status="web" aria-live="polite">Inte konfigurerad</p>
+              <button type="button" data-eon-test-login="web">Logga in</button>
+              <button type="button" data-eon-test-source="web">Vad har vi för data?</button>
+              <button type="button" data-eon-test-logout="web">Logga ut / rensa testsession</button>
+              <pre data-eon-test-output="web"></pre>
+            </section>
+          </div>
+          <div class="eon-api-comparison">
+            <h3>Jämförelse</h3>
+            <button type="button" data-eon-test-comparison>Uppdatera jämförelse</button>
+            <pre data-eon-test-comparison-output></pre>
+          </div>
         </section>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
@@ -2791,7 +2821,8 @@ class ElrakningPanel {
     this._bindMainCardToggles();
     this._bindProviderSourceDialog();
     this._bindMeterSourceDialog();
-    this._bindDiagnostics();
+        this._bindDiagnostics();
+    this._bindEonApiTests();
     this._bindMainInvoiceParser();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
@@ -3084,10 +3115,67 @@ class ElrakningPanel {
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
+    const eonTests = this.host.querySelector("[data-eon-api-tests]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
+    if (eonTests) eonTests.hidden = !this._debugEnabled;
+  }
+
+  _bindEonApiTests() {
+    const card = this.host.querySelector("[data-eon-api-tests]");
+    if (!card || !this.hass?.callWS) return;
+    const labels = {
+      app: { login: "eon_app_test_login", source: "eon_app_test_source_data", logout: "eon_app_test_logout" },
+      web: { login: "eon_web_test_login", source: "eon_web_test_source_data", logout: "eon_web_test_logout" },
+    };
+    const bind = (kind) => {
+      const account = card.querySelector(`[data-eon-test-account="${kind}"]`);
+      const password = card.querySelector(`[data-eon-test-password="${kind}"]`);
+      const status = card.querySelector(`[data-eon-test-status="${kind}"]`);
+      const output = card.querySelector(`[data-eon-test-output="${kind}"]`);
+      const login = card.querySelector(`[data-eon-test-login="${kind}"]`);
+      const source = card.querySelector(`[data-eon-test-source="${kind}"]`);
+      const logout = card.querySelector(`[data-eon-test-logout="${kind}"]`);
+      if (!account || !password || !status || !output || !login || !source || !logout) return;
+      const call = async (command, payload = {}) => this.hass.callWS({ type: `elrakning/${command}`, ...payload });
+      login.addEventListener("click", async () => {
+        if (!account.value.trim() || !password.value) return;
+        login.disabled = true;
+        status.textContent = "Verifierar …";
+        try {
+          const response = await call(labels[kind].login, { account_id: account.value.trim(), password: password.value });
+          status.textContent = response.status === "authenticated" ? "Autentiserad" : response.error === "browser_attestation_required" ? "Webbläsarattestering krävs" : "Autentisering misslyckades";
+          output.textContent = JSON.stringify({ status: response.status, error: response.error }, null, 2);
+        } catch { status.textContent = "Testet misslyckades"; }
+        finally { login.disabled = false; }
+      });
+      source.addEventListener("click", async () => {
+        source.disabled = true;
+        try {
+          const response = await call(labels[kind].source);
+          output.textContent = JSON.stringify(response, null, 2);
+          status.textContent = response.status === "ok" ? "Data hämtad" : response.error || response.status;
+        } catch { status.textContent = "Source data kunde inte hämtas"; }
+        finally { source.disabled = false; }
+      });
+      logout.addEventListener("click", async () => {
+        const response = await call(labels[kind].logout);
+        status.textContent = response.status === "not_configured" ? "Inte konfigurerad" : response.status;
+        output.textContent = "";
+      });
+    };
+    bind("app");
+    bind("web");
+    const comparison = card.querySelector("[data-eon-test-comparison]");
+    const comparisonOutput = card.querySelector("[data-eon-test-comparison-output]");
+    comparison?.addEventListener("click", async () => {
+      comparison.disabled = true;
+      try { comparisonOutput.textContent = JSON.stringify(await this.hass.callWS({ type: "elrakning/eon_test_comparison" }), null, 2); }
+      catch { comparisonOutput.textContent = "Jämförelsen kunde inte hämtas."; }
+      finally { comparison.disabled = false; }
+    });
   }
 
   _bindMeterDialog() {
