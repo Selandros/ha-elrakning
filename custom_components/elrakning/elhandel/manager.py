@@ -45,7 +45,6 @@ MAIN_CARD_DEFAULTS = {
     "solar": False,
     "consumption": False,
     "battery": False,
-    "battery_history": False,
 }
 
 

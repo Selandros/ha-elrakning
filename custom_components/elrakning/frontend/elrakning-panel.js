@@ -584,7 +584,6 @@ class ElrakningPanel {
       solar: false,
       consumption: false,
       battery: false,
-      battery_history: false,
     };
     this._diagnosticEntries = [];
     this._chartTouch = null;
@@ -781,13 +780,14 @@ class ElrakningPanel {
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
 
-          <article class="card battery-history-card" data-power-card="battery-history" data-config-card-key="battery_history">
-            <div class="card-heading"><h2>Batterihistorik</h2><span class="status" data-battery-history-status>Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery_history" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+        </section>
+        <div class="daily-energy-row battery-history-row">
+          <article class="card battery-history-card" data-power-card="battery-history" hidden>
+            <div class="card-heading"><h2>Batterihistorik</h2><span class="status" data-battery-history-status hidden>Ej konfigurerad</span></div>
             <p class="battery-history-meta" data-battery-history-meta hidden></p>
             <div class="battery-history-chart" data-battery-history-chart hidden></div>
           </article>
-
-        </section>
+        </div>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
           <div class="invoice-diagnostic-grid" data-invoice-diagnostic-fields></div>
@@ -1234,6 +1234,10 @@ class ElrakningPanel {
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .battery-history-row {
+          margin-top: 16px;
         }
 
         @container (max-width: 760px) {
@@ -3312,6 +3316,7 @@ class ElrakningPanel {
     if (!card || !status || !meta || !chart) return;
     const power = this._powerState || {};
     const configured = Boolean(power.charging_entity || power.discharging_entity || power.battery_power_entity);
+    card.hidden = !configured;
     status.textContent = configured ? "" : "Ej konfigurerad";
     status.hidden = configured;
     chart.hidden = !configured;
