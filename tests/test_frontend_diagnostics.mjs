@@ -386,6 +386,11 @@ assert.match(panelSource, /selector\.selector = \{ entity: \{ filter: selectorCo
 assert.match(panelSource, /\["Wh", "kWh", "MWh"\]/);
 assert.match(panelSource, /selector\.addEventListener\("value-changed"/);
 assert.match(panelSource, /selector\.value = event\.detail\?\.value/);
+assert.match(panelSource, /const buildMeterSelector = \(labelText, field, value\) => \{/);
+assert.match(panelSource, /selector\.dataset\.meterField = field/);
+assert.match(panelSource, /selector\.selector = \{ entity: \{ filter: selectorConfig\(field\), multiple: false \} \}/);
+assert.match(panelSource, /container\.replaceChildren\(buildMeterSelector\(labelText, field, value\)\)/);
+assert.match(panelSource, /fields\.map\(\(\[labelText, field\]\) =>\s*buildMeterSelector\(labelText, field, mapping\?\.\[field\] \|\| undefined\)\)/);
 assert.match(panelSource, /meter_selector_values_read/);
 assert.match(panelSource, /power_entity/);
 assert.match(panelSource, /energy_import_entity/);

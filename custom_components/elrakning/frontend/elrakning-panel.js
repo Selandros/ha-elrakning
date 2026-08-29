@@ -1097,7 +1097,8 @@ class ElrakningPanel {
           }
         }
 
-        .meter-summary {
+        .meter-summary,
+        .power-summary {
           color: var(--secondary-text-color);
           display: grid;
           gap: 6px 18px;
@@ -1113,14 +1114,6 @@ class ElrakningPanel {
           font-size: inherit;
           font-weight: 500;
           margin: 0 0 8px;
-        }
-
-        .power-summary {
-          color: var(--secondary-text-color);
-          display: grid;
-          gap: 6px 18px;
-          grid-template-columns: minmax(120px, auto) 1fr;
-          margin-top: 14px;
         }
 
         .power-summary-divider {
@@ -2708,7 +2701,7 @@ class ElrakningPanel {
         .map(([entityId]) => entityId);
       return { domain: "sensor", device_class: "energy", entity_id: energyEntities };
     };
-    const renderEntitySelector = (container, labelText, field, value) => {
+    const buildMeterSelector = (labelText, field, value) => {
       const label = document.createElement("label");
       label.className = "meter-selector-label";
       label.textContent = labelText;
@@ -2721,24 +2714,14 @@ class ElrakningPanel {
         selector.value = event.detail?.value;
       });
       label.append(selector);
-      container.replaceChildren(label);
+      return label;
+    };
+    const renderEntitySelector = (container, labelText, field, value) => {
+      container.replaceChildren(buildMeterSelector(labelText, field, value));
     };
     const renderSelectors = (mapping) => {
-      selectorsElement.replaceChildren(...fields.map(([labelText, field]) => {
-        const label = document.createElement("label");
-        label.className = "meter-selector-label";
-        label.textContent = labelText;
-        const selector = document.createElement("ha-selector");
-        selector.dataset.meterField = field;
-        selector.hass = this.hass;
-        selector.selector = { entity: { filter: selectorConfig(field), multiple: false } };
-        selector.value = mapping?.[field] || undefined;
-        selector.addEventListener("value-changed", (event) => {
-          selector.value = event.detail?.value;
-        });
-        label.append(selector);
-        return label;
-      }));
+      selectorsElement.replaceChildren(...fields.map(([labelText, field]) =>
+        buildMeterSelector(labelText, field, mapping?.[field] || undefined)));
     };
     const renderConsumptionSelector = (state) => {
       renderEntitySelector(consumptionSelectorElement, "Husets last", "consumption_entity", state?.consumption_entity);
