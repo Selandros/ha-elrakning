@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.storage import Store
 
 from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
@@ -30,6 +30,7 @@ class EonGridManager:
         self.store = Store(hass, 1, f"{DOMAIN}.eon_grid_state")
         self.state: dict[str, Any] = self._empty_state()
         self._refresh_unsub = None
+        self._web_refresh_unsub = None
         self._app_session: EonAppSession | None = None
         self._web_session: EonSession | None = None
 
@@ -81,6 +82,7 @@ class EonGridManager:
     async def async_save_app_credentials(self, account_id: str, password: str) -> dict[str, Any]:
         session = EonAppSession(self.hass)
         customer_id = await session.async_login(account_id, password)
+        self._cancel_web_refresh()
         self._app_session = session
         config = {
             "auth": "app",
@@ -136,12 +138,12 @@ class EonGridManager:
             profile = await client.async_get_user(customer_id)
             normalized = normalize_user_profile(profile, customer_id)
             state = await self._build_state(normalized, client)
-            merged_config = self._config_with_migration()
-            merged_config["web"] = {"cookies": session.cookies, "customer_id": customer_id}
-            await self._save_config(merged_config)
             self.state = state
             await self.store.async_save(self.state)
+            await self._persist_web_session(config, session)
+            self._schedule_web_refresh(session)
         except (EonAuthError, ValueError) as err:
+            self._cancel_web_refresh()
             self.state["error"] = "reauth_required" if isinstance(err, EonAuthError) else "invalid_profile"
             self.state["reauth_required"] = isinstance(err, EonAuthError)
             await self.store.async_save(self.state)
@@ -229,6 +231,7 @@ class EonGridManager:
         self.hass.config_entries.async_update_entry(self.entry, data=config)
         self._app_session = None
         self._web_session = None
+        self._cancel_web_refresh()
         self.state = self._empty_state()
         await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
@@ -287,6 +290,8 @@ class EonGridManager:
                 monthly = await client.async_get_monthly_consumption(
                     facility["point_of_delivery_number"], date.today().year
                 )
+            await self._persist_web_session(config, session)
+            self._schedule_web_refresh(session)
             return {
                 "provider": "eon",
                 "provider_name": "E.ON",
@@ -377,9 +382,42 @@ class EonGridManager:
     async def async_shutdown(self) -> None:
         self._app_session = None
         self._web_session = None
+        self._cancel_web_refresh()
         if self._refresh_unsub:
             self._refresh_unsub()
             self._refresh_unsub = None
+
+    def _schedule_web_refresh(self, session: EonSession) -> None:
+        """Schedule one refresh shortly before the server-provided expiry."""
+        self._cancel_web_refresh()
+        seconds = session.seconds_until_expiry
+        if seconds <= 0:
+            return
+        delay = max(1.0, seconds - 30.0)
+
+        def _refresh_callback(_now) -> None:
+            self._web_refresh_unsub = None
+            self.hass.async_create_task(self.async_refresh())
+
+        self._web_refresh_unsub = async_call_later(self.hass, delay, _refresh_callback)
+
+    def _cancel_web_refresh(self) -> None:
+        unsubscribe = getattr(self, "_web_refresh_unsub", None)
+        if unsubscribe:
+            unsubscribe()
+            self._web_refresh_unsub = None
+
+    async def _persist_web_session(self, config: dict[str, Any], session: EonSession) -> None:
+        """Persist only the whitelisted web session cookies after a successful refresh."""
+        web = self._web_config(config)
+        if not web.get("customer_id"):
+            return
+        merged_config = self._config_with_migration()
+        merged_config["web"] = {
+            "cookies": session.cookies,
+            "customer_id": web["customer_id"],
+        }
+        await self._save_config(merged_config)
 
     @staticmethod
     def _empty_state() -> dict[str, Any]:

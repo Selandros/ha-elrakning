@@ -250,6 +250,13 @@ class EonSession:
         """Return only the allowed cookie values for persistence."""
         return {key: morsel.value for key, morsel in self._jar.filter_cookies(URL(EON_WEB_BASE)).items() if key in ALLOWED_COOKIES and morsel.value}
 
+    @property
+    def seconds_until_expiry(self) -> float:
+        """Return the remaining lifetime of the in-memory access token."""
+        if not self._access_token or not self._expires_at:
+            return 0.0
+        return max(0.0, self._expires_at - time.monotonic())
+
     async def bootstrap(self, cookie_header: str) -> str:
         cookies = parse_cookie_header(cookie_header)
         self._cookies = cookies
@@ -278,7 +285,11 @@ class EonSession:
 
     async def refresh(self) -> None:
         try:
-            async with self._session.get(EON_WEB_BASE + REFRESH_PATH, cookies=self.cookies) as response:
+            async with self._session.get(
+                EON_WEB_BASE + REFRESH_PATH,
+                cookies=self.cookies,
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            ) as response:
                 self._apply_response_cookies(response)
                 payload = await response.json(content_type=None)
         except (ClientError, TimeoutError, TypeError, ValueError) as err:
@@ -288,23 +299,29 @@ class EonSession:
         token = payload.get("access_token")
         if not isinstance(token, str) or not token:
             raise EonAuthError("reauth_required")
+        expires_in = payload.get("expires_in")
+        if not isinstance(expires_in, (int, float)) or expires_in <= 0:
+            raise EonAuthError("reauth_required")
         self._access_token = token
         self._jar.update_cookies({"MyEonAccessToken": token}, response_url=URL(EON_WEB_BASE))
-        expires_in = payload.get("expires_in")
-        self._expires_at = time.monotonic() + float(expires_in) if isinstance(expires_in, (int, float)) else 0.0
+        self._expires_at = time.monotonic() + float(expires_in)
 
     async def _ensure_token(self) -> str:
         if self._access_token and self._expires_at > time.monotonic() + 30:
             return self._access_token
         await self._session_info()
-        if not self._access_token:
+        if not self._access_token or self._expires_at <= time.monotonic() + 30:
             await self.refresh()
         return self._access_token or ""
 
     async def _session_info(self) -> None:
         query = urlencode({"pagePath": "/mitt-e-on"})
         try:
-            async with self._session.get(f"{EON_WEB_BASE}{SESSION_PATH}?{query}", cookies=self.cookies) as response:
+            async with self._session.get(
+                f"{EON_WEB_BASE}{SESSION_PATH}?{query}",
+                cookies=self.cookies,
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            ) as response:
                 self._apply_response_cookies(response)
                 payload = await response.json(content_type=None)
         except (ClientError, TimeoutError, TypeError, ValueError) as err:
@@ -315,6 +332,9 @@ class EonSession:
         if isinstance(token, str) and token:
             self._access_token = token
             self._expires_at = _expiry_from_session(payload)
+        else:
+            self._access_token = None
+            self._expires_at = 0.0
 
     async def _request(self, method: str, url: str, token: str | None, **kwargs: Any) -> ClientResponse:
         headers = dict(kwargs.pop("headers", {}))

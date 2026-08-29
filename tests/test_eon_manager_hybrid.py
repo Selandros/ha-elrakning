@@ -14,6 +14,7 @@ def _load_manager():
     helpers = types.ModuleType("homeassistant.helpers")
     event = types.ModuleType("homeassistant.helpers.event")
     event.async_track_time_interval = lambda *args, **kwargs: None
+    event.async_call_later = lambda *args, **kwargs: None
     storage = types.ModuleType("homeassistant.helpers.storage")
     storage.Store = type("Store", (), {})
     aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")

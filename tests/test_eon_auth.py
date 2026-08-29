@@ -143,3 +143,119 @@ def test_bearer_probe_requires_existing_token():
         assert error.code == "reauth_required"
     else:
         raise AssertionError("probe accepted a missing app token")
+
+
+def test_web_refresh_uses_supported_request_and_updates_dynamic_expiry():
+    import asyncio
+
+    class Morsel:
+        def __init__(self, value):
+            self.value = value
+
+    class Jar:
+        def __init__(self):
+            self.updates = []
+
+        def filter_cookies(self, url):
+            return {"MyEonSession": Morsel("synthetic-cookie")}
+
+        def update_cookies(self, cookies, response_url=None):
+            self.updates.append((cookies, response_url))
+
+    class Response:
+        status = 200
+        cookies = {"MyEonAccessToken": "synthetic-response-cookie"}
+        url = "https://www.eon.se/bin/eon-se/codeflow/refreshToken"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def json(self, **kwargs):
+            return {
+                "access_token": "synthetic-new-token",
+                "refresh_token": "synthetic-refresh",
+                "scope": "scope",
+                "expires_in": 300,
+                "errorCode": 0,
+            }
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return Response()
+
+    session = auth.EonSession.__new__(auth.EonSession)
+    session._session = Session()
+    session._jar = Jar()
+    session._access_token = "synthetic-old-token"
+    session._expires_at = 0.0
+    asyncio.run(session.refresh())
+
+    assert session._access_token == "synthetic-new-token"
+    assert 299 <= session.seconds_until_expiry <= 300
+    url, kwargs = session._session.calls[0]
+    assert url.endswith("/refreshToken")
+    assert kwargs["headers"] == {"X-Requested-With": "XMLHttpRequest"}
+    assert "Authorization" not in kwargs["headers"]
+    assert kwargs["cookies"] == {"MyEonSession": "synthetic-cookie"}
+    assert session._jar.updates
+
+
+def test_web_ensure_token_refreshes_expired_session_without_revoke():
+    import asyncio
+
+    class Jar:
+        def filter_cookies(self, url):
+            return {}
+
+        def update_cookies(self, cookies, response_url=None):
+            return None
+
+    class Response:
+        def __init__(self, url):
+            self.url = url
+            self.status = 200
+            self.cookies = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def json(self, **kwargs):
+            if url := self.url:
+                if url.endswith("/session?pagePath=%2Fmitt-e-on"):
+                    return {"currentToken": "synthetic-expired-token", "tokenExpiersIn": 0}
+            return {
+                "access_token": "synthetic-refreshed-token",
+                "refresh_token": "synthetic-refresh",
+                "expires_in": 180,
+                "errorCode": 0,
+            }
+
+    class Session:
+        def __init__(self):
+            self.urls = []
+
+        def get(self, url, **kwargs):
+            self.urls.append(url)
+            return Response(url)
+
+    session = auth.EonSession.__new__(auth.EonSession)
+    session._session = Session()
+    session._jar = Jar()
+    session._access_token = "synthetic-old-token"
+    session._expires_at = 0.0
+    token = asyncio.run(session._ensure_token())
+
+    assert token == "synthetic-refreshed-token"
+    assert session._session.urls[0].endswith("/session?pagePath=%2Fmitt-e-on")
+    assert session._session.urls[1].endswith("/refreshToken")
+    assert not any("revokeToken" in url for url in session._session.urls)
