@@ -1191,10 +1191,10 @@ class ElrakningPanel {
         }
 
         .battery-history-axis-label,
-        .battery-history-day-label,
-        .battery-history-utilization {
+        .battery-history-day-label {
           fill: var(--secondary-text-color);
-          font-size: var(--price-card-text-size);
+          font-size: 10px;
+          font-weight: 400;
         }
 
         .battery-history-day-label,
@@ -3307,15 +3307,12 @@ class ElrakningPanel {
 
   _renderBatteryHistoryCard() {
     const card = this.host.querySelector('[data-power-card="battery-history"]');
-    const status = this.host.querySelector("[data-battery-history-status]");
     const meta = this.host.querySelector("[data-battery-history-meta]");
     const chart = this.host.querySelector("[data-battery-history-chart]");
-    if (!card || !status || !meta || !chart) return;
+    if (!card || !meta || !chart) return;
     const power = this._powerState || {};
     const configured = Boolean(power.charging_entity || power.discharging_entity || power.battery_power_entity);
     card.hidden = !configured;
-    status.textContent = configured ? "" : "Ej konfigurerad";
-    status.hidden = configured;
     chart.hidden = !configured;
     if (!configured) {
       meta.hidden = true;
