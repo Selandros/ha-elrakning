@@ -977,7 +977,8 @@ class ElrakningPanel {
             <button type="button" data-eon-grid-save>Logga in</button>
           </div>
           <details class="provider-fallback">
-            <summary>Avancerad sessionsimport</summary>
+            <summary>Webbdata / avtal och tariff</summary>
+            <p>Importera en befintlig Mitt E.ON-session för webbdata. Appdata fortsätter fungera utan den.</p>
             <label>Cookie-header<input type="password" data-eon-grid-cookie autocomplete="off"></label>
             <button type="button" data-eon-grid-cookie-save>Importera session</button>
           </details>

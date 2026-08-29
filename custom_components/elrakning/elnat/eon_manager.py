@@ -16,6 +16,7 @@ from .eon_models import (
     normalize_locations,
     normalize_outage,
     normalize_user_profile,
+    normalize_user_profiles,
     parse_monthly_consumption,
     parse_monthly_transfer,
 )
@@ -31,12 +32,14 @@ class EonGridManager:
         self.state: dict[str, Any] = self._empty_state()
         self._refresh_unsub = None
         self._app_session: EonAppSession | None = None
+        self._web_session: EonSession | None = None
 
     @property
     def configured(self) -> bool:
         config = self._config()
+        web = self._web_config(config)
         return (
-            isinstance(config.get("cookies"), dict) and bool(config.get("customer_id"))
+            isinstance(web.get("cookies"), dict) and bool(web.get("customer_id"))
         ) or (
             config.get("auth") == "app"
             and isinstance(config.get("account_id"), str)
@@ -65,7 +68,12 @@ class EonGridManager:
         client = EonClient(session)
         profile = await client.async_get_user(customer_id)
         normalized = normalize_user_profile(profile, customer_id)
-        await self._save_config({"cookies": session.cookies, "customer_id": customer_id})
+        self._web_session = session
+        config = self._config_with_migration()
+        config["web"] = {"cookies": session.cookies, "customer_id": customer_id}
+        await self._save_config(config)
+        if config.get("auth") == "app":
+            return await self._refresh_app(self._app_session)
         self.state = await self._build_state(normalized, client)
         await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
@@ -75,12 +83,14 @@ class EonGridManager:
         session = EonAppSession(self.hass)
         customer_id = await session.async_login(account_id, password)
         self._app_session = session
-        await self._save_config({
+        config = self._config_with_migration()
+        config.update({
             "auth": "app",
             "account_id": account_id.strip(),
             "password": password,
             "customer_id": customer_id,
         })
+        await self._save_config(config)
         return await self._refresh_app(session)
 
     async def async_refresh(self) -> dict[str, Any]:
@@ -90,14 +100,17 @@ class EonGridManager:
             return self.public_state()
         if config.get("auth") == "app":
             return await self._refresh_app(self._app_session)
-        session = EonSession(self.hass, config.get("cookies"))
+        session = await self._get_web_session(config)
         client = EonClient(session)
         try:
-            customer_id = config["customer_id"]
+            web = self._web_config(config)
+            customer_id = web["customer_id"]
             profile = await client.async_get_user(customer_id)
             normalized = normalize_user_profile(profile, customer_id)
             state = await self._build_state(normalized, client)
-            await self._save_config({"cookies": session.cookies, "customer_id": customer_id})
+            merged_config = self._config_with_migration()
+            merged_config["web"] = {"cookies": session.cookies, "customer_id": customer_id}
+            await self._save_config(merged_config)
             self.state = state
             await self.store.async_save(self.state)
         except (EonAuthError, ValueError) as err:
@@ -137,9 +150,13 @@ class EonGridManager:
                 installation["postal_code"],
             )
             outage = normalize_outage(await client.async_get_outages(installation["point_of_delivery_number"]))
-            self.state = {
+            state = {
                 "agreement": {"status": "future" if installation.get("is_future") is True else "configured", "type": "ELECTRICITY_GRID"},
-                "facility": {"price_area": installation.get("price_area")},
+                "facility": {
+                    "installation_identifier": installation.get("installation_identifier"),
+                    "point_of_delivery_number": installation.get("point_of_delivery_number"),
+                    "price_area": installation.get("price_area"),
+                },
                 "tariff": None,
                 "consumption": parse_monthly_transfer(monthly, now.year, now.month),
                 "cost": None,
@@ -149,6 +166,8 @@ class EonGridManager:
                 "error": None,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+            await self._enrich_app_state_from_web(state, installation, config)
+            self.state = state
             await self.store.async_save(self.state)
         except ValueError as err:
             self.state.update({"app_authenticated": True, "reauth_required": False, "error": str(err)})
@@ -169,11 +188,53 @@ class EonGridManager:
         self._app_session = session
         return session
 
+    async def _get_web_session(self, config: dict[str, Any]) -> EonSession:
+        """Return the cached web session without rebuilding its cookie jar."""
+        web = self._web_config(config)
+        if self._web_session is None:
+            self._web_session = EonSession(self.hass, web.get("cookies"))
+        return self._web_session
+
+    async def _enrich_app_state_from_web(
+        self, state: dict[str, Any], installation: dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Optionally enrich app state from the independently authenticated web API."""
+        web = self._web_config(config)
+        if not isinstance(web.get("cookies"), dict) or not web.get("customer_id"):
+            return
+        try:
+            session = await self._get_web_session(config)
+            profile = await EonClient(session).async_get_user(web["customer_id"])
+            profiles = normalize_user_profiles(profile, web["customer_id"])
+            matches = [
+                item for item in profiles
+                if _web_matches_installation(item.get("facility") or {}, installation)
+            ]
+            if len(matches) != 1:
+                state["web_data"] = {"status": "error", "error": "web_contract_match_required"}
+                return
+            matched = matches[0]
+            state.update({
+                "agreement": matched.get("agreement") or state.get("agreement"),
+                "tariff": matched.get("tariff"),
+            })
+            amount = state.get("consumption", {}).get("consumption_kwh") if state.get("consumption", {}).get("status") == "ok" else None
+            state["cost"] = calculate_eon_cost(amount, matched.get("tariff"))
+            web_facility = matched.get("facility") or {}
+            state["facility"].update({
+                "fuse_ampere": web_facility.get("fuse_ampere"),
+                "price_area": web_facility.get("price_area") or state["facility"].get("price_area"),
+            })
+            state["web_data"] = {"status": "ok", "error": None}
+        except (EonAuthError, ValueError):
+            state["web_data"] = {"status": "error", "error": "web_data_unavailable"}
+
     async def async_remove(self) -> dict[str, Any]:
         config = dict(self.entry.data)
         config.pop(EON_GRID_CONFIG_KEY, None)
         self.hass.config_entries.async_update_entry(self.entry, data=config)
         self._app_session = None
+        self._web_session = None
         self.state = self._empty_state()
         await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
@@ -210,6 +271,11 @@ class EonGridManager:
                     installation["postal_code"],
                 )
                 outages = await client.async_get_outages(installation["point_of_delivery_number"])
+            web_source = None
+            web = self._web_config(config)
+            if isinstance(web.get("cookies"), dict) and web.get("customer_id"):
+                web_session = await self._get_web_session(config)
+                web_source = await EonClient(web_session).async_get_user(web["customer_id"])
             return {
                 "provider": "eon",
                 "provider_name": "E.ON",
@@ -218,13 +284,15 @@ class EonGridManager:
                 "locations": _redact_source_data(locations),
                 "monthly_transfer": _redact_source_data(monthly),
                 "outages": _redact_source_data(outages),
+                "web": {"user": _redact_source_data(web_source)} if web_source is not None else None,
             }
 
-        if isinstance(config.get("cookies"), dict) and config.get("customer_id"):
-            session = EonSession(self.hass, config["cookies"])
+        web = self._web_config(config)
+        if isinstance(web.get("cookies"), dict) and web.get("customer_id"):
+            session = await self._get_web_session(config)
             client = EonClient(session)
-            profile = await client.async_get_user(config["customer_id"])
-            normalized = normalize_user_profile(profile, config["customer_id"])
+            profile = await client.async_get_user(web["customer_id"])
+            normalized = normalize_user_profile(profile, web["customer_id"])
             monthly: Any = {}
             facility = normalized.get("facility") or {}
             if facility.get("point_of_delivery_number"):
@@ -254,6 +322,7 @@ class EonGridManager:
             "cost": self.state.get("cost"),
             "outage": self.state.get("outage"),
             "error": self.state.get("error"),
+            "web_data": self.state.get("web_data"),
         }
 
     async def _build_state(self, normalized: dict[str, Any], client: EonClient) -> dict[str, Any]:
@@ -283,12 +352,30 @@ class EonGridManager:
         data[EON_GRID_CONFIG_KEY] = config_data
         self.hass.config_entries.async_update_entry(self.entry, data=data)
 
+    def _config_with_migration(self) -> dict[str, Any]:
+        """Return a copy with legacy flat web credentials represented under web."""
+        config = dict(self._config())
+        if "web" not in config and isinstance(config.get("cookies"), dict):
+            config["web"] = {
+                "cookies": config.pop("cookies"),
+                "customer_id": config.pop("customer_id", None),
+            }
+        return config
+
     def _config(self) -> dict[str, Any]:
         value = self.entry.data.get(EON_GRID_CONFIG_KEY, {})
         return value if isinstance(value, dict) else {}
 
+    @staticmethod
+    def _web_config(config: dict[str, Any]) -> dict[str, Any]:
+        web = config.get("web")
+        if isinstance(web, dict):
+            return web
+        return config
+
     async def async_shutdown(self) -> None:
         self._app_session = None
+        self._web_session = None
         if self._refresh_unsub:
             self._refresh_unsub()
             self._refresh_unsub = None
@@ -305,12 +392,25 @@ class EonGridManager:
             "error": None,
             "outage": None,
             "app_authenticated": False,
+            "web_data": None,
         }
+
+
+def _web_matches_installation(web_facility: dict[str, Any], app_installation: dict[str, Any]) -> bool:
+    """Match a web grid contract using verified installation identifiers."""
+    return bool(
+        (web_facility.get("point_of_delivery_number") and web_facility.get("point_of_delivery_number") == app_installation.get("point_of_delivery_number"))
+        or (web_facility.get("installation_identifier") and web_facility.get("installation_identifier") == app_installation.get("installation_identifier"))
+    )
 
 
 def _redact_source_data(value: Any) -> Any:
     """Redact credentials and customer-account identifiers from raw source data."""
-    sensitive = ("accountid", "customeridentifier", "contractaccountidentifier", "password", "token", "secret", "cookie", "authorization")
+    sensitive = (
+        "accountid", "customeridentifier", "customerid", "contractaccountidentifier",
+        "installationidentifier", "pointofdeliverynumber", "podid", "devicenumber",
+        "premiseid", "password", "token", "secret", "cookie", "authorization",
+    )
     if isinstance(value, dict):
         result = {}
         for key, item in value.items():

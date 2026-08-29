@@ -52,6 +52,22 @@ def test_normalize_user_profile_reads_grid_agreement_and_tariff_fields():
     assert result["tariff"]["subscription_fee_sek_per_month"] == 226.25
 
 
+def test_normalize_user_profiles_keeps_all_web_grid_contracts_for_matching():
+    payload = {
+        "customerIdentifier": "customer-id",
+        "privateContractAccounts": [{
+            "deliveryContracts": [
+                {"installation": {"installationIdentifier": "installation-a", "pointOfDeliveryNumber": "pod-a"},
+                 "engagements": [{"engagementType": "ELECTRICITY_GRID", "engagementStatus": "ACTIVE"}]},
+                {"installation": {"installationIdentifier": "installation-b", "pointOfDeliveryNumber": "pod-b"},
+                 "engagements": [{"engagementType": "ELECTRICITY_GRID", "engagementStatus": "FUTURE"}]},
+            ],
+        }],
+    }
+    result = models.normalize_user_profiles(payload, "customer-id")
+    assert [item["facility"]["point_of_delivery_number"] for item in result] == ["pod-a", "pod-b"]
+
+
 def test_monthly_parser_reads_energy_block_and_selected_month():
     payload = {
         "hasNoValues": False,

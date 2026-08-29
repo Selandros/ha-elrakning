@@ -14,7 +14,7 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 from aiohttp import ClientError, ClientResponse, CookieJar, ClientSession
-from homeassistant.helpers.aiohttp_client import async_create_clientsession, async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from yarl import URL
 
 EON_WEB_BASE = "https://www.eon.se"
@@ -222,7 +222,7 @@ class EonSession:
     """Maintain the minimum persistent E.ON cookie/session state."""
 
     def __init__(self, hass, cookies: Mapping[str, str] | None = None) -> None:
-        self._session: ClientSession = async_get_clientsession(hass)
+        self._session: ClientSession = async_create_clientsession(hass, cookie_jar=CookieJar())
         self._jar = CookieJar()
         self._cookies = {key: value for key, value in (cookies or {}).items() if key in ALLOWED_COOKIES and isinstance(value, str) and value}
         self._jar.update_cookies(self._cookies, response_url=URL(EON_WEB_BASE))

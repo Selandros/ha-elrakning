@@ -10,6 +10,16 @@ def normalize_user_profile(payload: Any, customer_id: str) -> dict[str, Any]:
     """Normalize the verified E.ON profile shape without exposing identifiers."""
     if not isinstance(payload, Mapping) or payload.get("customerIdentifier") != customer_id:
         raise ValueError("customer_id_mismatch")
+    contracts = normalize_user_profiles(payload, customer_id)
+    if not contracts:
+        return {"agreement": None, "facility": None, "tariff": None}
+    return contracts[0]
+
+
+def normalize_user_profiles(payload: Any, customer_id: str) -> list[dict[str, Any]]:
+    """Normalize every compatible web grid contract for hybrid matching."""
+    if not isinstance(payload, Mapping) or payload.get("customerIdentifier") != customer_id:
+        raise ValueError("customer_id_mismatch")
     accounts = []
     for key in ("privateContractAccounts", "smeContractAccounts"):
         values = payload.get(key)
@@ -52,9 +62,7 @@ def normalize_user_profile(payload: Any, customer_id: str) -> dict[str, Any]:
                 },
                 "tariff": normalize_tariff(engagement.get("prices"), engagement.get("estimatedYearlyCost")),
             })
-    if not contracts:
-        return {"agreement": None, "facility": None, "tariff": None}
-    return contracts[0]
+    return contracts
 
 
 def normalize_tariff(prices: Any, estimated_yearly_cost: Any) -> dict[str, Any]:
