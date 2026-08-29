@@ -1546,6 +1546,10 @@ class ElrakningPanel {
           font-weight: 600;
         }
 
+        .battery-history-chart .soc-tooltip > span {
+          display: block;
+        }
+
         .provider-dialog[hidden], .provider-source-dialog[hidden] {
           display: none;
         }

@@ -513,6 +513,7 @@ assert.match(panelSource, /class="chart-hover-marker chart-hover-marker-soc"/);
 assert.match(panelSource, /class="visually-hidden">Batteri SOC<\/h2>/);
 assert.match(panelSource, /\.visually-hidden \{[\s\S]*position: absolute;[\s\S]*width: 1px;/);
 assert.match(panelSource, /class="battery-history-utilization">\$\{Number\.isFinite\(day\.utilizationPercent\)/);
+assert.match(panelSource, /\.battery-history-chart \.soc-tooltip > span \{[\s\S]*display: block;/);
 assert.match(panelSource, /class="card-heading soc-card-heading"/);
 assert.match(panelSource, /\.card\.soc-card \{\n\s+min-height: 0;\n\s+\}/);
 assert.doesNotMatch(panelSource, /Utnyttjande/);
