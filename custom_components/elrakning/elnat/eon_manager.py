@@ -1,4 +1,4 @@
-"""E.ON grid manager with persistent cookie bootstrap."""
+"""E.ON grid manager with app-login and cookie fallback."""
 
 from __future__ import annotations
 
@@ -9,9 +9,16 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
 from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT
-from .eon_auth import EonAuthError, EonSession
-from .eon_client import EonClient
-from .eon_models import calculate_eon_cost, normalize_user_profile, parse_monthly_consumption
+from .eon_auth import EonAppSession, EonAuthError, EonSession
+from .eon_client import EonAppClient, EonClient
+from .eon_models import (
+    calculate_eon_cost,
+    normalize_locations,
+    normalize_outage,
+    normalize_user_profile,
+    parse_monthly_consumption,
+    parse_monthly_transfer,
+)
 
 
 class EonGridManager:
@@ -27,7 +34,13 @@ class EonGridManager:
     @property
     def configured(self) -> bool:
         config = self._config()
-        return isinstance(config.get("cookies"), dict) and bool(config.get("customer_id"))
+        return (
+            isinstance(config.get("cookies"), dict) and bool(config.get("customer_id"))
+        ) or (
+            config.get("auth") == "app"
+            and isinstance(config.get("account_id"), str)
+            and bool(config.get("password"))
+        )
 
     async def async_load(self) -> None:
         cached = await self.store.async_load()
@@ -57,11 +70,24 @@ class EonGridManager:
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
 
+    async def async_save_app_credentials(self, account_id: str, password: str) -> dict[str, Any]:
+        session = EonAppSession(self.hass)
+        customer_id = await session.async_login(account_id, password)
+        await self._save_config({
+            "auth": "app",
+            "account_id": account_id.strip(),
+            "password": password,
+            "customer_id": customer_id,
+        })
+        return await self._refresh_app(session)
+
     async def async_refresh(self) -> dict[str, Any]:
         config = self._config()
         if not self.configured:
             self.state = self._empty_state()
             return self.public_state()
+        if config.get("auth") == "app":
+            return await self._refresh_app()
         session = EonSession(self.hass, config.get("cookies"))
         client = EonClient(session)
         try:
@@ -75,6 +101,60 @@ class EonGridManager:
         except (EonAuthError, ValueError) as err:
             self.state["error"] = "reauth_required" if isinstance(err, EonAuthError) else "invalid_profile"
             self.state["reauth_required"] = isinstance(err, EonAuthError)
+            await self.store.async_save(self.state)
+        self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
+        return self.public_state()
+
+    async def _refresh_app(self, session: EonAppSession | None = None) -> dict[str, Any]:
+        config = self._config()
+        session = session or EonAppSession(self.hass)
+        try:
+            if session.customer_id is None:
+                await session.async_login(config["account_id"], config["password"])
+            client = EonAppClient(session)
+            await client.async_get_contract_accounts()
+            locations = normalize_locations(await client.async_get_locations())
+            if not locations:
+                raise ValueError("location_missing")
+            if len(locations) > 1:
+                raise ValueError("location_selection_required")
+            installation = locations[0]
+            now = date.today()
+            month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+            month_end = datetime(
+                now.year + (1 if now.month == 12 else 0),
+                1 if now.month == 12 else now.month + 1,
+                1,
+                tzinfo=timezone.utc,
+            )
+            monthly = await client.async_get_monthly_transfer(
+                installation["installation_identifier"],
+                month_start.isoformat(),
+                month_end.isoformat(),
+                installation["production"],
+                installation["street"],
+                installation["city"],
+                installation["postal_code"],
+            )
+            outage = normalize_outage(await client.async_get_outages(installation["point_of_delivery_number"]))
+            self.state = {
+                "agreement": {"status": "future" if installation.get("is_future") is True else "configured", "type": "ELECTRICITY_GRID"},
+                "facility": {"price_area": installation.get("price_area")},
+                "tariff": None,
+                "consumption": parse_monthly_transfer(monthly, now.year, now.month),
+                "cost": None,
+                "outage": outage,
+                "app_authenticated": True,
+                "reauth_required": False,
+                "error": None,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await self.store.async_save(self.state)
+        except ValueError as err:
+            self.state.update({"app_authenticated": True, "reauth_required": False, "error": str(err)})
+            await self.store.async_save(self.state)
+        except EonAuthError as err:
+            self.state.update({"app_authenticated": False, "reauth_required": True, "error": err.code})
             await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
@@ -99,6 +179,7 @@ class EonGridManager:
             "tariff": self.state.get("tariff"),
             "consumption": self.state.get("consumption"),
             "cost": self.state.get("cost"),
+            "outage": self.state.get("outage"),
             "error": self.state.get("error"),
         }
 
@@ -148,4 +229,6 @@ class EonGridManager:
             "cost": None,
             "reauth_required": False,
             "error": None,
+            "outage": None,
+            "app_authenticated": False,
         }

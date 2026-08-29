@@ -94,3 +94,49 @@ def test_cost_uses_gross_ore_rates_and_monthly_fee():
 
 def test_future_status_does_not_depend_on_current_date():
     assert models.agreement_status("ACTIVE", "2999-01-01", "Tillsvidare") == "future"
+
+
+def test_normalize_locations_selects_only_electricity_grid_installations():
+    result = models.normalize_locations([{
+        "installations": [
+            {"id": "grid-1", "podId": "pod-1", "productType": "ELECTRICITY", "serviceType": "GRID",
+             "priceArea": "SE_2", "production": False, "isFuture": True,
+             "address": {"fullStreet": "Example 1", "city": "Town", "postalCode": "123 45"}},
+            {"id": "other", "podId": "pod-2", "productType": "ELECTRICITY", "serviceType": "SUPPLY",
+             "address": {"fullStreet": "Example 2", "city": "Town", "postalCode": "123 45"}},
+        ],
+    }])
+    assert result == [{
+        "installation_identifier": "grid-1",
+        "point_of_delivery_number": "pod-1",
+        "street": "Example 1",
+        "city": "Town",
+        "postal_code": "123 45",
+        "price_area": "SE_2",
+        "production": False,
+        "is_future": True,
+        "elna_service_status": None,
+    }]
+
+
+def test_monthly_transfer_uses_timestamp_and_rejects_padded_values():
+    payload = {
+        "productType": "ELECTRICITY",
+        "aggregation": "MONTH",
+        "transfer": [
+            {"timestamp": "2026-08-01T00:00:00Z", "consumption": {"total": 12.5, "padded": False}},
+            {"timestamp": "2026-09-01T00:00:00Z", "consumption": {"total": 0, "padded": True}},
+        ],
+        "total": {"consumption": {"total": 999, "padded": False}},
+    }
+    assert models.parse_monthly_transfer(payload, 2026, 8)["consumption_kwh"] == 12.5
+    assert models.parse_monthly_transfer(payload, 2026, 9)["reason"] == "padded"
+
+
+def test_normalize_outage_treats_no_info_as_no_known_outage():
+    assert models.normalize_outage({"outageType": "NO_INFO", "affected": 0}) == {
+        "status": "no_known_outage", "outages": []
+    }
+    result = models.normalize_outage({"outageType": "UNVERIFIED", "affected": 1, "messageShort": "Status"})
+    assert result["status"] == "outage"
+    assert result["outages"][0]["message"] == "Status"

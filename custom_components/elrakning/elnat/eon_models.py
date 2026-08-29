@@ -119,6 +119,92 @@ def calculate_eon_cost(consumption_kwh: Any, tariff: Mapping[str, Any] | None) -
     }
 
 
+def normalize_locations(payload: Any) -> list[dict[str, Any]]:
+    """Normalize compatible electricity-grid installations from Locations."""
+    if not isinstance(payload, list):
+        raise ValueError("locations_unsupported")
+    locations: list[dict[str, Any]] = []
+    for location in payload:
+        if not isinstance(location, Mapping) or not isinstance(location.get("installations"), list):
+            continue
+        for installation in location["installations"]:
+            if not isinstance(installation, Mapping):
+                continue
+            if installation.get("productType") != "ELECTRICITY" or installation.get("serviceType") != "GRID":
+                continue
+            address = installation.get("address")
+            if not isinstance(address, Mapping):
+                raise ValueError("locations_unsupported")
+            if (
+                not isinstance(installation.get("id"), str)
+                or not isinstance(installation.get("podId"), str)
+                or not isinstance(installation.get("production"), bool)
+            ):
+                raise ValueError("locations_unsupported")
+            if any(not isinstance(address.get(key), str) or not address[key].strip() for key in ("fullStreet", "city", "postalCode")):
+                raise ValueError("locations_unsupported")
+            locations.append({
+                "installation_identifier": installation["id"],
+                "point_of_delivery_number": installation["podId"],
+                "street": address["fullStreet"],
+                "city": address["city"],
+                "postal_code": address["postalCode"],
+                "price_area": installation.get("priceArea"),
+                "production": installation["production"],
+                "is_future": installation.get("isFuture"),
+                "elna_service_status": installation.get("elnaServiceStatus"),
+            })
+    return locations
+
+
+def parse_monthly_transfer(payload: Any, year: int, month: int) -> dict[str, Any]:
+    """Parse one month from the verified middlelayer MONTH response."""
+    if not isinstance(payload, Mapping) or payload.get("productType") != "ELECTRICITY" or payload.get("aggregation") != "MONTH":
+        return {"status": "unsupported", "resolution": "Monthly"}
+    transfers = payload.get("transfer")
+    if not isinstance(transfers, list):
+        return {"status": "unsupported", "resolution": "Monthly"}
+    for item in transfers:
+        if not isinstance(item, Mapping) or not isinstance(item.get("timestamp"), str):
+            continue
+        try:
+            timestamp = datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if timestamp.year != year or timestamp.month != month:
+            continue
+        consumption = item.get("consumption")
+        if not isinstance(consumption, Mapping):
+            return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "consumption_missing"}
+        if consumption.get("padded") is True:
+            return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "padded"}
+        total = consumption.get("total")
+        if not _is_number(total):
+            return {"status": "unsupported", "resolution": "Monthly"}
+        return {"status": "ok", "resolution": "Monthly", "year": year, "month": month, "consumption_kwh": float(total)}
+    return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "month_missing"}
+
+
+def normalize_outage(payload: Any) -> dict[str, Any]:
+    """Normalize outage status without assigning semantics to unknown types."""
+    items = payload if isinstance(payload, list) else [payload]
+    visible = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("outageType") == "NO_INFO" and item.get("affected") == 0:
+            continue
+        visible.append({
+            "outage_type": item.get("outageType"),
+            "affected": item.get("affected"),
+            "title": item.get("title"),
+            "message": item.get("message") or item.get("messageShort"),
+            "planned_arrival": item.get("plannedArrival"),
+            "estimate": item.get("estimate"),
+        })
+    return {"status": "no_known_outage" if not visible else "outage", "outages": visible}
+
+
 def agreement_status(raw_status: Any, start_date: Any, end_date: Any) -> str:
     """Keep future agreements distinct from active and ended agreements."""
     today = date.today()

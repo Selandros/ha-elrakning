@@ -966,14 +966,20 @@ class ElrakningPanel {
       <div class="provider-dialog" data-eon-grid-dialog hidden role="dialog" aria-modal="true" aria-labelledby="eon-grid-title">
         <div class="provider-dialog-card">
           <h2 id="eon-grid-title">Konfigurera E.ON elnät</h2>
-          <p>Klistra in Cookie-headern från en autentiserad Mitt E.ON-session.</p>
-          <label>Cookie-header<input type="password" data-eon-grid-cookie autocomplete="off"></label>
+          <p>Logga in med ditt E.ON konto-ID och lösenord.</p>
+          <label>Användarnamn / konto-ID<input type="text" data-eon-grid-account autocomplete="username"></label>
+          <label>Lösenord<input type="password" data-eon-grid-password autocomplete="current-password"></label>
           <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
           <div class="provider-actions">
             <button type="button" data-eon-grid-cancel>Avbryt</button>
             <button type="button" data-eon-grid-remove hidden>Ta bort E.ON</button>
-            <button type="button" data-eon-grid-save>Spara</button>
+            <button type="button" data-eon-grid-save>Logga in</button>
           </div>
+          <details class="provider-fallback">
+            <summary>Avancerad sessionsimport</summary>
+            <label>Cookie-header<input type="password" data-eon-grid-cookie autocomplete="off"></label>
+            <button type="button" data-eon-grid-cookie-save>Importera session</button>
+          </details>
         </div>
       </div>
       <style>
@@ -4966,7 +4972,18 @@ class ElrakningPanel {
     const cost = state?.cost || {};
     provider.textContent = configured ? "E.ON · Elnät" : "";
     provider.hidden = !configured;
-    status.textContent = configured ? (agreement.status === "future" ? "Kommande avtal" : agreement.status === "active" ? "Konfigurerad" : "Ej aktivt") : "Ej konfigurerad";
+    const outage = state?.outage || {};
+    status.textContent = configured
+      ? outage.status === "outage"
+        ? "Driftstörning"
+        : outage.status === "no_known_outage"
+          ? "Ingen känd driftstörning"
+          : agreement.status === "future"
+            ? "Kommande avtal"
+            : agreement.status === "active"
+              ? "Konfigurerad"
+              : "Ej aktivt"
+      : "Ej konfigurerad";
     status.hidden = false;
     remove && (remove.hidden = !configured);
     const rows = [];
@@ -4991,32 +5008,49 @@ class ElrakningPanel {
   _bindEonGridDialog() {
     const open = this.host.querySelector("[data-eon-grid-configure]");
     const dialog = this.host.querySelector("[data-eon-grid-dialog]");
+    const account = this.host.querySelector("[data-eon-grid-account]");
+    const password = this.host.querySelector("[data-eon-grid-password]");
     const cookie = this.host.querySelector("[data-eon-grid-cookie]");
+    const cookieSave = this.host.querySelector("[data-eon-grid-cookie-save]");
     const result = this.host.querySelector("[data-eon-grid-result]");
     const save = this.host.querySelector("[data-eon-grid-save]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !cookie || !result || !save || !cancel || !remove) return;
-    const close = () => { dialog.hidden = true; cookie.value = ""; result.textContent = ""; };
-    open.addEventListener("click", () => { dialog.hidden = false; cookie.focus(); });
+    if (!open || !dialog || !account || !password || !cookie || !cookieSave || !result || !save || !cancel || !remove) return;
+    const close = () => { dialog.hidden = true; account.value = ""; password.value = ""; cookie.value = ""; result.textContent = ""; };
+    open.addEventListener("click", () => { dialog.hidden = false; account.focus(); });
     cancel.addEventListener("click", close);
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/eon_grid_remove" })); close(); } finally { remove.disabled = false; }
     });
     save.addEventListener("click", async () => {
-      if (!cookie.value.trim()) return;
+      if (!account.value.trim() || !password.value) return;
       save.disabled = true;
       result.textContent = "Verifierar session …";
       try {
-        const response = await this.hass.callWS({ type: "elrakning/eon_grid_save", cookie_header: cookie.value.trim() });
+        const response = await this.hass.callWS({ type: "elrakning/eon_grid_app_save", account_id: account.value.trim(), password: password.value });
         if (!response.success) throw new Error(response.error || "configuration_failed");
         this._applyEonGridState(response);
         result.textContent = "E.ON är konfigurerat";
         window.setTimeout(close, 900);
       } catch (error) {
-        result.textContent = error.message === "customer_id_missing" ? "Cookie-headern saknar verifierat kund-ID." : "E.ON-sessionen kunde inte verifieras.";
+        result.textContent = error.message === "reauth_required" ? "E.ON-inloggningen behöver göras om." : "E.ON-inloggningen kunde inte verifieras.";
       } finally { save.disabled = false; }
+    });
+    cookieSave.addEventListener("click", async () => {
+      if (!cookie.value.trim()) return;
+      cookieSave.disabled = true;
+      result.textContent = "Verifierar session …";
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/eon_grid_save", cookie_header: cookie.value.trim() });
+        if (!response.success) throw new Error(response.error || "configuration_failed");
+        this._applyEonGridState(response);
+        result.textContent = "E.ON-sessionen är importerad";
+        window.setTimeout(close, 900);
+      } catch {
+        result.textContent = "E.ON-sessionen kunde inte verifieras.";
+      } finally { cookieSave.disabled = false; }
     });
   }
 

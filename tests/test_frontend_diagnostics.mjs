@@ -15,6 +15,9 @@ const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/fron
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
 assert.match(eonPanelSource, /elrakning\/eon_grid_state/);
 assert.match(eonPanelSource, /data-eon-grid-cookie/);
+assert.match(eonPanelSource, /data-eon-grid-account/);
+assert.match(eonPanelSource, /data-eon-grid-password/);
+assert.match(eonPanelSource, /elrakning\/eon_grid_app_save/);
 
 assert.match(output, /^Elräkning diagnostics/m);
 assert.match(output, /Version: 0\.0\.64/);

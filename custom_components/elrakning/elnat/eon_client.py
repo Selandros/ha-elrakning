@@ -5,10 +5,15 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .eon_auth import EonSession
+from .eon_auth import EonAppSession, EonSession
 
 COMMON_USER_URL = "https://eoncommonapiapirun.azurewebsites.net/api/neo/api/cj/cv/v1/rest/v2/user"
 CONSUMPTION_URL = "https://eonmycoapirun.azurewebsites.net/api/consumption"
+MIDDLELAYER_BASE = "https://eonappapimrun.azure-api.net/middlelayer"
+CONTRACT_ACCOUNTS_URL = f"{MIDDLELAYER_BASE}/v2/ContractAccounts"
+LOCATIONS_URL = f"{MIDDLELAYER_BASE}/Locations"
+MONTHLY_TRANSFER_URL = f"{MIDDLELAYER_BASE}/energy/transfer/ELECTRICITY/MONTH"
+OUTAGES_URL = f"{MIDDLELAYER_BASE}/OutagesV2"
 
 
 class EonClient:
@@ -35,4 +40,51 @@ class EonClient:
                 "pointOfDeliveryNumber": point_of_delivery_number,
                 "consumptionType": "Electricity",
             },
+        )
+
+
+class EonAppClient:
+    """Access only the verified E.ON middlelayer endpoints."""
+
+    def __init__(self, session: EonAppSession) -> None:
+        self.session = session
+
+    async def async_get_contract_accounts(self) -> Any:
+        return await self.session.request_json("GET", CONTRACT_ACCOUNTS_URL)
+
+    async def async_get_locations(self) -> Any:
+        return await self.session.request_json(
+            "GET", LOCATIONS_URL, params={"includeFullElnaStatus": "true"}
+        )
+
+    async def async_get_monthly_transfer(
+        self,
+        installation_identifier: str,
+        from_timestamp: str,
+        to_timestamp: str,
+        production: bool,
+        street: str,
+        city: str,
+        postal_code: str,
+    ) -> Any:
+        return await self.session.request_json(
+            "GET",
+            MONTHLY_TRANSFER_URL,
+            params={
+                "includeReference": "true",
+                "includeTotal": "true",
+                "installations": f"{installation_identifier}:ELECTRICITY:GRID:{str(production).lower()}",
+                "from": from_timestamp,
+                "to": to_timestamp,
+                "locationStreet": street,
+                "locationCity": city,
+                "locationPostalCode": postal_code,
+                "limelightActivationDate": "",
+                "language": "sv",
+            },
+        )
+
+    async def async_get_outages(self, point_of_delivery_number: str) -> Any:
+        return await self.session.request_json(
+            "GET", OUTAGES_URL, params={"podIds": point_of_delivery_number}
         )
