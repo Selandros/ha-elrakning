@@ -1,10 +1,9 @@
 const ALLOWED_COOKIES = new Set([
-  "MyEonAccessScopes",
-  "MyEonAccessToken",
-  "MyEonAccessToken-ValidUntil",
-  "MyEonIDToken",
-  "MyEonSession",
+  "MyEonAccessScopes", "MyEonAccessToken", "MyEonAccessToken-ValidUntil",
+  "MyEonIDToken", "MyEonSession",
 ]);
+const MAX_ATTEMPTS = 8;
+const RETRY_DELAY_MS = 750;
 
 function readAllowedCookies() {
   const cookies = {};
@@ -17,22 +16,35 @@ function readAllowedCookies() {
   return cookies;
 }
 
+function waitForRetry() {
+  return new Promise((resolve) => window.setTimeout(resolve, RETRY_DELAY_MS));
+}
+
+async function sendStatus(type) {
+  try { await chrome.runtime.sendMessage({type}); } catch { /* Keep the page passive if the helper is unavailable. */ }
+}
+
 async function sendAuthenticatedSession() {
   if (location.origin !== "https://www.eon.se") return;
-  const cookies = readAllowedCookies();
-  if (!cookies.MyEonIDToken || !cookies.MyEonSession) return;
-  try {
-    const response = await fetch(
-      "/bin/eon-se/codeflow/session?pagePath=/content/eon-se/sv_SE/mitt-e-on",
-      {credentials: "include", cache: "no-store", headers: {"X-Requested-With": "XMLHttpRequest"}},
-    );
-    if (!response.ok) return;
-    const session = await response.json();
-    if (!session?.currentToken) return;
-    await chrome.runtime.sendMessage({type: "eon-session-ready", cookies});
-  } catch {
-    // The content script remains passive when the E.ON session is unavailable.
+  await sendStatus("eon-page-loaded");
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const cookies = readAllowedCookies();
+    if (cookies.MyEonIDToken && cookies.MyEonSession) {
+      try {
+        const response = await fetch(
+          "/bin/eon-se/codeflow/session?pagePath=/content/eon-se/sv_SE/mitt-e-on",
+          {credentials: "include", cache: "no-store", headers: {"X-Requested-With": "XMLHttpRequest"}},
+        );
+        if (response.ok && (await response.json())?.currentToken) {
+          const result = await chrome.runtime.sendMessage({type: "eon-session-ready", cookies});
+          if (result?.status === "completed") return;
+          if (result?.status && result.status !== "pending_missing") return;
+        }
+      } catch { /* Retry only within the bounded handoff window. */ }
+    }
+    if (attempt + 1 < MAX_ATTEMPTS) await waitForRetry();
   }
+  await sendStatus("eon-session-missing");
 }
 
 void sendAuthenticatedSession();

@@ -3,10 +3,13 @@ const ALLOWED_COOKIES = new Set([
   "MyEonIDToken", "MyEonSession",
 ]);
 const STATUS_VALUES = new Set([
-  "completed", "helper_not_configured", "pending_missing", "handoff_expired",
-  "eon_session_missing", "ha_unreachable", "handoff_rejected",
+  "helper_state_received", "handoff_state_stored", "eon_page_loaded",
+  "eon_session_ready", "handoff_posting", "completed", "helper_not_configured",
+  "helper_unreachable", "pending_missing", "handoff_expired", "eon_session_missing",
+  "ha_unreachable", "handoff_rejected",
 ]);
 const SESSION_KEY = "eonHandoff";
+let completionPromise = null;
 
 function normalizeOrigin(value) {
   const url = new URL(value);
@@ -40,6 +43,12 @@ async function storePending(state, tabId) {
   }});
 }
 
+async function pendingStatus(status) {
+  const pending = await getPending();
+  if (pending) await signalStatus(pending.tabId, status);
+  return pending;
+}
+
 async function getPending() {
   const stored = await chrome.storage.session.get(SESSION_KEY);
   const pending = stored[SESSION_KEY];
@@ -58,23 +67,21 @@ function filteredCookies(cookieMap) {
   )));
 }
 
-async function completeHandoff(cookieMap, eonTabId) {
+async function completeHandoff(cookieMap) {
   let origin;
   try {
     origin = await configuredHaOrigin();
   } catch {
-    await signalStatus(eonTabId, "helper_not_configured");
-    return;
+    return {status: "helper_not_configured"};
   }
   const pending = await getPending();
-  if (!pending) {
-    await signalStatus(eonTabId, "pending_missing");
-    return;
-  }
+  if (!pending) return {status: "pending_missing"};
+  await signalStatus(pending.tabId, "eon_session_ready");
+  await signalStatus(pending.tabId, "handoff_posting");
   const cookies = filteredCookies(cookieMap);
   if (!cookies.MyEonIDToken || !cookies.MyEonSession) {
     await signalStatus(pending.tabId, "eon_session_missing");
-    return;
+    return {status: "eon_session_missing"};
   }
   let response;
   try {
@@ -86,32 +93,51 @@ async function completeHandoff(cookieMap, eonTabId) {
   } catch {
     await clearPending();
     await signalStatus(pending.tabId, "ha_unreachable");
-    return;
+    return {status: "ha_unreachable"};
   }
   let payload = {};
   try { payload = await response.json(); } catch { payload = {}; }
   await clearPending();
   if (response.ok && payload.success === true) {
     await signalStatus(pending.tabId, "completed");
-    return;
+    return {status: "completed"};
   }
-  await signalStatus(pending.tabId, STATUS_VALUES.has(payload.error) ? payload.error : "handoff_rejected");
+  const status = STATUS_VALUES.has(payload.error) ? payload.error : "handoff_rejected";
+  await signalStatus(pending.tabId, status);
+  return {status};
 }
 
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "ha-handoff-state") {
     void (async () => {
       const origin = await configuredHaOrigin().catch(() => null);
       const senderUrl = sender.tab?.url;
-      if (!origin || !sender.tab?.id || !senderUrl || new URL(senderUrl).origin !== origin) return;
-      if (typeof message.state !== "string" || message.state.length < 32) return;
+      if (!origin || !sender.tab?.id || !senderUrl || new URL(senderUrl).origin !== origin) {
+        sendResponse({status: "helper_unreachable"});
+        return;
+      }
+      if (typeof message.state !== "string" || message.state.length < 32) {
+        sendResponse({status: "handoff_rejected"});
+        return;
+      }
       await storePending(message.state, sender.tab.id);
-    })();
-    return;
+      await signalStatus(sender.tab.id, "handoff_state_stored");
+      sendResponse({status: "handoff_state_stored"});
+    })().catch(() => sendResponse({status: "helper_unreachable"}));
+    return true;
   }
   if (message?.type === "eon-session-ready" && message.cookies) {
     const eonOrigin = sender.tab?.url ? new URL(sender.tab.url).origin : null;
     if (eonOrigin !== "https://www.eon.se") return;
-    void completeHandoff(message.cookies, sender.tab?.id).catch(() => {});
+    if (!completionPromise) {
+      completionPromise = completeHandoff(message.cookies).finally(() => { completionPromise = null; });
+    }
+    completionPromise.then(sendResponse).catch(() => sendResponse({status: "handoff_rejected"}));
+    return true;
+  }
+  if (["eon-page-loaded", "eon-session-missing"].includes(message?.type)) {
+    const eonOrigin = sender.tab?.url ? new URL(sender.tab.url).origin : null;
+    if (eonOrigin !== "https://www.eon.se") return;
+    void pendingStatus(message.type === "eon-page-loaded" ? "eon_page_loaded" : "eon_session_missing");
   }
 });

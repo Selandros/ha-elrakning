@@ -682,6 +682,7 @@ class ElrakningPanel {
     this._eonGridEventUnsubscribePromise = null;
     this._eonWebHandoffPending = false;
     this._eonHandoffStatusListener = null;
+    this._eonHandoffAckResolver = null;
     this._connectionReadyListener = null;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
@@ -4949,6 +4950,8 @@ class ElrakningPanel {
     document.removeEventListener("visibilitychange", this._onThemeVisibility);
     if (this._eonHandoffStatusListener) window.removeEventListener("message", this._eonHandoffStatusListener);
     this._eonHandoffStatusListener = null;
+    if (this._eonHandoffAckResolver) this._eonHandoffAckResolver("helper_unreachable");
+    this._eonHandoffAckResolver = null;
     this._themeResizeObserver?.disconnect();
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
@@ -5150,15 +5153,29 @@ class ElrakningPanel {
         const response = await this.hass.callWS({ type: "elrakning/grid/web_handoff_start" });
         if (!response.success) throw new Error(response.error || "handoff_failed");
         if (typeof response.state !== "string" || response.state.length < 32) throw new Error("handoff_failed");
+        const ack = new Promise((resolve) => {
+          const timeout = window.setTimeout(() => {
+            this._eonHandoffAckResolver = null;
+            resolve("helper_unreachable");
+          }, 5000);
+          this._eonHandoffAckResolver = (status) => {
+            window.clearTimeout(timeout);
+            this._eonHandoffAckResolver = null;
+            resolve(status);
+          };
+        });
         window.postMessage({ type: "elrakning-eon-handoff-state", state: response.state }, window.location.origin);
+        const ackStatus = await ack;
+        if (ackStatus !== "handoff_state_stored") throw new Error(ackStatus || "helper_unreachable");
         this._eonWebHandoffPending = true;
         if (popup) popup.location.href = response.url;
         else window.open(response.url, "_blank");
         result.textContent = "Logga in i Mitt E.ON. Anslutningen slutförs automatiskt efter lyckad inloggning.";
       } catch (error) {
         popup?.close();
-        if (webStatus) webStatus.textContent = "Handoff kunde inte startas.";
-        result.textContent = error.message === "handoff_unavailable" ? "Mitt E.ON-handoff är inte tillgänglig." : "Mitt E.ON kunde inte öppnas.";
+        const helperError = ["helper_unreachable", "helper_not_configured", "handoff_rejected"].includes(error.message);
+        if (webStatus && !helperError) webStatus.textContent = "Handoff kunde inte startas.";
+        if (result && !helperError) result.textContent = error.message === "handoff_unavailable" ? "Mitt E.ON-handoff är inte tillgänglig." : "Mitt E.ON kunde inte öppnas.";
         webConnect.disabled = false;
       }
     });
@@ -5168,7 +5185,13 @@ class ElrakningPanel {
     if (this._eonHandoffStatusListener) return;
     const messages = {
       completed: "Mitt E.ON är anslutet.",
+      helper_state_received: "Helper kontaktad.",
+      handoff_state_stored: "Väntar på Mitt E.ON.",
+      eon_page_loaded: "Mitt E.ON öppet.",
+      eon_session_ready: "E.ON-session hittad.",
+      handoff_posting: "Överför E.ON-session.",
       helper_not_configured: "Chrome-hjälpen är inte konfigurerad.",
+      helper_unreachable: "Chrome-hjälpen kunde inte nås.",
       pending_missing: "Ingen väntande anslutning hittades.",
       handoff_expired: "Anslutningen hann gå ut.",
       eon_session_missing: "Ingen inloggad Mitt E.ON-session hittades.",
@@ -5180,12 +5203,15 @@ class ElrakningPanel {
       if (event.data?.type !== "elrakning-eon-handoff-status") return;
       const status = messages[event.data.status];
       if (!status) return;
+      if (event.data.status !== "helper_state_received" && this._eonHandoffAckResolver) {
+        this._eonHandoffAckResolver(event.data.status);
+      }
       const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
       const result = this.host.querySelector("[data-eon-grid-result]");
       const webConnect = this.host.querySelector("[data-eon-grid-web-connect]");
       if (webStatus) webStatus.textContent = status;
       if (result) result.textContent = status;
-      if (webConnect) webConnect.disabled = false;
+      if (webConnect && ["completed", "helper_not_configured", "helper_unreachable", "pending_missing", "handoff_expired", "eon_session_missing", "ha_unreachable", "handoff_rejected"].includes(event.data.status)) webConnect.disabled = false;
       this._eonWebHandoffPending = event.data.status !== "completed";
       if (event.data.status === "completed") void this.loadEonGridState();
     };
