@@ -3116,12 +3116,21 @@ class ElrakningPanel {
   _applyDebugVisibility() {
     const source = this.host.querySelector("[data-provider-source]");
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
+    const eonCommonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
+    if (eonCommonApiProbe) eonCommonApiProbe.hidden = !this._isEonCommonApiProbeVisible();
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
+  }
+
+  _isEonCommonApiProbeVisible() {
+    return this._debugEnabled
+      && this._eonGridState?.configured === true
+      && this._eonGridState?.provider === "eon"
+      && this._eonGridState?.auth_method === "app";
   }
 
   _bindMeterDialog() {
@@ -5036,7 +5045,7 @@ class ElrakningPanel {
     status.hidden = false;
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
-    if (commonApiProbe) commonApiProbe.hidden = !this._debugEnabled || !configured || state?.auth_method !== "app";
+    if (commonApiProbe) commonApiProbe.hidden = !this._isEonCommonApiProbeVisible();
     const rows = [];
     if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
