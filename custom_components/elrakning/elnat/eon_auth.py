@@ -304,7 +304,7 @@ class EonSession:
         headers = dict(kwargs.pop("headers", {}))
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        return await self._session.request(method, url, headers=headers, cookies=self.cookies, **kwargs)
+        return await self._session.request(method, url, headers=headers, **kwargs)
 
     def _apply_response_cookies(self, response: ClientResponse) -> None:
         self._jar.update_cookies(response.cookies, response_url=response.url)

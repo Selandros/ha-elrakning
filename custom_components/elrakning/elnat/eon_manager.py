@@ -310,13 +310,17 @@ class EonGridManager:
         raise EonAuthError("not_configured")
 
     def public_state(self) -> dict[str, Any]:
+        facility = self.state.get("facility") or {}
         return {
             "configured": self.configured,
             "provider": EON_GRID_PROVIDER,
             "provider_name": "E.ON",
             "reauth_required": self.state.get("reauth_required", False),
             "agreement": self.state.get("agreement"),
-            "facility": self.state.get("facility"),
+            "facility": {
+                "price_area": facility.get("price_area"),
+                "fuse_ampere": facility.get("fuse_ampere"),
+            } if facility else None,
             "tariff": self.state.get("tariff"),
             "consumption": self.state.get("consumption"),
             "cost": self.state.get("cost"),
@@ -409,7 +413,8 @@ def _redact_source_data(value: Any) -> Any:
     sensitive = (
         "accountid", "customeridentifier", "customerid", "contractaccountidentifier",
         "installationidentifier", "pointofdeliverynumber", "podid", "devicenumber",
-        "premiseid", "password", "token", "secret", "cookie", "authorization",
+        "premiseid", "installationids", "allaccountids", "session", "id", "password",
+        "token", "secret", "cookie", "authorization",
     )
     if isinstance(value, dict):
         result = {}
