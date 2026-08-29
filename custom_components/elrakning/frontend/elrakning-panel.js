@@ -728,8 +728,8 @@ class ElrakningPanel {
         </div>
 
         <div class="daily-energy-row battery-history-row">
-          <article class="card battery-history-card" data-power-card="battery-history" hidden>
-            <div class="card-heading"><h2>Batterihistorik</h2><span class="status" data-battery-history-status hidden>Ej konfigurerad</span></div>
+          <article class="card battery-history-card" data-power-card="battery-history" hidden aria-labelledby="battery-history-title">
+            <h2 id="battery-history-title" class="visually-hidden">Batterihistorik</h2>
             <p class="battery-history-meta" data-battery-history-meta hidden></p>
             <div class="battery-history-chart" data-battery-history-chart hidden></div>
           </article>

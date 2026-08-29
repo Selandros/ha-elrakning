@@ -431,6 +431,10 @@ assert.match(panelSource, /_powerLivePoints = Object\.fromEntries\(\["solar", "c
 assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /data-power-card="battery-history"/);
 assert.match(panelSource, /Batterihistorik/);
+assert.match(panelSource, /aria-labelledby="battery-history-title"/);
+assert.match(panelSource, /id="battery-history-title" class="visually-hidden">Batterihistorik<\/h2>/);
+const batteryHistoryMarkup = panelSource.match(/<article class="card battery-history-card"[\s\S]*?<\/article>/)?.[0] || "";
+assert.doesNotMatch(batteryHistoryMarkup, /card-heading/);
 assert.doesNotMatch(panelSource, /data-power-card="battery-history"[^>]*data-config-card-key/);
 assert.doesNotMatch(panelSource, /data-power-card="battery-history"[^>]*data-main-card-toggle/);
 assert.match(panelSource, /battery-history-row/);
