@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -73,6 +74,22 @@ def test_auth_errors_do_not_echo_credentials():
         assert "secret" not in str(error)
     else:
         raise AssertionError("invalid form was accepted")
+
+
+def test_session_expiry_uses_numeric_epoch_milliseconds_first():
+    now = time.time()
+    expiry = auth._expiry_from_session({
+        "currentAccessTokenExpiresAt": (now + 120) * 1000,
+        "tokenExpiersIn": 898000,
+    })
+    remaining = expiry - time.monotonic()
+    assert 115 < remaining < 125
+
+
+def test_session_expiry_fallback_treats_remaining_value_as_milliseconds():
+    expiry = auth._expiry_from_session({"tokenExpiersIn": 898000})
+    remaining = expiry - time.monotonic()
+    assert 890 < remaining < 905
 
 
 def test_bearer_probe_uses_isolated_session_and_returns_success_payload():
@@ -231,7 +248,7 @@ def test_web_ensure_token_refreshes_expired_session_without_revoke():
 
         async def json(self, **kwargs):
             if url := self.url:
-                if url.endswith("/session?pagePath=%2Fmitt-e-on"):
+                if url.endswith("/session?pagePath=%2Fcontent%2Feon-se%2Fsv_SE%2Fmitt-e-on"):
                     return {"currentToken": "synthetic-expired-token", "tokenExpiersIn": 0}
             return {
                 "access_token": "synthetic-refreshed-token",
@@ -256,6 +273,6 @@ def test_web_ensure_token_refreshes_expired_session_without_revoke():
     token = asyncio.run(session._ensure_token())
 
     assert token == "synthetic-refreshed-token"
-    assert session._session.urls[0].endswith("/session?pagePath=%2Fmitt-e-on")
+    assert session._session.urls[0].endswith("/session?pagePath=%2Fcontent%2Feon-se%2Fsv_SE%2Fmitt-e-on")
     assert session._session.urls[1].endswith("/refreshToken")
     assert not any("revokeToken" in url for url in session._session.urls)

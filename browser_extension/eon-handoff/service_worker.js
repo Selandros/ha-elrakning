@@ -6,7 +6,12 @@ const STATUS_VALUES = new Set([
   "helper_state_received", "handoff_state_stored", "eon_page_loaded",
   "eon_session_ready", "handoff_posting", "completed", "helper_not_configured",
   "helper_unreachable", "pending_missing", "handoff_expired", "eon_session_missing",
-  "ha_unreachable", "handoff_rejected",
+  "eon_session_validation_failed", "ha_unreachable", "handoff_rejected",
+]);
+const BACKEND_STATUS_MAP = new Map([
+  ["session_failed", "eon_session_validation_failed"],
+  ["reauth_required", "eon_session_validation_failed"],
+  ["customer_id_missing", "eon_session_validation_failed"],
 ]);
 const SESSION_KEY = "eonHandoff";
 let completionPromise = null;
@@ -102,7 +107,7 @@ async function completeHandoff(cookieMap) {
     await signalStatus(pending.tabId, "completed");
     return {status: "completed"};
   }
-  const status = STATUS_VALUES.has(payload.error) ? payload.error : "handoff_rejected";
+  const status = BACKEND_STATUS_MAP.get(payload.error) || (STATUS_VALUES.has(payload.error) ? payload.error : "handoff_rejected");
   await signalStatus(pending.tabId, status);
   return {status};
 }

@@ -5190,6 +5190,7 @@ class ElrakningPanel {
       eon_page_loaded: "Mitt E.ON öppet.",
       eon_session_ready: "E.ON-session hittad.",
       handoff_posting: "Överför E.ON-session.",
+      eon_session_validation_failed: "E.ON-sessionen kunde inte verifieras.",
       helper_not_configured: "Chrome-hjälpen är inte konfigurerad.",
       helper_unreachable: "Chrome-hjälpen kunde inte nås.",
       pending_missing: "Ingen väntande anslutning hittades.",

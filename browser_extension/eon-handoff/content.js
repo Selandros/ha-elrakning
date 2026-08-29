@@ -4,6 +4,7 @@ const ALLOWED_COOKIES = new Set([
 ]);
 const MAX_ATTEMPTS = 8;
 const RETRY_DELAY_MS = 750;
+const WEB_SESSION_PAGE_PATH = "/content/eon-se/sv_SE/mitt-e-on";
 
 function readAllowedCookies() {
   const cookies = {};
@@ -32,7 +33,7 @@ async function sendAuthenticatedSession() {
     if (cookies.MyEonIDToken && cookies.MyEonSession) {
       try {
         const response = await fetch(
-          "/bin/eon-se/codeflow/session?pagePath=/content/eon-se/sv_SE/mitt-e-on",
+          `/bin/eon-se/codeflow/session?pagePath=${encodeURIComponent(WEB_SESSION_PAGE_PATH)}`,
           {credentials: "include", cache: "no-store", headers: {"X-Requested-With": "XMLHttpRequest"}},
         );
         if (response.ok && (await response.json())?.currentToken) {

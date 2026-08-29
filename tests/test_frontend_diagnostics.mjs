@@ -58,6 +58,8 @@ assert.match(handoffBridgeSource, /response\?\.status/);
 assert.match(handoffContentSource, /MAX_ATTEMPTS = 8/);
 assert.match(handoffContentSource, /pending_missing/);
 assert.match(handoffContentSource, /eon-session-missing/);
+assert.match(handoffContentSource, /WEB_SESSION_PAGE_PATH = "\/content\/eon-se\/sv_SE\/mitt-e-on"/);
+assert.match(handoffServiceSource, /eon_session_validation_failed/);
 assert.match(handoffViewSource, /requires_auth = False/);
 assert.match(handoffViewSource, /async_complete_web_handoff\(state, cookies\)/);
 assert.doesNotMatch(handoffViewSource, /EonHandoffPendingView|handoff\/pending/);

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import secrets
 import time
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ from yarl import URL
 EON_WEB_BASE = "https://www.eon.se"
 SESSION_PATH = "/bin/eon-se/codeflow/session"
 REFRESH_PATH = "/bin/eon-se/codeflow/refreshToken"
+WEB_SESSION_PAGE_PATH = "/content/eon-se/sv_SE/mitt-e-on"
 EON_APP_BASE = "https://api.apps.eon.se"
 COMMON_API_USER_URL = "https://eoncommonapiapirun.azurewebsites.net/api/neo/api/cj/cv/v1/rest/v2/user"
 APP_AUTHORIZATION_PATH = "/neo/oauth/v2/authorization"
@@ -327,7 +329,7 @@ class EonSession:
         return self._access_token or ""
 
     async def _session_info(self) -> None:
-        query = urlencode({"pagePath": "/mitt-e-on"})
+        query = urlencode({"pagePath": WEB_SESSION_PAGE_PATH})
         try:
             async with self._session.get(
                 f"{EON_WEB_BASE}{SESSION_PATH}?{query}",
@@ -360,14 +362,18 @@ class EonSession:
 
 def _expiry_from_session(payload: Mapping[str, Any]) -> float:
     absolute = payload.get("currentAccessTokenExpiresAt")
-    if isinstance(absolute, str):
+    absolute_seconds = None
+    if isinstance(absolute, (int, float)) and not isinstance(absolute, bool) and math.isfinite(absolute):
+        absolute_seconds = absolute / 1000
+    elif isinstance(absolute, str):
         try:
             parsed = datetime.fromisoformat(absolute.replace("Z", "+00:00"))
-            timestamp = (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).timestamp()
-            return time.monotonic() + max(0.0, timestamp - time.time())
+            absolute_seconds = (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).timestamp()
         except ValueError:
-            pass
+            absolute_seconds = None
+    if absolute_seconds is not None and math.isfinite(absolute_seconds) and absolute_seconds > time.time():
+        return time.monotonic() + (absolute_seconds - time.time())
     value = payload.get("tokenExpiersIn")
-    if isinstance(value, (int, float)):
-        return time.monotonic() + float(value)
-    return time.monotonic() + 60
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+        return time.monotonic() + (value / 1000)
+    return time.monotonic()
