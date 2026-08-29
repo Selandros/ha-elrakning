@@ -3659,7 +3659,7 @@ class ElrakningPanel {
         group.classList.add("hovered");
         hoveredDay = group;
       }
-      tooltip.innerHTML = `<strong>${day.date}</strong><span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span>`;
+      tooltip.innerHTML = `<span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span>`;
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
@@ -3743,7 +3743,7 @@ class ElrakningPanel {
       hoveredDay?.classList.remove("hovered");
       group.classList.add("hovered");
       hoveredDay = group;
-      tooltip.innerHTML = `<strong>${day.date}</strong><span>Producerat: ${Number.isFinite(day.producedKwh) ? `${this._formatNumber(day.producedKwh)} kWh` : "—"}</span><span>Solpotential: ${Number.isFinite(day.referenceKwh) ? `${this._formatNumber(day.referenceKwh)} kWh` : "—"}</span>`;
+      tooltip.innerHTML = `<span>Producerat: ${Number.isFinite(day.producedKwh) ? `${this._formatNumber(day.producedKwh)} kWh` : "—"}</span><span>Solpotential: ${Number.isFinite(day.referenceKwh) ? `${this._formatNumber(day.referenceKwh)} kWh` : "—"}</span>`;
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
