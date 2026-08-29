@@ -486,7 +486,13 @@ assert.match(panelSource, /const plot = \{ left: 44, right: 8, top: 8, bottom: 8
 assert.match(panelSource, /const xStart = dayStart\.getTime\(\);/);
 assert.match(panelSource, /const xEnd = points\.at\(-1\)\.timestamp;/);
 assert.match(panelSource, /const xDuration = Math\.max\(1, xEnd - xStart\);/);
-assert.match(panelSource, /const timestamp = xStart \+ pointerRatio \* xDuration;/);
+assert.match(panelSource, /const svgX = rect\.width > 0 \? \(\(event\.clientX - rect\.left\) \/ rect\.width\) \* width : plot\.left;/);
+assert.match(panelSource, /const clampedSvgX = Math\.max\(plot\.left, Math\.min\(width - plot\.right, svgX\)\);/);
+assert.match(panelSource, /const plotRatio = plotWidth > 0 \? \(clampedSvgX - plot\.left\) \/ plotWidth : 0;/);
+assert.match(panelSource, /const timestamp = xStart \+ plotRatio \* xDuration;/);
+assert.match(panelSource, /const singletonMarkup = segments\.filter\(\(segment\) => segment\.length === 1\)/);
+assert.match(panelSource, /class="soc-singleton"/);
+assert.match(panelSource, /\$\{gridMarkup\}\$\{lineMarkup\}\$\{singletonMarkup\}/);
 assert.match(panelSource, /\[0, 50, 100\]\.map\(\(level\)/);
 assert.match(panelSource, /class="soc-label top">100<\/span><span class="soc-label middle">50<\/span><span class="soc-label bottom">0<\/span>/);
 assert.doesNotMatch(panelSource, /<text class="soc-label"/);

@@ -1359,6 +1359,13 @@ class ElrakningPanel {
           vector-effect: non-scaling-stroke;
         }
 
+        .soc-singleton {
+          fill: var(--soc-color);
+          stroke: var(--ha-card-background, var(--card-background-color));
+          stroke-width: 2;
+          vector-effect: non-scaling-stroke;
+        }
+
         .soc-tooltip {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
@@ -3250,12 +3257,14 @@ class ElrakningPanel {
       const area = `M ${x(segment[0].timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(segment.at(-1).timestamp)} ${plot.top + plotHeight} Z`;
       return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
     }).join("");
+    const singletonMarkup = segments.filter((segment) => segment.length === 1).map(([point]) =>
+      `<circle class="soc-singleton" cx="${x(point.timestamp)}" cy="${y(point.value)}" r="3" />`).join("");
     const gridMarkup = [0, 50, 100].map((level) => {
       return `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`;
     }).join("");
     const labelMarkup = `<div class="soc-label-rail" aria-hidden="true"><span class="soc-label top">100</span><span class="soc-label middle">50</span><span class="soc-label bottom">0</span></div>`;
     chart.innerHTML = `${labelMarkup}<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
-      ${gridMarkup}${lineMarkup}<g class="soc-hover" aria-hidden="true"></g>
+      ${gridMarkup}${lineMarkup}${singletonMarkup}<g class="soc-hover" aria-hidden="true"></g>
     </svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".soc-chart-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
@@ -3266,8 +3275,10 @@ class ElrakningPanel {
     };
     const update = (event) => {
       const rect = svg.getBoundingClientRect();
-      const pointerRatio = rect.width > 0 ? Math.max(0, Math.min(rect.width, event.clientX - rect.left)) / rect.width : 0;
-      const timestamp = xStart + pointerRatio * xDuration;
+      const svgX = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * width : plot.left;
+      const clampedSvgX = Math.max(plot.left, Math.min(width - plot.right, svgX));
+      const plotRatio = plotWidth > 0 ? (clampedSvgX - plot.left) / plotWidth : 0;
+      const timestamp = xStart + plotRatio * xDuration;
       const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
       const pointX = x(point.timestamp);
       const pointY = y(point.value);
