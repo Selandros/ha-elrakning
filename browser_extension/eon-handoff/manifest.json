@@ -3,7 +3,7 @@
   "name": "Elräkning – Mitt E.ON-handoff",
   "version": "1.0.0",
   "description": "Completes the one-time authenticated Mitt E.ON handoff to Home Assistant.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": ["https://www.eon.se/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": {"service_worker": "service_worker.js", "type": "module"},

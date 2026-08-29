@@ -316,10 +316,8 @@ def test_web_handoff_is_single_use_and_filters_cookies():
     manager_module.EonSession = _Session
     try:
         start = asyncio.run(manager.async_start_web_handoff("synthetic-user"))
-        pending = manager.pending_web_handoff("synthetic-user")
         result = asyncio.run(manager.async_complete_web_handoff(
-            "synthetic-user",
-            pending["state"],
+            start["state"],
             {
                 "MyEonSession": "synthetic-session",
                 "MyEonIDToken": "synthetic-id-token",
@@ -329,14 +327,15 @@ def test_web_handoff_is_single_use_and_filters_cookies():
     finally:
         manager_module.EonSession = original
     assert start["status"] == "waiting_for_login"
+    assert len(start["state"]) >= 32
     assert result == {"configured": True}
     assert captured["customer_id"] == "synthetic-customer"
     assert set(captured["cookies"]) == {"MyEonSession", "MyEonIDToken"}
     assert manager._pending_web_handoff is None
     try:
-        asyncio.run(manager.async_complete_web_handoff("synthetic-user", pending["state"], {}))
+        asyncio.run(manager.async_complete_web_handoff(start["state"], {}))
     except manager_module.EonAuthError as error:
-        assert error.code == "invalid_handoff_state"
+        assert error.code == "pending_missing"
     else:
         raise AssertionError("handoff replay was accepted")
 
@@ -346,8 +345,27 @@ def test_web_handoff_timeout_is_cleared():
     manager._pending_web_handoff = {
         "user_id": "synthetic-user", "state": "synthetic-state", "expires_at": 0,
     }
-    assert manager.pending_web_handoff("synthetic-user") is None
+    try:
+        asyncio.run(manager.async_complete_web_handoff("synthetic-state", {}))
+    except manager_module.EonAuthError as error:
+        assert error.code == "handoff_expired"
+    else:
+        raise AssertionError("expired handoff was accepted")
     assert manager._pending_web_handoff is None
+
+
+def test_web_handoff_wrong_state_does_not_consume_valid_pending_state():
+    manager = object.__new__(manager_module.EonGridManager)
+    manager._pending_web_handoff = {
+        "user_id": "synthetic-user", "state": "synthetic-state", "expires_at": 10**12,
+    }
+    try:
+        asyncio.run(manager.async_complete_web_handoff("wrong-state", {}))
+    except manager_module.EonAuthError as error:
+        assert error.code == "handoff_rejected"
+    else:
+        raise AssertionError("wrong handoff state was accepted")
+    assert manager._pending_web_handoff["state"] == "synthetic-state"
 
 
 def test_grid_registry_accepts_a_second_provider_without_core_changes():

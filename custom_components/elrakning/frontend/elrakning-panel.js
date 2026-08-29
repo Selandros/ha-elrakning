@@ -681,6 +681,7 @@ class ElrakningPanel {
     this._readyEventUnsubscribePromise = null;
     this._eonGridEventUnsubscribePromise = null;
     this._eonWebHandoffPending = false;
+    this._eonHandoffStatusListener = null;
     this._connectionReadyListener = null;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
@@ -2817,6 +2818,7 @@ class ElrakningPanel {
     this._syncThemeBackground();
     this._bindElectricityProviderDialog();
     this._bindEonGridDialog();
+    this._bindEonHandoffStatus();
     this._bindRetainedHistory();
     this._bindMeterDialog();
     this._bindPowerDialog();
@@ -4945,6 +4947,8 @@ class ElrakningPanel {
     window.removeEventListener("resize", this._onThemeResize);
     window.removeEventListener("focus", this._onThemeFocus);
     document.removeEventListener("visibilitychange", this._onThemeVisibility);
+    if (this._eonHandoffStatusListener) window.removeEventListener("message", this._eonHandoffStatusListener);
+    this._eonHandoffStatusListener = null;
     this._themeResizeObserver?.disconnect();
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
@@ -5145,6 +5149,8 @@ class ElrakningPanel {
       try {
         const response = await this.hass.callWS({ type: "elrakning/grid/web_handoff_start" });
         if (!response.success) throw new Error(response.error || "handoff_failed");
+        if (typeof response.state !== "string" || response.state.length < 32) throw new Error("handoff_failed");
+        window.postMessage({ type: "elrakning-eon-handoff-state", state: response.state }, window.location.origin);
         this._eonWebHandoffPending = true;
         if (popup) popup.location.href = response.url;
         else window.open(response.url, "_blank");
@@ -5156,6 +5162,34 @@ class ElrakningPanel {
         webConnect.disabled = false;
       }
     });
+  }
+
+  _bindEonHandoffStatus() {
+    if (this._eonHandoffStatusListener) return;
+    const messages = {
+      completed: "Mitt E.ON är anslutet.",
+      helper_not_configured: "Chrome-hjälpen är inte konfigurerad.",
+      pending_missing: "Ingen väntande anslutning hittades.",
+      handoff_expired: "Anslutningen hann gå ut.",
+      eon_session_missing: "Ingen inloggad Mitt E.ON-session hittades.",
+      ha_unreachable: "Home Assistant kunde inte nås.",
+      handoff_rejected: "Mitt E.ON-anslutningen nekades.",
+    };
+    this._eonHandoffStatusListener = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.type !== "elrakning-eon-handoff-status") return;
+      const status = messages[event.data.status];
+      if (!status) return;
+      const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
+      const result = this.host.querySelector("[data-eon-grid-result]");
+      const webConnect = this.host.querySelector("[data-eon-grid-web-connect]");
+      if (webStatus) webStatus.textContent = status;
+      if (result) result.textContent = status;
+      if (webConnect) webConnect.disabled = false;
+      this._eonWebHandoffPending = event.data.status !== "completed";
+      if (event.data.status === "completed") void this.loadEonGridState();
+    };
+    window.addEventListener("message", this._eonHandoffStatusListener);
   }
 
   _applyProviderState(state) {

@@ -80,30 +80,22 @@ class EonGridManager:
         return {
             "status": "waiting_for_login",
             "url": "https://www.eon.se/mitt-e-on/",
+            "state": self._pending_web_handoff["state"],
         }
 
-    def pending_web_handoff(self, user_id: str) -> dict[str, Any] | None:
-        pending = self._pending_web_handoff
-        if not pending or pending["user_id"] != user_id:
-            return None
-        if pending["expires_at"] <= time.monotonic():
-            self._pending_web_handoff = None
-            return None
-        return {"state": pending["state"], "expires_in": int(pending["expires_at"] - time.monotonic())}
-
     async def async_complete_web_handoff(
-        self, user_id: str, state: str, cookies: dict[str, str]
+        self, state: str, cookies: dict[str, str]
     ) -> dict[str, Any]:
         pending = self._pending_web_handoff
+        if not pending:
+            raise EonAuthError("pending_missing")
+        if pending["expires_at"] <= time.monotonic():
+            self._pending_web_handoff = None
+            raise EonAuthError("handoff_expired")
+        if not isinstance(state, str) or not secrets.compare_digest(state, pending["state"]):
+            raise EonAuthError("handoff_rejected")
+        # Consume the capability before network work so it cannot be replayed.
         self._pending_web_handoff = None
-        if (
-            not pending
-            or pending["user_id"] != user_id
-            or pending["expires_at"] <= time.monotonic()
-            or not isinstance(state, str)
-            or not secrets.compare_digest(state, pending["state"])
-        ):
-            raise EonAuthError("invalid_handoff_state")
         session = EonSession(self.hass)
         customer_id = await session.bootstrap_cookies(cookies)
         return await self._activate_web_session(session, customer_id)

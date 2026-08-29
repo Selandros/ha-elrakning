@@ -75,17 +75,12 @@ class GridManager:
             return {"status": "unsupported"}
         return await self.provider.async_start_web_handoff(user_id)
 
-    def pending_web_handoff(self, user_id: str) -> dict[str, Any] | None:
-        if not self.provider or not hasattr(self.provider, "pending_web_handoff"):
-            return None
-        return self.provider.pending_web_handoff(user_id)
-
     async def async_complete_web_handoff(
-        self, user_id: str, state: str, cookies: dict[str, str]
+        self, state: str, cookies: dict[str, str]
     ) -> dict[str, Any]:
         if not self.provider or not hasattr(self.provider, "async_complete_web_handoff"):
             return {"status": "unsupported"}
-        return await self.provider.async_complete_web_handoff(user_id, state, cookies)
+        return await self.provider.async_complete_web_handoff(state, cookies)
 
     async def async_source_data(self) -> dict[str, Any]:
         return await self.provider.async_source_data()
