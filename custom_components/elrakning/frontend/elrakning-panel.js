@@ -730,7 +730,6 @@ class ElrakningPanel {
         <div class="daily-energy-row battery-history-row">
           <article class="card battery-history-card" data-power-card="battery-history" hidden aria-labelledby="battery-history-title">
             <h2 id="battery-history-title" class="visually-hidden">Batterihistorik</h2>
-            <p class="battery-history-meta" data-battery-history-meta hidden></p>
             <div class="battery-history-chart" data-battery-history-chart hidden></div>
           </article>
         </div>
@@ -1165,12 +1164,6 @@ class ElrakningPanel {
           min-width: 0;
         }
 
-        .battery-history-meta {
-          color: var(--secondary-text-color);
-          font-size: var(--price-card-text-size);
-          margin: 2px 0 8px;
-        }
-
         .battery-history-chart {
           container-type: inline-size;
           min-width: 0;
@@ -1198,9 +1191,9 @@ class ElrakningPanel {
         }
 
         .battery-history-y-label-rail {
-          bottom: 17.857143%;
+          bottom: 15.625%;
           left: 0;
-          top: 4.285714%;
+          top: 3.75%;
           width: 4.375%;
         }
 
@@ -1229,7 +1222,7 @@ class ElrakningPanel {
 
         .battery-history-x-label-rail {
           bottom: 0;
-          height: 17.857143%;
+          height: 15.625%;
           left: 4.375%;
           right: .833333%;
         }
@@ -3351,21 +3344,17 @@ class ElrakningPanel {
 
   _renderBatteryHistoryCard() {
     const card = this.host.querySelector('[data-power-card="battery-history"]');
-    const meta = this.host.querySelector("[data-battery-history-meta]");
     const chart = this.host.querySelector("[data-battery-history-chart]");
-    if (!card || !meta || !chart) return;
+    if (!card || !chart) return;
     const power = this._powerState || {};
     const configured = Boolean(power.charging_entity || power.discharging_entity || power.battery_power_entity);
     card.hidden = !configured;
     chart.hidden = !configured;
     if (!configured) {
-      meta.hidden = true;
       chart.replaceChildren();
       return;
     }
     const capacity = Number(power.capacity_kwh);
-    meta.textContent = Number.isFinite(capacity) && capacity > 0 ? `Kapacitet ${this._formatNumber(capacity)} kWh` : "Kapacitet saknas";
-    meta.hidden = false;
     const days = buildBatteryDailyHistory(
       this._powerHistory?.series?.charging?.points,
       this._powerHistory?.series?.discharging?.points,
@@ -3378,7 +3367,7 @@ class ElrakningPanel {
       return;
     }
     const width = 960;
-    const height = 280;
+    const height = 320;
     const plot = { left: 42, right: 8, top: 12, bottom: 50 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
