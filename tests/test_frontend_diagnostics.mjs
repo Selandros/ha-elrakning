@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -90,6 +90,26 @@ assert.equal(buildSolarDailyHistory(
   1,
   { today_kwh: 14.1, remaining_today_kwh: 14.1 },
 )[0].utilizationPercent, null);
+assert.deepEqual(buildSolarHistoryTooltipLines(
+  { date: "2026-08-23", producedKwh: 0.67, forecastKwh: 18.83 },
+  { today_kwh: 14.1, remaining_today_kwh: 3.96 },
+  new Date(2026, 7, 23, 12, 0),
+), ["Producerat: 0.67 kWh", "Prognos hittills: 10.14 kWh", "Dagsprognos: 18.83 kWh"]);
+assert.deepEqual(buildSolarHistoryTooltipLines(
+  { date: "2026-08-22", producedKwh: 41.19, forecastKwh: 38.7 },
+  { today_kwh: 14.1, remaining_today_kwh: 3.96 },
+  new Date(2026, 7, 23, 12, 0),
+), ["Producerat: 41.19 kWh", "Prognos: 38.7 kWh"]);
+assert.deepEqual(buildSolarHistoryTooltipLines(
+  { date: "2026-08-23", producedKwh: 0.67, forecastKwh: 18.83 },
+  { today_kwh: 14.1 },
+  new Date(2026, 7, 23, 12, 0),
+), ["Producerat: 0.67 kWh", "Dagsprognos: 18.83 kWh"]);
+assert.deepEqual(buildSolarHistoryTooltipLines(
+  { date: "2026-08-23", producedKwh: 0.67, forecastKwh: null },
+  { today_kwh: 14.1, remaining_today_kwh: 14.1 },
+  new Date(2026, 7, 23, 12, 0),
+), ["Producerat: 0.67 kWh"]);
 const solarOverReference = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
   { "2026-08-22": 1 },
@@ -523,9 +543,10 @@ assert.match(panelSource, /class="solar-history-reference-bar"/);
 assert.match(panelSource, /referenceBarWidth/);
 assert.match(panelSource, /solar-history-reference-bar \{[\s\S]*color-mix\(in srgb, var\(--solar-color\) 30%/);
 assert.match(panelSource, /solar-history-day\.hovered \.solar-history-reference-bar/);
-assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<span>Producerat:/);
-assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Producerat:/);
-assert.match(panelSource, /<span>Prognos: \$\{Number\.isFinite\(day\.forecastKwh\)/);
+assert.match(panelSource, /buildSolarHistoryTooltipLines\(day, this\._powerHistory\?\.solar_forecast/);
+assert.match(panelSource, /Prognos hittills:/);
+assert.match(panelSource, /Dagsprognos:/);
+assert.doesNotMatch(panelSource, /<strong>\$\{day\.date\}<\/strong><span>Producerat:/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*utilizationPercent/);
 assert.match(panelSource, /\.solar-history-chart \.soc-tooltip > span/);
 assert.match(panelSource, /solar_forecast_baselines/);

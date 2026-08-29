@@ -415,6 +415,30 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
   });
 }
 
+export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date()) {
+  const lines = [];
+  if (Number.isFinite(day?.producedKwh)) {
+    lines.push(`Producerat: ${day.producedKwh} kWh`);
+  }
+  const today = new Date(now).toLocaleDateString("sv-SE");
+  if (day?.date === today) {
+    const liveTodayKwh = Number.isFinite(Number(liveForecast?.today_kwh)) ? Number(liveForecast.today_kwh) : null;
+    const liveRemainingKwh = Number.isFinite(Number(liveForecast?.remaining_today_kwh)) ? Number(liveForecast.remaining_today_kwh) : null;
+    const expectedSoFarKwh = liveTodayKwh !== null && liveRemainingKwh !== null
+      ? liveTodayKwh - liveRemainingKwh
+      : null;
+    if (expectedSoFarKwh > 0) {
+      lines.push(`Prognos hittills: ${expectedSoFarKwh} kWh`);
+    }
+    if (Number.isFinite(day?.forecastKwh)) {
+      lines.push(`Dagsprognos: ${day.forecastKwh} kWh`);
+    }
+  } else if (Number.isFinite(day?.forecastKwh)) {
+    lines.push(`Prognos: ${day.forecastKwh} kWh`);
+  }
+  return lines;
+}
+
 export function buildEnergyBalance(totalKwh, externalKwh) {
   const total = Number.isFinite(totalKwh) ? totalKwh : null;
   const external = Number.isFinite(externalKwh) ? externalKwh : null;
@@ -3754,7 +3778,9 @@ class ElrakningPanel {
       hoveredDay?.classList.remove("hovered");
       group.classList.add("hovered");
       hoveredDay = group;
-      tooltip.innerHTML = `<span>Producerat: ${Number.isFinite(day.producedKwh) ? `${this._formatNumber(day.producedKwh)} kWh` : "—"}</span><span>Prognos: ${Number.isFinite(day.forecastKwh) ? `${this._formatNumber(day.forecastKwh)} kWh` : "—"}</span>`;
+      tooltip.innerHTML = buildSolarHistoryTooltipLines(day, this._powerHistory?.solar_forecast, new Date())
+        .map((line) => `<span>${line.replace(/([0-9]+(?:\.[0-9]+)?) kWh$/, (value) => `${this._formatNumber(Number.parseFloat(value))} kWh`)}</span>`)
+        .join("");
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
