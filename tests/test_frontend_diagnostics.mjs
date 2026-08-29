@@ -438,6 +438,10 @@ assert.ok(panelSource.indexOf('class="daily-energy-row"') < panelSource.indexOf(
 assert.ok(panelSource.indexOf('class="daily-energy-row battery-history-row"') < panelSource.indexOf('data-configuration-cards'));
 assert.match(panelSource, /buildBatteryDailyHistory\(/);
 assert.match(panelSource, /Kapacitetsutnyttjande:/);
+assert.doesNotMatch(panelSource, /battery-history-hover/);
+assert.match(panelSource, /battery-history-day\.hovered \.battery-history-bar/);
+assert.match(panelSource, /group\.classList\.add\("hovered"\)/);
+assert.match(panelSource, /hoveredDay\?\.classList\.remove\("hovered"\)/);
 assert.doesNotMatch(panelSource, /battery: batteryIsConfigured \? \[\["Laddning"[\s\S]*Laddat idag/);
 assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
 assert.match(panelSource, /data-daily-energy/);

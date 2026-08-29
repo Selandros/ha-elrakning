@@ -1222,12 +1222,8 @@ class ElrakningPanel {
           fill-opacity: .72;
         }
 
-        .battery-history-hover {
-          fill: none;
-          pointer-events: none;
-          stroke: var(--primary-text-color);
-          stroke-width: 1.5;
-          vector-effect: non-scaling-stroke;
+        .battery-history-day.hovered .battery-history-bar {
+          fill-opacity: 1;
         }
 
         .daily-energy-row {
@@ -3360,19 +3356,24 @@ class ElrakningPanel {
       const utilization = Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—";
       return `<g class="battery-history-day" data-battery-history-index="${index}"><rect class="battery-history-bar charging" x="${center - barGap / 2 - barWidth}" y="${y(day.chargingKwh)}" width="${barWidth}" height="${chargingHeight}" /><rect class="battery-history-bar discharging" x="${center + barGap / 2}" y="${y(day.dischargingKwh)}" width="${barWidth}" height="${dischargingHeight}" /><text class="battery-history-day-label" x="${center}" y="${height - 30}">${day.label}</text><text class="battery-history-utilization" x="${center}" y="${height - 12}">${utilization}</text></g>`;
     }).join("");
-    chart.innerHTML = `<svg class="battery-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddning och urladdning de senaste sju dagarna">${grid}${bars}<rect class="battery-history-hover" data-battery-history-hover hidden /></svg><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<svg class="battery-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddning och urladdning de senaste sju dagarna">${grid}${bars}</svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".battery-history-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
-    const hover = chart.querySelector("[data-battery-history-hover]");
-    const clear = () => { tooltip.hidden = true; hover.hidden = true; };
+    let hoveredDay = null;
+    const clear = () => {
+      tooltip.hidden = true;
+      hoveredDay?.classList.remove("hovered");
+      hoveredDay = null;
+    };
     const show = (event, index) => {
       const day = days[index];
-      const center = groupX(index);
-      hover.setAttribute("x", String(center - groupWidth / 2 + 2));
-      hover.setAttribute("y", String(plot.top));
-      hover.setAttribute("width", String(groupWidth - 4));
-      hover.setAttribute("height", String(plotHeight));
-      hover.hidden = false;
+      const group = svg.querySelector(`[data-battery-history-index="${index}"]`);
+      if (!day || !group) return;
+      if (hoveredDay !== group) {
+        hoveredDay?.classList.remove("hovered");
+        group.classList.add("hovered");
+        hoveredDay = group;
+      }
       tooltip.innerHTML = `<strong>${day.date}</strong><span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span><span>Kapacitetsutnyttjande: ${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span>`;
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
