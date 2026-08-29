@@ -379,6 +379,33 @@ export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capa
   });
 }
 
+export function buildSolarDailyHistory(points, analysisDays, now = new Date(), dayCount = 7) {
+  const current = new Date(now);
+  const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+  const days = Math.max(1, Math.min(7, Math.trunc(Number(dayCount) || 7)));
+  const analysisByDate = new Map((Array.isArray(analysisDays) ? analysisDays : []).map((day) => [day.date, day]));
+  return Array.from({ length: days }, (_, index) => {
+    const dayStart = new Date(todayStart);
+    dayStart.setDate(todayStart.getDate() - (days - index - 1));
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayStart.getDate() + 1);
+    const dayPoints = (Array.isArray(points) ? points : []).filter((point) => {
+      const timestamp = new Date(point.timestamp).getTime();
+      return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime() && Number.isFinite(Number(point.value_kw));
+    });
+    const actualKwh = dayPoints.length ? integratePowerHistoryKwh(dayPoints, dayStart, dayEnd, dayEnd <= current ? dayEnd : current) : null;
+    const localDate = dayStart.toLocaleDateString("sv-SE");
+    const analysis = analysisByDate.get(localDate);
+    const referenceKwh = Number.isFinite(Number(analysis?.reference_energy_kwh)) ? Number(analysis.reference_energy_kwh) : null;
+    return {
+      date: localDate,
+      label: dayStart.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" }),
+      producedKwh: actualKwh,
+      utilizationPercent: referenceKwh > 0 && actualKwh !== null ? actualKwh / referenceKwh * 100 : null,
+    };
+  });
+}
+
 export function buildEnergyBalance(totalKwh, externalKwh) {
   const total = Number.isFinite(totalKwh) ? totalKwh : null;
   const external = Number.isFinite(externalKwh) ? externalKwh : null;
@@ -747,6 +774,10 @@ class ElrakningPanel {
             <h2 id="battery-history-title" class="visually-hidden">Batterihistorik</h2>
             <div class="battery-history-chart" data-battery-history-chart hidden></div>
           </article>
+          <article class="card solar-history-card" data-power-card="solar-history" hidden aria-labelledby="solar-history-title">
+            <h2 id="solar-history-title" class="visually-hidden">Solhistorik</h2>
+            <div class="solar-history-chart" data-solar-history-chart hidden></div>
+          </article>
         </div>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
@@ -859,6 +890,7 @@ class ElrakningPanel {
         <div class="meter-dialog-card">
           <h2 id="power-title">Konfigurera energi</h2>
           <p data-power-result></p>
+          <p class="power-solar-analysis-status" data-power-solar-analysis-status hidden></p>
           <div class="battery-mode-wrap" data-power-battery-mode-wrap hidden>
             <span class="battery-mode-title">Batterieffekt</span>
             <div class="battery-mode-control" data-power-battery-mode role="radiogroup" aria-label="Batterieffekt">
@@ -1076,6 +1108,29 @@ class ElrakningPanel {
           gap: 6px;
         }
 
+        .solar-array-metadata {
+          display: grid;
+          gap: 8px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .solar-array-metadata label {
+          display: grid;
+          font-size: 12px;
+          gap: 4px;
+        }
+
+        .solar-array-metadata input {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          box-sizing: border-box;
+          color: var(--primary-text-color);
+          min-width: 0;
+          padding: 7px 8px;
+          width: 100%;
+        }
+
         .battery-mode-wrap {
           display: grid;
           gap: 8px;
@@ -1275,6 +1330,101 @@ class ElrakningPanel {
         }
 
         .battery-history-day.hovered .battery-history-bar {
+          fill-opacity: 1;
+        }
+
+        .solar-history-card {
+          min-width: 0;
+        }
+
+        .solar-history-chart {
+          container-type: inline-size;
+          min-width: 0;
+          position: relative;
+          width: 100%;
+        }
+
+        .solar-history-svg {
+          display: block;
+          height: auto;
+          max-width: 100%;
+          width: 100%;
+        }
+
+        .solar-history-gridline {
+          stroke: var(--divider-color);
+          stroke-width: 1;
+          opacity: .5;
+        }
+
+        .solar-history-y-label-rail,
+        .solar-history-x-label-rail {
+          pointer-events: none;
+          position: absolute;
+        }
+
+        .solar-history-y-label-rail {
+          bottom: 15.625%;
+          left: 0;
+          top: 3.75%;
+          width: 4.375%;
+        }
+
+        .solar-history-axis-label,
+        .solar-history-day-label,
+        .solar-history-utilization {
+          box-sizing: border-box;
+          display: block;
+          font-size: 10px;
+          font-weight: 400;
+          line-height: 1;
+        }
+
+        .solar-history-axis-label {
+          color: var(--secondary-text-color);
+          position: absolute;
+          right: 0;
+          text-align: center;
+          transform: translateY(-50%);
+          width: 100%;
+        }
+
+        .solar-history-axis-label.top { top: 0; }
+        .solar-history-axis-label.middle { top: 50%; }
+        .solar-history-axis-label.bottom { top: 100%; }
+
+        .solar-history-x-label-rail {
+          bottom: 0;
+          height: 15.625%;
+          left: 4.375%;
+          right: .833333%;
+        }
+
+        .solar-history-x-label {
+          position: absolute;
+          text-align: center;
+          top: 62%;
+          transform: translate(-50%, -50%);
+          width: max-content;
+        }
+
+        .solar-history-day-label {
+          color: var(--secondary-text-color);
+        }
+
+        .solar-history-utilization {
+          color: var(--primary-text-color);
+          font-weight: 600;
+        }
+
+        .solar-history-bar {
+          fill: var(--solar-color);
+          fill-opacity: .78;
+          rx: 4;
+          ry: 4;
+        }
+
+        .solar-history-day.hovered .solar-history-bar {
           fill-opacity: 1;
         }
 
@@ -2924,6 +3074,7 @@ class ElrakningPanel {
       const current = this._powerState || {};
       return {
         solar_entities: Array.isArray(current.solar_entities) ? [...current.solar_entities] : [],
+        solar_array_metadata: current.solar_array_metadata ? structuredClone(current.solar_array_metadata) : {},
         consumption_entity: current.consumption_entity || "",
         charging_entity: current.charging_entity || "",
         discharging_entity: current.discharging_entity || "",
@@ -3038,6 +3189,7 @@ class ElrakningPanel {
     const dialog = this.host.querySelector("[data-power-dialog]");
     const selectorsElement = this.host.querySelector("[data-power-selectors]");
     const result = this.host.querySelector("[data-power-result]");
+    const solarAnalysisStatus = this.host.querySelector("[data-power-solar-analysis-status]");
     const save = this.host.querySelector("[data-power-save]");
     const cancel = this.host.querySelector("[data-power-cancel]");
     const addSolar = this.host.querySelector("[data-power-add-solar]");
@@ -3062,6 +3214,13 @@ class ElrakningPanel {
     const close = () => { dialog.hidden = true; selectorsElement.replaceChildren(); };
     const renderSelectors = (state) => {
       const fields = fieldsFor(mode);
+      if (solarAnalysisStatus) {
+        const sunAvailable = this.hass?.states?.["sun.sun"] && !["unknown", "unavailable"].includes(this.hass.states["sun.sun"].state);
+        solarAnalysisStatus.hidden = mode !== "solar" || sunAvailable;
+        solarAnalysisStatus.textContent = mode === "solar" && !sunAvailable
+          ? "Sun-integrationen krävs för solanalys. Lägg till Sun under Inställningar → Enheter och tjänster."
+          : "";
+      }
       if (batteryModeWrap) batteryModeWrap.hidden = mode !== "battery";
       batteryModeOptions.forEach((option) => { option.checked = option.value === batteryMode; });
       if (invertBatteryWrap) invertBatteryWrap.hidden = mode !== "battery" || batteryMode !== "combined";
@@ -3078,6 +3237,26 @@ class ElrakningPanel {
         selector.value = current || undefined;
         selector.addEventListener("value-changed", (event) => { selector.value = event.detail?.value; });
         label.append(selector);
+        if (multiple) {
+          const metadata = state?.solar_array_metadata?.[current] || {};
+          const metadataGrid = document.createElement("div");
+          metadataGrid.className = "solar-array-metadata";
+          [["Installerad effekt (kWp)", "capacity_kwp", "number"], ["Antal paneler", "panel_count", "number"], ["Lutning (°)", "tilt_deg", "number"], ["Azimut (°)", "azimuth_deg", "number"]].forEach(([text, key, type]) => {
+            const metadataLabel = document.createElement("label");
+            metadataLabel.textContent = text;
+            const input = document.createElement("input");
+            input.type = type;
+            input.step = key === "panel_count" ? "1" : "any";
+            input.min = key === "capacity_kwp" || key === "panel_count" ? "0" : "0";
+            if (key === "tilt_deg") input.max = "90";
+            if (key === "azimuth_deg") input.max = "360";
+            input.dataset.solarMetadataField = key;
+            input.value = metadata[key] ?? "";
+            metadataLabel.append(input);
+            metadataGrid.append(metadataLabel);
+          });
+          label.append(metadataGrid);
+        }
         return label;
       }));
       if (invertBatteryWrap) {
@@ -3122,6 +3301,7 @@ class ElrakningPanel {
       const current = this._powerState || {};
       const mapping = {
         solar_entities: Array.isArray(current.solar_entities) ? [...current.solar_entities] : [],
+        solar_array_metadata: current.solar_array_metadata ? structuredClone(current.solar_array_metadata) : {},
         consumption_entity: current.consumption_entity || "",
         charging_entity: current.charging_entity || "",
         discharging_entity: current.discharging_entity || "",
@@ -3137,6 +3317,16 @@ class ElrakningPanel {
       if (mode === "solar") {
         mapping.solar_entities = Array.from(selectorsElement.querySelectorAll('[data-power-field="solar_entities"]'))
           .map((selector) => selector.value || "");
+        mapping.solar_array_metadata = {};
+        selectorsElement.querySelectorAll('[data-power-field="solar_entities"]').forEach((selector) => {
+          const entityId = selector.value || "";
+          if (!entityId) return;
+          const row = selector.closest(".meter-selector-label");
+          const metadata = Object.fromEntries([...row.querySelectorAll("[data-solar-metadata-field]")]
+            .map((input) => [input.dataset.solarMetadataField, input.value])
+            .filter(([, value]) => value !== ""));
+          if (Object.keys(metadata).length) mapping.solar_array_metadata[entityId] = metadata;
+        });
       }
       if (mode === "battery" && batteryMode === "combined") {
         mapping.charging_entity = "";
@@ -3174,6 +3364,7 @@ class ElrakningPanel {
         invert_battery_power: false,
         soc_entity: current.soc_entity || "",
         capacity_entity: current.capacity_entity || "",
+        solar_array_metadata: mode === "solar" ? {} : (current.solar_array_metadata ? structuredClone(current.solar_array_metadata) : {}),
       };
       if (mode === "solar") mapping.solar_entities = [];
       if (mode === "consumption") mapping.consumption_entity = "";
@@ -3220,7 +3411,7 @@ class ElrakningPanel {
     const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
     const values = {
-      solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"], ["Producerat idag", this._powerState.solar_energy_kwh, "kWh"]] : [],
+      solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"]] : [],
       battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
@@ -3249,6 +3440,7 @@ class ElrakningPanel {
     this._renderMergedMeterSummary();
     this._renderSocChart();
     this._renderBatteryHistoryCard();
+    this._renderSolarHistoryCard();
     this._syncSocCardHeight();
   }
 
@@ -3464,6 +3656,85 @@ class ElrakningPanel {
     svg.addEventListener("pointercancel", clear);
   }
 
+  _renderSolarHistoryCard() {
+    const card = this.host.querySelector('[data-power-card="solar-history"]');
+    const chart = this.host.querySelector("[data-solar-history-chart]");
+    if (!card || !chart) return;
+    const power = this._powerState || {};
+    const configured = Array.isArray(power.solar_entities) && power.solar_entities.length > 0;
+    card.hidden = !configured;
+    chart.hidden = !configured;
+    if (!configured) {
+      chart.replaceChildren();
+      return;
+    }
+    const days = buildSolarDailyHistory(
+      this._powerHistory?.series?.solar?.points,
+      this._powerHistory?.solar_analysis?.days,
+      new Date(),
+    );
+    const values = days.map((day) => day.producedKwh).filter((value) => Number.isFinite(value));
+    if (!values.length) {
+      chart.textContent = "Ingen solhistorik tillgänglig";
+      return;
+    }
+    const niceMax = (value) => {
+      const exponent = 10 ** Math.floor(Math.log10(Math.max(value, 1)));
+      const normalized = value / exponent;
+      const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+      return step * exponent;
+    };
+    const width = 960;
+    const height = 320;
+    const plot = { left: 42, right: 8, top: 12, bottom: 50 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const range = niceMax(Math.max(...values));
+    const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / range) * plotHeight;
+    const groupWidth = plotWidth / days.length;
+    const barWidth = Math.min(34, groupWidth * .5);
+    const groupX = (index) => plot.left + groupWidth * index + groupWidth / 2;
+    const grid = [0, range / 2, range].map((level) => `<line class="solar-history-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`).join("");
+    const bars = days.map((day, index) => {
+      const value = Number.isFinite(day.producedKwh) ? day.producedKwh : 0;
+      const barHeight = plot.top + plotHeight - y(value);
+      const center = groupX(index);
+      return `<g class="solar-history-day" data-solar-history-index="${index}"><rect class="solar-history-bar" x="${center - barWidth / 2}" y="${y(value)}" width="${barWidth}" height="${barHeight}" /></g>`;
+    }).join("");
+    const yLabelMarkup = [range, range / 2, 0].map((level, index) => `<span class="solar-history-axis-label ${index === 0 ? "top" : index === 1 ? "middle" : "bottom"}">${this._formatNumber(level)}</span>`).join("");
+    const xLabelMarkup = days.map((day, index) => `<span class="solar-history-x-label" style="left: ${(index + .5) / days.length * 100}%"><span class="solar-history-day-label">${day.label}</span><span class="solar-history-utilization">${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span></span>`).join("");
+    chart.innerHTML = `<div class="solar-history-y-label-rail" aria-hidden="true">${yLabelMarkup}</div><svg class="solar-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Solproduktion de senaste sju dagarna">${grid}${bars}</svg><div class="solar-history-x-label-rail" aria-hidden="true">${xLabelMarkup}</div><div class="soc-tooltip" hidden></div>`;
+    const svg = chart.querySelector(".solar-history-svg");
+    const tooltip = chart.querySelector(".soc-tooltip");
+    let hoveredDay = null;
+    const clear = () => {
+      tooltip.hidden = true;
+      hoveredDay?.classList.remove("hovered");
+      hoveredDay = null;
+    };
+    const show = (event, index) => {
+      const day = days[index];
+      const group = svg.querySelector(`[data-solar-history-index="${index}"]`);
+      if (!day || !group) return;
+      hoveredDay?.classList.remove("hovered");
+      group.classList.add("hovered");
+      hoveredDay = group;
+      tooltip.innerHTML = `<strong>${day.date}</strong><span>Producerat: ${Number.isFinite(day.producedKwh) ? `${this._formatNumber(day.producedKwh)} kWh` : "—"}</span>`;
+      tooltip.hidden = false;
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+    };
+    svg.addEventListener("pointermove", (event) => {
+      const group = event.target.closest?.("[data-solar-history-index]");
+      if (group) show(event, Number(group.dataset.solarHistoryIndex));
+    });
+    svg.addEventListener("pointerdown", (event) => {
+      const group = event.target.closest?.("[data-solar-history-index]");
+      if (group) show(event, Number(group.dataset.solarHistoryIndex));
+    });
+    svg.addEventListener("pointerleave", clear);
+    svg.addEventListener("pointercancel", clear);
+  }
+
   _renderSocChart() {
     const card = this.host.querySelector("[data-soc-card]");
     const chart = this.host.querySelector("[data-soc-chart]");
@@ -3599,6 +3870,7 @@ class ElrakningPanel {
       this._powerHistory = {
         date: response?.date || null,
         series,
+        solar_analysis: response?.solar_analysis || { available: false, days: [] },
       };
       this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();

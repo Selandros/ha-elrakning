@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -49,6 +49,14 @@ const dailyHistory = buildBatteryDailyHistory(
   2,
   new Date(2026, 7, 23, 12, 0),
 );
+const solarHistory = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13),
+  [{ date: "2026-08-22", reference_energy_kwh: 10 }],
+  new Date(2026, 7, 23, 12, 0),
+  2,
+);
+assert.equal(solarHistory.length, 2);
+assert.equal(solarHistory[0].utilizationPercent, 10);
 assert.equal(dailyHistory.length, 7);
 assert.ok(Math.abs(dailyHistory[5].chargingKwh - 1) < 1e-12);
 assert.ok(Math.abs(dailyHistory[5].dischargingKwh - 1) < 1e-12);
@@ -429,7 +437,7 @@ assert.match(panelSource, /data-meter-clear-last/);
 assert.match(panelSource, /Husets last/);
 assert.match(panelSource, /Nät just nu/);
 assert.match(panelSource, /displayPowerValue\(power\.consumption_kw\)/);
-assert.match(panelSource, /\["Producerat idag", this\._powerState\.solar_energy_kwh, "kWh"\]/);
+assert.doesNotMatch(panelSource, /\["Producerat idag", this\._powerState\.solar_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /integratePowerHistoryKwh\(points, dayStart, dayEnd, now\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("solar"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("consumption"\)/);
@@ -438,6 +446,8 @@ assert.match(panelSource, /_calculatePowerEnergy\("discharging"\)/);
 assert.match(panelSource, /_powerLivePoints = Object\.fromEntries\(\["solar", "consumption", "charging", "discharging", "soc"\]/);
 assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /data-power-card="battery-history"/);
+assert.match(panelSource, /data-power-card="solar-history"/);
+assert.match(panelSource, /id="solar-history-title" class="visually-hidden">Solhistorik<\/h2>/);
 assert.match(panelSource, /Batterihistorik/);
 assert.match(panelSource, /aria-labelledby="battery-history-title"/);
 assert.match(panelSource, /id="battery-history-title" class="visually-hidden">Batterihistorik<\/h2>/);
@@ -464,6 +474,8 @@ assert.match(panelSource, /battery-history-row/);
 assert.ok(panelSource.indexOf('class="daily-energy-row"') < panelSource.indexOf('class="daily-energy-row battery-history-row"'));
 assert.ok(panelSource.indexOf('class="daily-energy-row battery-history-row"') < panelSource.indexOf('data-configuration-cards'));
 assert.match(panelSource, /buildBatteryDailyHistory\(/);
+assert.match(panelSource, /buildSolarDailyHistory\(/);
+assert.match(panelSource, /solar_array_metadata/);
 assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Laddat:/);
 assert.match(panelSource, /<span>Urladdat: \$\{formatEnergy\(day\.dischargingKwh\)\}<\/span>`;/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*Kapacitetsutnyttjande:/);

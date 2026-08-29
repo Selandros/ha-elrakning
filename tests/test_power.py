@@ -91,6 +91,34 @@ def _hass(states):
 
 
 class PowerTests(unittest.IsolatedAsyncioTestCase):
+    def test_solar_incidence_factor_is_clamped_below_horizon(self):
+        self.assertEqual(power.solar_incidence_factor(-1, 180, 30, 180), 0)
+        self.assertAlmostEqual(power.solar_incidence_factor(90, 180, 0, 180), 1)
+
+    async def test_solar_array_metadata_is_optional_and_persisted_per_entity(self):
+        states = {"sensor.mppt_1": _state(1, "kW")}
+        manager = power.PowerManager(_hass(states))
+        result = await manager.async_save_mapping({
+            "solar_entities": ["sensor.mppt_1"],
+            "solar_array_metadata": {
+                "sensor.mppt_1": {"capacity_kwp": "4.95", "panel_count": "11", "tilt_deg": "30", "azimuth_deg": "180"},
+                "sensor.orphan": {"capacity_kwp": 99},
+            },
+        })
+        self.assertEqual(result["solar_array_metadata"], {
+            "sensor.mppt_1": {"capacity_kwp": 4.95, "panel_count": 11, "tilt_deg": 30.0, "azimuth_deg": 180.0},
+        })
+        self.assertEqual(result["solar_total_capacity_kwp"], 4.95)
+        self.assertEqual(result["solar_total_panel_count"], 11)
+
+    async def test_invalid_solar_array_metadata_is_rejected(self):
+        manager = power.PowerManager(_hass({"sensor.mppt": _state(1, "kW")}))
+        with self.assertRaisesRegex(ValueError, "invalid_solar_capacity_kwp"):
+            await manager.async_save_mapping({
+                "solar_entities": ["sensor.mppt"],
+                "solar_array_metadata": {"sensor.mppt": {"capacity_kwp": 0}},
+            })
+
     def test_signed_battery_power_is_split_with_optional_inversion(self):
         self.assertEqual(power._split_signed_power(3.2), (3.2, 0))
         self.assertEqual(power._split_signed_power(-3.2), (0, 3.2))

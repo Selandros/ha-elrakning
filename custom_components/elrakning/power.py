@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, time, timedelta, timezone
 from functools import partial
 from typing import Any
 
@@ -25,6 +25,7 @@ POWER_FIELDS = (
     "capacity_entity",
 )
 POWER_UPDATE_EVENT = "elrakning_power_update"
+SOLAR_ARRAY_METADATA_KEY = "solar_array_metadata"
 
 
 def _clean_entity(value: Any) -> str | None:
@@ -80,6 +81,67 @@ def _soc_history_point(state: State | Any) -> dict[str, Any] | None:
     return {"timestamp": timestamp.isoformat(), "value_percent": value}
 
 
+def _finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and number not in (float("inf"), float("-inf")) else None
+
+
+def _normalize_solar_array_metadata(metadata: Any, selected: list[str]) -> dict[str, dict[str, Any]]:
+    """Keep optional PV metadata aligned with the selected solar entities."""
+    if not isinstance(metadata, dict):
+        return {}
+    normalized = {}
+    for entity_id in selected:
+        item = metadata.get(entity_id)
+        if not isinstance(item, dict):
+            continue
+        try:
+            clean = _validate_solar_array_metadata(entity_id, item)
+        except ValueError:
+            continue
+        if clean:
+            normalized[entity_id] = clean
+    return normalized
+
+
+def _validate_solar_array_metadata(entity_id: str, metadata: Any) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        raise ValueError(f"invalid_solar_array_metadata:{entity_id}")
+    clean = {}
+    if "capacity_kwp" in metadata:
+        capacity = _finite_number(metadata["capacity_kwp"])
+        if capacity is None or capacity <= 0:
+            raise ValueError(f"invalid_solar_capacity_kwp:{entity_id}")
+        clean["capacity_kwp"] = capacity
+    if "panel_count" in metadata and metadata["panel_count"] not in (None, ""):
+        panel_count = _finite_number(metadata["panel_count"])
+        if panel_count is None or panel_count <= 0 or panel_count != int(panel_count):
+            raise ValueError(f"invalid_solar_panel_count:{entity_id}")
+        clean["panel_count"] = int(panel_count)
+    for key, low, high in (("tilt_deg", 0, 90), ("azimuth_deg", 0, 360)):
+        if key in metadata:
+            value = _finite_number(metadata[key])
+            if value is None or value < low or value > high:
+                raise ValueError(f"invalid_solar_{key}:{entity_id}")
+            clean[key] = value
+    return clean
+
+
+def solar_incidence_factor(elevation_deg: float, sun_azimuth_deg: float, tilt_deg: float, panel_azimuth_deg: float) -> float:
+    """Return the non-negative geometric incidence factor for one PV array."""
+    import math
+
+    if elevation_deg <= 0:
+        return 0.0
+    elevation = math.radians(elevation_deg)
+    tilt = math.radians(tilt_deg)
+    azimuth_delta = math.radians(sun_azimuth_deg - panel_azimuth_deg)
+    return max(0.0, math.sin(elevation) * math.cos(tilt) + math.cos(elevation) * math.sin(tilt) * math.cos(azimuth_delta))
+
+
 class PowerManager:
     """Persist selected power sensors and expose live/history series."""
 
@@ -87,14 +149,15 @@ class PowerManager:
         self.hass = hass
         self._diagnostic_callback = diagnostic_callback
         self.store = Store(hass, 1, STORE_KEY)
-        self.mapping: dict[str, Any] = {"solar_entities": [], **{field: None for field in POWER_FIELDS}, "invert_battery_power": False}
+        self.mapping: dict[str, Any] = {"solar_entities": [], SOLAR_ARRAY_METADATA_KEY: {}, **{field: None for field in POWER_FIELDS}, "invert_battery_power": False}
         self._history_inflight: dict[tuple[str, str, int], asyncio.Task] = {}
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     async def _async_state_changed(self, event: Event) -> None:
         entity_id = event.data.get("entity_id")
         selected = set(self.mapping.get("solar_entities", [])) | {
-            value for field, value in self.mapping.items() if field != "solar_entities" and value
+            value for field, value in self.mapping.items()
+            if field not in {"solar_entities", SOLAR_ARRAY_METADATA_KEY} and isinstance(value, str) and value
         }
         if entity_id not in selected:
             return
@@ -150,6 +213,9 @@ class PowerManager:
         self.mapping["solar_entities"] = list(dict.fromkeys(
             value for value in solar if isinstance(value, str) and value.strip()
         )) if isinstance(solar, list) else []
+        self.mapping[SOLAR_ARRAY_METADATA_KEY] = _normalize_solar_array_metadata(
+            cached.get(SOLAR_ARRAY_METADATA_KEY), self.mapping["solar_entities"]
+        )
         for field in POWER_FIELDS:
             self.mapping[field] = _clean_entity(cached.get(field))
         self.mapping["invert_battery_power"] = cached.get("invert_battery_power") is True
@@ -162,7 +228,14 @@ class PowerManager:
             raise ValueError("invalid_solar_entities")
         selected_solar = list(dict.fromkeys(_clean_entity(value) for value in solar))
         selected_solar = [value for value in selected_solar if value]
-        selected = {"solar_entities": selected_solar}
+        selected_metadata = {}
+        supplied_metadata = mapping.get(SOLAR_ARRAY_METADATA_KEY, {})
+        if supplied_metadata is not None and not isinstance(supplied_metadata, dict):
+            raise ValueError("invalid_solar_array_metadata")
+        for entity_id in selected_solar:
+            if isinstance(supplied_metadata, dict) and entity_id in supplied_metadata:
+                selected_metadata[entity_id] = _validate_solar_array_metadata(entity_id, supplied_metadata[entity_id])
+        selected = {"solar_entities": selected_solar, SOLAR_ARRAY_METADATA_KEY: selected_metadata}
         selected.update({field: _clean_entity(mapping.get(field)) for field in POWER_FIELDS})
         invert_battery_power = mapping.get("invert_battery_power", False)
         if not isinstance(invert_battery_power, bool):
@@ -209,6 +282,14 @@ class PowerManager:
         solar_values = [_positive_power(self.hass.states.get(entity_id)) for entity_id in self.mapping["solar_entities"]]
         solar_values = [value for value in solar_values if value is not None]
         result = {**self.mapping, "configured": any(self.mapping["solar_entities"]) or any(self.mapping[field] for field in POWER_FIELDS)}
+        metadata = self.mapping.get(SOLAR_ARRAY_METADATA_KEY, {})
+        result["solar_total_capacity_kwp"] = sum(
+            _finite_number(item.get("capacity_kwp")) or 0 for item in metadata.values() if isinstance(item, dict)
+        ) or None
+        result["solar_total_panel_count"] = sum(
+            int(_finite_number(item.get("panel_count"))) for item in metadata.values()
+            if isinstance(item, dict) and _finite_number(item.get("panel_count")) is not None
+        ) or None
         result.update({
             "solar_kw": sum(solar_values) if solar_values else None,
             "consumption_kw": self._power_value("consumption_entity"),
@@ -255,6 +336,7 @@ class PowerManager:
         date = current_day_start.date().isoformat()
         mapping = {
             "solar_entities": list(self.mapping.get("solar_entities", [])),
+            SOLAR_ARRAY_METADATA_KEY: dict(self.mapping.get(SOLAR_ARRAY_METADATA_KEY, {})),
             **{field: self.mapping.get(field) for field in POWER_FIELDS},
             "invert_battery_power": bool(self.mapping.get("invert_battery_power")),
         }
@@ -271,6 +353,7 @@ class PowerManager:
             }
         mapping_key = "|".join(
             [f"solar={','.join(mapping['solar_entities'])}"]
+            + [f"solar_array_metadata={mapping.get(SOLAR_ARRAY_METADATA_KEY) or {}}"]
             + [f"{field}={mapping.get(field) or ''}" for field in POWER_FIELDS]
             + [f"invert_battery_power={bool(mapping.get('invert_battery_power'))}"]
         )
@@ -318,7 +401,67 @@ class PowerManager:
             "discharging": {"points": self._battery_history_points("discharging", mapping, raw)},
             "soc": {"points": self._points_for_entity(soc_entity, raw)},
         }
-        return {"success": True, "date": date, "series": series}
+        result = {"success": True, "date": date, "series": series}
+        result["solar_analysis"] = self._solar_analysis(series["solar"]["points"], start, now=dt_util.now())
+        return result
+
+    def _solar_analysis(self, actual_points: list[dict[str, Any]], start, now) -> dict[str, Any]:
+        """Build daily clear-sky geometry facts from the shared solar history."""
+        metadata = self.mapping.get(SOLAR_ARRAY_METADATA_KEY, {})
+        entities = self.mapping.get("solar_entities", [])
+        complete = bool(entities) and all(
+            isinstance(metadata.get(entity_id), dict)
+            and all(_finite_number(metadata[entity_id].get(key)) is not None for key in ("capacity_kwp", "tilt_deg", "azimuth_deg"))
+            for entity_id in entities
+        )
+        sun_state = self.hass.states.get("sun.sun")
+        if sun_state is None or not complete:
+            return {"available": False, "sun_available": sun_state is not None, "days": []}
+        try:
+            from astral.sun import azimuth, elevation
+            from homeassistant.helpers.sun import get_astral_observer
+            observer = get_astral_observer(self.hass)
+        except Exception:
+            return {"available": False, "sun_available": True, "days": []}
+
+        local_now = dt_util.as_local(now)
+        today = local_now.date()
+        points_by_day = {}
+        for point in actual_points:
+            timestamp = dt_util.parse_datetime(point.get("timestamp"))
+            if timestamp is not None:
+                points_by_day.setdefault(dt_util.as_local(timestamp).date(), []).append(point)
+        days = []
+        for offset in range(6, -1, -1):
+            day = today - timedelta(days=offset)
+            day_start = datetime.combine(day, time.min, tzinfo=local_now.tzinfo)
+            day_end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=local_now.tzinfo)
+            limit = day_end if day < today else min(day_end, local_now)
+            if day == today and points_by_day.get(day):
+                latest = max(dt_util.parse_datetime(point["timestamp"]) for point in points_by_day[day] if dt_util.parse_datetime(point["timestamp"]) is not None)
+                limit = min(limit, latest)
+            reference = 0.0
+            if limit > day_start:
+                previous = None
+                cursor = day_start
+                while cursor <= limit:
+                    sun_elevation = elevation(observer, cursor)
+                    sun_azimuth = azimuth(observer, cursor)
+                    power = sum(
+                        (_finite_number(metadata[entity_id]["capacity_kwp"]) or 0)
+                        * solar_incidence_factor(
+                            sun_elevation,
+                            sun_azimuth,
+                            _finite_number(metadata[entity_id]["tilt_deg"]) or 0,
+                            _finite_number(metadata[entity_id]["azimuth_deg"]) or 0,
+                        ) for entity_id in entities
+                    )
+                    if previous is not None:
+                        reference += (previous + power) / 2 * (5 / 60)
+                    previous = power
+                    cursor = dt_util.as_local(cursor.astimezone(timezone.utc) + timedelta(minutes=5))
+            days.append({"date": day.isoformat(), "reference_energy_kwh": reference})
+        return {"available": True, "sun_available": True, "days": days}
 
     @staticmethod
     def _battery_history_points(direction: str, mapping: dict[str, Any], raw: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

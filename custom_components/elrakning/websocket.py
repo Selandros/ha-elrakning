@@ -645,6 +645,7 @@ async def websocket_meter_power_history(hass, connection, msg):
     {
         vol.Required("type"): POWER_SAVE_COMMAND,
         vol.Optional("solar_entities", default=[]): [str],
+        vol.Optional("solar_array_metadata", default={}): dict,
         vol.Optional("consumption_entity", default=""): str,
         vol.Optional("charging_entity", default=""): str,
         vol.Optional("discharging_entity", default=""): str,
