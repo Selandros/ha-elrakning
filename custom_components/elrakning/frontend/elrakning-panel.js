@@ -34,39 +34,6 @@ export function providerLabel(providerName, agreementName) {
     .join(" · ");
 }
 
-function createDataRatioBar(segments, ariaLabel) {
-  const validSegments = segments.filter((segment) => Number.isFinite(segment.value) && segment.value >= 0);
-  const total = validSegments.reduce((sum, segment) => sum + segment.value, 0);
-  if (!total) return null;
-  const bar = document.createElement("div");
-  bar.className = "configuration-data-bar";
-  bar.setAttribute("role", "img");
-  bar.setAttribute("aria-label", ariaLabel);
-  validSegments.forEach((segment) => {
-    if (!segment.value) return;
-    const part = document.createElement("span");
-    part.className = `configuration-data-bar-segment ${segment.className}`;
-    part.style.width = `${segment.value / total * 100}%`;
-    bar.append(part);
-  });
-  return bar;
-}
-
-function createDataProgressBar(value, maximum, ariaLabel, className) {
-  if (!Number.isFinite(value) || !Number.isFinite(maximum) || maximum <= 0) return null;
-  const bar = document.createElement("div");
-  bar.className = `configuration-progress-bar ${className}`;
-  bar.setAttribute("role", "progressbar");
-  bar.setAttribute("aria-label", ariaLabel);
-  bar.setAttribute("aria-valuemin", "0");
-  bar.setAttribute("aria-valuemax", String(maximum));
-  bar.setAttribute("aria-valuenow", String(value));
-  const fill = document.createElement("span");
-  fill.style.width = `${Math.max(0, Math.min(100, value / maximum * 100))}%`;
-  bar.append(fill);
-  return bar;
-}
-
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -729,11 +696,8 @@ class ElrakningPanel {
           </section>
         </div>
 
-        <section class="configuration-surfaces" data-configuration-cards aria-label="Elräkningens konfigurationskort">
-          <section class="configuration-surface configuration-surface-commerce" aria-label="Avtal och nät">
-            <p class="configuration-surface-label">Avtal och nät</p>
-            <div class="configuration-surface-grid configuration-surface-grid-commerce">
-          <article class="configuration-module configuration-card-elhandel" data-provider-card="elhandel" data-config-card-key="elhandel">
+        <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
+          <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
             <div class="card-heading">
               <h2>Elhandel</h2>
               <span class="status" data-provider-status></span>
@@ -751,50 +715,40 @@ class ElrakningPanel {
             <button type="button" data-greenely-parse-latest hidden>Tolka senaste</button>
           </article>
 
-            <article class="configuration-module configuration-card-elnet" data-provider-card="elnet" data-config-card-key="elnet">
+            <article class="card" data-provider-card="elnet" data-config-card-key="elnet">
             <div class="card-heading">
               <h2>Elnät</h2>
               <span class="status">Ej konfigurerad</span>
               <label class="main-card-toggle" data-main-card-toggle="elnet" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elnet" hidden></p>
-            <p class="configuration-empty">Konfigurera nätdata för att se effekt och import/export.</p>
             <button type="button" class="configuration-control">Konfigurera</button>
           </article>
-            </div>
-          </section>
 
-          <section class="configuration-surface configuration-surface-power" aria-label="Energi och batteri">
-            <p class="configuration-surface-label">Energi och batteri</p>
-            <div class="configuration-surface-grid configuration-surface-grid-power">
-          <article class="configuration-module configuration-card-elmatare" data-provider-card="elmatare" data-config-card-key="elmatare">
+          <article class="card" data-provider-card="elmatare" data-config-card-key="elmatare">
             <div class="card-heading">
               <h2>Elmätare</h2>
               <span class="status" data-meter-status>Ej konfigurerad</span>
               <label class="main-card-toggle" data-main-card-toggle="elmatare" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elmatare" hidden></p>
-            <div class="configuration-mini-chart" data-meter-mini-chart hidden></div>
             <div class="meter-summary" data-meter-summary hidden></div>
             <button type="button" class="configuration-control" data-meter-configure>Konfigurera</button>
             <button type="button" data-meter-source hidden>Visa mätardata</button>
           </article>
 
-          <article class="configuration-module power-card configuration-card-solar" data-power-card="solar" data-config-card-key="solar">
+          <article class="card power-card" data-power-card="solar" data-config-card-key="solar">
             <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
-            <div class="configuration-mini-chart" data-power-mini-chart="solar" hidden></div>
             <div class="power-summary" data-power-summary="solar" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
-          <article class="configuration-module power-card configuration-card-battery" data-power-card="battery" data-config-card-key="battery">
+          <article class="card power-card" data-power-card="battery" data-config-card-key="battery">
             <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
-            <div class="configuration-mini-chart" data-power-mini-chart="battery" hidden></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
-            </div>
-          </section>
+
         </section>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
@@ -2328,308 +2282,6 @@ class ElrakningPanel {
           min-height: 0;
         }
 
-        [data-configuration-cards] {
-          display: grid;
-          gap: 16px;
-          grid-template-columns: repeat(12, minmax(0, 1fr));
-          margin-top: 16px;
-        }
-
-        .configuration-surface {
-          background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
-          border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
-          border-radius: var(--ha-card-border-radius, 12px);
-          box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
-          box-sizing: border-box;
-          grid-column: 1 / -1;
-          min-width: 0;
-          overflow: hidden;
-          padding: 18px 20px 20px;
-        }
-
-        .configuration-surface-label {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          letter-spacing: .06em;
-          margin: 0 0 16px;
-          text-transform: uppercase;
-        }
-
-        .configuration-surface-grid {
-          display: grid;
-          gap: 20px;
-          min-width: 0;
-        }
-
-        .configuration-surface-grid-commerce {
-          grid-template-columns: minmax(0, 5fr) minmax(220px, 3fr);
-        }
-
-        .configuration-surface-grid-power {
-          grid-template-columns: minmax(0, 4fr) minmax(0, 3fr) minmax(0, 3fr);
-        }
-
-        .configuration-module {
-          align-content: start;
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-        }
-
-        .configuration-module + .configuration-module {
-          border-left: 1px solid var(--divider-color);
-          padding-left: 20px;
-        }
-
-        [data-configuration-cards] .configuration-module .card-heading {
-          align-items: center;
-          flex-direction: row;
-          min-height: 28px;
-        }
-
-        [data-configuration-cards] .configuration-module .card-heading h2 {
-          flex: 1 1 auto;
-          font-size: 20px;
-          font-weight: 500;
-          min-width: 0;
-          overflow: hidden;
-          padding-right: 0;
-          text-overflow: ellipsis;
-        }
-
-        [data-configuration-cards] .configuration-module .status {
-          color: var(--secondary-text-color);
-          flex: 0 0 auto;
-          font-size: 12px;
-          font-weight: 400;
-          margin-right: 38px;
-        }
-
-        [data-configuration-cards] .configuration-module .provider {
-          color: var(--primary-text-color);
-          font-size: 15px;
-          font-weight: 600;
-          line-height: 1.3;
-          margin-top: 14px;
-        }
-
-        [data-configuration-cards] .configuration-module .provider-summary,
-        [data-configuration-cards] .configuration-module .meter-summary,
-        [data-configuration-cards] .configuration-module .power-summary {
-          column-gap: 12px;
-          grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-          margin-top: 16px;
-          row-gap: 8px;
-        }
-
-        [data-configuration-cards] .configuration-module .provider-summary strong,
-        [data-configuration-cards] .configuration-module .meter-summary strong,
-        [data-configuration-cards] .configuration-module .power-summary strong {
-          color: var(--secondary-text-color);
-          font-size: 13px;
-          min-width: 0;
-          overflow-wrap: normal;
-          word-break: normal;
-        }
-
-        [data-configuration-cards] .configuration-module .provider-summary span,
-        [data-configuration-cards] .configuration-module .meter-summary span,
-        [data-configuration-cards] .configuration-module .power-summary span {
-          color: var(--primary-text-color);
-          font-size: 15px;
-          font-weight: 600;
-          min-width: 0;
-          text-align: right;
-          white-space: normal;
-        }
-
-        [data-configuration-cards] .configuration-module .configuration-control {
-          align-self: flex-start;
-          background: var(--primary-color);
-          border: 0;
-          color: var(--text-primary-color, white);
-          cursor: pointer;
-          margin-top: auto;
-          transition: filter 120ms ease;
-        }
-
-        [data-configuration-cards] .configuration-module .configuration-control:hover {
-          filter: brightness(1.08);
-        }
-
-        .configuration-empty {
-          background: color-mix(in srgb, var(--secondary-text-color) 5%, transparent);
-          border: 1px dashed color-mix(in srgb, var(--secondary-text-color) 35%, transparent);
-          border-radius: 8px;
-          color: var(--secondary-text-color);
-          line-height: 1.5;
-          margin-top: 22px;
-          max-width: 28ch;
-          padding: 12px;
-        }
-
-        [data-configuration-cards] .configuration-module .power-summary-divider {
-          align-items: center;
-          color: var(--secondary-text-color);
-          display: flex;
-          font-size: 11px;
-          font-weight: 600;
-          gap: 8px;
-          letter-spacing: .06em;
-          margin: 11px 0 2px;
-          text-transform: uppercase;
-        }
-
-        [data-configuration-cards] .configuration-module .power-summary-divider::after {
-          background: var(--divider-color);
-          content: "";
-          flex: 1;
-          height: 1px;
-        }
-
-        [data-configuration-cards] .configuration-module .configuration-data-bar {
-          background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
-          border-radius: 999px;
-          display: flex;
-          grid-column: 1 / -1;
-          height: 8px;
-          margin: 4px 0 2px;
-          overflow: hidden;
-        }
-
-        [data-configuration-cards] .configuration-module .configuration-progress-bar {
-          background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
-          border-radius: 999px;
-          grid-column: 1 / -1;
-          height: 6px;
-          margin: 0 0 2px;
-          overflow: hidden;
-        }
-
-        .configuration-progress-bar span {
-          background: var(--el-charging-color);
-          border-radius: inherit;
-          display: block;
-          height: 100%;
-          min-width: 0;
-        }
-
-        .configuration-progress-bar.utilization span {
-          background: var(--el-discharging-color);
-        }
-
-        .configuration-mini-chart {
-          margin: 18px 0 4px;
-          min-height: 0;
-        }
-
-        .configuration-mini-chart-svg {
-          display: block;
-          height: 116px;
-          overflow: visible;
-          width: 100%;
-        }
-
-        .configuration-mini-line {
-          fill: none;
-          stroke-linecap: round;
-          stroke-linejoin: round;
-          stroke-width: 2.5;
-          vector-effect: non-scaling-stroke;
-        }
-
-        .configuration-mini-area {
-          fill-opacity: .24;
-          stroke: none;
-        }
-
-        .configuration-mini-line.solar,
-        .configuration-mini-area.solar {
-          stroke: var(--el-solar-color);
-          fill: var(--el-solar-color);
-        }
-
-        .configuration-mini-line.consumption,
-        .configuration-mini-area.consumption {
-          stroke: var(--el-consumption-color);
-          fill: var(--el-consumption-color);
-        }
-
-        .configuration-mini-line.charging,
-        .configuration-mini-area.charging {
-          stroke: var(--el-charging-color);
-          fill: var(--el-charging-color);
-        }
-
-        .configuration-mini-line.discharging,
-        .configuration-mini-area.discharging {
-          stroke: var(--el-discharging-color);
-          fill: var(--el-discharging-color);
-        }
-
-        .configuration-data-bar-segment {
-          display: block;
-          height: 100%;
-          min-width: 2px;
-        }
-
-        .configuration-data-bar-segment.import {
-          background: var(--el-import-color);
-        }
-
-        .configuration-data-bar-segment.export {
-          background: var(--el-export-color);
-        }
-
-        .configuration-data-bar-segment.charging {
-          background: var(--el-charging-color);
-        }
-
-        .configuration-data-bar-segment.discharging {
-          background: var(--el-discharging-color);
-        }
-
-        [data-configuration-cards] .configuration-card-elhandel .provider-summary span:last-child,
-        [data-configuration-cards] .configuration-card-solar .power-summary span:last-child,
-        [data-configuration-cards] .configuration-card-elmatare .meter-summary span:nth-of-type(2) {
-          font-size: 18px;
-        }
-
-        @media (max-width: 980px) {
-          .configuration-surface-grid-commerce,
-          .configuration-surface-grid-power {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
-          .configuration-surface-grid-power .configuration-card-elmatare {
-            grid-column: 1 / -1;
-          }
-
-          .configuration-surface-grid-power .configuration-card-elmatare + .configuration-module {
-            border-left: 0;
-            padding-left: 0;
-          }
-        }
-
-        @media (max-width: 620px) {
-          .configuration-surface {
-            padding-left: 16px;
-            padding-right: 16px;
-          }
-
-          .configuration-surface-grid-commerce,
-          .configuration-surface-grid-power {
-            grid-template-columns: minmax(0, 1fr);
-          }
-
-          .configuration-module + .configuration-module {
-            border-left: 0;
-            border-top: 1px solid var(--divider-color);
-            padding-left: 0;
-            padding-top: 18px;
-          }
-        }
-
         .card-heading {
           display: flex;
           flex-direction: column;
@@ -3414,41 +3066,22 @@ class ElrakningPanel {
         .map(([labelText, value, unit]) => [labelText, unit === "kW" ? displayPowerValue(value) : value, unit])
         .filter(([, value]) => typeof value === "number" && Number.isFinite(value));
       const summaryNodes = [];
-      const flowBar = cardType === "battery"
-        ? createDataRatioBar([
-          { value: Number(this._powerState.charging_kw), className: "charging" },
-          { value: Number(this._powerState.discharging_kw), className: "discharging" },
-        ], "Batteriflöde just nu")
-        : null;
-      const socBar = cardType === "battery"
-        ? createDataProgressBar(Number(this._powerState.soc_percent), 100, "Laddnivå", "soc")
-        : null;
-      const utilizationBar = cardType === "battery"
-        ? createDataProgressBar(Number(capacityUtilizationPercent), 100, "Kapacitetsutnyttjande", "utilization")
-        : null;
       validRows.forEach(([labelText, value, unit], index) => {
         if (cardType === "battery" && index === 4) {
           const divider = document.createElement("div");
           divider.className = "power-summary-divider";
-          divider.textContent = "Idag";
           summaryNodes.push(divider);
         }
         const label = document.createElement("strong");
-        label.className = `configuration-metric-label ${labelText === "Laddnivå" ? "soc" : ""}`.trim();
         label.textContent = labelText;
         const output = document.createElement("span");
-        output.className = `configuration-metric-value ${labelText === "Laddnivå" ? "soc" : ""}`.trim();
         output.textContent = `${this._formatNumber(value)} ${unit}`;
         summaryNodes.push(label, output);
-        if (flowBar && index === 1) summaryNodes.push(flowBar);
-        if (socBar && labelText === "Laddnivå") summaryNodes.push(socBar);
-        if (utilizationBar && labelText === "Kapacitetsutnyttjande") summaryNodes.push(utilizationBar);
       });
       summary.replaceChildren(...summaryNodes);
       summary.hidden = validRows.length === 0;
     }
     this._renderMergedMeterSummary();
-    this._renderPowerMiniCharts();
     this._renderSocChart();
     this._syncSocCardHeight();
   }
@@ -3465,70 +3098,6 @@ class ElrakningPanel {
   _refreshPowerEnergyState() {
     if (!this._powerState) return;
     this._applyPowerState(this._powerState);
-  }
-
-  _buildPowerMiniChart(seriesKeys, ariaLabel) {
-    const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    const width = 720;
-    const height = 150;
-    const plot = { left: 4, right: 4, top: 8, bottom: 8 };
-    const plotWidth = width - plot.left - plot.right;
-    const plotHeight = height - plot.top - plot.bottom;
-    const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime())
-      / (dayEnd.getTime() - dayStart.getTime())) * plotWidth;
-    const rawSeries = seriesKeys.map((key) => {
-      const points = Array.isArray(this._powerHistory?.series?.[key]?.points)
-        ? this._powerHistory.series[key].points.filter((point) => {
-          const timestamp = new Date(point.timestamp).getTime();
-          return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
-        })
-        : [];
-      return { key, points };
-    });
-    const maximum = Math.max(1, ...rawSeries.flatMap(({ points }) => points.map((point) => Number(point.value_kw)))
-      .filter(Number.isFinite));
-    const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / maximum) * plotHeight;
-    const classes = { solar: "solar", consumption: "consumption", charging: "charging", discharging: "discharging" };
-    const markup = rawSeries.map(({ key, points }) => {
-      const canonical = this.buildCanonicalPowerPoints(points, dayStart, dayEnd);
-      const display = canonical.map((point) => ({
-        ...point,
-        value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
-      }));
-      return this.buildMeterDisplaySegments(display, "value_kw").filter((segment) => segment.length >= 2).map((segment) => {
-        const coordinates = this.buildMeterDisplayCoordinates(segment, "value_kw", x, y);
-        const first = coordinates[0];
-        const last = coordinates.at(-1);
-        const line = this.buildMeterDisplayPathSegments(coordinates).reduce((path, part) => (
-          `${path} C ${part.control1.x} ${part.control1.y} ${part.control2.x} ${part.control2.y} ${part.end.x} ${part.end.y}`
-        ), `M ${first.x} ${first.y}`);
-        const area = `M ${first.x} ${plot.top + plotHeight} L ${first.x} ${first.y} ${line.slice(line.indexOf(" "))} L ${last.x} ${plot.top + plotHeight} Z`;
-        return `<path class="configuration-mini-area ${classes[key]}" d="${area}" /><path class="configuration-mini-line ${classes[key]}" d="${line}" />`;
-      }).join("");
-    }).join("");
-    return markup ? `<svg class="configuration-mini-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}">${markup}</svg>` : "";
-  }
-
-  _renderPowerMiniCharts() {
-    const meterChart = this.host.querySelector("[data-meter-mini-chart]");
-    if (meterChart) {
-      const markup = this._buildPowerMiniChart(["consumption"], "Husets last historik");
-      meterChart.innerHTML = markup;
-      meterChart.hidden = !markup;
-    }
-    for (const [cardType, seriesKeys, label] of [
-      ["solar", ["solar"], "Solproduktion historik"],
-      ["battery", ["charging", "discharging"], "Batteriflöde historik"],
-    ]) {
-      const chart = this.host.querySelector(`[data-power-mini-chart="${cardType}"]`);
-      if (!chart) continue;
-      const markup = this._buildPowerMiniChart(seriesKeys, label);
-      chart.innerHTML = markup;
-      chart.hidden = !markup;
-    }
   }
 
   _renderMergedMeterSummary() {
@@ -3564,21 +3133,13 @@ class ElrakningPanel {
     }
     const validRows = rows.filter(([, value, unit]) =>
       unit === "" ? value === "Byt sensor" : typeof value === "number" && Number.isFinite(value));
-    const summaryNodes = validRows.flatMap(([labelText, value, unit]) => {
+    summary.replaceChildren(...validRows.flatMap(([labelText, value, unit]) => {
       const label = document.createElement("strong");
       label.textContent = labelText;
       const output = document.createElement("span");
       output.textContent = unit ? `${this._formatNumber(value)} ${unit}` : value;
       return [label, output];
-    });
-    const flowBar = meterConfigured
-      ? createDataRatioBar([
-        { value: Number(validRows.find(([label]) => label === "Import idag")?.[1]), className: "import" },
-        { value: Number(validRows.find(([label]) => label === "Export idag")?.[1]), className: "export" },
-      ], "Dagens nätbalans")
-      : null;
-    if (flowBar) summaryNodes.push(flowBar);
-    summary.replaceChildren(...summaryNodes);
+    }));
     summary.hidden = validRows.length === 0;
     this._renderDailyEnergyCard();
   }
