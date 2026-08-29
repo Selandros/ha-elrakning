@@ -60,12 +60,6 @@ def _manager(config=None):
     manager = object.__new__(manager_module.EonGridManager)
     manager.hass = object()
     manager._web_session = object()
-    manager._app_test_session = None
-    manager._app_test_source = None
-    manager._app_test_summary = None
-    manager._app_test_locations = []
-    manager._web_test_locations = []
-    manager._web_test_state = {"status": "not_configured"}
     manager._config = lambda: config or {"web": {"cookies": {"MyEonSession": "cookie"}, "customer_id": "web-customer"}}
     return manager
 
@@ -93,49 +87,6 @@ def _profile(*facilities):
             ],
         }],
     }
-
-
-class _WebClient:
-    payload = None
-
-    def __init__(self, session):
-        self.session = session
-
-    async def async_get_user(self, customer_id):
-        return self.payload
-
-
-def _enrich(profile, app_installation, consumption):
-    _WebClient.payload = profile
-    original = manager_module.EonClient
-    manager_module.EonClient = _WebClient
-    manager = _manager()
-    state = {
-        "agreement": {"status": "configured"},
-        "facility": {"price_area": "SE2"},
-        "consumption": consumption,
-        "tariff": None,
-        "cost": None,
-    }
-    try:
-        asyncio.run(manager._enrich_app_state_from_web(
-            state, app_installation, manager._config()
-        ))
-    finally:
-        manager_module.EonClient = original
-    return state
-
-
-def test_hybrid_matches_web_contract_by_pod_and_enriches_state():
-    state = _enrich(
-        _profile(("web-installation", "shared-pod")),
-        {"installation_identifier": "app-installation", "point_of_delivery_number": "shared-pod"},
-        {"status": "ok", "consumption_kwh": 10},
-    )
-    assert state["web_data"]["status"] == "ok"
-    assert state["tariff"]["subscription_fee_sek_per_month"] == 100
-    assert state["facility"]["fuse_ampere"] == 16
-    assert state["cost"]["total_sek"] == 113
 
 
 def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
@@ -185,73 +136,6 @@ def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
     assert result["reauth_required"] is False
 
 
-def test_hybrid_matches_web_contract_by_installation_identifier():
-    state = _enrich(
-        _profile(("shared-installation", "web-pod")),
-        {"installation_identifier": "shared-installation", "point_of_delivery_number": "app-pod"},
-        {"status": "ok", "consumption_kwh": 10},
-    )
-    assert state["web_data"]["status"] == "ok"
-    assert state["tariff"] is not None
-
-
-def test_hybrid_requires_one_unambiguous_match():
-    ambiguous = _enrich(
-        _profile(("shared", "pod-a"), ("shared", "pod-b")),
-        {"installation_identifier": "shared", "point_of_delivery_number": "unused"},
-        {"status": "ok", "consumption_kwh": 10},
-    )
-    missing = _enrich(
-        _profile(("other", "other-pod")),
-        {"installation_identifier": "missing", "point_of_delivery_number": "target"},
-        {"status": "ok", "consumption_kwh": 10},
-    )
-    for state in (ambiguous, missing):
-        assert state["web_data"]["error"] == "web_contract_match_required"
-        assert state["tariff"] is None
-
-
-def test_padded_app_consumption_does_not_calculate_web_cost():
-    state = _enrich(
-        _profile(("installation", "pod")),
-        {"installation_identifier": "installation", "point_of_delivery_number": "pod"},
-        {"status": "missing", "reason": "padded"},
-    )
-    assert state["tariff"] is not None
-    assert state["cost"] is None
-
-
-def test_web_auth_failure_preserves_app_state_without_global_reauth():
-    class _FailingClient:
-        def __init__(self, session):
-            pass
-
-        async def async_get_user(self, customer_id):
-            raise manager_module.EonAuthError("reauth_required")
-
-    original = manager_module.EonClient
-    manager_module.EonClient = _FailingClient
-    manager = _manager()
-    state = {
-        "facility": {"point_of_delivery_number": "internal-pod"},
-        "consumption": {"status": "ok", "consumption_kwh": 4},
-        "outage": {"status": "no_known_outage"},
-        "tariff": None,
-        "cost": None,
-    }
-    try:
-        asyncio.run(manager._enrich_app_state_from_web(
-            state, {"installation_identifier": "app", "point_of_delivery_number": "pod"}, manager._config()
-        ))
-    finally:
-        manager_module.EonClient = original
-    assert state["consumption"]["status"] == "ok"
-    assert state["facility"]["point_of_delivery_number"] == "internal-pod"
-    assert state["outage"]["status"] == "no_known_outage"
-    assert state["web_data"]["status"] == "error"
-    assert "reauth_required" not in state
-
-
 def test_public_state_filters_internal_installation_identifiers():
     manager = object.__new__(manager_module.EonGridManager)
     manager.state = {"facility": {
@@ -273,50 +157,6 @@ def test_source_redaction_removes_identifiers_and_credentials():
     })
     assert all(value == "[redacted]" for key, value in redacted.items() if key != "safe")
     assert redacted["safe"] == "kept"
-
-
-def test_app_test_login_uses_only_its_isolated_app_session():
-    calls = []
-
-    class _AppSession:
-        def __init__(self, hass):
-            calls.append("created")
-
-        async def async_login(self, account_id, password):
-            calls.append((account_id, password))
-
-    original = manager_module.EonAppSession
-    manager_module.EonAppSession = _AppSession
-    try:
-        result = asyncio.run(_manager().async_app_test_login("synthetic-account", "synthetic-password"))
-    finally:
-        manager_module.EonAppSession = original
-    assert result["status"] == "authenticated"
-    assert calls == ["created", ("synthetic-account", "synthetic-password")]
-
-
-def test_web_test_login_never_falls_back_to_app_auth():
-    class _UnexpectedAppSession:
-        def __init__(self, hass):
-            raise AssertionError("app auth was used")
-
-    original = manager_module.EonAppSession
-    manager_module.EonAppSession = _UnexpectedAppSession
-    try:
-        result = asyncio.run(_manager().async_web_test_login("synthetic-account", "synthetic-password"))
-    finally:
-        manager_module.EonAppSession = original
-    assert result["status"] == "browser_attestation_required"
-
-
-def test_app_and_web_comparison_reports_pod_and_installation_matches_without_values():
-    app = [{"point_of_delivery_number": "shared-pod", "installation_identifier": "app-id"}]
-    web = [{"point_of_delivery_number": "shared-pod", "installation_identifier": "web-id"}]
-    fields = manager_module._comparison_fields(app, web)
-    assert fields[1] == {"field": "POD match", "app": "ja", "web": "ja"}
-    assert fields[2] == {"field": "Installation ID match", "app": "nej", "web": "nej"}
-    web[0]["installation_identifier"] = "app-id"
-    assert manager_module._comparison_fields(app, web)[2]["app"] == "ja"
 
 
 def test_web_api_request_uses_bearer_without_explicit_web_cookies():
@@ -347,7 +187,7 @@ def test_legacy_web_config_is_migrated_without_losing_app_config():
     assert "cookies" not in migrated
 
 
-def test_saving_app_credentials_preserves_existing_web_configuration():
+def test_saving_app_credentials_replaces_active_auth_method():
     class _Session:
         def __init__(self, hass):
             pass
@@ -373,7 +213,7 @@ def test_saving_app_credentials_preserves_existing_web_configuration():
         asyncio.run(manager.async_save_app_credentials("account", "password"))
     finally:
         manager_module.EonAppSession = original
-    assert saved[0]["web"]["customer_id"] == "web-customer"
+    assert "web" not in saved[0]
     assert saved[0]["account_id"] == "account"
 
 
@@ -424,3 +264,13 @@ def test_saving_web_cookies_preserves_existing_app_configuration():
     assert config["auth"] == "app"
     assert config["account_id"] == "account"
     assert config["web"]["customer_id"] == "web-customer"
+
+
+def test_web_credentials_report_attestation_without_using_app_auth_or_mutating_config():
+    manager = object.__new__(manager_module.EonGridManager)
+    manager.entry = types.SimpleNamespace(data={"eon_grid": {
+        "auth": "app", "account_id": "app-account", "password": "app-password",
+    }})
+    result = asyncio.run(manager.async_save_web_credentials("web-account", "web-password"))
+    assert result == {"status": "browser_attestation_required", "error": "browser_attestation_required"}
+    assert manager.entry.data["eon_grid"]["account_id"] == "app-account"

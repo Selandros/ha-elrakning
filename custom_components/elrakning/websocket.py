@@ -39,15 +39,9 @@ ELECTRICITY_PROVIDER_REMOVE_COMMAND = f"{DOMAIN}/electricity_provider_remove"
 EON_GRID_STATE_COMMAND = f"{DOMAIN}/eon_grid_state"
 EON_GRID_SAVE_COMMAND = f"{DOMAIN}/eon_grid_save"
 EON_GRID_APP_SAVE_COMMAND = f"{DOMAIN}/eon_grid_app_save"
+EON_GRID_WEB_SAVE_COMMAND = f"{DOMAIN}/eon_grid_web_save"
 EON_GRID_SOURCE_DATA_COMMAND = f"{DOMAIN}/eon_grid_source_data"
 EON_GRID_REMOVE_COMMAND = f"{DOMAIN}/eon_grid_remove"
-EON_APP_TEST_LOGIN_COMMAND = f"{DOMAIN}/eon_app_test_login"
-EON_APP_TEST_SOURCE_COMMAND = f"{DOMAIN}/eon_app_test_source_data"
-EON_APP_TEST_LOGOUT_COMMAND = f"{DOMAIN}/eon_app_test_logout"
-EON_WEB_TEST_LOGIN_COMMAND = f"{DOMAIN}/eon_web_test_login"
-EON_WEB_TEST_SOURCE_COMMAND = f"{DOMAIN}/eon_web_test_source_data"
-EON_WEB_TEST_LOGOUT_COMMAND = f"{DOMAIN}/eon_web_test_logout"
-EON_TEST_COMPARISON_COMMAND = f"{DOMAIN}/eon_test_comparison"
 ELECTRICITY_HISTORY_STATE_COMMAND = f"{DOMAIN}/electricity_history_state"
 ELECTRICITY_HISTORY_PURGE_COMMAND = f"{DOMAIN}/electricity_history_purge"
 DIAGNOSTICS_STATE_COMMAND = f"{DOMAIN}/diagnostics_state"
@@ -85,15 +79,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_eon_grid_state)
     websocket_api.async_register_command(hass, websocket_eon_grid_save)
     websocket_api.async_register_command(hass, websocket_eon_grid_app_save)
+    websocket_api.async_register_command(hass, websocket_eon_grid_web_save)
     websocket_api.async_register_command(hass, websocket_eon_grid_source_data)
     websocket_api.async_register_command(hass, websocket_eon_grid_remove)
-    websocket_api.async_register_command(hass, websocket_eon_app_test_login)
-    websocket_api.async_register_command(hass, websocket_eon_app_test_source)
-    websocket_api.async_register_command(hass, websocket_eon_app_test_logout)
-    websocket_api.async_register_command(hass, websocket_eon_web_test_login)
-    websocket_api.async_register_command(hass, websocket_eon_web_test_source)
-    websocket_api.async_register_command(hass, websocket_eon_web_test_logout)
-    websocket_api.async_register_command(hass, websocket_eon_test_comparison)
     websocket_api.async_register_command(hass, websocket_electricity_history_state)
     websocket_api.async_register_command(hass, websocket_electricity_history_purge)
     websocket_api.async_register_command(hass, websocket_diagnostics_state)
@@ -385,6 +373,26 @@ async def websocket_eon_grid_app_save(hass, connection, msg):
     connection.send_result(msg["id"], {"success": True, **state})
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): EON_GRID_WEB_SAVE_COMMAND,
+    vol.Required("account_id"): str,
+    vol.Required("password"): str,
+})
+@websocket_api.async_response
+async def websocket_eon_grid_web_save(hass, connection, msg):
+    manager = _eon_grid_manager(hass)
+    account_id = msg.get("account_id")
+    password = msg.get("password")
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
+        return
+    if not isinstance(account_id, str) or not account_id.strip() or not isinstance(password, str) or not password:
+        connection.send_result(msg["id"], {"success": False, "error": "invalid_input"})
+        return
+    result = await manager.async_save_web_credentials(account_id.strip(), password)
+    connection.send_result(msg["id"], {"success": result.get("status") == "authenticated", **result})
+
+
 @websocket_api.websocket_command({vol.Required("type"): EON_GRID_SOURCE_DATA_COMMAND})
 @websocket_api.async_response
 async def websocket_eon_grid_source_data(hass, connection, msg):
@@ -408,96 +416,6 @@ async def websocket_eon_grid_remove(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
         return
     connection.send_result(msg["id"], {"success": True, **await manager.async_remove()})
-
-
-def _send_eon_test_error(connection, msg, error):
-    connection.send_result(msg["id"], {"success": False, "error": error})
-
-
-@websocket_api.websocket_command({
-    vol.Required("type"): EON_APP_TEST_LOGIN_COMMAND,
-    vol.Required("account_id"): str,
-    vol.Required("password"): str,
-})
-@websocket_api.async_response
-async def websocket_eon_app_test_login(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    result = await manager.async_app_test_login(msg["account_id"], msg["password"])
-    connection.send_result(msg["id"], {"success": result.get("status") == "authenticated", **result})
-
-
-@websocket_api.websocket_command({vol.Required("type"): EON_APP_TEST_SOURCE_COMMAND})
-@websocket_api.async_response
-async def websocket_eon_app_test_source(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    try:
-        result = await manager.async_app_test_source_data()
-    except Exception:
-        _send_eon_test_error(connection, msg, "app_test_source_unavailable")
-        return
-    connection.send_result(msg["id"], {"success": result.get("status") == "ok", **result})
-
-
-@websocket_api.websocket_command({vol.Required("type"): EON_APP_TEST_LOGOUT_COMMAND})
-@websocket_api.async_response
-async def websocket_eon_app_test_logout(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    connection.send_result(msg["id"], {"success": True, **await manager.async_app_test_logout()})
-
-
-@websocket_api.websocket_command({
-    vol.Required("type"): EON_WEB_TEST_LOGIN_COMMAND,
-    vol.Required("account_id"): str,
-    vol.Required("password"): str,
-})
-@websocket_api.async_response
-async def websocket_eon_web_test_login(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    result = await manager.async_web_test_login(msg["account_id"], msg["password"])
-    connection.send_result(msg["id"], {"success": result.get("status") == "authenticated", **result})
-
-
-@websocket_api.websocket_command({vol.Required("type"): EON_WEB_TEST_SOURCE_COMMAND})
-@websocket_api.async_response
-async def websocket_eon_web_test_source(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    result = await manager.async_web_test_source_data()
-    connection.send_result(msg["id"], {"success": False, **result})
-
-
-@websocket_api.websocket_command({vol.Required("type"): EON_WEB_TEST_LOGOUT_COMMAND})
-@websocket_api.async_response
-async def websocket_eon_web_test_logout(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    connection.send_result(msg["id"], {"success": True, **await manager.async_web_test_logout()})
-
-
-@websocket_api.websocket_command({vol.Required("type"): EON_TEST_COMPARISON_COMMAND})
-@websocket_api.async_response
-async def websocket_eon_test_comparison(hass, connection, msg):
-    manager = _eon_grid_manager(hass)
-    if manager is None:
-        _send_eon_test_error(connection, msg, "eon_grid_unavailable")
-        return
-    connection.send_result(msg["id"], {"success": True, **manager.eon_test_comparison()})
 
 
 @websocket_api.websocket_command({vol.Required("type"): ELECTRICITY_HISTORY_STATE_COMMAND})

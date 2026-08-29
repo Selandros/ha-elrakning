@@ -871,36 +871,6 @@ class ElrakningPanel {
           </article>
 
         </section>
-        <section class="card eon-api-test-card" data-eon-api-tests hidden aria-labelledby="eon-api-tests-title">
-          <div class="card-heading"><h2 id="eon-api-tests-title">E.ON API-test</h2><span class="status">Endast diagnostik</span></div>
-          <div class="eon-api-test-grid">
-            <section class="eon-api-test-section" data-eon-test-section="app">
-              <h3>E.ON App API</h3>
-              <label>Konto-ID / användarnamn<input type="text" data-eon-test-account="app" autocomplete="off"></label>
-              <label>Lösenord<input type="password" data-eon-test-password="app" autocomplete="off"></label>
-              <p class="provider-result" data-eon-test-status="app" aria-live="polite">Inte konfigurerad</p>
-              <button type="button" data-eon-test-login="app">Logga in</button>
-              <button type="button" data-eon-test-source="app">Vad har vi för data?</button>
-              <button type="button" data-eon-test-logout="app">Logga ut / rensa testsession</button>
-              <pre data-eon-test-output="app"></pre>
-            </section>
-            <section class="eon-api-test-section" data-eon-test-section="web">
-              <h3>E.ON Webb API</h3>
-              <label>Konto-ID / användarnamn<input type="text" data-eon-test-account="web" autocomplete="off"></label>
-              <label>Lösenord<input type="password" data-eon-test-password="web" autocomplete="off"></label>
-              <p class="provider-result" data-eon-test-status="web" aria-live="polite">Inte konfigurerad</p>
-              <button type="button" data-eon-test-login="web">Logga in</button>
-              <button type="button" data-eon-test-source="web">Vad har vi för data?</button>
-              <button type="button" data-eon-test-logout="web">Logga ut / rensa testsession</button>
-              <pre data-eon-test-output="web"></pre>
-            </section>
-          </div>
-          <div class="eon-api-comparison">
-            <h3>Jämförelse</h3>
-            <button type="button" data-eon-test-comparison>Uppdatera jämförelse</button>
-            <pre data-eon-test-comparison-output></pre>
-          </div>
-        </section>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
           <div class="invoice-diagnostic-grid" data-invoice-diagnostic-fields></div>
@@ -997,21 +967,27 @@ class ElrakningPanel {
       <div class="provider-dialog" data-eon-grid-dialog hidden role="dialog" aria-modal="true" aria-labelledby="eon-grid-title">
         <div class="provider-dialog-card">
           <h2 id="eon-grid-title">Konfigurera E.ON elnät</h2>
-          <p>Logga in med ditt E.ON konto-ID och lösenord.</p>
-          <label>Användarnamn / konto-ID<input type="text" data-eon-grid-account autocomplete="username"></label>
-          <label>Lösenord<input type="password" data-eon-grid-password autocomplete="current-password"></label>
+          <div class="eon-auth-methods">
+            <section class="eon-auth-method" aria-labelledby="eon-app-title">
+              <h3 id="eon-app-title">E.ON App</h3>
+              <p>Logga in med ditt E.ON konto-ID och lösenord.</p>
+              <label>Användarnamn / konto-ID<input type="text" data-eon-grid-app-account autocomplete="username"></label>
+              <label>Lösenord<input type="password" data-eon-grid-app-password autocomplete="current-password"></label>
+              <button type="button" data-eon-grid-app-save>Logga in</button>
+            </section>
+            <section class="eon-auth-method" aria-labelledby="eon-web-title">
+              <h3 id="eon-web-title">Mitt E.ON / Webb</h3>
+              <p>Webbinloggning kan kräva webbläsarverifiering.</p>
+              <label>Användarnamn / konto-ID<input type="text" data-eon-grid-web-account autocomplete="username"></label>
+              <label>Lösenord<input type="password" data-eon-grid-web-password autocomplete="current-password"></label>
+              <button type="button" data-eon-grid-web-save>Logga in</button>
+            </section>
+          </div>
           <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
           <div class="provider-actions">
             <button type="button" data-eon-grid-cancel>Avbryt</button>
             <button type="button" data-eon-grid-remove hidden>Ta bort E.ON</button>
-            <button type="button" data-eon-grid-save>Logga in</button>
           </div>
-          <details class="provider-fallback">
-            <summary>Webbdata / avtal och tariff</summary>
-            <p>Importera en befintlig Mitt E.ON-session för webbdata. Appdata fortsätter fungera utan den.</p>
-            <label>Cookie-header<input type="password" data-eon-grid-cookie autocomplete="off"></label>
-            <button type="button" data-eon-grid-cookie-save>Importera session</button>
-          </details>
         </div>
       </div>
       <style>
@@ -1850,6 +1826,33 @@ class ElrakningPanel {
           margin-top: 6px;
           padding: 9px;
           width: 100%;
+        }
+
+        .eon-auth-methods {
+          display: grid;
+          gap: 16px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .eon-auth-method {
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          padding: 14px;
+        }
+
+        .eon-auth-method h3 {
+          margin: 0;
+        }
+
+        .eon-auth-method p {
+          color: var(--secondary-text-color);
+          margin: 8px 0 14px;
+        }
+
+        @media (max-width: 700px) {
+          .eon-auth-methods {
+            grid-template-columns: 1fr;
+          }
         }
 
         .electricity-history-option {
@@ -2822,7 +2825,6 @@ class ElrakningPanel {
     this._bindProviderSourceDialog();
     this._bindMeterSourceDialog();
         this._bindDiagnostics();
-    this._bindEonApiTests();
     this._bindMainInvoiceParser();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
@@ -3115,67 +3117,10 @@ class ElrakningPanel {
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
-    const eonTests = this.host.querySelector("[data-eon-api-tests]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
-    if (eonTests) eonTests.hidden = !this._debugEnabled;
-  }
-
-  _bindEonApiTests() {
-    const card = this.host.querySelector("[data-eon-api-tests]");
-    if (!card || !this.hass?.callWS) return;
-    const labels = {
-      app: { login: "eon_app_test_login", source: "eon_app_test_source_data", logout: "eon_app_test_logout" },
-      web: { login: "eon_web_test_login", source: "eon_web_test_source_data", logout: "eon_web_test_logout" },
-    };
-    const bind = (kind) => {
-      const account = card.querySelector(`[data-eon-test-account="${kind}"]`);
-      const password = card.querySelector(`[data-eon-test-password="${kind}"]`);
-      const status = card.querySelector(`[data-eon-test-status="${kind}"]`);
-      const output = card.querySelector(`[data-eon-test-output="${kind}"]`);
-      const login = card.querySelector(`[data-eon-test-login="${kind}"]`);
-      const source = card.querySelector(`[data-eon-test-source="${kind}"]`);
-      const logout = card.querySelector(`[data-eon-test-logout="${kind}"]`);
-      if (!account || !password || !status || !output || !login || !source || !logout) return;
-      const call = async (command, payload = {}) => this.hass.callWS({ type: `elrakning/${command}`, ...payload });
-      login.addEventListener("click", async () => {
-        if (!account.value.trim() || !password.value) return;
-        login.disabled = true;
-        status.textContent = "Verifierar …";
-        try {
-          const response = await call(labels[kind].login, { account_id: account.value.trim(), password: password.value });
-          status.textContent = response.status === "authenticated" ? "Autentiserad" : response.error === "browser_attestation_required" ? "Webbläsarattestering krävs" : "Autentisering misslyckades";
-          output.textContent = JSON.stringify({ status: response.status, error: response.error }, null, 2);
-        } catch { status.textContent = "Testet misslyckades"; }
-        finally { login.disabled = false; }
-      });
-      source.addEventListener("click", async () => {
-        source.disabled = true;
-        try {
-          const response = await call(labels[kind].source);
-          output.textContent = JSON.stringify(response, null, 2);
-          status.textContent = response.status === "ok" ? "Data hämtad" : response.error || response.status;
-        } catch { status.textContent = "Source data kunde inte hämtas"; }
-        finally { source.disabled = false; }
-      });
-      logout.addEventListener("click", async () => {
-        const response = await call(labels[kind].logout);
-        status.textContent = response.status === "not_configured" ? "Inte konfigurerad" : response.status;
-        output.textContent = "";
-      });
-    };
-    bind("app");
-    bind("web");
-    const comparison = card.querySelector("[data-eon-test-comparison]");
-    const comparisonOutput = card.querySelector("[data-eon-test-comparison-output]");
-    comparison?.addEventListener("click", async () => {
-      comparison.disabled = true;
-      try { comparisonOutput.textContent = JSON.stringify(await this.hass.callWS({ type: "elrakning/eon_test_comparison" }), null, 2); }
-      catch { comparisonOutput.textContent = "Jämförelsen kunde inte hämtas."; }
-      finally { comparison.disabled = false; }
-    });
   }
 
   _bindMeterDialog() {
@@ -5111,49 +5056,57 @@ class ElrakningPanel {
   _bindEonGridDialog() {
     const open = this.host.querySelector("[data-eon-grid-configure]");
     const dialog = this.host.querySelector("[data-eon-grid-dialog]");
-    const account = this.host.querySelector("[data-eon-grid-account]");
-    const password = this.host.querySelector("[data-eon-grid-password]");
-    const cookie = this.host.querySelector("[data-eon-grid-cookie]");
-    const cookieSave = this.host.querySelector("[data-eon-grid-cookie-save]");
+    const appAccount = this.host.querySelector("[data-eon-grid-app-account]");
+    const appPassword = this.host.querySelector("[data-eon-grid-app-password]");
+    const webAccount = this.host.querySelector("[data-eon-grid-web-account]");
+    const webPassword = this.host.querySelector("[data-eon-grid-web-password]");
     const result = this.host.querySelector("[data-eon-grid-result]");
-    const save = this.host.querySelector("[data-eon-grid-save]");
+    const appSave = this.host.querySelector("[data-eon-grid-app-save]");
+    const webSave = this.host.querySelector("[data-eon-grid-web-save]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !account || !password || !cookie || !cookieSave || !result || !save || !cancel || !remove) return;
-    const close = () => { dialog.hidden = true; account.value = ""; password.value = ""; cookie.value = ""; result.textContent = ""; };
-    open.addEventListener("click", () => { dialog.hidden = false; account.focus(); });
+    if (!open || !dialog || !appAccount || !appPassword || !webAccount || !webPassword || !result || !appSave || !webSave || !cancel || !remove) return;
+    const close = () => {
+      dialog.hidden = true;
+      appAccount.value = "";
+      appPassword.value = "";
+      webAccount.value = "";
+      webPassword.value = "";
+      result.textContent = "";
+    };
+    open.addEventListener("click", () => { dialog.hidden = false; appAccount.focus(); });
     cancel.addEventListener("click", close);
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/eon_grid_remove" })); close(); } finally { remove.disabled = false; }
     });
-    save.addEventListener("click", async () => {
-      if (!account.value.trim() || !password.value) return;
-      save.disabled = true;
+    appSave.addEventListener("click", async () => {
+      if (!appAccount.value.trim() || !appPassword.value) return;
+      appSave.disabled = true;
       result.textContent = "Verifierar session …";
       try {
-        const response = await this.hass.callWS({ type: "elrakning/eon_grid_app_save", account_id: account.value.trim(), password: password.value });
+        const response = await this.hass.callWS({ type: "elrakning/eon_grid_app_save", account_id: appAccount.value.trim(), password: appPassword.value });
         if (!response.success) throw new Error(response.error || "configuration_failed");
         this._applyEonGridState(response);
         result.textContent = "E.ON är konfigurerat";
         window.setTimeout(close, 900);
       } catch (error) {
         result.textContent = error.message === "reauth_required" ? "E.ON-inloggningen behöver göras om." : "E.ON-inloggningen kunde inte verifieras.";
-      } finally { save.disabled = false; }
+      } finally { appSave.disabled = false; }
     });
-    cookieSave.addEventListener("click", async () => {
-      if (!cookie.value.trim()) return;
-      cookieSave.disabled = true;
+    webSave.addEventListener("click", async () => {
+      if (!webAccount.value.trim() || !webPassword.value) return;
+      webSave.disabled = true;
       result.textContent = "Verifierar session …";
       try {
-        const response = await this.hass.callWS({ type: "elrakning/eon_grid_save", cookie_header: cookie.value.trim() });
-        if (!response.success) throw new Error(response.error || "configuration_failed");
-        this._applyEonGridState(response);
-        result.textContent = "E.ON-sessionen är importerad";
-        window.setTimeout(close, 900);
-      } catch {
-        result.textContent = "E.ON-sessionen kunde inte verifieras.";
-      } finally { cookieSave.disabled = false; }
+        const response = await this.hass.callWS({ type: "elrakning/eon_grid_web_save", account_id: webAccount.value.trim(), password: webPassword.value });
+        if (!response.success && response.error === "browser_attestation_required") {
+          result.textContent = "Mitt E.ON kräver för närvarande webbläsarverifiering som integrationen ännu inte kan slutföra.";
+        } else if (!response.success) {
+          throw new Error(response.error || "configuration_failed");
+        }
+      } catch { result.textContent = "Mitt E.ON-inloggningen kunde inte verifieras."; }
+      finally { webSave.disabled = false; }
     });
   }
 

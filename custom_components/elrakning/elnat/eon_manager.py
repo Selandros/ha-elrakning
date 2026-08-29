@@ -16,7 +16,6 @@ from .eon_models import (
     normalize_locations,
     normalize_outage,
     normalize_user_profile,
-    normalize_user_profiles,
     parse_monthly_consumption,
     parse_monthly_transfer,
 )
@@ -33,12 +32,6 @@ class EonGridManager:
         self._refresh_unsub = None
         self._app_session: EonAppSession | None = None
         self._web_session: EonSession | None = None
-        self._app_test_session: EonAppSession | None = None
-        self._app_test_source: dict[str, Any] | None = None
-        self._app_test_summary: dict[str, Any] | None = None
-        self._app_test_locations: list[dict[str, Any]] = []
-        self._web_test_locations: list[dict[str, Any]] = []
-        self._web_test_state: dict[str, Any] = {"status": "not_configured"}
 
     @property
     def configured(self) -> bool:
@@ -89,15 +82,20 @@ class EonGridManager:
         session = EonAppSession(self.hass)
         customer_id = await session.async_login(account_id, password)
         self._app_session = session
-        config = self._config_with_migration()
-        config.update({
+        config = {
             "auth": "app",
             "account_id": account_id.strip(),
             "password": password,
             "customer_id": customer_id,
-        })
+        }
         await self._save_config(config)
         return await self._refresh_app(session)
+
+    async def async_save_web_credentials(self, account_id: str, password: str) -> dict[str, Any]:
+        """Report the unsupported browser-bound web login without changing app state."""
+        if not account_id.strip() or not password:
+            return {"status": "invalid_input", "error": "invalid_input"}
+        return {"status": "browser_attestation_required", "error": "browser_attestation_required"}
 
     async def async_refresh(self) -> dict[str, Any]:
         config = self._config()
@@ -172,7 +170,6 @@ class EonGridManager:
                 "error": None,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            await self._enrich_app_state_from_web(state, installation, config)
             self.state = state
             await self.store.async_save(self.state)
         except ValueError as err:
@@ -200,40 +197,6 @@ class EonGridManager:
         if self._web_session is None:
             self._web_session = EonSession(self.hass, web.get("cookies"))
         return self._web_session
-
-    async def _enrich_app_state_from_web(
-        self, state: dict[str, Any], installation: dict[str, Any], config: dict[str, Any]
-    ) -> None:
-        """Optionally enrich app state from the independently authenticated web API."""
-        web = self._web_config(config)
-        if not isinstance(web.get("cookies"), dict) or not web.get("customer_id"):
-            return
-        try:
-            session = await self._get_web_session(config)
-            profile = await EonClient(session).async_get_user(web["customer_id"])
-            profiles = normalize_user_profiles(profile, web["customer_id"])
-            matches = [
-                item for item in profiles
-                if _web_matches_installation(item.get("facility") or {}, installation)
-            ]
-            if len(matches) != 1:
-                state["web_data"] = {"status": "error", "error": "web_contract_match_required"}
-                return
-            matched = matches[0]
-            state.update({
-                "agreement": matched.get("agreement") or state.get("agreement"),
-                "tariff": matched.get("tariff"),
-            })
-            amount = state.get("consumption", {}).get("consumption_kwh") if state.get("consumption", {}).get("status") == "ok" else None
-            state["cost"] = calculate_eon_cost(amount, matched.get("tariff"))
-            web_facility = matched.get("facility") or {}
-            state["facility"].update({
-                "fuse_ampere": web_facility.get("fuse_ampere"),
-                "price_area": web_facility.get("price_area") or state["facility"].get("price_area"),
-            })
-            state["web_data"] = {"status": "ok", "error": None}
-        except (EonAuthError, ValueError):
-            state["web_data"] = {"status": "error", "error": "web_data_unavailable"}
 
     async def async_remove(self) -> dict[str, Any]:
         config = dict(self.entry.data)
@@ -277,11 +240,6 @@ class EonGridManager:
                     installation["postal_code"],
                 )
                 outages = await client.async_get_outages(installation["point_of_delivery_number"])
-            web_source = None
-            web = self._web_config(config)
-            if isinstance(web.get("cookies"), dict) and web.get("customer_id"):
-                web_session = await self._get_web_session(config)
-                web_source = await EonClient(web_session).async_get_user(web["customer_id"])
             return {
                 "provider": "eon",
                 "provider_name": "E.ON",
@@ -290,7 +248,6 @@ class EonGridManager:
                 "locations": _redact_source_data(locations),
                 "monthly_transfer": _redact_source_data(monthly),
                 "outages": _redact_source_data(outages),
-                "web": {"user": _redact_source_data(web_source)} if web_source is not None else None,
             }
 
         web = self._web_config(config)
@@ -315,98 +272,15 @@ class EonGridManager:
             }
         raise EonAuthError("not_configured")
 
-    async def async_app_test_login(self, account_id: str, password: str) -> dict[str, Any]:
-        """Authenticate an isolated diagnostic app session without changing production state."""
-        session = EonAppSession(self.hass)
-        try:
-            await session.async_login(account_id, password)
-        except EonAuthError as err:
-            self._app_test_session = None
-            self._app_test_source = None
-            self._app_test_summary = None
-            self._app_test_locations = []
-            return {"status": "auth_failed", "error": err.code}
-        self._app_test_session = session
-        self._app_test_source = None
-        self._app_test_summary = None
-        self._app_test_locations = []
-        return {"status": "authenticated", "auth_mode": "app_test"}
-
-    async def async_app_test_source_data(self) -> dict[str, Any]:
-        """Fetch app source data only for the explicit diagnostic action."""
-        if self._app_test_session is None or not self._app_test_session.is_valid:
-            return {"status": "reauth_required", "error": "app_test_not_authenticated"}
-        source = await self._fetch_app_source_data(self._app_test_session)
-        normalized = source.pop("_normalized_locations", [])
-        self._app_test_source = source
-        self._app_test_locations = normalized
-        self._app_test_summary = _safe_test_summary(normalized)
-        return {"status": "ok", "auth_mode": "app_test", **source}
-
-    async def async_app_test_logout(self) -> dict[str, Any]:
-        self._app_test_session = None
-        self._app_test_source = None
-        self._app_test_summary = None
-        self._app_test_locations = []
-        return {"status": "not_configured", "auth_mode": "app_test"}
-
-    async def async_web_test_login(self, account_id: str, password: str) -> dict[str, Any]:
-        """Report the verified web-auth boundary without attempting an attestation bypass."""
-        if not isinstance(account_id, str) or not account_id.strip() or not isinstance(password, str) or not password:
-            self._web_test_state = {"status": "auth_failed", "error": "invalid_credentials"}
-        else:
-            self._web_test_state = {
-                "status": "browser_attestation_required",
-                "error": "browser_attestation_required",
-            }
-        return {"auth_mode": "web_test", **self._web_test_state}
-
-    async def async_web_test_source_data(self) -> dict[str, Any]:
-        """Keep web diagnostic source access separate until a supported web session exists."""
-        return {"status": self._web_test_state.get("status", "not_configured"), "error": "web_test_not_authenticated"}
-
-    async def async_web_test_logout(self) -> dict[str, Any]:
-        self._web_test_state = {"status": "not_configured"}
-        self._web_test_locations = []
-        return {"auth_mode": "web_test", **self._web_test_state}
-
-    def eon_test_comparison(self) -> dict[str, Any]:
-        """Return a safe side-by-side summary without exposing identifiers."""
-        app = self._app_test_summary or {"status": "not_loaded"}
-        web = {"status": self._web_test_state.get("status", "not_configured")}
-        return {"app": app, "web": web, "fields": _comparison_fields(self._app_test_locations, self._web_test_locations)}
-
-    async def _fetch_app_source_data(self, session: EonAppSession) -> dict[str, Any]:
-        client = EonAppClient(session)
-        contract_accounts = await client.async_get_contract_accounts()
-        locations = await client.async_get_locations()
-        normalized = normalize_locations(locations)
-        monthly: Any = {}
-        outages: Any = []
-        if len(normalized) == 1:
-            installation = normalized[0]
-            now = date.today()
-            month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-            month_end = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1, tzinfo=timezone.utc)
-            monthly = await client.async_get_monthly_transfer(
-                installation["installation_identifier"], month_start.isoformat(), month_end.isoformat(),
-                installation["production"], installation["street"], installation["city"], installation["postal_code"],
-            )
-            outages = await client.async_get_outages(installation["point_of_delivery_number"])
-        return {
-            "contract_accounts": _redact_source_data(contract_accounts),
-            "locations": _redact_source_data(locations),
-            "monthly_transfer": _redact_source_data(monthly),
-            "outages": _redact_source_data(outages),
-            "_normalized_locations": normalized,
-        }
-
     def public_state(self) -> dict[str, Any]:
         facility = self.state.get("facility") or {}
+        config = self._config()
+        auth_mode = "app" if config.get("auth") == "app" else "web" if self._web_config(config).get("cookies") else None
         return {
             "configured": self.configured,
             "provider": EON_GRID_PROVIDER,
             "provider_name": "E.ON",
+            "auth_mode": auth_mode,
             "reauth_required": self.state.get("reauth_required", False),
             "agreement": self.state.get("agreement"),
             "facility": {
@@ -418,7 +292,6 @@ class EonGridManager:
             "cost": self.state.get("cost"),
             "outage": self.state.get("outage"),
             "error": self.state.get("error"),
-            "web_data": self.state.get("web_data"),
         }
 
     async def _build_state(self, normalized: dict[str, Any], client: EonClient) -> dict[str, Any]:
@@ -472,12 +345,6 @@ class EonGridManager:
     async def async_shutdown(self) -> None:
         self._app_session = None
         self._web_session = None
-        self._app_test_session = None
-        self._app_test_source = None
-        self._app_test_summary = None
-        self._app_test_locations = []
-        self._web_test_locations = []
-        self._web_test_state = {"status": "not_configured"}
         if self._refresh_unsub:
             self._refresh_unsub()
             self._refresh_unsub = None
@@ -494,40 +361,7 @@ class EonGridManager:
             "error": None,
             "outage": None,
             "app_authenticated": False,
-            "web_data": None,
         }
-
-
-def _web_matches_installation(web_facility: dict[str, Any], app_installation: dict[str, Any]) -> bool:
-    """Match a web grid contract using verified installation identifiers."""
-    return bool(
-        (web_facility.get("point_of_delivery_number") and web_facility.get("point_of_delivery_number") == app_installation.get("point_of_delivery_number"))
-        or (web_facility.get("installation_identifier") and web_facility.get("installation_identifier") == app_installation.get("installation_identifier"))
-    )
-
-
-def _safe_test_summary(locations: Any) -> dict[str, Any]:
-    """Summarize diagnostic locations without returning identifiers."""
-    values = locations if isinstance(locations, list) else []
-    return {
-        "status": "loaded",
-        "installation_count": len(values),
-        "price_areas": sorted({item.get("price_area") for item in values if isinstance(item, dict) and item.get("price_area")}),
-        "pod_available": any(isinstance(item, dict) and bool(item.get("point_of_delivery_number")) for item in values),
-    }
-
-
-def _comparison_fields(app_locations: list[dict[str, Any]], web_locations: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """Build safe comparison rows without copying raw identifiers."""
-    app_pods = {item.get("point_of_delivery_number") for item in app_locations}
-    web_pods = {item.get("point_of_delivery_number") for item in web_locations}
-    app_installations = {item.get("installation_identifier") for item in app_locations}
-    web_installations = {item.get("installation_identifier") for item in web_locations}
-    return [
-        {"field": "Installations", "app": str(len(app_locations)), "web": str(len(web_locations))},
-        {"field": "POD match", "app": "ja" if app_pods & web_pods else "nej", "web": "ja" if app_pods & web_pods else "nej"},
-        {"field": "Installation ID match", "app": "ja" if app_installations & web_installations else "nej", "web": "ja" if app_installations & web_installations else "nej"},
-    ]
 
 
 def _redact_source_data(value: Any) -> Any:
