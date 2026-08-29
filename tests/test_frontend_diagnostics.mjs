@@ -439,6 +439,7 @@ assert.match(panelSource, /\.battery-history-axis-label,[\s\S]*\.battery-history
 assert.match(panelSource, /\.battery-history-utilization \{[\s\S]*font-weight: 600;/);
 assert.match(panelSource, /battery-history-y-label-rail/);
 assert.match(panelSource, /battery-history-x-label-rail/);
+assert.match(panelSource, /\.battery-history-x-label \{[\s\S]*top: 62%;[\s\S]*transform: translate\(-50%, -50%\);/);
 assert.match(panelSource, /font-size: 10px;[\s\S]*font-weight: 400;[\s\S]*line-height: 1;/);
 assert.doesNotMatch(panelSource, /<text class="battery-history-(axis-label|day-label|utilization)"/);
 const batteryHistoryMarkup = panelSource.match(/<article class="card battery-history-card"[\s\S]*?<\/article>/)?.[0] || "";

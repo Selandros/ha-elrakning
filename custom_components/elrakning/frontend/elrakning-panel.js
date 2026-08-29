@@ -1237,7 +1237,7 @@ class ElrakningPanel {
         .battery-history-x-label {
           position: absolute;
           text-align: center;
-          top: 50%;
+          top: 62%;
           transform: translate(-50%, -50%);
           width: max-content;
         }
