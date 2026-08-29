@@ -23,6 +23,7 @@ from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
 from .elhandel.providers.greenely_source import paginate_source
+from .elnat.eon_manager import EonGridManager
 from .meter import MeterManager
 from .power import PowerManager
 from .solar_forecast import SolarForecastManager
@@ -35,6 +36,9 @@ ELECTRICITY_PROVIDER_STATE_COMMAND = f"{DOMAIN}/electricity_provider_state"
 ELECTRICITY_PROVIDER_SAVE_COMMAND = f"{DOMAIN}/electricity_provider_save"
 ELECTRICITY_PROVIDER_SOURCE_DATA_COMMAND = f"{DOMAIN}/electricity_provider_source_data"
 ELECTRICITY_PROVIDER_REMOVE_COMMAND = f"{DOMAIN}/electricity_provider_remove"
+EON_GRID_STATE_COMMAND = f"{DOMAIN}/eon_grid_state"
+EON_GRID_SAVE_COMMAND = f"{DOMAIN}/eon_grid_save"
+EON_GRID_REMOVE_COMMAND = f"{DOMAIN}/eon_grid_remove"
 ELECTRICITY_HISTORY_STATE_COMMAND = f"{DOMAIN}/electricity_history_state"
 ELECTRICITY_HISTORY_PURGE_COMMAND = f"{DOMAIN}/electricity_history_purge"
 DIAGNOSTICS_STATE_COMMAND = f"{DOMAIN}/diagnostics_state"
@@ -69,6 +73,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_greenely_parse_latest)
     websocket_api.async_register_command(hass, websocket_electricity_provider_source_data)
     websocket_api.async_register_command(hass, websocket_electricity_provider_remove)
+    websocket_api.async_register_command(hass, websocket_eon_grid_state)
+    websocket_api.async_register_command(hass, websocket_eon_grid_save)
+    websocket_api.async_register_command(hass, websocket_eon_grid_remove)
     websocket_api.async_register_command(hass, websocket_electricity_history_state)
     websocket_api.async_register_command(hass, websocket_electricity_history_purge)
     websocket_api.async_register_command(hass, websocket_diagnostics_state)
@@ -304,6 +311,46 @@ async def websocket_electricity_provider_remove(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "internal_error"})
         return
     connection.send_result(msg["id"], {"success": True, **_electricity_provider_state(manager)})
+
+
+def _eon_grid_manager(hass) -> EonGridManager | None:
+    manager = hass.data.get(DOMAIN, {}).get("eon_grid_manager")
+    return manager if isinstance(manager, EonGridManager) else None
+
+
+@websocket_api.websocket_command({vol.Required("type"): EON_GRID_STATE_COMMAND})
+@websocket_api.async_response
+async def websocket_eon_grid_state(hass, connection, msg):
+    manager = _eon_grid_manager(hass)
+    connection.send_result(msg["id"], {"success": True, **(manager.public_state() if manager else {"configured": False})})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): EON_GRID_SAVE_COMMAND,
+    vol.Required("cookie_header"): str,
+})
+@websocket_api.async_response
+async def websocket_eon_grid_save(hass, connection, msg):
+    manager = _eon_grid_manager(hass)
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
+        return
+    try:
+        state = await manager.async_save_cookie_header(msg["cookie_header"])
+    except Exception as err:
+        connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "configuration_failed")})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command({vol.Required("type"): EON_GRID_REMOVE_COMMAND})
+@websocket_api.async_response
+async def websocket_eon_grid_remove(hass, connection, msg):
+    manager = _eon_grid_manager(hass)
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
+        return
+    connection.send_result(msg["id"], {"success": True, **await manager.async_remove()})
 
 
 @websocket_api.websocket_command({vol.Required("type"): ELECTRICITY_HISTORY_STATE_COMMAND})

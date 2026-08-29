@@ -11,6 +11,10 @@ const output = formatDiagnosticsText([
     message: "Loading source data",
   },
 ], "0.0.64");
+const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+assert.match(eonPanelSource, /data-provider-card="elnet"/);
+assert.match(eonPanelSource, /elrakning\/eon_grid_state/);
+assert.match(eonPanelSource, /data-eon-grid-cookie/);
 
 assert.match(output, /^Elräkning diagnostics/m);
 assert.match(output, /Version: 0\.0\.64/);

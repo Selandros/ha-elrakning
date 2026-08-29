@@ -5,6 +5,9 @@ NORD_POOL_DOMAIN = "nordpool"
 ELECTRICITY_PROVIDER_CONFIG_KEY = "electricity_provider"
 ELECTRICITY_PROVIDER_CONFIG_DATA_KEY = "electricity_provider_config"
 GREENELY_PROVIDER = "greenely"
+EON_GRID_PROVIDER = "eon_grid"
+EON_GRID_CONFIG_KEY = "eon_grid_config"
+EON_GRID_UPDATE_EVENT = "elrakning_eon_grid_update"
 SUPPORTED_ELECTRICITY_PROVIDERS = {
     GREENELY_PROVIDER: "Greenely",
 }

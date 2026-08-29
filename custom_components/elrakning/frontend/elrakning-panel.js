@@ -679,6 +679,7 @@ class ElrakningPanel {
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
+    this._eonGridEventUnsubscribePromise = null;
     this._connectionReadyListener = null;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
@@ -834,13 +835,14 @@ class ElrakningPanel {
           </article>
 
             <article class="card" data-provider-card="elnet" data-config-card-key="elnet">
-            <div class="card-heading">
-              <h2>Elnät</h2>
-              <span class="status">Ej konfigurerad</span>
-              <label class="main-card-toggle" data-main-card-toggle="elnet" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
-            </div>
-            <p class="provider" data-provider-name="elnet" hidden></p>
-            <button type="button" class="configuration-control">Konfigurera</button>
+              <div class="card-heading">
+                <h2>Elnät</h2>
+                <span class="status" data-eon-grid-status>Ej konfigurerad</span>
+                <label class="main-card-toggle" data-main-card-toggle="elnet" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
+              </div>
+              <p class="provider" data-provider-name="elnet" hidden></p>
+              <div class="provider-summary" data-eon-grid-summary hidden></div>
+              <button type="button" class="configuration-control" data-eon-grid-configure>Konfigurera</button>
           </article>
 
           <article class="card" data-provider-card="elmatare" data-config-card-key="elmatare">
@@ -958,6 +960,19 @@ class ElrakningPanel {
             <button type="button" data-greenely-consumption hidden>Testa förbrukning</button>
             <button type="button" data-greenely-invoices hidden>Hämta fakturor</button>
             <button type="button" data-greenely-parse hidden>Tolka senaste fakturan</button>
+          </div>
+        </div>
+      </div>
+      <div class="provider-dialog" data-eon-grid-dialog hidden role="dialog" aria-modal="true" aria-labelledby="eon-grid-title">
+        <div class="provider-dialog-card">
+          <h2 id="eon-grid-title">Konfigurera E.ON elnät</h2>
+          <p>Klistra in Cookie-headern från en autentiserad Mitt E.ON-session.</p>
+          <label>Cookie-header<input type="password" data-eon-grid-cookie autocomplete="off"></label>
+          <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
+          <div class="provider-actions">
+            <button type="button" data-eon-grid-cancel>Avbryt</button>
+            <button type="button" data-eon-grid-remove hidden>Ta bort E.ON</button>
+            <button type="button" data-eon-grid-save>Spara</button>
           </div>
         </div>
       </div>
@@ -2759,6 +2774,7 @@ class ElrakningPanel {
     this._setupThemeBackgroundSync();
     this._syncThemeBackground();
     this._bindElectricityProviderDialog();
+    this._bindEonGridDialog();
     this._bindRetainedHistory();
     this._bindMeterDialog();
     this._bindPowerDialog();
@@ -4751,6 +4767,10 @@ class ElrakningPanel {
         },
         "elrakning_electricity_provider_update",
       );
+      this._eonGridEventUnsubscribePromise = hass.connection.subscribeEvents(
+        () => this.loadEonGridState(),
+        "elrakning_eon_grid_update",
+      );
       this._meterEventUnsubscribePromise = hass.connection.subscribeEvents(
         (event) => {
           const entityId = event.data?.entity_id;
@@ -4810,6 +4830,11 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._eonGridEventUnsubscribePromise) {
+      Promise.resolve(this._eonGridEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
     if (this._meterEventUnsubscribePromise) {
       Promise.resolve(this._meterEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -4845,6 +4870,7 @@ class ElrakningPanel {
     }
     this._eventUnsubscribePromise = null;
     this._greenelyEventUnsubscribePromise = null;
+    this._eonGridEventUnsubscribePromise = null;
     this._meterEventUnsubscribePromise = null;
     this._meterPowerEventUnsubscribePromise = null;
     this._powerEventUnsubscribePromise = null;
@@ -4872,6 +4898,7 @@ class ElrakningPanel {
     this._backendHydrationPromise = Promise.all([
       this.loadPriceData(),
       this.loadProviderState(),
+      this.loadEonGridState(),
       this.loadRetainedHistory(),
       this.loadMeterState(loadHistory),
       this.loadPowerState(loadHistory),
@@ -4913,6 +4940,84 @@ class ElrakningPanel {
     } catch {
       // Keep the optional Greenely UI unconfigured when state is unavailable.
     }
+  }
+
+  async loadEonGridState() {
+    if (!this.hass?.callWS) return;
+    try {
+      const state = await this.hass.callWS({ type: "elrakning/eon_grid_state" });
+      this._applyEonGridState(state);
+    } catch {
+      // Keep the optional E.ON grid card unconfigured when state is unavailable.
+    }
+  }
+
+  _applyEonGridState(state) {
+    const configured = state?.configured === true;
+    const status = this.host.querySelector("[data-eon-grid-status]");
+    const provider = this.host.querySelector('[data-provider-name="elnet"]');
+    const summary = this.host.querySelector("[data-eon-grid-summary]");
+    const remove = this.host.querySelector("[data-eon-grid-remove]");
+    if (!status || !provider || !summary) return;
+    const agreement = state?.agreement || {};
+    const facility = state?.facility || {};
+    const tariff = state?.tariff || {};
+    const consumption = state?.consumption || {};
+    const cost = state?.cost || {};
+    provider.textContent = configured ? "E.ON · Elnät" : "";
+    provider.hidden = !configured;
+    status.textContent = configured ? (agreement.status === "future" ? "Kommande avtal" : agreement.status === "active" ? "Konfigurerad" : "Ej aktivt") : "Ej konfigurerad";
+    status.hidden = false;
+    remove && (remove.hidden = !configured);
+    const rows = [];
+    if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
+    if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
+    if (facility.price_area) rows.push(["Elområde", facility.price_area]);
+    if (consumption.status === "ok") rows.push(["Förbrukning", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
+    if (tariff.subscription_fee_sek_per_month != null) rows.push(["Abonnemang", this._formatSek(tariff.subscription_fee_sek_per_month) + "/mån"]);
+    if (tariff.transfer_fee_ore_per_kwh != null) rows.push(["Överföring", `${this._formatNumber(tariff.transfer_fee_ore_per_kwh)} öre/kWh`]);
+    if (tariff.energy_tax_ore_per_kwh != null) rows.push(["Energiskatt", `${this._formatNumber(tariff.energy_tax_ore_per_kwh)} öre/kWh`]);
+    if (cost.total_sek != null) rows.push(["E.ON-kostnad", this._formatSek(cost.total_sek)]);
+    summary.replaceChildren(...rows.flatMap(([label, value]) => {
+      const left = document.createElement("strong");
+      left.textContent = label;
+      const right = document.createElement("span");
+      right.textContent = value;
+      return [left, right];
+    }));
+    summary.hidden = !configured || rows.length === 0;
+  }
+
+  _bindEonGridDialog() {
+    const open = this.host.querySelector("[data-eon-grid-configure]");
+    const dialog = this.host.querySelector("[data-eon-grid-dialog]");
+    const cookie = this.host.querySelector("[data-eon-grid-cookie]");
+    const result = this.host.querySelector("[data-eon-grid-result]");
+    const save = this.host.querySelector("[data-eon-grid-save]");
+    const cancel = this.host.querySelector("[data-eon-grid-cancel]");
+    const remove = this.host.querySelector("[data-eon-grid-remove]");
+    if (!open || !dialog || !cookie || !result || !save || !cancel || !remove) return;
+    const close = () => { dialog.hidden = true; cookie.value = ""; result.textContent = ""; };
+    open.addEventListener("click", () => { dialog.hidden = false; cookie.focus(); });
+    cancel.addEventListener("click", close);
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/eon_grid_remove" })); close(); } finally { remove.disabled = false; }
+    });
+    save.addEventListener("click", async () => {
+      if (!cookie.value.trim()) return;
+      save.disabled = true;
+      result.textContent = "Verifierar session …";
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/eon_grid_save", cookie_header: cookie.value.trim() });
+        if (!response.success) throw new Error(response.error || "configuration_failed");
+        this._applyEonGridState(response);
+        result.textContent = "E.ON är konfigurerat";
+        window.setTimeout(close, 900);
+      } catch (error) {
+        result.textContent = error.message === "customer_id_missing" ? "Cookie-headern saknar verifierat kund-ID." : "E.ON-sessionen kunde inte verifieras.";
+      } finally { save.disabled = false; }
+    });
   }
 
   _applyProviderState(state) {
