@@ -58,6 +58,38 @@ const solarHistory = buildSolarDailyHistory(
 assert.equal(solarHistory.length, 2);
 assert.equal(solarHistory[0].forecastKwh, 10);
 assert.equal(solarHistory[0].utilizationPercent, 10);
+const solarToday = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 1, 13),
+  { "2026-08-23": 14.1 },
+  new Date(2026, 7, 23, 12, 0),
+  1,
+  { today_kwh: 14.1, remaining_today_kwh: 6.5 },
+);
+assert.equal(solarToday[0].forecastKwh, 14.1);
+assert.ok(Math.abs(solarToday[0].utilizationPercent - 1 / 7.6 * 100) < 1e-12);
+const solarTodayOverExpected = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 2, 13),
+  {},
+  new Date(2026, 7, 23, 12, 0),
+  1,
+  { today_kwh: 2, remaining_today_kwh: 1 },
+);
+assert.equal(solarTodayOverExpected[0].utilizationPercent, 200);
+const solarTodayMissingRemaining = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 1, 13),
+  { "2026-08-23": 14.1 },
+  new Date(2026, 7, 23, 12, 0),
+  1,
+  { today_kwh: 14.1 },
+);
+assert.equal(solarTodayMissingRemaining[0].utilizationPercent, null);
+assert.equal(buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 1, 13),
+  { "2026-08-23": 14.1 },
+  new Date(2026, 7, 23, 12, 0),
+  1,
+  { today_kwh: 14.1, remaining_today_kwh: 14.1 },
+)[0].utilizationPercent, null);
 const solarOverReference = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
   { "2026-08-22": 1 },

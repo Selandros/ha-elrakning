@@ -379,7 +379,7 @@ export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capa
   });
 }
 
-export function buildSolarDailyHistory(points, forecastBaselines, now = new Date(), dayCount = 7) {
+export function buildSolarDailyHistory(points, forecastBaselines, now = new Date(), dayCount = 7, liveForecast = null) {
   const current = new Date(now);
   const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
   const days = Math.max(1, Math.min(7, Math.trunc(Number(dayCount) || 7)));
@@ -396,12 +396,21 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const actualKwh = dayPoints.length ? integratePowerHistoryKwh(dayPoints, dayStart, dayEnd, dayEnd <= current ? dayEnd : current) : null;
     const localDate = dayStart.toLocaleDateString("sv-SE");
     const forecastKwh = Number.isFinite(Number(forecastByDate[localDate])) ? Number(forecastByDate[localDate]) : null;
+    const isToday = dayStart.getTime() === todayStart.getTime();
+    const liveTodayKwh = Number.isFinite(Number(liveForecast?.today_kwh)) ? Number(liveForecast.today_kwh) : null;
+    const liveRemainingKwh = Number.isFinite(Number(liveForecast?.remaining_today_kwh)) ? Number(liveForecast.remaining_today_kwh) : null;
+    const expectedSoFarKwh = isToday && liveTodayKwh !== null && liveRemainingKwh !== null
+      ? liveTodayKwh - liveRemainingKwh
+      : null;
+    const utilizationDenominatorKwh = isToday ? expectedSoFarKwh : forecastKwh;
     return {
       date: localDate,
       label: dayStart.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" }),
       producedKwh: actualKwh,
       forecastKwh,
-      utilizationPercent: forecastKwh > 0 && actualKwh !== null ? actualKwh / forecastKwh * 100 : null,
+      utilizationPercent: utilizationDenominatorKwh > 0 && actualKwh !== null
+        ? actualKwh / utilizationDenominatorKwh * 100
+        : null,
     };
   });
 }
@@ -3691,6 +3700,8 @@ class ElrakningPanel {
       this._powerHistory?.series?.solar?.points,
       this._powerHistory?.solar_forecast_baselines,
       new Date(),
+      7,
+      this._powerHistory?.solar_forecast,
     );
     const values = days.flatMap((day) => [day.producedKwh, day.forecastKwh]).filter((value) => Number.isFinite(value));
     if (!values.length) {
