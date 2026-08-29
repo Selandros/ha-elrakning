@@ -14,7 +14,7 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 from aiohttp import ClientError, ClientResponse, CookieJar, ClientSession
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession, async_get_clientsession
 from yarl import URL
 
 EON_WEB_BASE = "https://www.eon.se"
@@ -101,10 +101,15 @@ class EonAppSession:
     """Run the verified E.ON app login and keep tokens in memory only."""
 
     def __init__(self, hass) -> None:
-        self._session: ClientSession = async_get_clientsession(hass)
+        self._session: ClientSession = async_create_clientsession(hass, cookie_jar=CookieJar())
         self._access_token: str | None = None
         self._expires_at = 0.0
         self.customer_id: str | None = None
+
+    @property
+    def is_valid(self) -> bool:
+        """Return whether the in-memory access token is still usable."""
+        return bool(self._access_token and self._expires_at > time.monotonic() + 30)
 
     async def async_login(self, account_id: str, password: str) -> str:
         """Complete the verified authorization-code flow."""

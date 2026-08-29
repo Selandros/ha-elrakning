@@ -30,6 +30,7 @@ class EonGridManager:
         self.store = Store(hass, 1, f"{DOMAIN}.eon_grid_state")
         self.state: dict[str, Any] = self._empty_state()
         self._refresh_unsub = None
+        self._app_session: EonAppSession | None = None
 
     @property
     def configured(self) -> bool:
@@ -73,6 +74,7 @@ class EonGridManager:
     async def async_save_app_credentials(self, account_id: str, password: str) -> dict[str, Any]:
         session = EonAppSession(self.hass)
         customer_id = await session.async_login(account_id, password)
+        self._app_session = session
         await self._save_config({
             "auth": "app",
             "account_id": account_id.strip(),
@@ -87,7 +89,7 @@ class EonGridManager:
             self.state = self._empty_state()
             return self.public_state()
         if config.get("auth") == "app":
-            return await self._refresh_app()
+            return await self._refresh_app(self._app_session)
         session = EonSession(self.hass, config.get("cookies"))
         client = EonClient(session)
         try:
@@ -107,10 +109,8 @@ class EonGridManager:
 
     async def _refresh_app(self, session: EonAppSession | None = None) -> dict[str, Any]:
         config = self._config()
-        session = session or EonAppSession(self.hass)
         try:
-            if session.customer_id is None:
-                await session.async_login(config["account_id"], config["password"])
+            session = await self._get_app_session(config, session)
             client = EonAppClient(session)
             await client.async_get_contract_accounts()
             locations = normalize_locations(await client.async_get_locations())
@@ -159,10 +159,21 @@ class EonGridManager:
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
 
+    async def _get_app_session(
+        self, config: dict[str, Any], session: EonAppSession | None = None
+    ) -> EonAppSession:
+        """Return the cached app session, logging in only when it is absent or expired."""
+        session = session or self._app_session or EonAppSession(self.hass)
+        if not session.is_valid:
+            await session.async_login(config["account_id"], config["password"])
+        self._app_session = session
+        return session
+
     async def async_remove(self) -> dict[str, Any]:
         config = dict(self.entry.data)
         config.pop(EON_GRID_CONFIG_KEY, None)
         self.hass.config_entries.async_update_entry(self.entry, data=config)
+        self._app_session = None
         self.state = self._empty_state()
         await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
@@ -172,8 +183,7 @@ class EonGridManager:
         """Fetch the active E.ON source payload only after an explicit request."""
         config = self._config()
         if config.get("auth") == "app":
-            session = EonAppSession(self.hass)
-            await session.async_login(config["account_id"], config["password"])
+            session = await self._get_app_session(config)
             client = EonAppClient(session)
             contract_accounts = await client.async_get_contract_accounts()
             locations = await client.async_get_locations()
@@ -278,6 +288,7 @@ class EonGridManager:
         return value if isinstance(value, dict) else {}
 
     async def async_shutdown(self) -> None:
+        self._app_session = None
         if self._refresh_unsub:
             self._refresh_unsub()
             self._refresh_unsub = None

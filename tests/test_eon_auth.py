@@ -9,6 +9,7 @@ homeassistant = types.ModuleType("homeassistant")
 helpers = types.ModuleType("homeassistant.helpers")
 aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
 aiohttp_client.async_get_clientsession = lambda hass: None
+aiohttp_client.async_create_clientsession = lambda hass, **kwargs: None
 homeassistant.helpers = helpers
 helpers.aiohttp_client = aiohttp_client
 sys.modules.setdefault("homeassistant", homeassistant)
