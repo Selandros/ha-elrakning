@@ -774,6 +774,7 @@ class ElrakningPanel {
               <label class="main-card-toggle" data-main-card-toggle="elmatare" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
             </div>
             <p class="provider" data-provider-name="elmatare" hidden></p>
+            <div class="configuration-mini-chart" data-meter-mini-chart hidden></div>
             <div class="meter-summary" data-meter-summary hidden></div>
             <button type="button" class="configuration-control" data-meter-configure>Konfigurera</button>
             <button type="button" data-meter-source hidden>Visa mätardata</button>
@@ -781,12 +782,14 @@ class ElrakningPanel {
 
           <article class="configuration-module power-card configuration-card-solar" data-power-card="solar" data-config-card-key="solar">
             <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+            <div class="configuration-mini-chart" data-power-mini-chart="solar" hidden></div>
             <div class="power-summary" data-power-summary="solar" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
           </article>
 
           <article class="configuration-module power-card configuration-card-battery" data-power-card="battery" data-config-card-key="battery">
             <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+            <div class="configuration-mini-chart" data-power-mini-chart="battery" hidden></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
@@ -2515,6 +2518,55 @@ class ElrakningPanel {
           background: var(--el-discharging-color);
         }
 
+        .configuration-mini-chart {
+          margin: 18px 0 4px;
+          min-height: 0;
+        }
+
+        .configuration-mini-chart-svg {
+          display: block;
+          height: 116px;
+          overflow: visible;
+          width: 100%;
+        }
+
+        .configuration-mini-line {
+          fill: none;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 2.5;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .configuration-mini-area {
+          fill-opacity: .24;
+          stroke: none;
+        }
+
+        .configuration-mini-line.solar,
+        .configuration-mini-area.solar {
+          stroke: var(--el-solar-color);
+          fill: var(--el-solar-color);
+        }
+
+        .configuration-mini-line.consumption,
+        .configuration-mini-area.consumption {
+          stroke: var(--el-consumption-color);
+          fill: var(--el-consumption-color);
+        }
+
+        .configuration-mini-line.charging,
+        .configuration-mini-area.charging {
+          stroke: var(--el-charging-color);
+          fill: var(--el-charging-color);
+        }
+
+        .configuration-mini-line.discharging,
+        .configuration-mini-area.discharging {
+          stroke: var(--el-discharging-color);
+          fill: var(--el-discharging-color);
+        }
+
         .configuration-data-bar-segment {
           display: block;
           height: 100%;
@@ -3396,6 +3448,7 @@ class ElrakningPanel {
       summary.hidden = validRows.length === 0;
     }
     this._renderMergedMeterSummary();
+    this._renderPowerMiniCharts();
     this._renderSocChart();
     this._syncSocCardHeight();
   }
@@ -3412,6 +3465,70 @@ class ElrakningPanel {
   _refreshPowerEnergyState() {
     if (!this._powerState) return;
     this._applyPowerState(this._powerState);
+  }
+
+  _buildPowerMiniChart(seriesKeys, ariaLabel) {
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const width = 720;
+    const height = 150;
+    const plot = { left: 4, right: 4, top: 8, bottom: 8 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime())
+      / (dayEnd.getTime() - dayStart.getTime())) * plotWidth;
+    const rawSeries = seriesKeys.map((key) => {
+      const points = Array.isArray(this._powerHistory?.series?.[key]?.points)
+        ? this._powerHistory.series[key].points.filter((point) => {
+          const timestamp = new Date(point.timestamp).getTime();
+          return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+        })
+        : [];
+      return { key, points };
+    });
+    const maximum = Math.max(1, ...rawSeries.flatMap(({ points }) => points.map((point) => Number(point.value_kw)))
+      .filter(Number.isFinite));
+    const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / maximum) * plotHeight;
+    const classes = { solar: "solar", consumption: "consumption", charging: "charging", discharging: "discharging" };
+    const markup = rawSeries.map(({ key, points }) => {
+      const canonical = this.buildCanonicalPowerPoints(points, dayStart, dayEnd);
+      const display = canonical.map((point) => ({
+        ...point,
+        value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
+      }));
+      return this.buildMeterDisplaySegments(display, "value_kw").filter((segment) => segment.length >= 2).map((segment) => {
+        const coordinates = this.buildMeterDisplayCoordinates(segment, "value_kw", x, y);
+        const first = coordinates[0];
+        const last = coordinates.at(-1);
+        const line = this.buildMeterDisplayPathSegments(coordinates).reduce((path, part) => (
+          `${path} C ${part.control1.x} ${part.control1.y} ${part.control2.x} ${part.control2.y} ${part.end.x} ${part.end.y}`
+        ), `M ${first.x} ${first.y}`);
+        const area = `M ${first.x} ${plot.top + plotHeight} L ${first.x} ${first.y} ${line.slice(line.indexOf(" "))} L ${last.x} ${plot.top + plotHeight} Z`;
+        return `<path class="configuration-mini-area ${classes[key]}" d="${area}" /><path class="configuration-mini-line ${classes[key]}" d="${line}" />`;
+      }).join("");
+    }).join("");
+    return markup ? `<svg class="configuration-mini-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}">${markup}</svg>` : "";
+  }
+
+  _renderPowerMiniCharts() {
+    const meterChart = this.host.querySelector("[data-meter-mini-chart]");
+    if (meterChart) {
+      const markup = this._buildPowerMiniChart(["consumption"], "Husets last historik");
+      meterChart.innerHTML = markup;
+      meterChart.hidden = !markup;
+    }
+    for (const [cardType, seriesKeys, label] of [
+      ["solar", ["solar"], "Solproduktion historik"],
+      ["battery", ["charging", "discharging"], "Batteriflöde historik"],
+    ]) {
+      const chart = this.host.querySelector(`[data-power-mini-chart="${cardType}"]`);
+      if (!chart) continue;
+      const markup = this._buildPowerMiniChart(seriesKeys, label);
+      chart.innerHTML = markup;
+      chart.hidden = !markup;
+    }
   }
 
   _renderMergedMeterSummary() {

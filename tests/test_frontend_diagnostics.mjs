@@ -440,6 +440,12 @@ assert.match(panelSource, /function createDataProgressBar\(value, maximum, ariaL
 assert.match(panelSource, /Batteriflöde just nu/);
 assert.match(panelSource, /Dagens nätbalans/);
 assert.match(panelSource, /configuration-progress-bar/);
+assert.match(panelSource, /data-meter-mini-chart/);
+assert.match(panelSource, /data-power-mini-chart="solar"/);
+assert.match(panelSource, /data-power-mini-chart="battery"/);
+assert.match(panelSource, /_buildPowerMiniChart\(seriesKeys, ariaLabel\)/);
+assert.match(panelSource, /configuration-mini-chart-svg/);
+assert.match(panelSource, /configuration-mini-line/);
 assert.match(panelSource, /className: "import"/);
 assert.match(panelSource, /className: "export"/);
 assert.match(panelSource, /className: "charging"/);
