@@ -727,6 +727,14 @@ class ElrakningPanel {
           </section>
         </div>
 
+        <div class="daily-energy-row battery-history-row">
+          <article class="card battery-history-card" data-power-card="battery-history" hidden>
+            <div class="card-heading"><h2>Batterihistorik</h2><span class="status" data-battery-history-status hidden>Ej konfigurerad</span></div>
+            <p class="battery-history-meta" data-battery-history-meta hidden></p>
+            <div class="battery-history-chart" data-battery-history-chart hidden></div>
+          </article>
+        </div>
+
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
           <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
             <div class="card-heading">
@@ -781,13 +789,6 @@ class ElrakningPanel {
           </article>
 
         </section>
-        <div class="daily-energy-row battery-history-row">
-          <article class="card battery-history-card" data-power-card="battery-history" hidden>
-            <div class="card-heading"><h2>Batterihistorik</h2><span class="status" data-battery-history-status hidden>Ej konfigurerad</span></div>
-            <p class="battery-history-meta" data-battery-history-meta hidden></p>
-            <div class="battery-history-chart" data-battery-history-chart hidden></div>
-          </article>
-        </div>
         <section class="card invoice-diagnostics" data-invoice-diagnostics hidden>
           <h2>Fakturatolkning</h2>
           <div class="invoice-diagnostic-grid" data-invoice-diagnostic-fields></div>

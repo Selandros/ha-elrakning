@@ -434,6 +434,8 @@ assert.match(panelSource, /Batterihistorik/);
 assert.doesNotMatch(panelSource, /data-power-card="battery-history"[^>]*data-config-card-key/);
 assert.doesNotMatch(panelSource, /data-power-card="battery-history"[^>]*data-main-card-toggle/);
 assert.match(panelSource, /battery-history-row/);
+assert.ok(panelSource.indexOf('class="daily-energy-row"') < panelSource.indexOf('class="daily-energy-row battery-history-row"'));
+assert.ok(panelSource.indexOf('class="daily-energy-row battery-history-row"') < panelSource.indexOf('data-configuration-cards'));
 assert.match(panelSource, /buildBatteryDailyHistory\(/);
 assert.match(panelSource, /Kapacitetsutnyttjande:/);
 assert.doesNotMatch(panelSource, /battery: batteryIsConfigured \? \[\["Laddning"[\s\S]*Laddat idag/);
