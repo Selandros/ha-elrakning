@@ -966,7 +966,7 @@ class ElrakningPanel {
       </div>
       <div class="provider-dialog" data-eon-grid-dialog hidden role="dialog" aria-modal="true" aria-labelledby="eon-grid-title">
         <div class="provider-dialog-card">
-          <h2 id="eon-grid-title">Konfigurera E.ON elnät</h2>
+          <h2 id="eon-grid-title">Konfigurera elnät</h2>
           <div class="eon-auth-methods">
             <section class="eon-auth-method" aria-labelledby="eon-app-title">
               <h3 id="eon-app-title">E.ON App</h3>
@@ -4490,7 +4490,7 @@ class ElrakningPanel {
       copy.disabled = true;
       try {
         const source = isEon
-          ? await this.hass.callWS({ type: "elrakning/eon_grid_source_data" })
+          ? await this.hass.callWS({ type: "elrakning/grid/source_data" })
           : await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
         const providerName = source.provider_name || source.facility?.provider_name;
         if (typeof providerName === "string" && providerName.trim()) {
@@ -4996,7 +4996,7 @@ class ElrakningPanel {
   async loadEonGridState() {
     if (!this.hass?.callWS) return;
     try {
-      const state = await this.hass.callWS({ type: "elrakning/eon_grid_state" });
+      const state = await this.hass.callWS({ type: "elrakning/grid/state" });
       this._applyEonGridState(state);
     } catch {
       // Keep the optional E.ON grid card unconfigured when state is unavailable.
@@ -5078,14 +5078,14 @@ class ElrakningPanel {
     cancel.addEventListener("click", close);
     remove.addEventListener("click", async () => {
       remove.disabled = true;
-      try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/eon_grid_remove" })); close(); } finally { remove.disabled = false; }
+      try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/grid/remove" })); close(); } finally { remove.disabled = false; }
     });
     appSave.addEventListener("click", async () => {
       if (!appAccount.value.trim() || !appPassword.value) return;
       appSave.disabled = true;
       result.textContent = "Verifierar session …";
       try {
-        const response = await this.hass.callWS({ type: "elrakning/eon_grid_app_save", account_id: appAccount.value.trim(), password: appPassword.value });
+          const response = await this.hass.callWS({ type: "elrakning/grid/login", provider: "eon", auth_method: "app", account_id: appAccount.value.trim(), password: appPassword.value });
         if (!response.success) throw new Error(response.error || "configuration_failed");
         this._applyEonGridState(response);
         result.textContent = "E.ON är konfigurerat";
@@ -5099,7 +5099,7 @@ class ElrakningPanel {
       webSave.disabled = true;
       result.textContent = "Verifierar session …";
       try {
-        const response = await this.hass.callWS({ type: "elrakning/eon_grid_web_save", account_id: webAccount.value.trim(), password: webPassword.value });
+        const response = await this.hass.callWS({ type: "elrakning/grid/login", provider: "eon", auth_method: "web", account_id: webAccount.value.trim(), password: webPassword.value });
         if (!response.success && response.error === "browser_attestation_required") {
           result.textContent = "Mitt E.ON kräver för närvarande webbläsarverifiering som integrationen ännu inte kan slutföra.";
         } else if (!response.success) {

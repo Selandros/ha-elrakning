@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
-from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT
+from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
 from .eon_auth import EonAppSession, EonAuthError, EonSession
 from .eon_client import EonAppClient, EonClient
 from .eon_models import (
@@ -201,6 +201,7 @@ class EonGridManager:
     async def async_remove(self) -> dict[str, Any]:
         config = dict(self.entry.data)
         config.pop(EON_GRID_CONFIG_KEY, None)
+        config.pop(GRID_CONFIG_KEY, None)
         self.hass.config_entries.async_update_entry(self.entry, data=config)
         self._app_session = None
         self._web_session = None
@@ -278,9 +279,10 @@ class EonGridManager:
         auth_mode = "app" if config.get("auth") == "app" else "web" if self._web_config(config).get("cookies") else None
         return {
             "configured": self.configured,
-            "provider": EON_GRID_PROVIDER,
+            "provider": "eon",
             "provider_name": "E.ON",
             "auth_mode": auth_mode,
+            "auth_method": auth_mode,
             "reauth_required": self.state.get("reauth_required", False),
             "agreement": self.state.get("agreement"),
             "facility": {
@@ -318,7 +320,12 @@ class EonGridManager:
 
     async def _save_config(self, config_data: dict[str, Any]) -> None:
         data = dict(self.entry.data)
-        data[EON_GRID_CONFIG_KEY] = config_data
+        data[GRID_CONFIG_KEY] = {
+            "provider": "eon",
+            "auth_method": "app" if config_data.get("auth") == "app" else "web",
+            "provider_config": dict(config_data),
+        }
+        data.pop(EON_GRID_CONFIG_KEY, None)
         self.hass.config_entries.async_update_entry(self.entry, data=data)
 
     def _config_with_migration(self) -> dict[str, Any]:
@@ -332,7 +339,8 @@ class EonGridManager:
         return config
 
     def _config(self) -> dict[str, Any]:
-        value = self.entry.data.get(EON_GRID_CONFIG_KEY, {})
+        envelope = self.entry.data.get(GRID_CONFIG_KEY)
+        value = envelope.get("provider_config", {}) if isinstance(envelope, dict) else self.entry.data.get(EON_GRID_CONFIG_KEY, {})
         return value if isinstance(value, dict) else {}
 
     @staticmethod

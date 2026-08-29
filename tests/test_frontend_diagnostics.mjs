@@ -13,15 +13,14 @@ const output = formatDiagnosticsText([
 ], "0.0.64");
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
-assert.match(eonPanelSource, /elrakning\/eon_grid_state/);
+assert.match(eonPanelSource, /elrakning\/grid\/state/);
 assert.match(eonPanelSource, /data-eon-grid-app-account/);
 assert.match(eonPanelSource, /data-eon-grid-app-password/);
 assert.match(eonPanelSource, /data-eon-grid-web-account/);
 assert.match(eonPanelSource, /data-eon-grid-web-password/);
-assert.match(eonPanelSource, /elrakning\/eon_grid_app_save/);
-assert.match(eonPanelSource, /elrakning\/eon_grid_web_save/);
+assert.match(eonPanelSource, /elrakning\/grid\/login/);
 assert.match(eonPanelSource, /data-eon-grid-source/);
-assert.match(eonPanelSource, /elrakning\/eon_grid_source_data/);
+assert.match(eonPanelSource, /elrakning\/grid\/source_data/);
 assert.match(eonPanelSource, /data-provider-source-dialog/);
 assert.doesNotMatch(eonPanelSource, /data-eon-grid-cookie/);
 assert.doesNotMatch(eonPanelSource, /data-eon-api-tests/);

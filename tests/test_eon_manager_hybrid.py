@@ -39,6 +39,7 @@ def _load_manager():
     const.EON_GRID_CONFIG_KEY = "eon_grid"
     const.EON_GRID_PROVIDER = "eon"
     const.EON_GRID_UPDATE_EVENT = "eon_update"
+    const.GRID_CONFIG_KEY = "grid_config"
     sys.modules["custom_components.elrakning.const"] = const
     for name in ("custom_components", "custom_components.elrakning", PKG):
         package = sys.modules.setdefault(name, types.ModuleType(name))
@@ -54,6 +55,17 @@ def _load_manager():
 
 
 manager_module = _load_manager()
+
+
+def _load_registry():
+    name = f"{PKG}.provider_registry"
+    spec = importlib.util.spec_from_file_location(
+        name, ROOT / "custom_components/elrakning/elnat/provider_registry.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _manager(config=None):
@@ -260,7 +272,7 @@ def test_saving_web_cookies_preserves_existing_app_configuration():
         manager_module.EonSession = original_session
         manager_module.EonClient = original_client
         manager_module.normalize_user_profile = original_normalize
-    config = manager.entry.data["eon_grid"]
+    config = manager.entry.data["grid_config"]["provider_config"]
     assert config["auth"] == "app"
     assert config["account_id"] == "account"
     assert config["web"]["customer_id"] == "web-customer"
@@ -274,3 +286,15 @@ def test_web_credentials_report_attestation_without_using_app_auth_or_mutating_c
     result = asyncio.run(manager.async_save_web_credentials("web-account", "web-password"))
     assert result == {"status": "browser_attestation_required", "error": "browser_attestation_required"}
     assert manager.entry.data["eon_grid"]["account_id"] == "app-account"
+
+
+def test_grid_registry_accepts_a_second_provider_without_core_changes():
+    registry = _load_registry()
+    synthetic = registry.GridProviderDefinition("synthetic", "Synthetic Grid", ("app",), lambda hass, entry: object())
+    registry.GRID_PROVIDER_REGISTRY[synthetic.provider_id] = synthetic
+    try:
+        assert registry.get_grid_provider("synthetic") is synthetic
+        entry = types.SimpleNamespace(data={"grid_config": {"provider": "synthetic"}})
+        assert registry.configured_grid_provider(entry) is synthetic
+    finally:
+        registry.GRID_PROVIDER_REGISTRY.pop(synthetic.provider_id, None)
