@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import secrets
+import time
 from typing import Any
 
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
@@ -31,6 +33,7 @@ class EonGridManager:
         self.state: dict[str, Any] = self._empty_state()
         self._refresh_unsub = None
         self._web_refresh_unsub = None
+        self._pending_web_handoff: dict[str, Any] | None = None
         self._app_session: EonAppSession | None = None
         self._web_session: EonSession | None = None
 
@@ -65,6 +68,48 @@ class EonGridManager:
     async def async_save_cookie_header(self, cookie_header: str) -> dict[str, Any]:
         session = EonSession(self.hass)
         customer_id = await session.bootstrap(cookie_header)
+        return await self._activate_web_session(session, customer_id)
+
+    async def async_start_web_handoff(self, user_id: str) -> dict[str, Any]:
+        """Create one short-lived browser handoff bound to one HA user."""
+        self._pending_web_handoff = {
+            "user_id": user_id,
+            "state": secrets.token_urlsafe(32),
+            "expires_at": time.monotonic() + 300,
+        }
+        return {
+            "status": "waiting_for_login",
+            "url": "https://www.eon.se/mitt-e-on/",
+        }
+
+    def pending_web_handoff(self, user_id: str) -> dict[str, Any] | None:
+        pending = self._pending_web_handoff
+        if not pending or pending["user_id"] != user_id:
+            return None
+        if pending["expires_at"] <= time.monotonic():
+            self._pending_web_handoff = None
+            return None
+        return {"state": pending["state"], "expires_in": int(pending["expires_at"] - time.monotonic())}
+
+    async def async_complete_web_handoff(
+        self, user_id: str, state: str, cookies: dict[str, str]
+    ) -> dict[str, Any]:
+        pending = self._pending_web_handoff
+        self._pending_web_handoff = None
+        if (
+            not pending
+            or pending["user_id"] != user_id
+            or pending["expires_at"] <= time.monotonic()
+            or not isinstance(state, str)
+            or not secrets.compare_digest(state, pending["state"])
+        ):
+            raise EonAuthError("invalid_handoff_state")
+        session = EonSession(self.hass)
+        customer_id = await session.bootstrap_cookies(cookies)
+        return await self._activate_web_session(session, customer_id)
+
+    async def _activate_web_session(self, session: EonSession, customer_id: str) -> dict[str, Any]:
+        """Verify and activate a bootstrapped web session."""
         client = EonClient(session)
         profile = await client.async_get_user(customer_id)
         normalized = normalize_user_profile(profile, customer_id)
@@ -382,6 +427,7 @@ class EonGridManager:
     async def async_shutdown(self) -> None:
         self._app_session = None
         self._web_session = None
+        self._pending_web_handoff = None
         self._cancel_web_refresh()
         if self._refresh_unsub:
             self._refresh_unsub()

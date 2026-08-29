@@ -680,6 +680,7 @@ class ElrakningPanel {
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
     this._eonGridEventUnsubscribePromise = null;
+    this._eonWebHandoffPending = false;
     this._connectionReadyListener = null;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
@@ -978,10 +979,9 @@ class ElrakningPanel {
             </section>
             <section class="eon-auth-method" aria-labelledby="eon-web-title">
               <h3 id="eon-web-title">Mitt E.ON / Webb</h3>
-              <p>Webbinloggning kan kräva webbläsarverifiering.</p>
-              <label>Användarnamn / konto-ID<input type="text" data-eon-grid-web-account autocomplete="username"></label>
-              <label>Lösenord<input type="password" data-eon-grid-web-password autocomplete="current-password"></label>
-              <button type="button" data-eon-grid-web-save>Logga in</button>
+              <p>Logga in i E.ON:s webbportal och anslut den verifierade sessionen.</p>
+              <button type="button" data-eon-grid-web-connect>Anslut Mitt E.ON</button>
+              <p data-eon-grid-web-status aria-live="polite">Inte ansluten.</p>
             </section>
           </div>
           <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
@@ -5016,12 +5016,14 @@ class ElrakningPanel {
   _applyEonGridState(state) {
     this._eonGridState = state;
     const configured = state?.configured === true;
+    if (configured) this._eonWebHandoffPending = false;
     const status = this.host.querySelector("[data-eon-grid-status]");
     const provider = this.host.querySelector('[data-provider-name="elnet"]');
     const summary = this.host.querySelector("[data-eon-grid-summary]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
     const sourceButton = this.host.querySelector("[data-eon-grid-source]");
     const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
+    const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
     if (!status || !provider || !summary) return;
     const agreement = state?.agreement || {};
     const facility = state?.facility || {};
@@ -5043,6 +5045,13 @@ class ElrakningPanel {
               : "Ej aktivt"
       : "Ej konfigurerad";
     status.hidden = false;
+    if (webStatus) {
+      webStatus.textContent = configured && state?.auth_method === "web"
+        ? "Ansluten."
+        : this._eonWebHandoffPending
+          ? "Väntar på E.ON-inloggning …"
+          : "Inte ansluten.";
+    }
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     if (commonApiProbe) commonApiProbe.hidden = !this._isEonCommonApiProbeVisible();
@@ -5070,21 +5079,18 @@ class ElrakningPanel {
     const dialog = this.host.querySelector("[data-eon-grid-dialog]");
     const appAccount = this.host.querySelector("[data-eon-grid-app-account]");
     const appPassword = this.host.querySelector("[data-eon-grid-app-password]");
-    const webAccount = this.host.querySelector("[data-eon-grid-web-account]");
-    const webPassword = this.host.querySelector("[data-eon-grid-web-password]");
+    const webConnect = this.host.querySelector("[data-eon-grid-web-connect]");
+    const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
     const result = this.host.querySelector("[data-eon-grid-result]");
     const appSave = this.host.querySelector("[data-eon-grid-app-save]");
     const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
-    const webSave = this.host.querySelector("[data-eon-grid-web-save]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !appAccount || !appPassword || !webAccount || !webPassword || !result || !appSave || !webSave || !cancel || !remove || !commonApiProbe) return;
+    if (!open || !dialog || !appAccount || !appPassword || !webConnect || !result || !appSave || !cancel || !remove || !commonApiProbe) return;
     const close = () => {
       dialog.hidden = true;
       appAccount.value = "";
       appPassword.value = "";
-      webAccount.value = "";
-      webPassword.value = "";
       result.textContent = "";
     };
     open.addEventListener("click", () => { dialog.hidden = false; appAccount.focus(); });
@@ -5131,19 +5137,24 @@ class ElrakningPanel {
         result.textContent = error.message === "reauth_required" ? "E.ON-inloggningen behöver göras om." : "E.ON-inloggningen kunde inte verifieras.";
       } finally { appSave.disabled = false; }
     });
-    webSave.addEventListener("click", async () => {
-      if (!webAccount.value.trim() || !webPassword.value) return;
-      webSave.disabled = true;
-      result.textContent = "Verifierar session …";
+    webConnect.addEventListener("click", async () => {
+      webConnect.disabled = true;
+      if (webStatus) webStatus.textContent = "Väntar på inloggning …";
+      result.textContent = "Öppnar Mitt E.ON …";
+      const popup = window.open("about:blank", "_blank");
       try {
-        const response = await this.hass.callWS({ type: "elrakning/grid/login", provider: "eon", auth_method: "web", account_id: webAccount.value.trim(), password: webPassword.value });
-        if (!response.success && response.error === "browser_attestation_required") {
-          result.textContent = "Mitt E.ON kräver för närvarande webbläsarverifiering som integrationen ännu inte kan slutföra.";
-        } else if (!response.success) {
-          throw new Error(response.error || "configuration_failed");
-        }
-      } catch { result.textContent = "Mitt E.ON-inloggningen kunde inte verifieras."; }
-      finally { webSave.disabled = false; }
+        const response = await this.hass.callWS({ type: "elrakning/grid/web_handoff_start" });
+        if (!response.success) throw new Error(response.error || "handoff_failed");
+        this._eonWebHandoffPending = true;
+        if (popup) popup.location.href = response.url;
+        else window.open(response.url, "_blank");
+        result.textContent = "Logga in i Mitt E.ON. Anslutningen slutförs automatiskt efter lyckad inloggning.";
+      } catch (error) {
+        popup?.close();
+        if (webStatus) webStatus.textContent = "Handoff kunde inte startas.";
+        result.textContent = error.message === "handoff_unavailable" ? "Mitt E.ON-handoff är inte tillgänglig." : "Mitt E.ON kunde inte öppnas.";
+        webConnect.disabled = false;
+      }
     });
   }
 

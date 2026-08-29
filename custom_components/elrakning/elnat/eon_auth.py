@@ -259,10 +259,22 @@ class EonSession:
 
     async def bootstrap(self, cookie_header: str) -> str:
         cookies = parse_cookie_header(cookie_header)
+        return await self.bootstrap_cookies(cookies)
+
+    async def bootstrap_cookies(self, cookies: Mapping[str, str]) -> str:
+        """Bootstrap from an allowlisted cookie mapping without a raw header."""
+        if not isinstance(cookies, Mapping):
+            raise EonAuthError("invalid_cookie_header")
+        cookies = {
+            key: value for key, value in cookies.items()
+            if key in ALLOWED_COOKIES and isinstance(value, str) and value
+        }
+        if "MyEonIDToken" not in cookies:
+            raise EonAuthError("customer_id_missing")
         self._cookies = cookies
         self._jar.update_cookies(cookies, response_url=URL(EON_WEB_BASE))
         customer_id = customer_id_from_id_token(cookies["MyEonIDToken"])
-        await self._session_info()
+        await self._ensure_token()
         return customer_id
 
     async def request_json(self, method: str, url: str, **kwargs: Any) -> Any:

@@ -13,6 +13,7 @@ from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EV
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .elnat.manager import GridManager
+from .elnat.eon_handoff import async_register_eon_handoff_views
 from .meter import MeterManager
 from .power import PowerManager
 from .solar_forecast import SolarForecastManager
@@ -57,6 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     grid_manager = GridManager(hass, entry)
     await grid_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
+    async_register_eon_handoff_views(hass)
     if grid_manager.configured:
         grid_manager.async_start_refresh()
 

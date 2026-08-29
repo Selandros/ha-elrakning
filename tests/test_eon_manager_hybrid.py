@@ -289,6 +289,67 @@ def test_web_credentials_report_attestation_without_using_app_auth_or_mutating_c
     assert manager.entry.data["eon_grid"]["account_id"] == "app-account"
 
 
+def test_web_handoff_is_single_use_and_filters_cookies():
+    class _Session:
+        def __init__(self, hass):
+            pass
+
+        async def bootstrap_cookies(self, cookies):
+            self.cookies_received = {
+                key: value for key, value in cookies.items()
+                if key in {"MyEonSession", "MyEonIDToken", "MyEonAccessToken", "MyEonAccessToken-ValidUntil", "MyEonAccessScopes", "MyEonResumeAt"}
+            }
+            return "synthetic-customer"
+
+    manager = object.__new__(manager_module.EonGridManager)
+    manager._pending_web_handoff = None
+    manager.hass = object()
+    captured = {}
+
+    async def _activate(session, customer_id):
+        captured["cookies"] = session.cookies_received
+        captured["customer_id"] = customer_id
+        return {"configured": True}
+
+    manager._activate_web_session = _activate
+    original = manager_module.EonSession
+    manager_module.EonSession = _Session
+    try:
+        start = asyncio.run(manager.async_start_web_handoff("synthetic-user"))
+        pending = manager.pending_web_handoff("synthetic-user")
+        result = asyncio.run(manager.async_complete_web_handoff(
+            "synthetic-user",
+            pending["state"],
+            {
+                "MyEonSession": "synthetic-session",
+                "MyEonIDToken": "synthetic-id-token",
+                "AnalyticsCookie": "must-be-dropped",
+            },
+        ))
+    finally:
+        manager_module.EonSession = original
+    assert start["status"] == "waiting_for_login"
+    assert result == {"configured": True}
+    assert captured["customer_id"] == "synthetic-customer"
+    assert set(captured["cookies"]) == {"MyEonSession", "MyEonIDToken"}
+    assert manager._pending_web_handoff is None
+    try:
+        asyncio.run(manager.async_complete_web_handoff("synthetic-user", pending["state"], {}))
+    except manager_module.EonAuthError as error:
+        assert error.code == "invalid_handoff_state"
+    else:
+        raise AssertionError("handoff replay was accepted")
+
+
+def test_web_handoff_timeout_is_cleared():
+    manager = object.__new__(manager_module.EonGridManager)
+    manager._pending_web_handoff = {
+        "user_id": "synthetic-user", "state": "synthetic-state", "expires_at": 0,
+    }
+    assert manager.pending_web_handoff("synthetic-user") is None
+    assert manager._pending_web_handoff is None
+
+
 def test_grid_registry_accepts_a_second_provider_without_core_changes():
     registry = _load_registry()
     synthetic = registry.GridProviderDefinition("synthetic", "Synthetic Grid", ("app",), lambda hass, entry: object())
