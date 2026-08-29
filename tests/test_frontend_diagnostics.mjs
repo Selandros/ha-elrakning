@@ -56,7 +56,18 @@ const solarHistory = buildSolarDailyHistory(
   2,
 );
 assert.equal(solarHistory.length, 2);
+assert.equal(solarHistory[0].referenceKwh, 10);
 assert.equal(solarHistory[0].utilizationPercent, 10);
+const solarOverReference = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
+  [{ date: "2026-08-22", reference_energy_kwh: 1 }],
+  new Date(2026, 7, 23, 12, 0),
+  2,
+);
+assert.equal(solarOverReference[0].referenceKwh, 1);
+assert.equal(solarOverReference[0].utilizationPercent, 200);
+assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].referenceKwh, null);
+assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].utilizationPercent, null);
 assert.equal(dailyHistory.length, 7);
 assert.ok(Math.abs(dailyHistory[5].chargingKwh - 1) < 1e-12);
 assert.ok(Math.abs(dailyHistory[5].dischargingKwh - 1) < 1e-12);
@@ -475,6 +486,15 @@ assert.ok(panelSource.indexOf('class="daily-energy-row"') < panelSource.indexOf(
 assert.ok(panelSource.indexOf('class="daily-energy-row battery-history-row"') < panelSource.indexOf('data-configuration-cards'));
 assert.match(panelSource, /buildBatteryDailyHistory\(/);
 assert.match(panelSource, /buildSolarDailyHistory\(/);
+assert.match(panelSource, /const values = days\.flatMap\(\(day\) => \[day\.producedKwh, day\.referenceKwh\]\)/);
+assert.match(panelSource, /class="solar-history-reference-bar"/);
+assert.match(panelSource, /referenceBarWidth/);
+assert.match(panelSource, /solar-history-reference-bar \{[\s\S]*color-mix\(in srgb, var\(--solar-color\) 30%/);
+assert.match(panelSource, /solar-history-day\.hovered \.solar-history-reference-bar/);
+assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Producerat:/);
+assert.match(panelSource, /<span>Solpotential: \$\{Number\.isFinite\(day\.referenceKwh\)/);
+assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*utilizationPercent/);
+assert.match(panelSource, /\.solar-history-chart \.soc-tooltip > span/);
 assert.match(panelSource, /solar_array_metadata/);
 assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Laddat:/);
 assert.match(panelSource, /<span>Urladdat: \$\{formatEnergy\(day\.dischargingKwh\)\}<\/span>`;/);
@@ -533,7 +553,7 @@ assert.match(panelSource, /class="chart-hover-marker chart-hover-marker-soc"/);
 assert.match(panelSource, /class="visually-hidden">Batteri SOC<\/h2>/);
 assert.match(panelSource, /\.visually-hidden \{[\s\S]*position: absolute;[\s\S]*width: 1px;/);
 assert.match(panelSource, /class="battery-history-utilization">\$\{Number\.isFinite\(day\.utilizationPercent\)/);
-assert.match(panelSource, /\.battery-history-chart \.soc-tooltip > span \{[\s\S]*display: block;/);
+assert.match(panelSource, /\.battery-history-chart \.soc-tooltip > span,[\s\S]*\.solar-history-chart \.soc-tooltip > span \{[\s\S]*display: block;/);
 assert.match(panelSource, /class="card-heading soc-card-heading"/);
 assert.match(panelSource, /\.card\.soc-card \{\n\s+min-height: 0;\n\s+\}/);
 assert.doesNotMatch(panelSource, /Utnyttjande/);

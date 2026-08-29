@@ -401,6 +401,7 @@ export function buildSolarDailyHistory(points, analysisDays, now = new Date(), d
       date: localDate,
       label: dayStart.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" }),
       producedKwh: actualKwh,
+      referenceKwh,
       utilizationPercent: referenceKwh > 0 && actualKwh !== null ? actualKwh / referenceKwh * 100 : null,
     };
   });
@@ -1431,7 +1432,15 @@ class ElrakningPanel {
           ry: 4;
         }
 
-        .solar-history-day.hovered .solar-history-bar {
+        .solar-history-reference-bar {
+          fill: color-mix(in srgb, var(--solar-color) 30%, var(--ha-card-background, var(--card-background-color)));
+          fill-opacity: .9;
+          rx: 4;
+          ry: 4;
+        }
+
+        .solar-history-day.hovered .solar-history-bar,
+        .solar-history-day.hovered .solar-history-reference-bar {
           fill-opacity: 1;
         }
 
@@ -1718,7 +1727,8 @@ class ElrakningPanel {
           font-weight: 600;
         }
 
-        .battery-history-chart .soc-tooltip > span {
+        .battery-history-chart .soc-tooltip > span,
+        .solar-history-chart .soc-tooltip > span {
           display: block;
         }
 
@@ -3682,7 +3692,7 @@ class ElrakningPanel {
       this._powerHistory?.solar_analysis?.days,
       new Date(),
     );
-    const values = days.map((day) => day.producedKwh).filter((value) => Number.isFinite(value));
+    const values = days.flatMap((day) => [day.producedKwh, day.referenceKwh]).filter((value) => Number.isFinite(value));
     if (!values.length) {
       chart.textContent = "Ingen solhistorik tillgänglig";
       return;
@@ -3702,13 +3712,18 @@ class ElrakningPanel {
     const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / range) * plotHeight;
     const groupWidth = plotWidth / days.length;
     const barWidth = Math.min(34, groupWidth * .5);
+    const referenceBarWidth = Math.min(42, groupWidth * .7);
     const groupX = (index) => plot.left + groupWidth * index + groupWidth / 2;
     const grid = [0, range / 2, range].map((level) => `<line class="solar-history-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`).join("");
     const bars = days.map((day, index) => {
-      const value = Number.isFinite(day.producedKwh) ? day.producedKwh : 0;
-      const barHeight = plot.top + plotHeight - y(value);
       const center = groupX(index);
-      return `<g class="solar-history-day" data-solar-history-index="${index}"><rect class="solar-history-bar" x="${center - barWidth / 2}" y="${y(value)}" width="${barWidth}" height="${barHeight}" /></g>`;
+      const reference = Number.isFinite(day.referenceKwh) && day.referenceKwh > 0
+        ? `<rect class="solar-history-reference-bar" x="${center - referenceBarWidth / 2}" y="${y(day.referenceKwh)}" width="${referenceBarWidth}" height="${plot.top + plotHeight - y(day.referenceKwh)}" />`
+        : "";
+      const actual = Number.isFinite(day.producedKwh)
+        ? `<rect class="solar-history-bar" x="${center - barWidth / 2}" y="${y(day.producedKwh)}" width="${barWidth}" height="${plot.top + plotHeight - y(day.producedKwh)}" />`
+        : "";
+      return `<g class="solar-history-day" data-solar-history-index="${index}">${reference}${actual}</g>`;
     }).join("");
     const yLabelMarkup = [range, range / 2, 0].map((level, index) => `<span class="solar-history-axis-label ${index === 0 ? "top" : index === 1 ? "middle" : "bottom"}">${this._formatNumber(level)}</span>`).join("");
     const xLabelMarkup = days.map((day, index) => `<span class="solar-history-x-label" style="left: ${(index + .5) / days.length * 100}%"><span class="solar-history-day-label">${day.label}</span><span class="solar-history-utilization">${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span></span>`).join("");
@@ -3728,7 +3743,7 @@ class ElrakningPanel {
       hoveredDay?.classList.remove("hovered");
       group.classList.add("hovered");
       hoveredDay = group;
-      tooltip.innerHTML = `<strong>${day.date}</strong><span>Producerat: ${Number.isFinite(day.producedKwh) ? `${this._formatNumber(day.producedKwh)} kWh` : "—"}</span>`;
+      tooltip.innerHTML = `<strong>${day.date}</strong><span>Producerat: ${Number.isFinite(day.producedKwh) ? `${this._formatNumber(day.producedKwh)} kWh` : "—"}</span><span>Solpotential: ${Number.isFinite(day.referenceKwh) ? `${this._formatNumber(day.referenceKwh)} kWh` : "—"}</span>`;
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
