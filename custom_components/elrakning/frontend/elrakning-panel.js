@@ -457,6 +457,21 @@ export function buildThresholdClippedSegments(points, key) {
   return segments;
 }
 
+export function buildContinuousGapPairs(points, key) {
+  const gaps = [];
+  let previous = null;
+  for (const point of Array.isArray(points) ? points : []) {
+    const timestamp = new Date(point?.timestamp).getTime();
+    const value = normalizeMeterValue(point?.[key]);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
+    if (previous && timestamp - previous.timestamp > 5 * 60 * 1000) {
+      gaps.push([previous.point, point]);
+    }
+    previous = { point, timestamp };
+  }
+  return gaps;
+}
+
 function monotoneEndpointTangent(point, nextPoint, followingPoint, slope, nextSlope) {
   const width = Math.abs(nextPoint.x - point.x);
   const nextWidth = Math.abs(followingPoint.x - nextPoint.x);
@@ -2326,6 +2341,14 @@ class ElrakningPanel {
         .chart-power-area-consumption { fill: var(--consumption-color); }
         .chart-power-area-charging { fill: var(--charging-color); }
         .chart-power-area-discharging { fill: var(--discharging-color); }
+
+        .chart-interpolated-line {
+          opacity: .45;
+        }
+
+        .chart-interpolated-area {
+          opacity: .35;
+        }
 
         .chart-hover-markers {
           pointer-events: none;
@@ -4933,14 +4956,19 @@ class ElrakningPanel {
   }
 
   buildMeterDisplayMarkup(points, key, className, x, meterY) {
-    return this.buildMeterDisplaySegments(points, key).map((segment) => {
+    const segments = this.buildMeterDisplaySegments(points, key).map((segment) => {
       if (segment.length < 2) return "";
       return `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
     }).join("");
+    const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
+      if (!isVisiblePowerValue(from?.[key]) || !isVisiblePowerValue(to?.[key])) return "";
+      return `<path class="${className} chart-interpolated-line" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
+    }).join("");
+    return `${segments}${interpolated}`;
   }
 
   buildMeterDisplayAreaMarkup(points, key, className, x, meterY) {
-    return this.buildMeterDisplaySegments(points, key).map((segment) => {
+    const segments = this.buildMeterDisplaySegments(points, key).map((segment) => {
       if (segment.length < 2) return "";
       const first = segment[0];
       const last = segment.at(-1);
@@ -4949,6 +4977,12 @@ class ElrakningPanel {
       const baselineY = meterY(0);
       return `<path class="${className}" d="M ${firstX} ${baselineY} L ${firstX} ${meterY(first[key])} ${this.buildSmoothMeterPath(segment, key, x, meterY).slice(1)} L ${lastX} ${baselineY} Z" />`;
     }).join("");
+    const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
+      if (!isVisiblePowerValue(from?.[key]) || !isVisiblePowerValue(to?.[key])) return "";
+      const baselineY = meterY(0);
+      return `<path class="${className} chart-interpolated-area" d="M ${x(from.timestamp)} ${baselineY} L ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])} L ${x(to.timestamp)} ${baselineY} Z" />`;
+    }).join("");
+    return `${segments}${interpolated}`;
   }
 
   renderPriceChart() {

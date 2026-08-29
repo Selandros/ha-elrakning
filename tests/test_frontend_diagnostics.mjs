@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -96,6 +96,14 @@ const openEndedSegments = buildThresholdClippedSegments(thresholdPoints([1.5, 2.
 assert.equal(openEndedSegments[0].at(-1).value_kw, 2.66);
 assert.equal(buildThresholdClippedSegments(thresholdPoints([0.1, 0.05]), "value_kw").length, 0);
 assert.equal(buildThresholdClippedSegments(thresholdPoints([0.4, null, 1.2]), "value_kw").length, 0);
+const continuousGapPoints = thresholdPoints([1, 2, 4, 5]).filter((_, index) => index !== 2);
+const continuousGapSnapshot = JSON.stringify(continuousGapPoints);
+const continuousGaps = buildContinuousGapPairs(continuousGapPoints, "value_kw");
+assert.equal(continuousGaps.length, 1);
+assert.equal(continuousGaps[0][0].value_kw, 2);
+assert.equal(continuousGaps[0][1].value_kw, 5);
+assert.equal(JSON.stringify(continuousGapPoints), continuousGapSnapshot);
+assert.equal(buildContinuousGapPairs(thresholdPoints([1, 2]), "value_kw").length, 0);
 const missingStartPoints = thresholdPoints([null, 1.19, 1.2]);
 assert.deepEqual(
   buildThresholdClippedSegments(missingStartPoints, "value_kw")[0].map((point) => point.value_kw),
@@ -739,7 +747,12 @@ assert.match(panelSource, /\.chart-power-area-export \{ fill: var\(--grid-export
 assert.match(panelSource, /\.chart-power-area-consumption \{ fill: var\(--consumption-color\); \}/);
 assert.match(panelSource, /\.chart-power-area-charging \{ fill: var\(--charging-color\); \}/);
 assert.match(panelSource, /\.chart-power-area-discharging \{ fill: var\(--discharging-color\); \}/);
+assert.match(panelSource, /\.chart-interpolated-line \{[\s\S]*opacity: \.45;/);
+assert.match(panelSource, /\.chart-interpolated-area \{[\s\S]*opacity: \.35;/);
 assert.match(panelSource, /buildMeterDisplayAreaMarkup\(points, key, className, x, meterY\)/);
+assert.match(panelSource, /buildContinuousGapPairs\(points, key\)/);
+assert.match(panelSource, /class="\$\{className\} chart-interpolated-line"/);
+assert.match(panelSource, /class="\$\{className\} chart-interpolated-area"/);
 assert.match(panelSource, /buildMeterDisplayAreaMarkup\(powerDisplayPoints\.solar, "value_kw", "chart-power-area chart-power-area-solar"/);
 assert.match(panelSource, /buildMeterDisplayAreaMarkup\(meterDisplayPoints, "import_kw", "chart-power-area chart-power-area-import"/);
 assert.match(panelSource, /buildMeterDisplayAreaMarkup\(meterDisplayPoints, "export_kw", "chart-power-area chart-power-area-export"/);
