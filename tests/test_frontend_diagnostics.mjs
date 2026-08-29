@@ -785,6 +785,17 @@ assert.match(panelSource, /data-power-selectors><\/div>\n\s+<label class="batter
 assert.match(panelSource, /data-power-invert-battery/);
 assert.match(panelSource, /battery_power_entity/);
 assert.match(panelSource, /invert_battery_power/);
+assert.match(panelSource, /id="power-title"><\/h2>/);
+assert.match(panelSource, /solar: "Konfigurera sol"/);
+assert.match(panelSource, /consumption: "Konfigurera last"/);
+assert.match(panelSource, /battery: "Konfigurera batteri"/);
+assert.match(panelSource, /\.battery-mode-wrap\[hidden\],[\s\S]*\.battery-invert-row\[hidden\],[\s\S]*display: none;/);
+assert.match(panelSource, /\.power-solar-analysis-status\[hidden\],[\s\S]*\[data-power-add-solar\]\[hidden\][\s\S]*display: none;/);
+assert.match(panelSource, /batteryModeWrap\.hidden = mode !== "battery"/);
+assert.match(panelSource, /invertBatteryWrap\.hidden = mode !== "battery" \|\| batteryMode !== "combined"/);
+assert.match(panelSource, /solarAnalysisStatus\.hidden = mode !== "solar" \|\| sunAvailable/);
+assert.match(panelSource, /addSolar\.hidden = mode !== "solar"/);
+assert.match(panelSource, /const fieldsFor = \(selectedMode\) => selectedMode === "solar"/);
 assert.match(panelSource, /displayPowerValue\(value\)/);
 assert.doesNotMatch(panelSource, /\.chart-bar\.cheap \{[^}]*opacity:/);
 assert.doesNotMatch(panelSource, /\.chart-bar\.normal \{[^}]*opacity:/);

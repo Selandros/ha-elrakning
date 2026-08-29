@@ -888,7 +888,7 @@ class ElrakningPanel {
       </div>
       <div class="meter-dialog power-dialog" data-power-dialog hidden role="dialog" aria-modal="true" aria-labelledby="power-title">
         <div class="meter-dialog-card">
-          <h2 id="power-title">Konfigurera energi</h2>
+          <h2 id="power-title"></h2>
           <p data-power-result></p>
           <p class="power-solar-analysis-status" data-power-solar-analysis-status hidden></p>
           <div class="battery-mode-wrap" data-power-battery-mode-wrap hidden>
@@ -1135,6 +1135,13 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           margin-top: 16px;
+        }
+
+        .battery-mode-wrap[hidden],
+        .battery-invert-row[hidden],
+        .power-solar-analysis-status[hidden],
+        [data-power-add-solar][hidden] {
+          display: none;
         }
 
         .battery-mode-title {
@@ -3187,6 +3194,7 @@ class ElrakningPanel {
 
   _bindPowerDialog() {
     const dialog = this.host.querySelector("[data-power-dialog]");
+    const title = this.host.querySelector("#power-title");
     const selectorsElement = this.host.querySelector("[data-power-selectors]");
     const result = this.host.querySelector("[data-power-result]");
     const solarAnalysisStatus = this.host.querySelector("[data-power-solar-analysis-status]");
@@ -3270,6 +3278,7 @@ class ElrakningPanel {
     const open = async (selectedMode) => {
       mode = selectedMode;
       dialog.hidden = false;
+      if (title) title.textContent = ({ solar: "Konfigurera sol", consumption: "Konfigurera last", battery: "Konfigurera batteri" })[mode] || "Konfigurera energi";
       if (clear) clear.textContent = ({ solar: "Rensa sol", consumption: "Rensa last", battery: "Rensa batteri" })[mode];
       save.disabled = true;
       result.textContent = "Hämtar sparad konfiguration …";
