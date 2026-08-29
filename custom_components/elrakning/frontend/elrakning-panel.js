@@ -3371,7 +3371,7 @@ class ElrakningPanel {
     const plot = { left: 42, right: 8, top: 12, bottom: 50 };
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
-    const range = Math.max(1, Math.ceil(maximum * 1.1 * 2) / 2);
+    const range = Number.isFinite(capacity) && capacity > 0 ? capacity : Math.max(1, maximum);
     const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / range) * plotHeight;
     const groupWidth = plotWidth / days.length;
     const barWidth = Math.min(24, groupWidth * .24);

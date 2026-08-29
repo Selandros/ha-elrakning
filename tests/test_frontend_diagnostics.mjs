@@ -448,6 +448,8 @@ assert.doesNotMatch(panelSource, /battery-history-meta|data-battery-history-meta
 assert.match(panelSource, /const capacity = Number\(power\.capacity_kwh\);[\s\S]*buildBatteryDailyHistory\([\s\S]*capacity,[\s\S]*\);/);
 assert.match(panelSource, /const height = 320;/);
 assert.match(panelSource, /const plot = \{ left: 42, right: 8, top: 12, bottom: 50 \};/);
+assert.match(panelSource, /const range = Number\.isFinite\(capacity\) && capacity > 0 \? capacity : Math\.max\(1, maximum\);/);
+assert.match(panelSource, /const yLabels = \[range, range \/ 2, 0\];/);
 assert.doesNotMatch(panelSource, /data-power-card="battery-history"[^>]*data-config-card-key/);
 assert.doesNotMatch(panelSource, /data-power-card="battery-history"[^>]*data-main-card-toggle/);
 assert.match(panelSource, /battery-history-row/);
