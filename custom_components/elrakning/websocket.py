@@ -39,6 +39,7 @@ ELECTRICITY_PROVIDER_REMOVE_COMMAND = f"{DOMAIN}/electricity_provider_remove"
 EON_GRID_STATE_COMMAND = f"{DOMAIN}/eon_grid_state"
 EON_GRID_SAVE_COMMAND = f"{DOMAIN}/eon_grid_save"
 EON_GRID_APP_SAVE_COMMAND = f"{DOMAIN}/eon_grid_app_save"
+EON_GRID_SOURCE_DATA_COMMAND = f"{DOMAIN}/eon_grid_source_data"
 EON_GRID_REMOVE_COMMAND = f"{DOMAIN}/eon_grid_remove"
 ELECTRICITY_HISTORY_STATE_COMMAND = f"{DOMAIN}/electricity_history_state"
 ELECTRICITY_HISTORY_PURGE_COMMAND = f"{DOMAIN}/electricity_history_purge"
@@ -77,6 +78,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_eon_grid_state)
     websocket_api.async_register_command(hass, websocket_eon_grid_save)
     websocket_api.async_register_command(hass, websocket_eon_grid_app_save)
+    websocket_api.async_register_command(hass, websocket_eon_grid_source_data)
     websocket_api.async_register_command(hass, websocket_eon_grid_remove)
     websocket_api.async_register_command(hass, websocket_electricity_history_state)
     websocket_api.async_register_command(hass, websocket_electricity_history_purge)
@@ -367,6 +369,21 @@ async def websocket_eon_grid_app_save(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "configuration_failed")})
         return
     connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command({vol.Required("type"): EON_GRID_SOURCE_DATA_COMMAND})
+@websocket_api.async_response
+async def websocket_eon_grid_source_data(hass, connection, msg):
+    manager = _eon_grid_manager(hass)
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
+        return
+    try:
+        source = await manager.async_source_data()
+    except Exception as err:
+        connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "source_unavailable")})
+        return
+    connection.send_result(msg["id"], {"success": True, **source})
 
 
 @websocket_api.websocket_command({vol.Required("type"): EON_GRID_REMOVE_COMMAND})

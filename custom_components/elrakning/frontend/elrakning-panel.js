@@ -843,6 +843,7 @@ class ElrakningPanel {
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
               <button type="button" class="configuration-control" data-eon-grid-configure>Konfigurera</button>
+              <button type="button" data-eon-grid-source hidden>Vad har vi för data?</button>
           </article>
 
           <article class="card" data-provider-card="elmatare" data-config-card-key="elmatare">
@@ -3079,9 +3080,11 @@ class ElrakningPanel {
 
   _applyDebugVisibility() {
     const source = this.host.querySelector("[data-provider-source]");
+    const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     if (source) source.hidden = !this._debugEnabled;
+    if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
   }
@@ -4430,12 +4433,13 @@ class ElrakningPanel {
 
   _bindProviderSourceDialog() {
     const open = this.host.querySelector("[data-provider-source]");
+    const eonOpen = this.host.querySelector("[data-eon-grid-source]");
     const dialog = this.host.querySelector("[data-provider-source-dialog]");
     const close = this.host.querySelector("[data-provider-source-close]");
     const copy = this.host.querySelector("[data-provider-source-copy]");
     const provider = this.host.querySelector("[data-provider-source-provider]");
     const text = this.host.querySelector("[data-provider-source-text]");
-    if (!open || !dialog || !close || !copy || !provider || !text) return;
+    if (!open || !eonOpen || !dialog || !close || !copy || !provider || !text) return;
     const dismiss = () => {
       dialog.hidden = true;
       provider.hidden = true;
@@ -4443,25 +4447,32 @@ class ElrakningPanel {
       text.textContent = "";
       copy.disabled = true;
     };
-    open.addEventListener("click", async () => {
+    const loadSource = async (event) => {
+      const isEon = event.currentTarget === eonOpen;
       dialog.hidden = false;
       text.textContent = "Hämtar Source data …";
       provider.hidden = true;
       provider.textContent = "";
       copy.disabled = true;
       try {
-        const source = await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
+        const source = isEon
+          ? await this.hass.callWS({ type: "elrakning/eon_grid_source_data" })
+          : await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
         const providerName = source.provider_name || source.facility?.provider_name;
         if (typeof providerName === "string" && providerName.trim()) {
           provider.textContent = `Källa: ${providerName.trim()}`;
           provider.hidden = false;
         }
-        text.textContent = JSON.stringify({ facility: source.facility, contracts: source.contracts, invoices: source.invoices.items, consumption: { total: source.consumption.total, items: source.consumption.items } }, null, 2);
+        text.textContent = isEon
+          ? JSON.stringify(source, null, 2)
+          : JSON.stringify({ facility: source.facility, contracts: source.contracts, invoices: source.invoices.items, consumption: { total: source.consumption.total, items: source.consumption.items } }, null, 2);
         copy.disabled = false;
       } catch {
         text.textContent = "Source data kunde inte hämtas.";
       }
-    });
+    };
+    open.addEventListener("click", loadSource);
+    eonOpen.addEventListener("click", loadSource);
     copy.addEventListener("click", async () => {
       try {
         await this._copyText(text.textContent);
@@ -4959,11 +4970,13 @@ class ElrakningPanel {
   }
 
   _applyEonGridState(state) {
+    this._eonGridState = state;
     const configured = state?.configured === true;
     const status = this.host.querySelector("[data-eon-grid-status]");
     const provider = this.host.querySelector('[data-provider-name="elnet"]');
     const summary = this.host.querySelector("[data-eon-grid-summary]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
+    const sourceButton = this.host.querySelector("[data-eon-grid-source]");
     if (!status || !provider || !summary) return;
     const agreement = state?.agreement || {};
     const facility = state?.facility || {};
@@ -4986,6 +4999,7 @@ class ElrakningPanel {
       : "Ej konfigurerad";
     status.hidden = false;
     remove && (remove.hidden = !configured);
+    if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     const rows = [];
     if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);

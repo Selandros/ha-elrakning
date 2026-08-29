@@ -168,6 +168,69 @@ class EonGridManager:
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
 
+    async def async_source_data(self) -> dict[str, Any]:
+        """Fetch the active E.ON source payload only after an explicit request."""
+        config = self._config()
+        if config.get("auth") == "app":
+            session = EonAppSession(self.hass)
+            await session.async_login(config["account_id"], config["password"])
+            client = EonAppClient(session)
+            contract_accounts = await client.async_get_contract_accounts()
+            locations = await client.async_get_locations()
+            normalized = normalize_locations(locations)
+            monthly = {}
+            outages: Any = []
+            if len(normalized) == 1:
+                installation = normalized[0]
+                now = date.today()
+                month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+                month_end = datetime(
+                    now.year + (1 if now.month == 12 else 0),
+                    1 if now.month == 12 else now.month + 1,
+                    1,
+                    tzinfo=timezone.utc,
+                )
+                monthly = await client.async_get_monthly_transfer(
+                    installation["installation_identifier"],
+                    month_start.isoformat(),
+                    month_end.isoformat(),
+                    installation["production"],
+                    installation["street"],
+                    installation["city"],
+                    installation["postal_code"],
+                )
+                outages = await client.async_get_outages(installation["point_of_delivery_number"])
+            return {
+                "provider": "eon",
+                "provider_name": "E.ON",
+                "auth_mode": "app",
+                "contract_accounts": _redact_source_data(contract_accounts),
+                "locations": _redact_source_data(locations),
+                "monthly_transfer": _redact_source_data(monthly),
+                "outages": _redact_source_data(outages),
+            }
+
+        if isinstance(config.get("cookies"), dict) and config.get("customer_id"):
+            session = EonSession(self.hass, config["cookies"])
+            client = EonClient(session)
+            profile = await client.async_get_user(config["customer_id"])
+            normalized = normalize_user_profile(profile, config["customer_id"])
+            monthly: Any = {}
+            facility = normalized.get("facility") or {}
+            if facility.get("point_of_delivery_number"):
+                monthly = await client.async_get_monthly_consumption(
+                    facility["point_of_delivery_number"], date.today().year
+                )
+            return {
+                "provider": "eon",
+                "provider_name": "E.ON",
+                "auth_mode": "web",
+                "user": _redact_source_data(profile),
+                "consumption": _redact_source_data(monthly),
+                "outages": [],
+            }
+        raise EonAuthError("not_configured")
+
     def public_state(self) -> dict[str, Any]:
         return {
             "configured": self.configured,
@@ -232,3 +295,17 @@ class EonGridManager:
             "outage": None,
             "app_authenticated": False,
         }
+
+
+def _redact_source_data(value: Any) -> Any:
+    """Redact credentials and customer-account identifiers from raw source data."""
+    sensitive = ("accountid", "customeridentifier", "contractaccountidentifier", "password", "token", "secret", "cookie", "authorization")
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            result[key] = "[redacted]" if any(word in key_text for word in sensitive) else _redact_source_data(item)
+        return result
+    if isinstance(value, list):
+        return [_redact_source_data(item) for item in value]
+    return value

@@ -18,6 +18,9 @@ assert.match(eonPanelSource, /data-eon-grid-cookie/);
 assert.match(eonPanelSource, /data-eon-grid-account/);
 assert.match(eonPanelSource, /data-eon-grid-password/);
 assert.match(eonPanelSource, /elrakning\/eon_grid_app_save/);
+assert.match(eonPanelSource, /data-eon-grid-source/);
+assert.match(eonPanelSource, /elrakning\/eon_grid_source_data/);
+assert.match(eonPanelSource, /data-provider-source-dialog/);
 
 assert.match(output, /^Elräkning diagnostics/m);
 assert.match(output, /Version: 0\.0\.64/);
