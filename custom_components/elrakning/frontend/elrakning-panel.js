@@ -52,6 +52,21 @@ function createDataRatioBar(segments, ariaLabel) {
   return bar;
 }
 
+function createDataProgressBar(value, maximum, ariaLabel, className) {
+  if (!Number.isFinite(value) || !Number.isFinite(maximum) || maximum <= 0) return null;
+  const bar = document.createElement("div");
+  bar.className = `configuration-progress-bar ${className}`;
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-label", ariaLabel);
+  bar.setAttribute("aria-valuemin", "0");
+  bar.setAttribute("aria-valuemax", String(maximum));
+  bar.setAttribute("aria-valuenow", String(value));
+  const fill = document.createElement("span");
+  fill.style.width = `${Math.max(0, Math.min(100, value / maximum * 100))}%`;
+  bar.append(fill);
+  return bar;
+}
+
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -2479,6 +2494,27 @@ class ElrakningPanel {
           overflow: hidden;
         }
 
+        [data-configuration-cards] .configuration-module .configuration-progress-bar {
+          background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
+          border-radius: 999px;
+          grid-column: 1 / -1;
+          height: 6px;
+          margin: 0 0 2px;
+          overflow: hidden;
+        }
+
+        .configuration-progress-bar span {
+          background: var(--el-charging-color);
+          border-radius: inherit;
+          display: block;
+          height: 100%;
+          min-width: 0;
+        }
+
+        .configuration-progress-bar.utilization span {
+          background: var(--el-discharging-color);
+        }
+
         .configuration-data-bar-segment {
           display: block;
           height: 100%;
@@ -3332,6 +3368,12 @@ class ElrakningPanel {
           { value: Number(this._powerState.discharging_kw), className: "discharging" },
         ], "Batteriflöde just nu")
         : null;
+      const socBar = cardType === "battery"
+        ? createDataProgressBar(Number(this._powerState.soc_percent), 100, "Laddnivå", "soc")
+        : null;
+      const utilizationBar = cardType === "battery"
+        ? createDataProgressBar(Number(capacityUtilizationPercent), 100, "Kapacitetsutnyttjande", "utilization")
+        : null;
       validRows.forEach(([labelText, value, unit], index) => {
         if (cardType === "battery" && index === 4) {
           const divider = document.createElement("div");
@@ -3340,11 +3382,15 @@ class ElrakningPanel {
           summaryNodes.push(divider);
         }
         const label = document.createElement("strong");
+        label.className = `configuration-metric-label ${labelText === "Laddnivå" ? "soc" : ""}`.trim();
         label.textContent = labelText;
         const output = document.createElement("span");
+        output.className = `configuration-metric-value ${labelText === "Laddnivå" ? "soc" : ""}`.trim();
         output.textContent = `${this._formatNumber(value)} ${unit}`;
         summaryNodes.push(label, output);
         if (flowBar && index === 1) summaryNodes.push(flowBar);
+        if (socBar && labelText === "Laddnivå") summaryNodes.push(socBar);
+        if (utilizationBar && labelText === "Kapacitetsutnyttjande") summaryNodes.push(utilizationBar);
       });
       summary.replaceChildren(...summaryNodes);
       summary.hidden = validRows.length === 0;

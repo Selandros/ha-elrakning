@@ -436,8 +436,10 @@ assert.doesNotMatch(panelSource, /\.configuration-surface[\s\S]*linear-gradient/
 assert.match(panelSource, /\.configuration-empty \{[\s\S]*border: 1px dashed/);
 assert.match(panelSource, /\[data-configuration-cards\] \.configuration-module \.configuration-control \{[\s\S]*background: var\(--primary-color\)/);
 assert.match(panelSource, /function createDataRatioBar\(segments, ariaLabel\)/);
+assert.match(panelSource, /function createDataProgressBar\(value, maximum, ariaLabel, className\)/);
 assert.match(panelSource, /Batteriflöde just nu/);
 assert.match(panelSource, /Dagens nätbalans/);
+assert.match(panelSource, /configuration-progress-bar/);
 assert.match(panelSource, /className: "import"/);
 assert.match(panelSource, /className: "export"/);
 assert.match(panelSource, /className: "charging"/);
