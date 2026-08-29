@@ -1174,6 +1174,7 @@ class ElrakningPanel {
         .battery-history-chart {
           container-type: inline-size;
           min-width: 0;
+          position: relative;
           width: 100%;
         }
 
@@ -1190,20 +1191,63 @@ class ElrakningPanel {
           opacity: .5;
         }
 
-        .battery-history-axis-label,
-        .battery-history-day-label {
-          fill: var(--secondary-text-color);
-          font-size: 10px;
-          font-weight: 400;
+        .battery-history-y-label-rail,
+        .battery-history-x-label-rail {
+          pointer-events: none;
+          position: absolute;
         }
 
+        .battery-history-y-label-rail {
+          bottom: 17.857143%;
+          left: 0;
+          top: 4.285714%;
+          width: 4.375%;
+        }
+
+        .battery-history-axis-label,
         .battery-history-day-label,
         .battery-history-utilization {
-          text-anchor: middle;
+          box-sizing: border-box;
+          display: block;
+          font-size: 10px;
+          font-weight: 400;
+          line-height: 1;
+        }
+
+        .battery-history-axis-label {
+          color: var(--secondary-text-color);
+          position: absolute;
+          right: 0;
+          text-align: center;
+          transform: translateY(-50%);
+          width: 100%;
+        }
+
+        .battery-history-axis-label.top { top: 0; }
+        .battery-history-axis-label.middle { top: 50%; }
+        .battery-history-axis-label.bottom { top: 100%; }
+
+        .battery-history-x-label-rail {
+          bottom: 0;
+          height: 17.857143%;
+          left: 4.375%;
+          right: .833333%;
+        }
+
+        .battery-history-x-label {
+          position: absolute;
+          text-align: center;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          width: max-content;
+        }
+
+        .battery-history-day-label {
+          color: var(--secondary-text-color);
         }
 
         .battery-history-utilization {
-          fill: var(--primary-text-color);
+          color: var(--primary-text-color);
           font-weight: 600;
         }
 
@@ -3345,15 +3389,17 @@ class ElrakningPanel {
     const barGap = Math.min(5, groupWidth * .05);
     const groupX = (index) => plot.left + groupWidth * index + groupWidth / 2;
     const formatEnergy = (value) => Number.isFinite(value) ? `${this._formatNumber(value)} kWh` : "—";
-    const grid = [0, range / 2, range].map((level) => `<line class="battery-history-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="battery-history-axis-label" text-anchor="end" x="${plot.left - 6}" y="${y(level) + 4}">${this._formatNumber(level)}</text>`).join("");
+    const yLabels = [range, range / 2, 0];
+    const grid = [0, range / 2, range].map((level) => `<line class="battery-history-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`).join("");
     const bars = days.map((day, index) => {
       const center = groupX(index);
       const chargingHeight = plot.top + plotHeight - y(day.chargingKwh);
       const dischargingHeight = plot.top + plotHeight - y(day.dischargingKwh);
-      const utilization = Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—";
-      return `<g class="battery-history-day" data-battery-history-index="${index}"><rect class="battery-history-bar charging" x="${center - barGap / 2 - barWidth}" y="${y(day.chargingKwh)}" width="${barWidth}" height="${chargingHeight}" /><rect class="battery-history-bar discharging" x="${center + barGap / 2}" y="${y(day.dischargingKwh)}" width="${barWidth}" height="${dischargingHeight}" /><text class="battery-history-day-label" x="${center}" y="${height - 30}">${day.label}</text><text class="battery-history-utilization" x="${center}" y="${height - 12}">${utilization}</text></g>`;
+      return `<g class="battery-history-day" data-battery-history-index="${index}"><rect class="battery-history-bar charging" x="${center - barGap / 2 - barWidth}" y="${y(day.chargingKwh)}" width="${barWidth}" height="${chargingHeight}" /><rect class="battery-history-bar discharging" x="${center + barGap / 2}" y="${y(day.dischargingKwh)}" width="${barWidth}" height="${dischargingHeight}" /></g>`;
     }).join("");
-    chart.innerHTML = `<svg class="battery-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddning och urladdning de senaste sju dagarna">${grid}${bars}</svg><div class="soc-tooltip" hidden></div>`;
+    const yLabelMarkup = yLabels.map((level, index) => `<span class="battery-history-axis-label ${index === 0 ? "top" : index === 1 ? "middle" : "bottom"}">${this._formatNumber(level)}</span>`).join("");
+    const xLabelMarkup = days.map((day, index) => `<span class="battery-history-x-label" style="left: ${(index + .5) / days.length * 100}%"><span class="battery-history-day-label">${day.label}</span><span class="battery-history-utilization">${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span></span>`).join("");
+    chart.innerHTML = `<div class="battery-history-y-label-rail" aria-hidden="true">${yLabelMarkup}</div><svg class="battery-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddning och urladdning de senaste sju dagarna">${grid}${bars}</svg><div class="battery-history-x-label-rail" aria-hidden="true">${xLabelMarkup}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".battery-history-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
     let hoveredDay = null;
