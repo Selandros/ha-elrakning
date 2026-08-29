@@ -21,6 +21,7 @@ EON_WEB_BASE = "https://www.eon.se"
 SESSION_PATH = "/bin/eon-se/codeflow/session"
 REFRESH_PATH = "/bin/eon-se/codeflow/refreshToken"
 EON_APP_BASE = "https://api.apps.eon.se"
+COMMON_API_USER_URL = "https://eoncommonapiapirun.azurewebsites.net/api/neo/api/cj/cv/v1/rest/v2/user"
 APP_AUTHORIZATION_PATH = "/neo/oauth/v2/authorization"
 APP_AUTHENTICATOR_PATH = "/authn/authenticate/isu-sap-authenticator"
 APP_TOKEN_URL = "https://eonappapimrun.azure-api.net/middlelayer/token"
@@ -102,6 +103,7 @@ class EonAppSession:
 
     def __init__(self, hass) -> None:
         self._session: ClientSession = async_create_clientsession(hass, cookie_jar=CookieJar())
+        self._bearer_session: ClientSession = async_create_clientsession(hass, cookie_jar=CookieJar())
         self._access_token: str | None = None
         self._expires_at = 0.0
         self.customer_id: str | None = None
@@ -187,6 +189,20 @@ class EonAppSession:
             raise
         except (ClientError, TimeoutError, TypeError, ValueError) as err:
             raise EonAuthError("app_api_failed") from err
+
+    async def async_request_bearer_json(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        """Probe a Bearer-only API with the existing app token and no web cookies."""
+        if not self._access_token or self._expires_at <= time.monotonic() + 30:
+            raise EonAuthError("reauth_required")
+        headers = dict(kwargs.pop("headers", {}))
+        headers["Authorization"] = f"Bearer {self._access_token}"
+        try:
+            async with self._bearer_session.request(method, url, headers=headers, **kwargs) as response:
+                status = response.status
+                payload = await response.json(content_type=None) if status == 200 else None
+        except (ClientError, TimeoutError, TypeError, ValueError) as err:
+            raise EonAuthError("probe_failed") from err
+        return {"status": status, "payload": payload}
 
 
 def parse_cookie_header(value: str) -> dict[str, str]:

@@ -21,6 +21,8 @@ assert.match(eonPanelSource, /data-eon-grid-web-password/);
 assert.match(eonPanelSource, /elrakning\/grid\/login/);
 assert.match(eonPanelSource, /data-eon-grid-source/);
 assert.match(eonPanelSource, /elrakning\/grid\/source_data/);
+assert.match(eonPanelSource, /data-eon-grid-common-api-probe/);
+assert.match(eonPanelSource, /elrakning\/grid\/common_api_probe/);
 assert.match(eonPanelSource, /data-provider-source-dialog/);
 assert.doesNotMatch(eonPanelSource, /data-eon-grid-cookie/);
 assert.doesNotMatch(eonPanelSource, /data-eon-api-tests/);

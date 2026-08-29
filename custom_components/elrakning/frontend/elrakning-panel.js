@@ -974,6 +974,7 @@ class ElrakningPanel {
               <label>Användarnamn / konto-ID<input type="text" data-eon-grid-app-account autocomplete="username"></label>
               <label>Lösenord<input type="password" data-eon-grid-app-password autocomplete="current-password"></label>
               <button type="button" data-eon-grid-app-save>Logga in</button>
+              <button type="button" data-eon-grid-common-api-probe hidden>Testa Common API</button>
             </section>
             <section class="eon-auth-method" aria-labelledby="eon-web-title">
               <h3 id="eon-web-title">Mitt E.ON / Webb</h3>
@@ -5011,6 +5012,7 @@ class ElrakningPanel {
     const summary = this.host.querySelector("[data-eon-grid-summary]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
     const sourceButton = this.host.querySelector("[data-eon-grid-source]");
+    const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
     if (!status || !provider || !summary) return;
     const agreement = state?.agreement || {};
     const facility = state?.facility || {};
@@ -5034,6 +5036,7 @@ class ElrakningPanel {
     status.hidden = false;
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
+    if (commonApiProbe) commonApiProbe.hidden = !this._debugEnabled || !configured || state?.auth_method !== "app";
     const rows = [];
     if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
@@ -5062,10 +5065,11 @@ class ElrakningPanel {
     const webPassword = this.host.querySelector("[data-eon-grid-web-password]");
     const result = this.host.querySelector("[data-eon-grid-result]");
     const appSave = this.host.querySelector("[data-eon-grid-app-save]");
+    const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
     const webSave = this.host.querySelector("[data-eon-grid-web-save]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !appAccount || !appPassword || !webAccount || !webPassword || !result || !appSave || !webSave || !cancel || !remove) return;
+    if (!open || !dialog || !appAccount || !appPassword || !webAccount || !webPassword || !result || !appSave || !webSave || !cancel || !remove || !commonApiProbe) return;
     const close = () => {
       dialog.hidden = true;
       appAccount.value = "";
@@ -5079,6 +5083,30 @@ class ElrakningPanel {
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/grid/remove" })); close(); } finally { remove.disabled = false; }
+    });
+    commonApiProbe.addEventListener("click", async () => {
+      commonApiProbe.disabled = true;
+      result.textContent = "Testar Common API …";
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/grid/common_api_probe" });
+        if (response.status === "ok") {
+          const sourceDialog = this.host.querySelector("[data-provider-source-dialog]");
+          const sourceProvider = this.host.querySelector("[data-provider-source-provider]");
+          const sourceText = this.host.querySelector("[data-provider-source-text]");
+          const sourceCopy = this.host.querySelector("[data-provider-source-copy]");
+          if (sourceDialog && sourceProvider && sourceText && sourceCopy) {
+            sourceProvider.textContent = "Källa: E.ON Common API (Bearer-probe)";
+            sourceProvider.hidden = false;
+            sourceText.textContent = JSON.stringify(response.payload, null, 2);
+            sourceCopy.disabled = false;
+            sourceDialog.hidden = false;
+          }
+          result.textContent = "Common API fungerar med Bearer-token.";
+        } else if (response.status === "denied_401") result.textContent = "Common API nekade: 401.";
+        else if (response.status === "denied_403") result.textContent = "Common API nekade: 403.";
+        else result.textContent = "Common API svarade med ett API-fel.";
+      } catch { result.textContent = "Common API-probet kunde inte genomföras."; }
+      finally { commonApiProbe.disabled = false; }
     });
     appSave.addEventListener("click", async () => {
       if (!appAccount.value.trim() || !appPassword.value) return;

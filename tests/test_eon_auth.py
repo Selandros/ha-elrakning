@@ -73,3 +73,73 @@ def test_auth_errors_do_not_echo_credentials():
         assert "secret" not in str(error)
     else:
         raise AssertionError("invalid form was accepted")
+
+
+def test_bearer_probe_uses_isolated_session_and_returns_success_payload():
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def json(self, **kwargs):
+            return {"customerIdentifier": "synthetic-customer"}
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, url, **kwargs):
+            self.calls.append((method, url, kwargs))
+            return Response()
+
+    session = auth.EonAppSession.__new__(auth.EonAppSession)
+    session._access_token = "synthetic-token"
+    session._expires_at = 10**12
+    session._bearer_session = Session()
+    result = __import__("asyncio").run(session.async_request_bearer_json(
+        "GET", "https://example.invalid/user", params={"customerId": "synthetic-customer"}
+    ))
+    assert result == {"status": 200, "payload": {"customerIdentifier": "synthetic-customer"}}
+    method, url, kwargs = session._bearer_session.calls[0]
+    assert method == "GET"
+    assert url.endswith("/user")
+    assert kwargs["headers"]["Authorization"] == "Bearer synthetic-token"
+    assert "cookies" not in kwargs
+
+
+def test_bearer_probe_maps_denied_status_without_payload():
+    class Response:
+        status = 403
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class Session:
+        def request(self, method, url, **kwargs):
+            return Response()
+
+    session = auth.EonAppSession.__new__(auth.EonAppSession)
+    session._access_token = "synthetic-token"
+    session._expires_at = 10**12
+    session._bearer_session = Session()
+    result = __import__("asyncio").run(session.async_request_bearer_json("GET", "https://example.invalid/user"))
+    assert result == {"status": 403, "payload": None}
+
+
+def test_bearer_probe_requires_existing_token():
+    session = auth.EonAppSession.__new__(auth.EonAppSession)
+    session._access_token = None
+    session._expires_at = 10**12
+    try:
+        __import__("asyncio").run(session.async_request_bearer_json("GET", "https://example.invalid/user"))
+    except auth.EonAuthError as error:
+        assert error.code == "reauth_required"
+    else:
+        raise AssertionError("probe accepted a missing app token")

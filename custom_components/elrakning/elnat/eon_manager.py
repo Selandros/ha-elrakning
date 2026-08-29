@@ -9,7 +9,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 
 from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
-from .eon_auth import EonAppSession, EonAuthError, EonSession
+from .eon_auth import COMMON_API_USER_URL, EonAppSession, EonAuthError, EonSession
 from .eon_client import EonAppClient, EonClient
 from .eon_models import (
     calculate_eon_cost,
@@ -96,6 +96,30 @@ class EonGridManager:
         if not account_id.strip() or not password:
             return {"status": "invalid_input", "error": "invalid_input"}
         return {"status": "browser_attestation_required", "error": "browser_attestation_required"}
+
+    async def async_common_api_probe(self) -> dict[str, Any]:
+        """Check whether the existing app token is accepted by the Common API."""
+        config = self._config()
+        if config.get("auth") != "app" or self._app_session is None:
+            raise EonAuthError("reauth_required")
+        customer_id = self._app_session.customer_id or config.get("customer_id")
+        if not isinstance(customer_id, str) or not customer_id:
+            raise EonAuthError("customer_id_missing")
+        result = await self._app_session.async_request_bearer_json(
+            "GET",
+            COMMON_API_USER_URL,
+            params={"readMeterChange": "true", "customerId": customer_id},
+        )
+        status = result["status"]
+        response = {"provider": "eon", "provider_name": "E.ON", "probe": True, "http_status": status}
+        if status == 200:
+            response["status"] = "ok"
+            response["payload"] = _redact_source_data(result.get("payload"))
+        elif status in (401, 403):
+            response["status"] = f"denied_{status}"
+        else:
+            response["status"] = "api_error"
+        return response
 
     async def async_refresh(self) -> dict[str, Any]:
         config = self._config()

@@ -298,3 +298,31 @@ def test_grid_registry_accepts_a_second_provider_without_core_changes():
         assert registry.configured_grid_provider(entry) is synthetic
     finally:
         registry.GRID_PROVIDER_REGISTRY.pop(synthetic.provider_id, None)
+
+
+def test_common_api_probe_uses_existing_app_session_and_redacts_result():
+    class Session:
+        customer_id = "synthetic-customer"
+
+        def __init__(self):
+            self.calls = []
+
+        async def async_request_bearer_json(self, method, url, **kwargs):
+            self.calls.append((method, url, kwargs))
+            return {"status": 200, "payload": {
+                "customerIdentifier": "synthetic-customer",
+                "installation": {"pointOfDeliveryNumber": "synthetic-pod"},
+                "prices": {"transferFee": 97},
+            }}
+
+    manager = object.__new__(manager_module.EonGridManager)
+    manager._config = lambda: {"auth": "app", "customer_id": "synthetic-customer"}
+    manager._app_session = Session()
+    result = asyncio.run(manager.async_common_api_probe())
+    assert result["status"] == "ok"
+    assert result["payload"]["customerIdentifier"] == "[redacted]"
+    assert result["payload"]["installation"]["pointOfDeliveryNumber"] == "[redacted]"
+    method, url, kwargs = manager._app_session.calls[0]
+    assert method == "GET"
+    assert url.endswith("/rest/v2/user")
+    assert kwargs["params"] == {"readMeterChange": "true", "customerId": "synthetic-customer"}
