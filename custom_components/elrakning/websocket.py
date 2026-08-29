@@ -677,11 +677,16 @@ async def websocket_power_state(hass, connection, msg):
     connection.send_result(msg["id"], {"success": True, **await manager.async_state()})
 
 
-@websocket_api.websocket_command({vol.Required("type"): POWER_HISTORY_COMMAND})
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): POWER_HISTORY_COMMAND,
+        vol.Optional("days", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=7)),
+    }
+)
 @websocket_api.async_response
 async def websocket_power_history(hass, connection, msg):
     manager = _power_manager(hass)
-    result = await manager.async_history() if manager else {
+    result = await manager.async_history(msg.get("days", 1)) if manager else {
         "success": False,
         "series": {},
         "error": "power_unavailable",

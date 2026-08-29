@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCanonicalMeterPoints, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -39,6 +39,22 @@ assert.equal(integratePowerHistoryKwh(powerPoints([1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([5, 5, 5, 5, 5, 5, 5]), integrationStart, integrationEnd, new Date("2026-08-23T00:30:00")) - 2.5) < 1e-12);
 assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3, 2, 7 / 3, 8 / 3, 3, 10 / 3, 11 / 3, 4]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")) - 2) < 1e-12);
 assert.equal(integratePowerHistoryKwh(powerPoints([0.05, 0.05]), integrationStart, integrationEnd, new Date("2026-08-23T00:05:00")), 0.004166666666666667);
+const dailyHistoryPoints = (day, value, count) => Array.from({ length: count }, (_, index) => ({
+  timestamp: new Date(day.getTime() + index * 5 * 60 * 1000).toISOString(),
+  value_kw: value,
+}));
+const dailyHistory = buildBatteryDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13),
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 7),
+  2,
+  new Date(2026, 7, 23, 12, 0),
+);
+assert.equal(dailyHistory.length, 7);
+assert.ok(Math.abs(dailyHistory[5].chargingKwh - 1) < 1e-12);
+assert.ok(Math.abs(dailyHistory[5].dischargingKwh - 1) < 1e-12);
+assert.ok(Math.abs(dailyHistory[5].utilizationPercent - 50) < 1e-12);
+assert.equal(buildBatteryDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], null, new Date(2026, 7, 23, 12, 0))[5].utilizationPercent, null);
+assert.ok(Math.abs(buildBatteryDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 7), 0.5, new Date(2026, 7, 23, 12, 0))[5].utilizationPercent - 200) < 1e-12);
 assert.equal(integratePowerHistoryKwh([
   powerPoints([1, 1, 1])[0],
   powerPoints([1, 1, 1])[2],
@@ -356,8 +372,9 @@ assert.match(panelSource, /data-config-card-key="elmatare"/);
 assert.match(panelSource, /data-config-card-key="solar"/);
 assert.doesNotMatch(panelSource, /data-config-card-key="consumption"/);
 assert.match(panelSource, /data-config-card-key="battery"/);
+assert.match(panelSource, /data-config-card-key="battery_history"/);
 assert.match(panelSource, /data-main-card-toggle/);
-assert.equal((panelSource.match(/class="main-card-toggle"/g) || []).length, 5);
+assert.equal((panelSource.match(/class="main-card-toggle"/g) || []).length, 6);
 assert.doesNotMatch(panelSource, /main-card-toggle[^>]*>Main/);
 assert.match(panelSource, /main-card-toggle[^>]*aria-label="Main"/);
 assert.match(panelSource, /configuration-control/);
@@ -413,10 +430,11 @@ assert.match(panelSource, /_calculatePowerEnergy\("charging"\)/);
 assert.match(panelSource, /_calculatePowerEnergy\("discharging"\)/);
 assert.match(panelSource, /_powerLivePoints = Object\.fromEntries\(\["solar", "consumption", "charging", "discharging", "soc"\]/);
 assert.match(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
-assert.match(panelSource, /\["Laddat idag", this\._powerState\.charging_energy_kwh, "kWh"\]/);
-assert.match(panelSource, /\["Urladdat idag", this\._powerState\.discharging_energy_kwh, "kWh"\]/);
-assert.match(panelSource, /\["Kapacitetsutnyttjande", capacityUtilizationPercent, "%"\]/);
-assert.match(panelSource, /className = "power-summary-divider"/);
+assert.match(panelSource, /data-power-card="battery-history"/);
+assert.match(panelSource, /Batterihistorik/);
+assert.match(panelSource, /buildBatteryDailyHistory\(/);
+assert.match(panelSource, /Kapacitetsutnyttjande:/);
+assert.doesNotMatch(panelSource, /battery: batteryIsConfigured \? \[\["Laddning"[\s\S]*Laddat idag/);
 assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
 assert.match(panelSource, /data-daily-energy/);
 assert.match(panelSource, /Dagens energi/);
@@ -863,6 +881,7 @@ assert.match(panelSource, /if \(this\._mainCards\.consumption && !this\._mainCar
 assert.match(panelSource, /elrakning\/power_state/);
 assert.match(panelSource, /elrakning\/power_save/);
 assert.match(panelSource, /elrakning\/power_history/);
+assert.match(panelSource, /type: "elrakning\/power_history", days: 7/);
 assert.match(panelSource, /_refreshBackendState\(true\)/);
 assert.match(panelSource, /this\._backendHydrationPromise = Promise\.all\(\[/);
 assert.match(panelSource, /"elrakning_integration_ready"/);

@@ -342,7 +342,7 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
         manager.chart_preferences_store = _Store()
 
         first = await manager.async_get_main_cards("user-a")
-        self.assertEqual(set(first), {"elhandel", "elnet", "elmatare", "solar", "consumption", "battery"})
+        self.assertEqual(set(first), {"elhandel", "elnet", "elmatare", "solar", "consumption", "battery", "battery_history"})
         self.assertFalse(any(first.values()))
         updated = await manager.async_set_main_cards("user-a", {"battery": True})
         self.assertTrue(updated["battery"])

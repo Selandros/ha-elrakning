@@ -88,7 +88,7 @@ class PowerManager:
         self._diagnostic_callback = diagnostic_callback
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {"solar_entities": [], **{field: None for field in POWER_FIELDS}, "invert_battery_power": False}
-        self._history_inflight: dict[tuple[str, str], asyncio.Task] = {}
+        self._history_inflight: dict[tuple[str, str, int], asyncio.Task] = {}
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     async def _async_state_changed(self, event: Event) -> None:
@@ -246,11 +246,13 @@ class PowerManager:
         divisor = 1000 if unit == "wh" else 1 if unit == "kwh" else 0.001 if unit == "mwh" else None
         return _state_number(state, {"wh", "kwh", "mwh"}, divisor) if divisor else None
 
-    async def async_history(self) -> dict[str, Any]:
+    async def async_history(self, days: int = 1) -> dict[str, Any]:
         now = dt_util.now()
-        start = dt_util.start_of_local_day(now)
-        end = dt_util.start_of_local_day(now + timedelta(days=1))
-        date = start.date().isoformat()
+        days = max(1, min(7, int(days)))
+        current_day_start = dt_util.start_of_local_day(now)
+        start = dt_util.start_of_local_day(now - timedelta(days=days - 1))
+        end = dt_util.start_of_local_day(current_day_start + timedelta(days=1))
+        date = current_day_start.date().isoformat()
         mapping = {
             "solar_entities": list(self.mapping.get("solar_entities", [])),
             **{field: self.mapping.get(field) for field in POWER_FIELDS},
@@ -272,7 +274,7 @@ class PowerManager:
             + [f"{field}={mapping.get(field) or ''}" for field in POWER_FIELDS]
             + [f"invert_battery_power={bool(mapping.get('invert_battery_power'))}"]
         )
-        key = (mapping_key, date)
+        key = (mapping_key, date, days)
         task = self._history_inflight.get(key)
         if task is None:
             task = asyncio.create_task(self._async_history_fetch(power_entities, mapping, start, end, date))

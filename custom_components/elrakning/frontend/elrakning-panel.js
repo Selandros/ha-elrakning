@@ -348,6 +348,37 @@ export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Dat
   return energyKwh;
 }
 
+export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capacityKwh, now = new Date(), dayCount = 7) {
+  const current = new Date(now);
+  const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+  const requestedDays = Number(dayCount);
+  const days = Math.max(1, Math.min(7, Number.isFinite(requestedDays) ? Math.trunc(requestedDays) : 7));
+  const pointsForDay = (points, dayStart, dayEnd) => (Array.isArray(points) ? points : []).filter((point) => {
+    const timestamp = new Date(point.timestamp).getTime();
+    return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime() && Number.isFinite(Number(point.value_kw));
+  });
+  return Array.from({ length: days }, (_, index) => {
+    const dayStart = new Date(todayStart);
+    dayStart.setDate(todayStart.getDate() - (days - index - 1));
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayStart.getDate() + 1);
+    const charging = pointsForDay(chargingPoints, dayStart, dayEnd);
+    const discharging = pointsForDay(dischargingPoints, dayStart, dayEnd);
+    const integrationNow = dayEnd <= current ? dayEnd : current;
+    const chargedKwh = charging.length ? integratePowerHistoryKwh(charging, dayStart, dayEnd, integrationNow) : null;
+    const dischargedKwh = discharging.length ? integratePowerHistoryKwh(discharging, dayStart, dayEnd, integrationNow) : null;
+    return {
+      date: dayStart.toLocaleDateString("sv-SE"),
+      label: dayStart.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" }),
+      chargingKwh: chargedKwh,
+      dischargingKwh: dischargedKwh,
+      utilizationPercent: Number.isFinite(Number(dischargedKwh)) && Number.isFinite(Number(capacityKwh)) && Number(capacityKwh) > 0
+        ? Number(dischargedKwh) / Number(capacityKwh) * 100
+        : null,
+    };
+  });
+}
+
 export function buildEnergyBalance(totalKwh, externalKwh) {
   const total = Number.isFinite(totalKwh) ? totalKwh : null;
   const external = Number.isFinite(externalKwh) ? externalKwh : null;
@@ -553,6 +584,7 @@ class ElrakningPanel {
       solar: false,
       consumption: false,
       battery: false,
+      battery_history: false,
     };
     this._diagnosticEntries = [];
     this._chartTouch = null;
@@ -747,6 +779,12 @@ class ElrakningPanel {
             <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
             <div class="power-summary" data-power-summary="battery" hidden></div>
             <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
+          </article>
+
+          <article class="card battery-history-card" data-power-card="battery-history" data-config-card-key="battery_history">
+            <div class="card-heading"><h2>Batterihistorik</h2><span class="status" data-battery-history-status>Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery_history" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
+            <p class="battery-history-meta" data-battery-history-meta hidden></p>
+            <div class="battery-history-chart" data-battery-history-chart hidden></div>
           </article>
 
         </section>
@@ -1120,6 +1158,75 @@ class ElrakningPanel {
           border-top: 1px solid var(--divider-color);
           grid-column: 1 / -1;
           margin: 6px 0;
+        }
+
+        .battery-history-card {
+          min-width: 0;
+        }
+
+        .battery-history-meta {
+          color: var(--secondary-text-color);
+          font-size: var(--price-card-text-size);
+          margin: 2px 0 8px;
+        }
+
+        .battery-history-chart {
+          container-type: inline-size;
+          min-width: 0;
+          width: 100%;
+        }
+
+        .battery-history-svg {
+          display: block;
+          height: auto;
+          max-width: 100%;
+          width: 100%;
+        }
+
+        .battery-history-gridline {
+          stroke: var(--divider-color);
+          stroke-width: 1;
+          opacity: .5;
+        }
+
+        .battery-history-axis-label,
+        .battery-history-day-label,
+        .battery-history-utilization {
+          fill: var(--secondary-text-color);
+          font-size: var(--price-card-text-size);
+        }
+
+        .battery-history-day-label,
+        .battery-history-utilization {
+          text-anchor: middle;
+        }
+
+        .battery-history-utilization {
+          fill: var(--primary-text-color);
+          font-weight: 600;
+        }
+
+        .battery-history-bar {
+          rx: 4;
+          ry: 4;
+        }
+
+        .battery-history-bar.charging {
+          fill: var(--charging-color);
+          fill-opacity: .72;
+        }
+
+        .battery-history-bar.discharging {
+          fill: var(--discharging-color);
+          fill-opacity: .72;
+        }
+
+        .battery-history-hover {
+          fill: none;
+          pointer-events: none;
+          stroke: var(--primary-text-color);
+          stroke-width: 1.5;
+          vector-effect: non-scaling-stroke;
         }
 
         .daily-energy-row {
@@ -3032,10 +3139,9 @@ class ElrakningPanel {
     const batteryConfigured = Boolean(this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
     const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
-    const capacityUtilizationPercent = this._capacityUtilizationPercent();
     const values = {
       solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"], ["Producerat idag", this._powerState.solar_energy_kwh, "kWh"]] : [],
-      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"], ["Laddat idag", this._powerState.charging_energy_kwh, "kWh"], ["Urladdat idag", this._powerState.discharging_energy_kwh, "kWh"], ["Kapacitetsutnyttjande", capacityUtilizationPercent, "%"]] : [],
+      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
       const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : "solar"}"]`);
@@ -3051,11 +3157,6 @@ class ElrakningPanel {
         .filter(([, value]) => typeof value === "number" && Number.isFinite(value));
       const summaryNodes = [];
       validRows.forEach(([labelText, value, unit], index) => {
-        if (cardType === "battery" && index === 4) {
-          const divider = document.createElement("div");
-          divider.className = "power-summary-divider";
-          summaryNodes.push(divider);
-        }
         const label = document.createElement("strong");
         label.textContent = labelText;
         const output = document.createElement("span");
@@ -3067,6 +3168,7 @@ class ElrakningPanel {
     }
     this._renderMergedMeterSummary();
     this._renderSocChart();
+    this._renderBatteryHistoryCard();
     this._syncSocCardHeight();
   }
 
@@ -3202,6 +3304,85 @@ class ElrakningPanel {
     grid.innerHTML = markup.join("");
   }
 
+  _renderBatteryHistoryCard() {
+    const card = this.host.querySelector('[data-power-card="battery-history"]');
+    const status = this.host.querySelector("[data-battery-history-status]");
+    const meta = this.host.querySelector("[data-battery-history-meta]");
+    const chart = this.host.querySelector("[data-battery-history-chart]");
+    if (!card || !status || !meta || !chart) return;
+    const power = this._powerState || {};
+    const configured = Boolean(power.charging_entity || power.discharging_entity || power.battery_power_entity);
+    status.textContent = configured ? "" : "Ej konfigurerad";
+    status.hidden = configured;
+    chart.hidden = !configured;
+    if (!configured) {
+      meta.hidden = true;
+      chart.replaceChildren();
+      return;
+    }
+    const capacity = Number(power.capacity_kwh);
+    meta.textContent = Number.isFinite(capacity) && capacity > 0 ? `Kapacitet ${this._formatNumber(capacity)} kWh` : "Kapacitet saknas";
+    meta.hidden = false;
+    const days = buildBatteryDailyHistory(
+      this._powerHistory?.series?.charging?.points,
+      this._powerHistory?.series?.discharging?.points,
+      capacity,
+    );
+    const values = days.flatMap((day) => [day.chargingKwh, day.dischargingKwh]).filter((value) => Number.isFinite(value));
+    const maximum = values.length ? Math.max(...values) : 0;
+    if (!values.length) {
+      chart.textContent = "Ingen batterihistorik tillgänglig";
+      return;
+    }
+    const width = 960;
+    const height = 280;
+    const plot = { left: 42, right: 8, top: 12, bottom: 50 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const range = Math.max(1, Math.ceil(maximum * 1.1 * 2) / 2);
+    const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / range) * plotHeight;
+    const groupWidth = plotWidth / days.length;
+    const barWidth = Math.min(24, groupWidth * .24);
+    const barGap = Math.min(5, groupWidth * .05);
+    const groupX = (index) => plot.left + groupWidth * index + groupWidth / 2;
+    const formatEnergy = (value) => Number.isFinite(value) ? `${this._formatNumber(value)} kWh` : "—";
+    const grid = [0, range / 2, range].map((level) => `<line class="battery-history-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" /><text class="battery-history-axis-label" text-anchor="end" x="${plot.left - 6}" y="${y(level) + 4}">${this._formatNumber(level)}</text>`).join("");
+    const bars = days.map((day, index) => {
+      const center = groupX(index);
+      const chargingHeight = plot.top + plotHeight - y(day.chargingKwh);
+      const dischargingHeight = plot.top + plotHeight - y(day.dischargingKwh);
+      const utilization = Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—";
+      return `<g class="battery-history-day" data-battery-history-index="${index}"><rect class="battery-history-bar charging" x="${center - barGap / 2 - barWidth}" y="${y(day.chargingKwh)}" width="${barWidth}" height="${chargingHeight}" /><rect class="battery-history-bar discharging" x="${center + barGap / 2}" y="${y(day.dischargingKwh)}" width="${barWidth}" height="${dischargingHeight}" /><text class="battery-history-day-label" x="${center}" y="${height - 30}">${day.label}</text><text class="battery-history-utilization" x="${center}" y="${height - 12}">${utilization}</text></g>`;
+    }).join("");
+    chart.innerHTML = `<svg class="battery-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddning och urladdning de senaste sju dagarna">${grid}${bars}<rect class="battery-history-hover" data-battery-history-hover hidden /></svg><div class="soc-tooltip" hidden></div>`;
+    const svg = chart.querySelector(".battery-history-svg");
+    const tooltip = chart.querySelector(".soc-tooltip");
+    const hover = chart.querySelector("[data-battery-history-hover]");
+    const clear = () => { tooltip.hidden = true; hover.hidden = true; };
+    const show = (event, index) => {
+      const day = days[index];
+      const center = groupX(index);
+      hover.setAttribute("x", String(center - groupWidth / 2 + 2));
+      hover.setAttribute("y", String(plot.top));
+      hover.setAttribute("width", String(groupWidth - 4));
+      hover.setAttribute("height", String(plotHeight));
+      hover.hidden = false;
+      tooltip.innerHTML = `<strong>${day.date}</strong><span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span><span>Kapacitetsutnyttjande: ${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span>`;
+      tooltip.hidden = false;
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+    };
+    svg.addEventListener("pointermove", (event) => {
+      const group = event.target.closest?.("[data-battery-history-index]");
+      if (group) show(event, Number(group.dataset.batteryHistoryIndex));
+    });
+    svg.addEventListener("pointerdown", (event) => {
+      const group = event.target.closest?.("[data-battery-history-index]");
+      if (group) show(event, Number(group.dataset.batteryHistoryIndex));
+    });
+    svg.addEventListener("pointerleave", clear);
+    svg.addEventListener("pointercancel", clear);
+  }
+
   _renderSocChart() {
     const card = this.host.querySelector("[data-soc-card]");
     const chart = this.host.querySelector("[data-soc-chart]");
@@ -3317,7 +3498,7 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._powerHistoryRequestToken;
     try {
-      const response = await this.hass.callWS({ type: "elrakning/power_history" });
+      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7 });
       if (response?.error === "power_unavailable") return;
       if (requestToken !== this._powerHistoryRequestToken) return;
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};

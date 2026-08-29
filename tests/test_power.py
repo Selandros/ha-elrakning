@@ -135,6 +135,34 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "invalid_power_unit"):
             await manager.async_save_mapping({"solar_entities": ["sensor.energy"]})
 
+    async def test_history_supports_one_shared_seven_day_recorder_range(self):
+        states = {"sensor.charge": _state(1, "kW")}
+        hass = _hass(states)
+        manager = power.PowerManager(hass)
+        await manager.async_save_mapping({"charging_entity": "sensor.charge"})
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        captured = []
+        recorder.get_instance = lambda _: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: (
+            captured.append((args[1], args[2], kwargs["entity_ids"])) or {"sensor.charge": []}
+        )
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {name: sys.modules.get(name) for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")}
+        sys.modules.update({"homeassistant.components": components, "homeassistant.components.recorder": recorder, "homeassistant.components.recorder.history": history})
+        try:
+            result = await manager.async_history(7)
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertTrue(result["success"])
+        self.assertEqual(captured, [(datetime(2026, 8, 17, tzinfo=timezone.utc), datetime(2026, 8, 24, tzinfo=timezone.utc), ["sensor.charge"])])
+
     async def test_state_change_event_contains_live_series_point(self):
         states = {
             "sensor.solar": _state(0.36, "kW"),
