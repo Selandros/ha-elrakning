@@ -14,6 +14,7 @@ from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .meter import MeterManager
 from .power import PowerManager
+from .solar_forecast import SolarForecastManager
 from .websocket import async_register_websocket_commands
 
 PANEL_PATH = DOMAIN
@@ -49,6 +50,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_manager = PowerManager(hass, manager.async_diagnostic)
     await power_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["power_manager"] = power_manager
+    solar_forecast_manager = SolarForecastManager(hass, manager.async_diagnostic)
+    await solar_forecast_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["solar_forecast_manager"] = solar_forecast_manager
 
     integration_dir = Path(__file__).parent
     frontend_data = hass.data.setdefault(DOMAIN, {})
@@ -127,6 +131,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await meter_manager.async_shutdown()
     if power_manager := frontend_data.pop("power_manager", None):
         await power_manager.async_shutdown()
+    if solar_forecast_manager := frontend_data.pop("solar_forecast_manager", None):
+        await solar_forecast_manager.async_shutdown()
     if frontend.async_panel_exists(hass, PANEL_PATH):
         frontend.async_remove_panel(hass, PANEL_PATH)
     return True

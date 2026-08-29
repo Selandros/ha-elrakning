@@ -51,22 +51,22 @@ const dailyHistory = buildBatteryDailyHistory(
 );
 const solarHistory = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13),
-  [{ date: "2026-08-22", reference_energy_kwh: 10 }],
+  { "2026-08-22": 10 },
   new Date(2026, 7, 23, 12, 0),
   2,
 );
 assert.equal(solarHistory.length, 2);
-assert.equal(solarHistory[0].referenceKwh, 10);
+assert.equal(solarHistory[0].forecastKwh, 10);
 assert.equal(solarHistory[0].utilizationPercent, 10);
 const solarOverReference = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
-  [{ date: "2026-08-22", reference_energy_kwh: 1 }],
+  { "2026-08-22": 1 },
   new Date(2026, 7, 23, 12, 0),
   2,
 );
-assert.equal(solarOverReference[0].referenceKwh, 1);
+assert.equal(solarOverReference[0].forecastKwh, 1);
 assert.equal(solarOverReference[0].utilizationPercent, 200);
-assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].referenceKwh, null);
+assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].forecastKwh, null);
 assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].utilizationPercent, null);
 assert.equal(dailyHistory.length, 7);
 assert.ok(Math.abs(dailyHistory[5].chargingKwh - 1) < 1e-12);
@@ -486,16 +486,21 @@ assert.ok(panelSource.indexOf('class="daily-energy-row"') < panelSource.indexOf(
 assert.ok(panelSource.indexOf('class="daily-energy-row battery-history-row"') < panelSource.indexOf('data-configuration-cards'));
 assert.match(panelSource, /buildBatteryDailyHistory\(/);
 assert.match(panelSource, /buildSolarDailyHistory\(/);
-assert.match(panelSource, /const values = days\.flatMap\(\(day\) => \[day\.producedKwh, day\.referenceKwh\]\)/);
+assert.match(panelSource, /const values = days\.flatMap\(\(day\) => \[day\.producedKwh, day\.forecastKwh\]\)/);
 assert.match(panelSource, /class="solar-history-reference-bar"/);
 assert.match(panelSource, /referenceBarWidth/);
 assert.match(panelSource, /solar-history-reference-bar \{[\s\S]*color-mix\(in srgb, var\(--solar-color\) 30%/);
 assert.match(panelSource, /solar-history-day\.hovered \.solar-history-reference-bar/);
 assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<span>Producerat:/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Producerat:/);
-assert.match(panelSource, /<span>Solpotential: \$\{Number\.isFinite\(day\.referenceKwh\)/);
+assert.match(panelSource, /<span>Prognos: \$\{Number\.isFinite\(day\.forecastKwh\)/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*utilizationPercent/);
 assert.match(panelSource, /\.solar-history-chart \.soc-tooltip > span/);
+assert.match(panelSource, /solar_forecast_baselines/);
+assert.match(panelSource, /elrakning\/solar_forecast_state/);
+assert.match(panelSource, /elrakning_solar_forecast_update/);
+assert.doesNotMatch(panelSource, /solar-history-reference-bar[\s\S]*referenceKwh/);
+assert.doesNotMatch(panelSource, /Solpotential/);
 assert.match(panelSource, /solar_array_metadata/);
 assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<span>Laddat:/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Laddat:/);

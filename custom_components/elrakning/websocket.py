@@ -25,6 +25,7 @@ from .elhandel.providers.greenely_consumption import normalize_greenely_consumpt
 from .elhandel.providers.greenely_source import paginate_source
 from .meter import MeterManager
 from .power import PowerManager
+from .solar_forecast import SolarForecastManager
 
 COMMAND = f"{DOMAIN}/price_data"
 GREENELY_TEST_COMMAND = f"{DOMAIN}/greenely_test"
@@ -51,6 +52,7 @@ METER_POWER_HISTORY_COMMAND = f"{DOMAIN}/meter_power_history"
 POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
+SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +87,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_save)
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
+    websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
 
 
@@ -692,7 +695,23 @@ async def websocket_power_history(hass, connection, msg):
         "series": {},
         "error": "power_unavailable",
     }
+    forecast_manager = _solar_forecast_manager(hass)
+    forecast = forecast_manager.public_state() if forecast_manager else SolarForecastManager._unavailable_facts()
+    result["solar_forecast"] = forecast
+    result["solar_forecast_baselines"] = forecast.get("baselines", {})
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({vol.Required("type"): SOLAR_FORECAST_STATE_COMMAND})
+@websocket_api.async_response
+async def websocket_solar_forecast_state(hass, connection, msg):
+    """Return current Forecast.Solar facts and stored daily baselines."""
+    manager = _solar_forecast_manager(hass)
+    connection.send_result(msg["id"], manager.public_state() if manager else SolarForecastManager._unavailable_facts())
+
+
+def _solar_forecast_manager(hass) -> SolarForecastManager | None:
+    return hass.data.get(DOMAIN, {}).get("solar_forecast_manager")
 
 
 def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
