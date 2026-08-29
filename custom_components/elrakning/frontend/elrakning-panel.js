@@ -1505,14 +1505,14 @@ class ElrakningPanel {
         }
 
         .soc-estimated-area {
-          fill: #777;
+          fill: #5f9f82;
           fill-opacity: .22;
           stroke: none;
         }
 
         .soc-estimated-line {
           fill: none;
-          stroke: #777;
+          stroke: #5f9f82;
           stroke-linecap: round;
           stroke-linejoin: round;
           stroke-width: 2;
