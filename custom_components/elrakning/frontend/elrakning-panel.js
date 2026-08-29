@@ -1504,6 +1504,21 @@ class ElrakningPanel {
           vector-effect: non-scaling-stroke;
         }
 
+        .soc-estimated-area {
+          fill: #777;
+          fill-opacity: .22;
+          stroke: none;
+        }
+
+        .soc-estimated-line {
+          fill: none;
+          stroke: #777;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 2;
+          vector-effect: non-scaling-stroke;
+        }
+
         .soc-singleton {
           fill: var(--soc-color);
           stroke: var(--ha-card-background, var(--card-background-color));
@@ -3463,10 +3478,12 @@ class ElrakningPanel {
     const typicalInterval = intervals.length ? intervals.slice().sort((left, right) => left - right)[Math.floor(intervals.length / 2)] : 0;
     const maxGap = Math.max(30 * 60 * 1000, typicalInterval * 4, 2 * 60 * 60 * 1000);
     const segments = [];
+    const estimatedSegments = [];
     let segment = [points[0]];
     points.slice(1).forEach((point, index) => {
       if (point.timestamp - points[index].timestamp > maxGap) {
         segments.push(segment);
+        estimatedSegments.push([points[index], point]);
         segment = [];
       }
       segment.push(point);
@@ -3477,6 +3494,11 @@ class ElrakningPanel {
       const area = `M ${x(segment[0].timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(segment.at(-1).timestamp)} ${plot.top + plotHeight} Z`;
       return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
     }).join("");
+    const estimatedMarkup = estimatedSegments.map(([from, to]) => {
+      const coordinates = `${x(from.timestamp)} ${y(from.value)} L ${x(to.timestamp)} ${y(to.value)}`;
+      const area = `M ${x(from.timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(to.timestamp)} ${plot.top + plotHeight} Z`;
+      return `<path class="soc-estimated-area" d="${area}" /><path class="soc-estimated-line" d="M ${coordinates}" />`;
+    }).join("");
     const singletonMarkup = segments.filter((segment) => segment.length === 1).map(([point]) =>
       `<circle class="soc-singleton" cx="${x(point.timestamp)}" cy="${y(point.value)}" r="3" />`).join("");
     const gridMarkup = [0, 50, 100].map((level) => {
@@ -3484,7 +3506,7 @@ class ElrakningPanel {
     }).join("");
     const labelMarkup = `<div class="soc-label-rail" aria-hidden="true"><span class="soc-label top">100</span><span class="soc-label middle">50</span><span class="soc-label bottom">0</span></div>`;
     chart.innerHTML = `${labelMarkup}<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
-      ${gridMarkup}${lineMarkup}${singletonMarkup}<g class="soc-hover" aria-hidden="true"></g>
+      ${gridMarkup}${lineMarkup}${estimatedMarkup}${singletonMarkup}<g class="soc-hover" aria-hidden="true"></g>
     </svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".soc-chart-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
