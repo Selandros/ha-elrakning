@@ -3406,7 +3406,7 @@ class ElrakningPanel {
         group.classList.add("hovered");
         hoveredDay = group;
       }
-      tooltip.innerHTML = `<strong>${day.date}</strong><span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span><span>Kapacitetsutnyttjande: ${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span>`;
+      tooltip.innerHTML = `<strong>${day.date}</strong><span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span>`;
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
