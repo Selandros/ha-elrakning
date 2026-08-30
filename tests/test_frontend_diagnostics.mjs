@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -23,6 +23,12 @@ assert.match(eonPanelSource, /data-phase-metric="current"/);
 assert.match(eonPanelSource, /data-phase-metric="voltage"/);
 assert.match(eonPanelSource, /data-phase-metric="active_power"/);
 assert.match(eonPanelSource, /phase_source_entities/);
+assert.match(eonPanelSource, /phase-history-time-label/);
+assert.match(eonPanelSource, /phase-history-threshold/);
+assert.match(eonPanelSource, /Säkring/);
+assert.match(eonPanelSource, /phase-history-zero-line/);
+assert.match(eonPanelSource, /buildPhaseProvenance/);
+assert.match(eonPanelSource, /state_class/);
 assert.match(eonPanelSource, /chartColor\("phaseL1"\)/);
 assert.match(eonPanelSource, /chartColor\("phaseL2"\)/);
 assert.match(eonPanelSource, /chartColor\("phaseL3"\)/);
@@ -476,6 +482,21 @@ assert.equal(provenanceSeparateBattery.derivation.method, "separate_charge_disch
 assert.equal(provenanceSeparateBattery.derivation.charging_input_kw, 0.4);
 assert.equal(provenanceSeparateBattery.derivation.discharging_input_kw, 0.2);
 assert.equal(buildLiveSourceEntity(liveEntityStates, "sensor.pv_a", "solar_power").unit, "W");
+const phaseProvenance = buildPhaseProvenance(
+  "active_power",
+  {
+    phase_source_entities: { active_power: { l1: "sensor.phase_power_l1" } },
+    phase_discovery_method: "device_registry_and_phase_metadata",
+  },
+  { phase_history: { active_power: { l1: { points: [{ timestamp: "2026-08-30T12:00:00Z", value: 0.16, raw_value: 160 }] } } } },
+  { "sensor.phase_power_l1": { state: "160", attributes: { unit_of_measurement: "W", device_class: "power", state_class: "measurement" }, last_updated: "2026-08-30T12:00:00Z" } },
+);
+assert.equal(phaseProvenance.source.entities.l1.raw_state, "160");
+assert.equal(phaseProvenance.source.entities.l1.normalized_value, 0.16);
+assert.equal(phaseProvenance.source.entities.l1.normalized_unit, "kW");
+assert.equal(phaseProvenance.source.entities.l1.conversion, "W / 1000");
+assert.equal(phaseProvenance.source.entities.l1.state_class, "measurement");
+assert.equal(phaseProvenance.source.discovery_method, "device_registry_and_phase_metadata");
 for (const raw of [provenanceSolar, provenanceHouse, provenanceGrid, provenanceBattery]) {
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "token"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "password"), false);

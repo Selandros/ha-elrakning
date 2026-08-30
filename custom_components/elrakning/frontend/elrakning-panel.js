@@ -431,10 +431,42 @@ export function buildLiveSourceEntity(states, entityId, role) {
   return {
     entity_id: entityId || null,
     state: state?.state ?? null,
+    raw_state: state?.state ?? null,
     unit: state?.attributes?.unit_of_measurement ?? null,
+    raw_unit: state?.attributes?.unit_of_measurement ?? null,
     device_class: state?.attributes?.device_class ?? null,
+    state_class: state?.attributes?.state_class ?? null,
     last_updated: state?.last_updated ?? null,
     role,
+  };
+}
+
+export function buildPhaseProvenance(metric, meterState = {}, meterHistory = {}, states = {}) {
+  const metricKey = metric === "voltage" ? "voltage" : metric === "active_power" ? "active_power" : "current";
+  const sourceEntities = meterState.phase_source_entities?.[metricKey]
+    || (metricKey === "current" ? meterState.phase_current_source_entities || meterState.phase_current_entities : {})
+    || {};
+  const normalize = (entityId, phase) => {
+    const source = buildLiveSourceEntity(states, entityId, `${metricKey}_${phase}`);
+    const raw = Number(source.raw_state);
+    const unit = String(source.raw_unit || "").toLowerCase();
+    let normalized = Number.isFinite(raw) ? raw : null;
+    let conversion = "identity";
+    if (metricKey === "active_power" && unit === "w") {
+      normalized = raw / 1000;
+      conversion = "W / 1000";
+    } else if (metricKey === "current") {
+      normalized = Number.isFinite(raw) ? Math.abs(raw) : null;
+      conversion = "abs(A) for fuse loading";
+    }
+    return { ...source, phase, normalized_value: normalized, normalized_unit: metricKey === "active_power" ? "kW" : metricKey === "voltage" ? "V" : "A", conversion };
+  };
+  const phases = Object.fromEntries(["l1", "l2", "l3"].map((phase) => [phase, sourceEntities[phase] ? normalize(sourceEntities[phase], phase) : null]));
+  return {
+    metric: metricKey,
+    source: { entities: phases, discovery_method: meterState.phase_discovery_method || meterState.phase_current_discovery_method || null },
+    history: meterHistory.phase_history?.[metricKey] || {},
+    normalization: metricKey === "active_power" ? "source W values are divided by 1000 to kW when applicable" : metricKey === "current" ? "absolute current magnitude is used for fuse loading" : "source voltage values are retained in V",
   };
 }
 
@@ -2716,6 +2748,20 @@ class ElrakningPanel {
           text-align: center;
         }
 
+        .phase-history-phase-label {
+          align-items: center;
+          display: inline-flex;
+          gap: 4px;
+        }
+
+        .phase-history-phase-indicator {
+          border-radius: 50%;
+          display: inline-block;
+          height: 6px;
+          margin-right: 3px;
+          width: 6px;
+        }
+
         .phase-history-summary strong {
           color: var(--primary-text-color);
           display: block;
@@ -2737,6 +2783,23 @@ class ElrakningPanel {
         .phase-history-gridline {
           stroke: var(--divider-color);
           stroke-width: 1;
+        }
+
+        .phase-history-threshold,
+        .phase-history-zero-line {
+          stroke: var(--secondary-text-color);
+          stroke-dasharray: 4 4;
+          stroke-width: 1;
+        }
+
+        .phase-history-reference-label,
+        .phase-history-time-label {
+          fill: var(--secondary-text-color);
+          font-size: 10px;
+        }
+
+        .phase-history-reference-label {
+          font-weight: 400;
         }
 
         .phase-history-axis-label {
@@ -6454,8 +6517,16 @@ class ElrakningPanel {
       try {
         await this._copyText(JSON.stringify({
           metric: this._phaseHistoryMetric,
-          phase_source_entities: this._meterPowerHistory.phase_source_entities || {},
-          phase_discovery_method: this._meterPowerHistory.phase_discovery_method || null,
+          ...buildPhaseProvenance(
+            this._phaseHistoryMetric,
+            {
+              ...(this._meterState || {}),
+              phase_source_entities: this._meterPowerHistory.phase_source_entities || this._meterState?.phase_source_entities || {},
+              phase_discovery_method: this._meterPowerHistory.phase_discovery_method || this._meterState?.phase_discovery_method || null,
+            },
+            this._meterPowerHistory,
+            this.hass?.states || {},
+          ),
           phase_history: this._meterPowerHistory.phase_history,
         }, null, 2));
         if (feedback) {
@@ -6494,10 +6565,19 @@ class ElrakningPanel {
     const live = metric === "current" ? this._meterState?.phase_current_a : metric === "voltage" ? this._meterState?.phase_voltage_v : this._meterState?.phase_active_power_kw;
     summary.replaceChildren(...["l1", "l2", "l3"].map((phase) => {
       const item = document.createElement("div");
-      const strong = document.createElement("strong");
-      const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
-      strong.textContent = Number.isFinite(Number(value)) ? `${this._formatNumber(metric === "current" ? Math.abs(Number(value)) : Number(value))} ${unit}` : "—";
-      item.append(strong, document.createTextNode(phase.toUpperCase()));
+        const strong = document.createElement("strong");
+        const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
+      const formattedValue = metric === "voltage"
+        ? Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })
+        : this._formatNumber(metric === "current" ? Math.abs(Number(value)) : Number(value));
+      strong.textContent = Number.isFinite(Number(value)) ? `${formattedValue} ${unit}` : "—";
+      const phaseLabel = document.createElement("span");
+      phaseLabel.className = `phase-history-phase-label ${phase}`;
+      phaseLabel.textContent = phase.toUpperCase();
+      const indicator = document.createElement("i");
+      indicator.className = `phase-history-phase-indicator ${phase}`;
+      indicator.style.backgroundColor = chartColor(`phase${phase.slice(1).toUpperCase()}`);
+      item.append(strong, indicator, phaseLabel);
       return item;
     }));
     const width = 960;
@@ -6507,11 +6587,21 @@ class ElrakningPanel {
     const timestamps = allPoints.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
     const minTime = Math.min(...timestamps);
     const maxTime = Math.max(...timestamps);
-    const timeRange = Math.max(1, maxTime - minTime);
+    const firstDate = new Date(minTime);
+    const dayStart = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate()).getTime();
+    const dayEndDate = new Date(dayStart);
+    dayEndDate.setDate(dayEndDate.getDate() + 1);
+    const useDayAxis = maxTime <= dayEndDate.getTime();
+    const axisStart = useDayAxis ? dayStart : minTime;
+    const axisEnd = useDayAxis ? dayEndDate.getTime() : maxTime;
+    const timeRange = Math.max(1, axisEnd - axisStart);
     const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
     let minValue = metric === "current" ? 0 : Math.min(...values);
     const fuse = Number(this._meterState?.facility?.fuse_ampere);
-    let maxValue = metric === "current" ? Math.max(Number.isFinite(fuse) ? fuse : 0, ...values) : Math.max(...values);
+    const observedMax = values.length ? Math.max(...values.map((value) => metric === "current" ? Math.abs(value) : value)) : 0;
+    let maxValue = metric === "current"
+      ? Math.max(Number.isFinite(fuse) ? fuse : 0, observedMax * 1.08)
+      : Math.max(...values);
     if (metric === "active_power") {
       minValue = Math.min(0, minValue);
       maxValue = Math.max(0, maxValue);
@@ -6522,29 +6612,39 @@ class ElrakningPanel {
       maxValue += margin;
     }
     if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue) { minValue = 0; maxValue = 1; }
-    const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - minTime) / timeRange) * (width - plot.left - plot.right);
+    const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - axisStart) / timeRange) * (width - plot.left - plot.right);
     const y = (value) => plot.top + (maxValue - value) / (maxValue - minValue) * (height - plot.top - plot.bottom);
     const phaseColors = { l1: chartColor("phaseL1"), l2: chartColor("phaseL2"), l3: chartColor("phaseL3") };
     const grid = [0, 0.5, 1].map((ratio) => {
       const value = maxValue - ratio * (maxValue - minValue);
       return `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="phase-history-axis-label" x="4" y="${y(value) + 3}">${this._formatNumber(value)} ${unit}</text>`;
     }).join("");
-    const zero = metric === "active_power" ? `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(0)}" x2="${width - plot.right}" y2="${y(0)}" />` : "";
+    const threshold = metric === "current" && Number.isFinite(fuse) && fuse > 0
+      ? `<line class="phase-history-threshold" x1="${plot.left}" y1="${y(fuse)}" x2="${width - plot.right}" y2="${y(fuse)}" /><text class="phase-history-reference-label" x="${width - plot.right - 4}" y="${y(fuse) - 4}" text-anchor="end">${this._formatNumber(fuse)} A · Säkring</text>`
+      : "";
+    const zero = metric === "active_power" ? `<line class="phase-history-zero-line" x1="${plot.left}" y1="${y(0)}" x2="${width - plot.right}" y2="${y(0)}" /><text class="phase-history-reference-label" x="${width - plot.right - 4}" y="${y(0) - 4}" text-anchor="end">0 kW</text>` : "";
+    const tickCount = useDayAxis ? 8 : 6;
+    const timeTicks = Array.from({ length: tickCount + 1 }, (_, index) => axisStart + timeRange * index / tickCount);
+    const timeAxis = timeTicks.map((timestamp) => {
+      const date = new Date(timestamp);
+      const labelText = useDayAxis ? date.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" });
+      return `<text class="phase-history-time-label" x="${x(timestamp)}" y="${height - 5}" text-anchor="middle">${labelText}</text>`;
+    }).join("");
     const lines = Object.entries(phasePoints).map(([phase, points]) => {
       const d = points.map((point, index) => `${index ? "L" : "M"} ${x(point.timestamp)} ${y(Number(point.value))}`).join(" ");
       return d ? `<path class="phase-history-line" stroke="${phaseColors[phase]}" d="${d}" />` : "";
     }).join("");
-    chart.innerHTML = `<svg class="phase-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${label} per fas">${grid}${zero}${lines}<g class="phase-history-hover" aria-hidden="true"></g></svg><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<svg class="phase-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${label} per fas">${grid}${threshold}${zero}${lines}${timeAxis}<g class="phase-history-hover" aria-hidden="true"></g></svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".phase-history-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
     const hover = chart.querySelector(".phase-history-hover");
     const nearest = (timestamp) => Object.fromEntries(Object.entries(phasePoints).map(([phase, points]) => [phase, points.reduce((best, point) => !best || Math.abs(new Date(point.timestamp) - timestamp) < Math.abs(new Date(best.timestamp) - timestamp) ? point : best, null)]));
     const update = (event) => {
       const bounds = svg.getBoundingClientRect();
-      const timestamp = new Date(minTime + Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))) * timeRange);
+      const timestamp = new Date(axisStart + Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))) * timeRange);
       const selected = nearest(timestamp);
-      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, formatted: `${this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
-      renderSharedTooltip(tooltip, { title: timestamp.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }), fields });
+      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, formatted: `${metric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
+      renderSharedTooltip(tooltip, { title: timestamp.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }), fields });
       tooltip.hidden = false;
       hover.innerHTML = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => `<circle class="chart-hover-marker" fill="${phaseColors[phase]}" cx="${x(point.timestamp)}" cy="${y(Number(point.value))}" r="4" />`).join("");
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
