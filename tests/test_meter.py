@@ -252,6 +252,56 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["history"]["point_count"], 2)
         self.assertEqual(result["history"]["max_abs_kw"], 1.5)
 
+    async def test_billing_history_reads_from_local_month_start_to_now(self):
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        captured = []
+        recorder.get_instance = lambda hass: hass.recorder
+        history.get_significant_states = lambda *args, **kwargs: (
+            captured.append((args[1], args[2], kwargs["entity_ids"]))
+            or {
+                "sensor.power": [
+                    types.SimpleNamespace(
+                        state="2",
+                        attributes={"unit_of_measurement": "kW"},
+                        last_updated=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                    ),
+                    types.SimpleNamespace(
+                        state="3",
+                        attributes={"unit_of_measurement": "kW"},
+                        last_updated=datetime(2026, 8, 23, 12, tzinfo=timezone.utc),
+                    ),
+                ]
+            }
+        )
+        recorder.history = history
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        previous = {
+            name: sys.modules.get(name)
+            for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")
+        }
+        sys.modules.update({
+            "homeassistant.components": components,
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        })
+        try:
+            hass = _hass("sensor.power")
+            manager = meter.MeterManager(hass)
+            await manager.async_save_mapping({"power_entity": "sensor.power"})
+            result = await manager.async_billing_history()
+        finally:
+            for name, original in previous.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertTrue(result["success"])
+        self.assertEqual(captured, [(datetime(2026, 8, 1, tzinfo=timezone.utc), datetime(2026, 8, 23, 12, tzinfo=timezone.utc), ["sensor.power"])])
+        self.assertEqual(len(result["points"]), 2)
+        self.assertEqual(result["coverage"]["point_count"], 2)
+
     async def test_recorder_instance_executor_is_used(self):
         recorder = types.ModuleType("homeassistant.components.recorder")
         history = types.ModuleType("homeassistant.components.recorder.history")

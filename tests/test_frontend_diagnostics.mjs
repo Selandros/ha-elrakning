@@ -130,6 +130,15 @@ const incompleteInvoiceEstimate = buildInvoiceEstimate(
   new Date("2026-08-01T00:15:00Z"),
 );
 assert.equal(incompleteInvoiceEstimate.data_coverage.missing_price_periods, 1);
+const gappedInvoiceEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T01:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T01:00:00Z", import_kw: 2 }],
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  null,
+  new Date("2026-08-01T01:00:00Z"),
+);
+assert.equal(gappedInvoiceEstimate.imported_kwh_so_far, null);
+assert.equal(gappedInvoiceEstimate.data_coverage.missing_energy_periods, 1);
 const dailyHistoryPoints = (day, value, count) => Array.from({ length: count }, (_, index) => ({
   timestamp: new Date(day.getTime() + index * 5 * 60 * 1000).toISOString(),
   value_kw: value,
@@ -866,6 +875,9 @@ assert.match(panelSource, /data-price-layer="grid"/);
 assert.match(panelSource, /data-invoice-estimate-card/);
 assert.match(panelSource, /Estimerad faktura/);
 assert.match(panelSource, /buildInvoiceEstimate\(/);
+assert.match(panelSource, /elrakning\/billing_history/);
+assert.match(panelSource, /this\._billingHistory/);
+assert.match(panelSource, /billingHistory\?\.price_periods/);
 assert.match(panelSource, /trade_weighted_average_ore_per_kwh/);
 assert.match(panelSource, /export_credit: false/);
 assert.match(panelSource, /class="price-filter-toggle"/);

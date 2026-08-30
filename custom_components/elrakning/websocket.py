@@ -64,6 +64,7 @@ METER_STATE_COMMAND = f"{DOMAIN}/meter_state"
 METER_SOURCE_COMMAND = f"{DOMAIN}/meter_source"
 METER_STORE_CLEAR_COMMAND = f"{DOMAIN}/meter_store_clear"
 METER_POWER_HISTORY_COMMAND = f"{DOMAIN}/meter_power_history"
+BILLING_HISTORY_COMMAND = f"{DOMAIN}/billing_history"
 POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
@@ -111,6 +112,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_meter_source)
     websocket_api.async_register_command(hass, websocket_meter_store_clear)
     websocket_api.async_register_command(hass, websocket_meter_power_history)
+    websocket_api.async_register_command(hass, websocket_billing_history)
     websocket_api.async_register_command(hass, websocket_power_save)
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
@@ -853,6 +855,57 @@ async def websocket_meter_power_history(hass, connection, msg):
         "error": "meter_unavailable",
     }
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({vol.Required("type"): BILLING_HISTORY_COMMAND})
+@websocket_api.async_response
+async def websocket_billing_history(hass, connection, msg):
+    """Return canonical current-month meter and price history for billing."""
+    meter = _meter_manager(hass)
+    billing = await meter.async_billing_history() if meter else {
+        "success": False,
+        "points": [],
+        "error": "meter_unavailable",
+    }
+    if not billing.get("success"):
+        connection.send_result(msg["id"], {"success": False, **billing})
+        return
+    entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+    coordinator: ElrakningCoordinator | None = entry.runtime_data if entry else None
+    if coordinator is None:
+        connection.send_result(msg["id"], {"success": True, **billing, "price_periods": [], "price_coverage": {"period_count": 0}})
+        return
+    start = date.fromisoformat(billing["start"][:10])
+    end = date.fromisoformat(billing["end"][:10])
+    price_periods = []
+    missing_price_dates = 0
+    target = start
+    while target <= end:
+        data = await coordinator.async_get_price_data(target)
+        serialized = _serialize_price_data(hass, data)
+        periods = serialized.get("periods", [])
+        if periods:
+            price_periods.extend(periods)
+        else:
+            missing_price_dates += 1
+        target += timedelta(days=1)
+    connection.send_result(msg["id"], {
+        "success": True,
+        "start": billing["start"],
+        "end": billing["end"],
+        "energy_points": billing.get("points", []),
+        "energy_source": "home_assistant_recorder",
+        "integration_method": "trapezoidal_power_integration",
+        "energy_coverage": billing.get("coverage", {}),
+        "price_periods": price_periods,
+        "price_source": "nord_pool_historical_daily_periods",
+        "price_coverage": {
+            "period_count": len(price_periods),
+            "missing_dates": missing_price_dates,
+            "price_start": price_periods[0]["start"] if price_periods else None,
+            "price_end": price_periods[-1]["end"] if price_periods else None,
+        },
+    })
 
 
 @websocket_api.websocket_command(

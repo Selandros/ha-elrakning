@@ -426,38 +426,46 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     .sort((left, right) => left.timestamp - right.timestamp);
   const integrate = (startMs, endMs) => {
     const limit = Math.min(endMs, nowMs);
-    if (limit <= startMs || points.length < 2) return null;
+    if (limit <= startMs || points.length < 2) return { kwh: null, covered: false };
     let total = 0;
-    let covered = false;
+    let coveredUntil = startMs;
     for (let index = 1; index < points.length; index += 1) {
       const left = points[index - 1];
       const right = points[index];
+      if (right.timestamp - left.timestamp > 30 * 60 * 1000) continue;
       const overlapStart = Math.max(startMs, left.timestamp);
       const overlapEnd = Math.min(limit, right.timestamp);
       if (overlapEnd <= overlapStart || right.timestamp <= left.timestamp) continue;
       const valueAt = (timestamp) => left.importKw + (right.importKw - left.importKw) * ((timestamp - left.timestamp) / (right.timestamp - left.timestamp));
       total += (valueAt(overlapStart) + valueAt(overlapEnd)) / 2 * ((overlapEnd - overlapStart) / 3600000);
-      covered = true;
+      if (overlapStart <= coveredUntil + 1 && overlapEnd > coveredUntil) coveredUntil = overlapEnd;
     }
-    return covered ? total : null;
+    return { kwh: coveredUntil >= limit - 1 ? total : null, covered: coveredUntil >= limit - 1 };
   };
   const rows = [];
   let missingPricePeriods = 0;
   let missingEnergyPeriods = 0;
+  let coveredEnergyPeriods = 0;
+  let coveredEnergyKwh = 0;
+  let observedPricePeriods = 0;
   for (const period of periods) {
     const startMs = new Date(period.start).getTime();
     const endMs = new Date(period.end).getTime();
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= monthStart.getTime() || startMs >= nowMs) continue;
-    const importKwh = integrate(Math.max(startMs, monthStart.getTime()), Math.min(endMs, nowMs));
+    observedPricePeriods += 1;
+    const integration = integrate(Math.max(startMs, monthStart.getTime()), Math.min(endMs, nowMs));
+    if (!integration.covered) {
+      missingEnergyPeriods += 1;
+      continue;
+    }
+    coveredEnergyPeriods += 1;
+    coveredEnergyKwh += integration.kwh;
     const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
     if (!Number.isFinite(tradeOre) || !Number.isFinite(gridGross)) {
       missingPricePeriods += 1;
       continue;
     }
-    if (importKwh === null) {
-      missingEnergyPeriods += 1;
-      continue;
-    }
+    const importKwh = integration.kwh;
     rows.push({
       start: period.start,
       end: period.end,
@@ -468,7 +476,7 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
       grid_cost_sek: importKwh * gridGross / 100,
     });
   }
-  const importedKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
+  const importedKwh = coveredEnergyPeriods > 0 ? coveredEnergyKwh : null;
   const tradeVariableSek = rows.reduce((sum, row) => sum + row.trade_cost_sek, 0);
   const gridVariableSek = rows.reduce((sum, row) => sum + row.grid_cost_sek, 0);
   const coveredStart = rows.length ? Math.min(...rows.map((row) => new Date(row.start).getTime())) : null;
@@ -477,19 +485,24 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const monthMs = nextMonth.getTime() - monthStart.getTime();
   const elapsedDays = Math.max(1, elapsedMs / 86400000);
   const remainingDays = Math.max(0, (nextMonth.getTime() - nowMs) / 86400000);
-  const dailyImportKwh = importedKwh > 0 ? importedKwh / elapsedDays : 0;
-  const tradeWeighted = importedKwh > 0
-    ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / importedKwh
+  const pricedImportKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
+  const dailyImportKwh = importedKwh > 0 ? importedKwh / elapsedDays : null;
+  const tradeWeighted = pricedImportKwh > 0
+    ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / pricedImportKwh
     : null;
-  const gridWeighted = importedKwh > 0 ? gridGross : null;
+  const gridWeighted = pricedImportKwh > 0 ? gridGross : null;
   const fixedTrade = Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
   const gridFixed = Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
   const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
   const accruedTradeFixed = fixedTrade === null ? null : fixedTrade * Math.min(1, elapsedMs / monthMs);
   const variableSoFarSek = tradeVariableSek + gridVariableSek;
   const fixedSoFarSek = (accruedTradeFixed || 0) + (accruedGridFixed || 0);
-  const forecastImportKwh = importedKwh + dailyImportKwh * remainingDays;
-  const forecastVariableSek = forecastImportKwh * ((tradeWeighted || 0) + (gridWeighted || 0)) / 100;
+  const forecastImportKwh = importedKwh !== null && dailyImportKwh !== null && tradeWeighted !== null && gridWeighted !== null
+    ? importedKwh + dailyImportKwh * remainingDays
+    : null;
+  const forecastVariableSek = forecastImportKwh === null
+    ? null
+    : forecastImportKwh * (tradeWeighted + gridWeighted) / 100;
   const forecastFixedSek = (fixedTrade || 0) + (gridFixed || 0);
   return {
     month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
@@ -497,10 +510,10 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek + (accruedTradeFixed || 0) },
     grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek + (accruedGridFixed || 0) },
     total_so_far_sek: variableSoFarSek + fixedSoFarSek,
-    estimated_month_total_sek: forecastVariableSek + forecastFixedSek,
+    estimated_month_total_sek: forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek,
     forecast_method: "actual imported energy and volume-weighted observed gross prices; remaining energy uses observed daily average",
     forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 ? "complete_available_data" : "partial_data",
-    data_coverage: { period_count: rows.length, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, first_period: coveredStart ? new Date(coveredStart).toISOString() : null, last_period: coveredEnd ? new Date(coveredEnd).toISOString() : null },
+    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: observedPricePeriods ? coveredEnergyPeriods / observedPricePeriods * 100 : 0, first_period: coveredStart ? new Date(coveredStart).toISOString() : null, last_period: coveredEnd ? new Date(coveredEnd).toISOString() : null },
     trade_weighted_average_ore_per_kwh: tradeWeighted,
     grid_weighted_average_ore_per_kwh: gridWeighted,
     total_weighted_average_ore_per_kwh: tradeWeighted === null || gridWeighted === null ? null : tradeWeighted + gridWeighted,
@@ -993,6 +1006,7 @@ class ElrakningPanel {
     this._priceComparisonVisible = { electricity: true, grid: false };
     this._providerConfigured = false;
     this._electricityProviderState = null;
+    this._billingHistory = null;
     this.priceData = {
       source: "nord_pool",
       mode: "spot_price",
@@ -3753,6 +3767,7 @@ class ElrakningPanel {
           throw new Error(response.error || "save_failed");
         }
         this._applyMeterState(response);
+        this.loadBillingHistory();
         const powerResponse = await this.hass.callWS({ type: "elrakning/power_save", ...powerMapping });
         if (!powerResponse?.success) throw new Error(powerResponse?.error || "power_save_failed");
         this._applyPowerState(powerResponse);
@@ -3773,6 +3788,7 @@ class ElrakningPanel {
         const response = await this.hass.callWS({ type: "elrakning/meter_store_clear" });
         if (!response.success) throw new Error(response.error || "meter_store_clear_failed");
         this._applyMeterState(response);
+        this.loadBillingHistory();
         renderSelectors(response);
         invertToggle.checked = false;
         result.textContent = "Elmätare rensad.";
@@ -5235,15 +5251,16 @@ class ElrakningPanel {
     const month = this.host.querySelector("[data-invoice-estimate-month]");
     const status = this.host.querySelector("[data-invoice-estimate-status]");
     if (!card || !grid || !month || !status) return;
+    const billingHistory = this._billingHistory;
     const estimate = buildInvoiceEstimate(
-      this.priceData?.periods,
-      this._meterPowerHistory?.points,
+      billingHistory?.price_periods,
+      billingHistory?.energy_points,
       this._eonGridPrice,
       this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
     );
     const configured = this._meterState?.configured === true;
-    card.hidden = !configured || !this.priceData?.periods?.length;
-    if (!configured || !this.priceData?.periods?.length) return;
+    card.hidden = !configured || !billingHistory;
+    if (!configured || !billingHistory) return;
     month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
     if (!estimate) {
       grid.replaceChildren();
@@ -5252,9 +5269,9 @@ class ElrakningPanel {
       return;
     }
     const rows = [
-      ["Elhandel", estimate.trade.total_so_far_sek, ""],
-      ["Elnät", estimate.grid.total_so_far_sek, ""],
-      ["Hittills", estimate.total_so_far_sek, "total"],
+      ["Elhandel", estimate.completeness.trade_variable ? estimate.trade.total_so_far_sek : "Rörligt saknas", ""],
+      ["Elnät", estimate.completeness.grid_variable ? estimate.grid.total_so_far_sek : "Rörligt saknas", ""],
+      ["Hittills", estimate.completeness.trade_variable && estimate.completeness.grid_variable ? estimate.total_so_far_sek : "Underlag saknas", "total"],
       ["Prognos månad", estimate.estimated_month_total_sek, "total"],
       ["Import hittills", estimate.imported_kwh_so_far, "kWh"],
     ];
@@ -5264,9 +5281,11 @@ class ElrakningPanel {
       label.textContent = labelText;
       const output = document.createElement("span");
       output.className = className;
-      output.textContent = value === null || !Number.isFinite(Number(value))
-        ? "–"
-        : className === "kWh" ? `${this._formatNumber(Number(value))} kWh` : this._formatSek(Number(value));
+      output.textContent = typeof value === "string"
+        ? value
+        : value === null || !Number.isFinite(Number(value))
+          ? "–"
+          : className === "kWh" ? `${this._formatNumber(Number(value))} kWh` : this._formatSek(Number(value));
       return [label, output];
     }));
     const coverage = estimate.data_coverage;
@@ -5495,7 +5514,10 @@ class ElrakningPanel {
         this._eventConnection.removeEventListener("ready", this._connectionReadyListener);
       }
       this._eventUnsubscribePromise = hass.connection.subscribeEvents(
-        () => this.loadPriceData(),
+        () => {
+          this.loadPriceData();
+          this.loadBillingHistory();
+        },
         "elrakning_price_update",
       );
       this._greenelyEventUnsubscribePromise = hass.connection.subscribeEvents(
@@ -5651,6 +5673,7 @@ class ElrakningPanel {
       this.loadRetainedHistory(),
       this.loadMeterState(loadHistory),
       this.loadPowerState(loadHistory),
+      this.loadBillingHistory(),
       this._loadDebugPreference(),
       this._loadChartPreferences(),
     ]).finally(() => {
@@ -5679,6 +5702,17 @@ class ElrakningPanel {
     this._updatePriceComparisonControls();
     this.updatePriceSummary();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    this._renderInvoiceEstimateCard();
+  }
+
+  async loadBillingHistory() {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/billing_history" });
+      this._billingHistory = response?.success === true ? response : null;
+    } catch {
+      this._billingHistory = null;
+    }
     this._renderInvoiceEstimateCard();
   }
 

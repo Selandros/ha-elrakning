@@ -274,6 +274,71 @@ class MeterManager:
             task.add_done_callback(clear_inflight)
         return await asyncio.shield(task)
 
+    async def async_billing_history(self) -> dict[str, Any]:
+        """Return imported power history from local month start through now."""
+        entity_id = self.mapping.get("power_entity")
+        now = dt_util.now()
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if not entity_id:
+            return {
+                "success": True,
+                "entity_id": None,
+                "start": start.isoformat(),
+                "end": now.isoformat(),
+                "points": [],
+                "coverage": {"energy_start": None, "energy_end": None, "point_count": 0},
+            }
+        return await self._async_billing_history_fetch(entity_id, start, now, bool(self.mapping.get(METER_INVERT_FIELD)))
+
+    async def _async_billing_history_fetch(self, entity_id: str, start, end, invert_power: bool) -> dict[str, Any]:
+        """Read the selected meter power entity for the complete billing month."""
+        try:
+            from homeassistant.components.recorder import get_instance, history
+
+            recorder = get_instance(self.hass)
+            history_by_entity = await recorder.async_add_executor_job(
+                partial(
+                    history.get_significant_states,
+                    self.hass,
+                    start,
+                    end,
+                    entity_ids=[entity_id],
+                    include_start_time_state=True,
+                    significant_changes_only=False,
+                    minimal_response=False,
+                    no_attributes=False,
+                )
+            )
+        except Exception:
+            return {
+                "success": False,
+                "entity_id": entity_id,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "points": [],
+                "error": "history_unavailable",
+            }
+        points = sorted(
+            (
+                point
+                for state in history_by_entity.get(entity_id, [])
+                if (point := normalize_power_state(state, invert_power)) is not None
+            ),
+            key=lambda point: point["timestamp"],
+        )
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "points": points,
+            "coverage": {
+                "energy_start": points[0]["timestamp"] if points else None,
+                "energy_end": points[-1]["timestamp"] if points else None,
+                "point_count": len(points),
+            },
+        }
+
     async def _async_power_history_fetch(
         self,
         entity_id: str,

@@ -82,10 +82,15 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         return data
 
     def _cache_price_data(self, data: PriceData) -> None:
-        """Keep the current, next, and explicitly requested date bounded."""
+        """Keep current-month periods available for billing without unbounded growth."""
         self._price_data_by_date[data.date] = data
         today = dt_util.now().date()
-        keep_dates = {today, today + timedelta(days=1), data.date}
+        keep_dates = {
+            target_date
+            for target_date in self._price_data_by_date
+            if target_date.year == today.year and target_date.month == today.month
+        }
+        keep_dates.update({today, today + timedelta(days=1), data.date})
         self._price_data_by_date = {
             target_date: cached
             for target_date, cached in self._price_data_by_date.items()
