@@ -21,6 +21,12 @@ export function chartColor(key) {
   return CHART_COLORS[key] || CHART_COLORS.neutral;
 }
 
+export const PHASE_COLOR_MAP = Object.freeze({
+  l1: chartColor("phaseL1"),
+  l2: chartColor("phaseL2"),
+  l3: chartColor("phaseL3"),
+});
+
 function chartSeriesColor(className) {
   const colors = [
     ["chart-meter-import", "import"],
@@ -421,9 +427,64 @@ export function mergeDailyPhaseMaxima(dailyPhaseMax = {}, phaseCurrentA = {}, ti
     if (!Number.isFinite(value)) continue;
     const magnitude = Math.abs(value);
     const previous = Number(next[phase]?.ampere);
-    if (!Number.isFinite(previous) || magnitude > previous) next[phase] = { ampere: magnitude, timestamp: timestampText };
+    if (!Number.isFinite(previous) || magnitude > previous) next[phase] = { ampere: magnitude, raw_value: value, timestamp: timestampText };
   }
   return next;
+}
+
+export function buildDailyMaxPhase(dailyPhaseMax = {}, fuseAmpere = null) {
+  const winner = ["l1", "l2", "l3"].reduce((best, phase) => {
+    const item = dailyPhaseMax?.[phase];
+    const ampere = Number(item?.ampere);
+    return Number.isFinite(ampere) && (!best || ampere > best.ampere) ? { phase, item, ampere } : best;
+  }, null);
+  if (!winner) return null;
+  const fuse = Number(fuseAmpere);
+  const utilization = Number.isFinite(fuse) && fuse > 0 ? winner.ampere / fuse * 100 : null;
+  return {
+    phase: winner.phase,
+    ampere: winner.ampere,
+    raw_value: winner.item.raw_value ?? null,
+    timestamp: winner.item.timestamp ?? null,
+    fuse_ampere: Number.isFinite(fuse) && fuse > 0 ? fuse : null,
+    utilization_percent: utilization,
+  };
+}
+
+export function mergePhaseHistory(existing = {}, incoming = {}) {
+  const merged = { ...(existing || {}) };
+  for (const metric of ["current", "voltage", "active_power"]) {
+    const incomingMetric = incoming?.[metric];
+    if (!incomingMetric || typeof incomingMetric !== "object") continue;
+    const currentMetric = { ...(merged[metric] || {}) };
+    for (const phase of ["l1", "l2", "l3"]) {
+      const incomingSeries = incomingMetric[phase];
+      if (!incomingSeries || typeof incomingSeries !== "object" || !Array.isArray(incomingSeries.points)) continue;
+      const existingSeries = currentMetric[phase] || {};
+      const pointsByTimestamp = new Map(
+        (Array.isArray(existingSeries.points) ? existingSeries.points : [])
+          .filter((point) => point?.timestamp)
+          .map((point) => [point.timestamp, point]),
+      );
+      for (const point of incomingSeries.points) {
+        if (point?.timestamp) pointsByTimestamp.set(point.timestamp, point);
+      }
+      const points = [...pointsByTimestamp.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
+      currentMetric[phase] = { ...existingSeries, ...incomingSeries, points: points.slice(-2000) };
+    }
+    merged[metric] = currentMetric;
+  }
+  return merged;
+}
+
+export function phaseHistoryPointCounts(history = {}) {
+  return Object.fromEntries(["current", "voltage", "active_power"].map((metric) => [
+    metric,
+    Object.fromEntries(["l1", "l2", "l3"].map((phase) => [
+      phase,
+      Array.isArray(history?.[metric]?.[phase]?.points) ? history[metric][phase].points.length : 0,
+    ])),
+  ]));
 }
 
 export function buildLiveSourceEntity(states, entityId, role) {
@@ -455,18 +516,24 @@ export function buildPhaseProvenance(metric, meterState = {}, meterHistory = {},
     if (metricKey === "active_power" && unit === "w") {
       normalized = raw / 1000;
       conversion = "W / 1000";
+    } else if (metricKey === "active_power" && unit === "mw") {
+      normalized = raw * 1000;
+      conversion = "MW * 1000";
     } else if (metricKey === "current") {
       normalized = Number.isFinite(raw) ? Math.abs(raw) : null;
       conversion = "abs(A) for fuse loading";
     }
-    return { ...source, phase, normalized_value: normalized, normalized_unit: metricKey === "active_power" ? "kW" : metricKey === "voltage" ? "V" : "A", conversion };
+    const inverted = metricKey === "active_power" && meterState.invert_power === true;
+    if (inverted && normalized != null) normalized = -normalized;
+    if (inverted) conversion = `${conversion}; invert_power=true`;
+    return { ...source, phase, normalized_value: normalized, normalized_unit: metricKey === "active_power" ? "kW" : metricKey === "voltage" ? "V" : "A", conversion, invert_power: inverted };
   };
   const phases = Object.fromEntries(["l1", "l2", "l3"].map((phase) => [phase, sourceEntities[phase] ? normalize(sourceEntities[phase], phase) : null]));
   return {
     metric: metricKey,
     source: { entities: phases, discovery_method: meterState.phase_discovery_method || meterState.phase_current_discovery_method || null },
     history: meterHistory.phase_history?.[metricKey] || {},
-    normalization: metricKey === "active_power" ? "source W values are divided by 1000 to kW when applicable" : metricKey === "current" ? "absolute current magnitude is used for fuse loading" : "source voltage values are retained in V",
+    normalization: metricKey === "active_power" ? `signed grid power is normalized to kW and invert_power=${meterState.invert_power === true}` : metricKey === "current" ? "absolute current magnitude is used for fuse loading" : "source voltage values are retained in V",
   };
 }
 
@@ -665,6 +732,16 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     }
     return { kwh: coveredUntil >= limit - 1 ? total : null, covered: coveredUntil >= limit - 1 };
   };
+  const coveredSegments = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const left = points[index - 1];
+    const right = points[index];
+    const segmentStart = Math.max(monthStart.getTime(), left.timestamp);
+    const segmentEnd = Math.min(nowMs, right.timestamp);
+    if (right.timestamp - left.timestamp <= 30 * 60 * 1000 && segmentEnd > segmentStart) {
+      coveredSegments.push({ start: segmentStart, end: segmentEnd });
+    }
+  }
   const rows = [];
   let missingPricePeriods = 0;
   let missingEnergyPeriods = 0;
@@ -709,22 +786,36 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const coveredEnd = rows.length ? Math.max(...rows.map((row) => Math.min(new Date(row.end).getTime(), nowMs))) : null;
   const elapsedMs = Math.max(0, nowMs - monthStart.getTime());
   const monthMs = nextMonth.getTime() - monthStart.getTime();
+  const mergedCoveredSegments = coveredSegments.sort((left, right) => left.start - right.start).reduce((merged, segment) => {
+    const previous = merged.at(-1);
+    if (previous && segment.start <= previous.end) previous.end = Math.max(previous.end, segment.end);
+    else merged.push({ ...segment });
+    return merged;
+  }, []);
+  const coveredDurationMs = mergedCoveredSegments.reduce((sum, segment) => sum + segment.end - segment.start, 0);
+  const coveredStartMs = mergedCoveredSegments.length ? mergedCoveredSegments[0].start : null;
+  const coveredEndMs = mergedCoveredSegments.length ? mergedCoveredSegments.at(-1).end : null;
+  const missingPastMs = Math.max(0, elapsedMs - coveredDurationMs);
   const elapsedDays = Math.max(1, elapsedMs / 86400000);
+  const coveredDays = coveredDurationMs / 86400000;
   const remainingDays = Math.max(0, (nextMonth.getTime() - nowMs) / 86400000);
   const pricedImportKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
-  const dailyImportKwh = importedKwh > 0 ? importedKwh / elapsedDays : null;
+  const observedDailyImportKwh = importedKwh > 0 && coveredDays > 0 ? importedKwh / coveredDays : null;
   const tradeWeighted = pricedImportKwh > 0
     ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / pricedImportKwh
     : null;
   const gridWeighted = pricedImportKwh > 0 ? gridGross : null;
-  const fixedTrade = Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
+  const fixedTrade = tradeFixedFee != null && Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
   const gridFixed = Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
   const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
   const accruedTradeFixed = fixedTrade === null ? null : fixedTrade * Math.min(1, elapsedMs / monthMs);
   const variableSoFarSek = tradeVariableSek + gridVariableSek;
   const fixedSoFarSek = (accruedTradeFixed || 0) + (accruedGridFixed || 0);
-  const forecastImportKwh = importedKwh !== null && dailyImportKwh !== null && tradeWeighted !== null && gridWeighted !== null
-    ? importedKwh + dailyImportKwh * remainingDays
+  const missingPastDays = missingPastMs / 86400000;
+  const forecastMissingPastKwh = observedDailyImportKwh === null ? null : observedDailyImportKwh * missingPastDays;
+  const forecastFutureKwh = observedDailyImportKwh === null ? null : observedDailyImportKwh * remainingDays;
+  const forecastImportKwh = importedKwh !== null && forecastMissingPastKwh !== null && forecastFutureKwh !== null && tradeWeighted !== null && gridWeighted !== null
+    ? importedKwh + forecastMissingPastKwh + forecastFutureKwh
     : null;
   const forecastVariableSek = forecastImportKwh === null
     ? null
@@ -739,18 +830,23 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     estimated_month_total_sek: forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek,
     forecast_import_kwh: forecastImportKwh,
     forecast_remaining_kwh: forecastImportKwh === null ? null : Math.max(0, forecastImportKwh - importedKwh),
+    forecast_missing_past_kwh: forecastMissingPastKwh,
+    forecast_future_kwh: forecastFutureKwh,
     forecast_remaining_days: remainingDays,
     forecast_remaining_trade_variable_sek: forecastImportKwh === null || tradeWeighted === null ? null : Math.max(0, forecastImportKwh - importedKwh) * tradeWeighted / 100,
     forecast_remaining_grid_variable_sek: forecastImportKwh === null || gridWeighted === null ? null : Math.max(0, forecastImportKwh - importedKwh) * gridWeighted / 100,
-    forecast_method: "actual imported energy and volume-weighted observed gross prices; remaining energy uses observed daily average",
-    forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 ? "complete_available_data" : "partial_data",
-    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: observedPricePeriods ? coveredEnergyPeriods / observedPricePeriods * 100 : 0, first_period: coveredStart ? new Date(coveredStart).toISOString() : null, last_period: coveredEnd ? new Date(coveredEnd).toISOString() : null },
+    forecast_remaining_total_sek: forecastVariableSek === null ? null : forecastVariableSek - variableSoFarSek,
+    missing_past_estimated_kwh: forecastMissingPastKwh,
+    forecast_method: "actual imported energy and volume-weighted observed gross prices; missing past and future energy use the observed covered-duration average",
+    forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 && coveredDurationMs >= elapsedMs - 1 ? "complete_available_data" : "partial_data",
+    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: elapsedMs ? coveredDurationMs / elapsedMs * 100 : 0, first_period: coveredStartMs ? new Date(coveredStartMs).toISOString() : null, last_period: coveredEndMs ? new Date(coveredEndMs).toISOString() : null, observed_duration_ms: coveredDurationMs, covered_duration_ms: coveredDurationMs, missing_past_duration_ms: missingPastMs, remaining_future_duration_ms: remainingDays * 86400000, elapsed_month_duration_ms: elapsedMs, periods: { observed_covered: { duration_ms: coveredDurationMs, kwh: importedKwh }, missing_past: { duration_ms: missingPastMs, estimated_kwh: forecastMissingPastKwh }, future_remaining: { duration_ms: remainingDays * 86400000, estimated_kwh: forecastFutureKwh } } },
     trade_weighted_average_ore_per_kwh: tradeWeighted,
     grid_weighted_average_ore_per_kwh: gridWeighted,
     total_weighted_average_ore_per_kwh: tradeWeighted === null || gridWeighted === null ? null : tradeWeighted + gridWeighted,
     completeness: { trade_variable: rows.length > 0, trade_fixed: fixedTrade !== null, grid_variable: rows.length > 0 && Number.isFinite(gridGross), grid_fixed: gridFixed !== null, export_credit: false },
     export_energy_kwh: null,
     rows,
+    trade_fixed_fee_source: fixedTrade !== null ? "provider_summary.tariff.fixed_fee_incl_vat_per_month" : null,
   };
 }
 
@@ -766,25 +862,70 @@ export function previousCalendarMonth(month) {
 export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
   const month = previousCalendarMonth(selectedMonth);
   const normalizeProvider = (items) => {
-    const matches = (Array.isArray(items) ? items : []).filter((invoice) => (
-      invoice && invoice.month === month && Number.isFinite(Number(invoice.amount_due_sek))
-    ));
-    const total = matches.reduce((sum, invoice) => sum + Number(invoice.amount_due_sek), 0);
+    const matches = (Array.isArray(items) ? items : []).filter((invoice) => invoice && invoice.month === month);
+    const normalized = matches.map((invoice) => {
+      const periodCost = Number(invoice.period_cost_before_credits_sek);
+      const amountDue = Number(invoice.amount_due_sek);
+      const comparisonValue = Number.isFinite(periodCost) ? periodCost : Number.isFinite(amountDue) ? amountDue : null;
+      return {
+        invoice_exists: true,
+        billing_period: invoice.billing_period || invoice.month,
+        period_cost_sek: Number.isFinite(periodCost) ? periodCost : null,
+        period_cost_before_credits_sek: Number.isFinite(periodCost) ? periodCost : null,
+        credits_applied_sek: Number.isFinite(Number(invoice.credits_applied_sek)) ? Number(invoice.credits_applied_sek) : null,
+        amount_due_sek: Number.isFinite(amountDue) ? amountDue : null,
+        comparison_value_sek: comparisonValue,
+        source: invoice.source || null,
+      };
+    });
+    const comparable = normalized.filter((invoice) => Number.isFinite(invoice.comparison_value_sek));
+    const total = comparable.reduce((sum, invoice) => sum + invoice.comparison_value_sek, 0);
+    const sumField = (field) => {
+      const values = normalized.map((invoice) => invoice[field]).filter((value) => Number.isFinite(value));
+      return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+    };
     return {
       available: matches.length > 0,
-      total_sek: matches.length ? total : null,
-      invoices: matches.map((invoice) => ({ month: invoice.month, amount_due_sek: Number(invoice.amount_due_sek) })),
+      invoice_exists: matches.length > 0,
+      total_sek: comparable.length ? total : null,
+      billing_period: normalized.length === 1 ? normalized[0].billing_period : month,
+      period_cost_sek: sumField("period_cost_sek"),
+      period_cost_before_credits_sek: sumField("period_cost_before_credits_sek"),
+      credits_applied_sek: sumField("credits_applied_sek"),
+      amount_due_sek: sumField("amount_due_sek"),
+      comparison_value_sek: comparable.length ? total : null,
+      source: normalized.length === 1 ? normalized[0].source : null,
+      invoices: normalized,
     };
   };
   const trade = normalizeProvider(invoiceSources.trade);
-  const grid = normalizeProvider(invoiceSources.grid);
+  const gridMatches = Array.isArray(invoiceSources.grid) ? invoiceSources.grid.filter((invoice) => invoice && invoice.month === month) : [];
+  const grid = gridMatches.length ? normalizeProvider(gridMatches) : {
+    available: false,
+    invoice_exists: false,
+    billing_period: month,
+    period_cost_sek: null,
+    period_cost_before_credits_sek: null,
+    credits_applied_sek: null,
+    amount_due_sek: null,
+    comparison_value_sek: null,
+    total_sek: null,
+    source: null,
+    invoices: [],
+    reason: "no_previous_invoice",
+  };
   const coverage = trade.available && grid.available ? "complete" : trade.available || grid.available ? "partial" : "missing";
   return {
     month,
     trade,
     grid,
     coverage,
-    total_sek: coverage === "complete" ? trade.total_sek + grid.total_sek : null,
+    total_sek: coverage === "complete" && Number.isFinite(trade.total_sek) && Number.isFinite(grid.total_sek) ? trade.total_sek + grid.total_sek : null,
+    comparison: {
+      available: coverage === "complete" && Number.isFinite(trade.total_sek) && Number.isFinite(grid.total_sek),
+      coverage,
+      reason: coverage === "partial" && !grid.available ? "previous_grid_invoice_missing" : null,
+    },
   };
 }
 
@@ -800,6 +941,7 @@ export function buildInvoiceComparison(estimate, previousActual) {
       available: false,
       month: previousActual?.month || null,
       coverage: previousActual?.coverage || "missing",
+      reason: previousActual?.comparison?.reason || null,
       difference_sek: null,
       difference_percent: null,
       scale_max_sek: Number.isFinite(current) && current >= 0 ? current : null,
@@ -813,6 +955,7 @@ export function buildInvoiceComparison(estimate, previousActual) {
     available: true,
     month: previousActual.month,
     coverage: "complete",
+    reason: null,
     difference_sek: difference,
     difference_percent: previous > 0 ? difference / previous * 100 : null,
     scale_max_sek: scaleMax,
@@ -828,9 +971,9 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
   const rows = Array.isArray(estimate.rows) ? estimate.rows.map((row) => ({
     timestamp: row.start,
     imported_kwh: row.import_kwh,
-    trade: {
-      ore_per_kwh_gross: row.trade_price_ore_per_kwh_gross,
-      vat_included: billingHistory.trade_vat_included ?? null,
+      trade: {
+        ore_per_kwh_gross: row.trade_price_ore_per_kwh_gross,
+        vat_included: billingHistory.trade_vat_included ?? (Number.isFinite(row.vat_ore_per_kwh) ? true : null),
       spot_price_ex_vat_ore_per_kwh: row.spot_price_ex_vat_ore_per_kwh,
       electricity_cost_ex_vat_ore_per_kwh: row.electricity_cost_ex_vat_ore_per_kwh,
       vat_ore_per_kwh: row.vat_ore_per_kwh,
@@ -844,14 +987,30 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
     trade_cost_sek: row.trade_cost_sek,
     grid_cost_sek: row.grid_cost_sek,
   })) : [];
-  const tradeFixed = Number.isFinite(Number(estimate.trade?.fixed_fee_sek)) ? Number(estimate.trade.fixed_fee_sek) : null;
-  const gridFixed = Number.isFinite(Number(estimate.grid?.fixed_fee_sek)) ? Number(estimate.grid.fixed_fee_sek) : null;
+  const tradeFixedValue = estimate.trade?.fixed_fee_sek;
+  const gridFixedValue = estimate.grid?.fixed_fee_sek;
+  const tradeFixed = tradeFixedValue != null && Number.isFinite(Number(tradeFixedValue)) ? Number(tradeFixedValue) : null;
+  const gridFixed = gridFixedValue != null && Number.isFinite(Number(gridFixedValue)) ? Number(gridFixedValue) : null;
+  const gridTransfer = Number(gridPrice.transfer_ore_per_kwh_gross);
+  const gridEnergyTax = Number(gridPrice.energy_tax_ore_per_kwh_gross);
+  const gridComponentTotal = gridTransfer + gridEnergyTax;
+  const splitGridCost = (total, component) => Number.isFinite(Number(total)) && Number.isFinite(component) && gridComponentTotal > 0
+    ? Number(total) * component / gridComponentTotal
+    : null;
   return {
     energy_source: {
       method: billingHistory.energy_source?.method || "integrated_grid_power",
-      entity_id: billingHistory.energy_source?.entity_id || null,
-      source_entity: billingHistory.energy_source?.source_entity || null,
+      source_entities: ((Array.isArray(billingHistory.energy_source?.source_entities) && billingHistory.energy_source.source_entities.length)
+        ? billingHistory.energy_source.source_entities
+        : [{
+        entity_id: billingHistory.energy_source?.entity_id || billingHistory.entity_id || null,
+        raw_unit: billingHistory.energy_source?.raw_unit || "kW",
+        role: "grid_active_power",
+        invert: billingHistory.energy_source?.invert ?? null,
+        canonical_sign_convention: billingHistory.energy_source?.canonical_sign_convention || null,
+      }]).filter((source) => source?.entity_id),
       raw_unit: billingHistory.energy_source?.raw_unit || "kW",
+      source_entity: billingHistory.energy_source?.source_entity || billingHistory.energy_source?.entity_id || billingHistory.entity_id || null,
       sample_count: energyPoints.length || null,
       period_start_value: billingHistory.energy_source?.period_start_value ?? null,
       current_value: billingHistory.energy_source?.current_value ?? null,
@@ -873,7 +1032,7 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       total_sek: estimate.grid?.variable_cost_sek ?? null,
     },
     fixed_fees: {
-      trade: { monthly_fee_sek: tradeFixed, vat_included: billingHistory.trade_fixed_vat_included ?? null, source: billingHistory.trade_fixed_source || null },
+      trade: { monthly_fee_sek: tradeFixed, vat_included: billingHistory.trade_fixed_vat_included ?? (tradeFixed !== null ? true : null), source: billingHistory.trade_fixed_source || estimate.trade_fixed_fee_source || (tradeFixed !== null ? "provider_summary.tariff.fixed_fee_incl_vat_per_month" : null) },
       grid: { monthly_fee_sek: gridFixed, vat_included: gridPrice.vat_included ?? null, source: gridPrice.source || null },
       total_monthly_fixed_sek: (tradeFixed !== null && gridFixed !== null) ? tradeFixed + gridFixed : null,
       applied_once: true,
@@ -892,7 +1051,7 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       forecast_remaining_kwh: estimate.forecast_remaining_kwh ?? null,
       forecast_trade_variable_sek: estimate.forecast_remaining_trade_variable_sek ?? null,
       forecast_grid_variable_sek: estimate.forecast_remaining_grid_variable_sek ?? null,
-      total_sek: billingHistory.forecast_remaining_total_sek ?? null,
+      total_sek: estimate.forecast_remaining_total_sek ?? null,
       spot_price_source: billingHistory.spot_price_source || null,
       fallback_price: billingHistory.fallback_price ?? null,
       confidence: estimate.forecast_confidence,
@@ -906,18 +1065,34 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       estimated_total_sek: estimate.estimated_month_total_sek,
     },
     calculation: {
-      trade_variable_sek: estimate.trade?.variable_cost_sek ?? null,
-      trade_fixed_sek: tradeFixed,
-      grid_transfer_sek: gridPrice.transfer_ore_per_kwh_gross == null ? null : estimate.grid?.variable_cost_sek * Number(gridPrice.transfer_ore_per_kwh_gross) / Number(estimate.grid_weighted_average_ore_per_kwh || gridPrice.variable_total_ore_per_kwh_gross),
-      grid_energy_tax_sek: gridPrice.energy_tax_ore_per_kwh_gross == null ? null : estimate.grid?.variable_cost_sek * Number(gridPrice.energy_tax_ore_per_kwh_gross) / Number(estimate.grid_weighted_average_ore_per_kwh || gridPrice.variable_total_ore_per_kwh_gross),
+      trade_variable_actual_sek: estimate.trade?.variable_cost_sek ?? null,
+      trade_variable_forecast_remaining_sek: estimate.forecast_remaining_trade_variable_sek ?? null,
+      trade_variable_estimated_month_sek: estimate.trade?.variable_cost_sek == null || estimate.forecast_remaining_trade_variable_sek == null ? null : estimate.trade.variable_cost_sek + estimate.forecast_remaining_trade_variable_sek,
+      grid_transfer_actual_sek: splitGridCost(estimate.grid?.variable_cost_sek, gridTransfer),
+      grid_transfer_forecast_remaining_sek: splitGridCost(estimate.forecast_remaining_grid_variable_sek, gridTransfer),
+      grid_transfer_estimated_month_sek: gridPrice.transfer_ore_per_kwh_gross == null || estimate.forecast_import_kwh == null ? null : estimate.forecast_import_kwh * Number(gridPrice.transfer_ore_per_kwh_gross) / 100,
+      grid_energy_tax_actual_sek: splitGridCost(estimate.grid?.variable_cost_sek, gridEnergyTax),
+      grid_energy_tax_forecast_remaining_sek: splitGridCost(estimate.forecast_remaining_grid_variable_sek, gridEnergyTax),
+      grid_energy_tax_estimated_month_sek: gridPrice.energy_tax_ore_per_kwh_gross == null || estimate.forecast_import_kwh == null ? null : estimate.forecast_import_kwh * Number(gridPrice.energy_tax_ore_per_kwh_gross) / 100,
       grid_fixed_sek: gridFixed,
+      trade_fixed_sek: tradeFixed,
       other_sek: 0,
       estimated_total_sek: estimate.estimated_month_total_sek,
-      formula: "trade_variable + trade_fixed + grid_transfer + grid_energy_tax + grid_fixed",
+      component_sum_sek: [
+        estimate.trade?.variable_cost_sek,
+        estimate.forecast_remaining_trade_variable_sek,
+        splitGridCost(estimate.grid?.variable_cost_sek, gridTransfer),
+        splitGridCost(estimate.forecast_remaining_grid_variable_sek, gridTransfer),
+        splitGridCost(estimate.grid?.variable_cost_sek, gridEnergyTax),
+        splitGridCost(estimate.forecast_remaining_grid_variable_sek, gridEnergyTax),
+        tradeFixed,
+        gridFixed,
+      ].reduce((sum, value) => sum + (Number.isFinite(Number(value)) ? Number(value) : 0), 0),
+      formula: "trade_variable_actual + trade_variable_forecast_remaining + grid_transfer_actual + grid_transfer_forecast_remaining + grid_energy_tax_actual + grid_energy_tax_forecast_remaining + trade_fixed + grid_fixed",
     },
     vat_audit: {
-      spot: { included_at_source: billingHistory.spot_vat_included ?? null, vat_added_by_us: billingHistory.spot_vat_added_by_us ?? null },
-      trade_variable: { included_at_source: billingHistory.trade_vat_included ?? null, vat_added_by_us: billingHistory.trade_vat_added_by_us ?? null },
+      spot: { source_is_ex_vat: rows.some((row) => Number.isFinite(row.trade.spot_price_ex_vat_ore_per_kwh)), vat_added_by_calculation: false, vat_component_present: rows.some((row) => Number.isFinite(row.trade.vat_ore_per_kwh)) },
+      trade_variable: { source_is_ex_vat: rows.some((row) => Number.isFinite(row.trade.electricity_cost_ex_vat_ore_per_kwh)), vat_added_by_calculation: false, gross_price_source: "period.customer_price", vat_component_present: rows.some((row) => Number.isFinite(row.trade.vat_ore_per_kwh)) },
       grid_transfer: { included_at_source: gridPrice.vat_included ?? null, vat_added_by_us: gridPrice.vat_included === true ? false : null },
       energy_tax: { included_at_source: gridPrice.vat_included ?? null, vat_added_by_us: gridPrice.vat_included === true ? false : null },
       grid_fixed_fee: { included_at_source: gridPrice.vat_included ?? null, vat_added_by_us: gridPrice.vat_included === true ? false : null },
@@ -1266,6 +1441,7 @@ export function renderSharedTooltip(tooltip, { title = "", fields = [] }) {
   for (const field of validFields) {
     const row = document.createElement("span");
     row.className = `tooltip-value ${field.className || ""}`.trim();
+    if (field.color) row.style.color = field.color;
     row.textContent = `${field.label}: ${field.formatted ?? field.value}`;
     tooltip.append(row);
   }
@@ -1341,7 +1517,7 @@ class ElrakningPanel {
     this._tooltipOrbit = { angle: null };
     this._priceHeaderLayoutObserver = null;
     this._chartPreferencesReady = false;
-    this._meterPowerHistory = { date: null, points: [] };
+    this._meterPowerHistory = { date: null, points: [], phase_history: {}, loaded_at: null, last_live_merge_at: null, last_live_timestamp: null };
     this._livePowerMaxima = { date: null, house: 0, solar: 0, grid: 0, battery: 0 };
     this._meterTooltipPoints = [];
     this._meterCanonicalPoints = [];
@@ -1369,6 +1545,7 @@ class ElrakningPanel {
     };
     this._priceComparisonVisible = { electricity: true, grid: false };
     this._phaseHistoryMetric = "current";
+    this._phaseHistoryVisible = { l1: true, l2: true, l3: true };
     this._providerConfigured = false;
     this._electricityProviderState = null;
     this._billingHistory = null;
@@ -1443,6 +1620,7 @@ class ElrakningPanel {
             <span class="invoice-estimate-comparison" data-invoice-estimate-comparison hidden></span>
             <div class="invoice-estimate-bar" data-invoice-estimate-bar hidden aria-label="Jämförelse med föregående månad"><span data-invoice-estimate-fill></span><i data-invoice-estimate-marker aria-hidden="true"></i></div>
             <div class="invoice-estimate-scale" data-invoice-estimate-scale hidden><span>0</span><span data-invoice-estimate-scale-value></span></div>
+            <div class="live-power-debug-footer"><span class="live-power-copy-feedback" aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="invoice" hidden>Visa data</button></div>
           </article>
         </section>
 
@@ -1551,6 +1729,11 @@ class ElrakningPanel {
                 <button type="button" data-phase-metric="voltage" aria-pressed="false">Spänning</button>
                 <button type="button" data-phase-metric="active_power" aria-pressed="false">Effekt</button>
               </div>
+              <div class="phase-history-filter-selector" role="group" aria-label="Faser">
+                <button type="button" data-phase-filter="l1" aria-pressed="true">L1</button>
+                <button type="button" data-phase-filter="l2" aria-pressed="true">L2</button>
+                <button type="button" data-phase-filter="l3" aria-pressed="true">L3</button>
+              </div>
             </div>
             <div class="phase-history-summary" data-phase-history-summary></div>
             <div class="phase-history-chart" data-phase-history-chart></div>
@@ -1586,7 +1769,6 @@ class ElrakningPanel {
               </div>
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
-              <div class="eon-grid-phase-summary" data-eon-grid-phase-summary hidden></div>
               <p class="provider-invoice-cost" data-provider-invoice-cost="elnet" hidden><span>Kostnad denna månad</span><strong></strong></p>
               <button type="button" class="configuration-control" data-eon-grid-configure>Konfigurera</button>
               <button type="button" data-eon-grid-source hidden>Vad har vi för data?</button>
@@ -2650,49 +2832,6 @@ class ElrakningPanel {
           margin-top: 14px;
         }
 
-        .eon-grid-phase-summary {
-          display: grid;
-          gap: 6px;
-          margin-top: 12px;
-        }
-
-        .eon-grid-phase-summary h3 {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          font-weight: 400;
-          margin: 0 0 2px;
-        }
-
-        .eon-grid-phase-row {
-          align-items: center;
-          display: grid;
-          gap: 8px;
-          grid-template-columns: 22px minmax(0, 1fr) auto;
-          min-width: 0;
-        }
-
-        .eon-grid-phase-label,
-        .eon-grid-phase-value {
-          color: var(--secondary-text-color);
-          font-size: 11px;
-          white-space: nowrap;
-        }
-
-        .eon-grid-phase-bar {
-          background: rgba(255, 255, 255, 0.14);
-          border-radius: 999px;
-          height: 5px;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .eon-grid-phase-bar span {
-          background: var(--secondary-text-color);
-          border-radius: inherit;
-          display: block;
-          height: 100%;
-        }
-
         .phase-history-row {
           grid-template-columns: 1fr;
           margin-top: 16px;
@@ -2720,7 +2859,14 @@ class ElrakningPanel {
           gap: 6px;
         }
 
-        .phase-history-metric-selector button {
+        .phase-history-filter-selector {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .phase-history-metric-selector button,
+        .phase-history-filter-selector button {
           background: transparent;
           border: 1px solid var(--divider-color);
           border-radius: 999px;
@@ -2730,7 +2876,8 @@ class ElrakningPanel {
           padding: 4px 9px;
         }
 
-        .phase-history-metric-selector button.active {
+        .phase-history-metric-selector button.active,
+        .phase-history-filter-selector button.active {
           background: var(--primary-background-color);
           color: var(--primary-text-color);
         }
@@ -2917,10 +3064,6 @@ class ElrakningPanel {
         .provider-invoice-cost strong {
           font-size: 17px;
           font-weight: 500;
-        }
-
-        .invoice-estimate-card.debug-copy-enabled {
-          cursor: pointer;
         }
 
         .retained-history {
@@ -3986,7 +4129,6 @@ class ElrakningPanel {
     this._bindPhaseHistoryCard();
         this._bindDiagnostics();
     this._bindMainInvoiceParser();
-    this._bindInvoiceEstimate();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
     this._setupSocCardHeightObserver();
@@ -4101,9 +4243,24 @@ class ElrakningPanel {
     if (["current", "voltage", "active_power"].includes(preference)) this._phaseHistoryMetric = preference;
   }
 
+  _applyPhaseHistoryVisibility(preferences) {
+    if (!preferences || typeof preferences !== "object") return;
+    for (const phase of Object.keys(this._phaseHistoryVisible)) {
+      if (typeof preferences[phase] === "boolean") this._phaseHistoryVisible[phase] = preferences[phase];
+    }
+  }
+
   _syncPhaseHistoryMetricButtons() {
     for (const button of this.host.querySelectorAll("[data-phase-metric]")) {
       const active = button.dataset.phaseMetric === this._phaseHistoryMetric;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+
+  _syncPhaseHistoryVisibilityButtons() {
+    for (const button of this.host.querySelectorAll("[data-phase-filter]")) {
+      const active = this._phaseHistoryVisible[button.dataset.phaseFilter] === true;
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
     }
@@ -4132,11 +4289,13 @@ class ElrakningPanel {
       this._applyChartLayerState(response.chart_layers);
       this._applyPriceComparisonState(response.price_comparison);
       this._applyPhaseHistoryPreference(response.phase_history_metric);
+      this._applyPhaseHistoryVisibility(response.phase_history_visible);
       this._applyConfigurationCardsVisibility(response.configuration_cards_visible, response.main_cards);
       this._chartPreferencesReady = true;
       this._syncChartLayerButtons();
       this._syncPriceComparisonControls();
       this._syncPhaseHistoryMetricButtons();
+      this._syncPhaseHistoryVisibilityButtons();
       this.renderPriceChart();
     } catch {
       // Keep the first-use defaults for this session when preference loading fails.
@@ -4151,6 +4310,7 @@ class ElrakningPanel {
         chart_layers: this._chartLayerState(),
         price_comparison: this._priceComparisonVisible,
         phase_history_metric: this._phaseHistoryMetric,
+        phase_history_visible: this._phaseHistoryVisible,
         configuration_cards_visible: this._configurationCardsVisible,
         main_cards: this._mainCards,
       });
@@ -4312,7 +4472,6 @@ class ElrakningPanel {
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
     this._updateLivePowerCardInteractivity();
-    this._updateInvoiceEstimateInteractivity();
   }
 
   _bindMeterDialog() {
@@ -4872,7 +5031,8 @@ class ElrakningPanel {
         element._livePowerRaw.presentation.fuse_ampere = tile.fuseAmpere;
         element._livePowerRaw.presentation.phase_current_a = tile.phaseCurrentA;
         element._livePowerRaw.presentation.fuse_utilization_percent = tile.fuseUtilizationPercent;
-        element._livePowerRaw.history.daily_phase_max = this._meterPowerHistory?.daily_phase_max || {};
+      element._livePowerRaw.history.daily_phase_max = this._meterPowerHistory?.daily_phase_max || {};
+      element._livePowerRaw.history.daily_max_phase = this._meterPowerHistory?.daily_max_phase || null;
       }
     }
   }
@@ -4899,6 +5059,7 @@ class ElrakningPanel {
   _updateLivePowerCardInteractivity() {
     const enabled = this._debugEnabled;
     for (const tile of this.host.querySelectorAll("[data-live-power-tile]")) {
+      if (tile.matches("[data-invoice-estimate-card]")) continue;
       if (enabled && !tile._livePowerCopyEnabled) {
         const copy = () => { void this._copyLivePowerTile(tile); };
         const clickHandler = (event) => {
@@ -6035,7 +6196,7 @@ class ElrakningPanel {
       : this._formatSek(Number(estimate.estimated_month_total_sek));
     const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(
       billingHistory.invoice_sources || {
-        trade: billingHistory.trade_invoices,
+        trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
         grid: billingHistory.grid_invoices,
       },
       estimate.month,
@@ -6080,29 +6241,6 @@ class ElrakningPanel {
       const available = value != null && Number.isFinite(Number(value));
       if (output) output.textContent = available ? this._formatSek(Number(value)) : "";
       element.hidden = !available;
-    }
-  }
-
-  _bindInvoiceEstimate() {
-    this._updateInvoiceEstimateInteractivity();
-  }
-
-  _updateInvoiceEstimateInteractivity() {
-    const card = this.host.querySelector("[data-invoice-estimate-card]");
-    if (!card) return;
-    if (this._debugEnabled && !card._invoiceCopyEnabled) {
-      const click = () => {
-        if (this._invoiceEstimateRaw) this._showSourceDataDialog("Source data", "Estimerad faktura", this._invoiceEstimateRaw);
-      };
-      card.addEventListener("click", click);
-      card._invoiceCopyEnabled = true;
-      card._invoiceCopyClick = click;
-      card.classList.add("debug-copy-enabled");
-    } else if (!this._debugEnabled && card._invoiceCopyEnabled) {
-      card.removeEventListener("click", card._invoiceCopyClick);
-      delete card._invoiceCopyEnabled;
-      delete card._invoiceCopyClick;
-      card.classList.remove("debug-copy-enabled");
     }
   }
 
@@ -6514,13 +6652,27 @@ class ElrakningPanel {
         this._renderPhaseHistoryCard();
       });
     }
+    for (const button of this.host.querySelectorAll("[data-phase-filter]")) {
+      button.addEventListener("click", () => {
+        const phase = button.dataset.phaseFilter;
+        if (!Object.hasOwn(this._phaseHistoryVisible, phase)) return;
+        this._phaseHistoryVisible[phase] = button.getAttribute("aria-pressed") !== "true";
+        this._syncPhaseHistoryVisibilityButtons();
+        this._persistChartPreferences();
+        this._renderPhaseHistoryCard();
+      });
+    }
     this._syncPhaseHistoryMetricButtons();
+    this._syncPhaseHistoryVisibilityButtons();
     const copy = this.host.querySelector("[data-phase-history-copy]");
     copy?.addEventListener("click", () => {
       if (!this._debugEnabled || !this._meterPowerHistory?.phase_history) return;
       const metricLabels = { current: "Ström", voltage: "Spänning", active_power: "Effekt" };
+      const phaseHistory = this._meterPowerHistory.phase_history;
       this._showSourceDataDialog("Source data", `Faser · ${metricLabels[this._phaseHistoryMetric] || this._phaseHistoryMetric}`, {
           metric: this._phaseHistoryMetric,
+          active_phases: Object.keys(this._phaseHistoryVisible).filter((phase) => this._phaseHistoryVisible[phase]),
+          phase_color_map: PHASE_COLOR_MAP,
           ...buildPhaseProvenance(
             this._phaseHistoryMetric,
             {
@@ -6531,7 +6683,22 @@ class ElrakningPanel {
             this._meterPowerHistory,
             this.hass?.states || {},
           ),
-          phase_history: this._meterPowerHistory.phase_history,
+          history_cache: {
+            period_key: this._meterPowerHistory.date || null,
+            loaded_at: this._meterPowerHistory.loaded_at || null,
+            metric: this._phaseHistoryMetric,
+            point_counts: phaseHistoryPointCounts(phaseHistory),
+            recorder_loaded: this._meterHistorySummary?.success === true,
+            last_live_merge_at: this._meterPowerHistory.last_live_merge_at || null,
+            last_live_timestamp: this._meterPowerHistory.last_live_timestamp || null,
+          },
+          recorder_history: phaseHistory,
+          live_values: {
+            current: this._meterState?.phase_current_a || {},
+            voltage: this._meterState?.phase_voltage_v || {},
+            active_power: this._meterState?.phase_active_power_kw || {},
+          },
+          rendered_history: phaseHistory[this._phaseHistoryMetric] || {},
         });
     });
   }
@@ -6546,7 +6713,7 @@ class ElrakningPanel {
     const source = history[metric] || {};
     const phasePoints = Object.fromEntries(["l1", "l2", "l3"].map((phase) => [
       phase,
-      Array.isArray(source[phase]?.points) ? source[phase].points.filter((point) => Number.isFinite(Number(point.value))) : [],
+      this._phaseHistoryVisible[phase] && Array.isArray(source[phase]?.points) ? source[phase].points.filter((point) => Number.isFinite(Number(point.value))) : [],
     ]));
     const hasPoints = Object.values(phasePoints).some((points) => points.length);
     card.hidden = !hasPoints;
@@ -6560,7 +6727,7 @@ class ElrakningPanel {
     const labels = { current: ["Ström", "A"], voltage: ["Spänning", "V"], active_power: ["Effekt", "kW"] };
     const [label, unit] = labels[metric];
     const live = metric === "current" ? this._meterState?.phase_current_a : metric === "voltage" ? this._meterState?.phase_voltage_v : this._meterState?.phase_active_power_kw;
-    summary.replaceChildren(...["l1", "l2", "l3"].map((phase) => {
+    summary.replaceChildren(...["l1", "l2", "l3"].filter((phase) => this._phaseHistoryVisible[phase]).map((phase) => {
       const item = document.createElement("div");
         const strong = document.createElement("strong");
         const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
@@ -6573,7 +6740,7 @@ class ElrakningPanel {
       phaseLabel.textContent = phase.toUpperCase();
       const indicator = document.createElement("i");
       indicator.className = `phase-history-phase-indicator ${phase}`;
-      indicator.style.backgroundColor = chartColor(`phase${phase.slice(1).toUpperCase()}`);
+      indicator.style.backgroundColor = PHASE_COLOR_MAP[phase];
       item.append(strong, indicator, phaseLabel);
       return item;
     }));
@@ -6611,7 +6778,7 @@ class ElrakningPanel {
     if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue) { minValue = 0; maxValue = 1; }
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - axisStart) / timeRange) * (width - plot.left - plot.right);
     const y = (value) => plot.top + (maxValue - value) / (maxValue - minValue) * (height - plot.top - plot.bottom);
-    const phaseColors = { l1: chartColor("phaseL1"), l2: chartColor("phaseL2"), l3: chartColor("phaseL3") };
+    const phaseColors = PHASE_COLOR_MAP;
     const grid = [0, 0.5, 1].map((ratio) => {
       const value = maxValue - ratio * (maxValue - minValue);
       return `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="phase-history-axis-label" x="4" y="${y(value) + 3}">${this._formatNumber(value)} ${unit}</text>`;
@@ -6640,7 +6807,7 @@ class ElrakningPanel {
       const bounds = svg.getBoundingClientRect();
       const timestamp = new Date(axisStart + Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))) * timeRange);
       const selected = nearest(timestamp);
-      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, formatted: `${metric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
+      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, color: phaseColors[phase], formatted: `${metric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
       renderSharedTooltip(tooltip, { title: timestamp.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }), fields });
       tooltip.hidden = false;
       hover.innerHTML = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => `<circle class="chart-hover-marker" fill="${phaseColors[phase]}" cx="${x(point.timestamp)}" cy="${y(Number(point.value))}" r="4" />`).join("");
@@ -6704,54 +6871,6 @@ class ElrakningPanel {
     }));
   }
 
-  _renderEonGridPhaseSummary() {
-    const summary = this.host.querySelector("[data-eon-grid-phase-summary]");
-    if (!summary) return;
-    const configured = this._eonGridState?.configured === true;
-    const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
-    const dailyPhaseMax = this._meterPowerHistory?.daily_phase_max || {};
-    const values = ["l1", "l2", "l3"].map((phase) => {
-      const raw = dailyPhaseMax[phase]?.ampere;
-      return raw == null ? null : Number(raw);
-    });
-    if (!configured || !values.some(Number.isFinite)) {
-      summary.replaceChildren();
-      summary.hidden = true;
-      return;
-    }
-    const heading = document.createElement("h3");
-    heading.textContent = "Fasbelastning idag";
-    const rows = [heading];
-    for (const [index, phase] of ["l1", "l2", "l3"].entries()) {
-      const value = values[index];
-      const row = document.createElement("div");
-      row.className = "eon-grid-phase-row";
-      const label = document.createElement("span");
-      label.className = "eon-grid-phase-label";
-      label.textContent = phase.toUpperCase();
-      const bar = document.createElement("div");
-      bar.className = "eon-grid-phase-bar";
-      const fill = document.createElement("span");
-      fill.style.backgroundColor = chartColor("neutral");
-      fill.style.width = Number.isFinite(value) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
-        ? `${Math.max(0, Math.min(100, value / fuseAmpere * 100))}%`
-        : "0%";
-      bar.append(fill);
-      const output = document.createElement("span");
-      output.className = "eon-grid-phase-value";
-      const utilization = Number.isFinite(value) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
-        ? ` · ${this._formatNumber(value / fuseAmpere * 100)} %`
-        : "";
-      output.textContent = Number.isFinite(value)
-        ? `${this._formatNumber(value)}${Number.isFinite(fuseAmpere) && fuseAmpere > 0 ? ` / ${this._formatNumber(fuseAmpere)} A` : " A"}${utilization}`
-        : "—";
-      row.append(label, bar, output);
-      rows.push(row);
-    }
-    summary.replaceChildren(...rows);
-    summary.hidden = false;
-  }
-
   _applyEonGridState(state) {
     this._eonGridState = state;
     this._eonGridPrice = state?.grid_price || state?.tariff?.grid_price || null;
@@ -6773,6 +6892,18 @@ class ElrakningPanel {
     const dailyFuseUtilizationPercent = Number.isFinite(Number(state?.daily_max_fuse_utilization_percent))
       ? Number(state.daily_max_fuse_utilization_percent)
       : this._meterPowerHistory?.daily_max_fuse_utilization_percent;
+    const fuseAmpere = Number(facility.fuse_ampere);
+    const dailyMaxPhaseBase = state?.daily_max_phase || this._meterPowerHistory?.daily_max_phase || buildDailyMaxPhase(
+      state?.daily_phase_max || this._meterPowerHistory?.daily_phase_max,
+      fuseAmpere,
+    );
+    const dailyMaxPhase = dailyMaxPhaseBase
+      ? {
+        ...dailyMaxPhaseBase,
+        fuse_ampere: dailyMaxPhaseBase.fuse_ampere ?? (Number.isFinite(fuseAmpere) && fuseAmpere > 0 ? fuseAmpere : null),
+        utilization_percent: dailyMaxPhaseBase.utilization_percent ?? (Number.isFinite(fuseAmpere) && fuseAmpere > 0 ? dailyMaxPhaseBase.ampere / fuseAmpere * 100 : null),
+      }
+      : null;
     provider.textContent = configured && state?.provider_name ? `${state.provider_name} · Elnät` : "";
     provider.hidden = !configured;
     const outage = state?.outage || {};
@@ -6798,7 +6929,11 @@ class ElrakningPanel {
     if (facility.price_area) rows.push(["Elområde", facility.price_area]);
     if (facility.grid_area) rows.push(["Nätområde", facility.grid_area]);
     if (Number.isFinite(dailyMaxPhaseCurrentA)) {
-      rows.push(["Max fas idag", `${this._formatNumber(dailyMaxPhaseCurrentA)} A`]);
+      const phaseLabel = dailyMaxPhase?.phase ? `${dailyMaxPhase.phase.toUpperCase()} · ` : "";
+      const fuseLabel = Number.isFinite(Number(dailyMaxPhase?.fuse_ampere ?? fuseAmpere))
+        ? ` / ${this._formatNumber(Number(dailyMaxPhase.fuse_ampere ?? fuseAmpere))} A`
+        : "";
+      rows.push(["Max fas idag", `${phaseLabel}${this._formatNumber(dailyMaxPhase?.ampere ?? dailyMaxPhaseCurrentA)}${fuseLabel}`]);
     }
     if (Number.isFinite(dailyFuseUtilizationPercent)) {
       rows.push(["Högsta säkringsandel", `${this._formatNumber(dailyFuseUtilizationPercent)} %`]);
@@ -6817,7 +6952,6 @@ class ElrakningPanel {
       return [left, right];
     }));
     summary.hidden = !configured || rows.length === 0;
-    this._renderEonGridPhaseSummary();
     this._renderInvoiceCardCosts();
     this._updatePriceComparisonControls();
     if (this.host.querySelector(".price-chart") && this.priceData.periods.length) this.renderPriceChart();
@@ -6936,7 +7070,6 @@ class ElrakningPanel {
     if (source) source.hidden = !this._debugEnabled || state?.configured !== true;
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
-    this._renderEonGridPhaseSummary();
     this._renderPhaseHistoryCard();
     this._renderInvoiceEstimateCard();
   }
@@ -6955,6 +7088,7 @@ class ElrakningPanel {
       ) || null,
     };
     const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+    this._meterPowerHistory.daily_max_phase = buildDailyMaxPhase(dailyPhaseMax, fuseAmpere);
     const dailyMax = this._meterPowerHistory.daily_max_phase_current_a;
     this._meterPowerHistory.daily_max_fuse_utilization_percent = Number.isFinite(dailyMax) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
       ? dailyMax / fuseAmpere * 100
@@ -6977,7 +7111,6 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     const entityId = this._meterState?.power_entity || null;
     const requestToken = ++this._meterHistoryRequestToken;
-    this._meterPowerHistory = { date: null, points: [] };
     this._meterHistorySummary = null;
     try {
       const request = { type: "elrakning/meter_power_history" };
@@ -7001,19 +7134,27 @@ class ElrakningPanel {
         if (this.host.querySelector(".price-chart")) this.renderPriceChart();
         return;
       }
+      const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+      const responseDate = response?.date || null;
+      const existingDate = this._meterPowerHistory?.date || null;
+      const samePeriod = !existingDate || !responseDate || existingDate === responseDate;
+      const previousHistory = samePeriod ? this._meterPowerHistory : { date: responseDate, points: [] };
       this._meterPowerHistory = {
-        date: response?.date || null,
-        points: Array.isArray(response?.points) ? response.points : [],
+        date: responseDate,
+        points: Array.isArray(response?.points) ? response.points : previousHistory.points || [],
         phase_current_history: response?.phase_current_history || {},
-        phase_history: response?.phase_history || {},
+        phase_history: mergePhaseHistory(previousHistory.phase_history, response?.phase_history),
         phase_source_entities: response?.phase_source_entities || this._meterState?.phase_source_entities || {},
         phase_discovery_method: response?.phase_discovery_method || this._meterState?.phase_discovery_method || null,
         daily_phase_max: response?.daily_phase_max || {},
+        daily_max_phase: response?.daily_max_phase || buildDailyMaxPhase(response?.daily_phase_max || {}, fuseAmpere),
         daily_max_phase_current_a: Number.isFinite(Number(response?.daily_max_phase_current_a)) ? Number(response.daily_max_phase_current_a) : null,
         phase_current_source_entities: response?.phase_current_source_entities || this._meterState?.phase_current_source_entities || {},
         phase_current_discovery_method: response?.phase_current_discovery_method || this._meterState?.phase_current_discovery_method || null,
+        loaded_at: new Date().toISOString(),
+        last_live_merge_at: previousHistory.last_live_merge_at || null,
+        last_live_timestamp: previousHistory.last_live_timestamp || null,
       };
-      const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
       const dailyMaxPhase = this._meterPowerHistory.daily_max_phase_current_a;
       this._meterPowerHistory.daily_max_fuse_utilization_percent = Number.isFinite(dailyMaxPhase) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
         ? dailyMaxPhase / fuseAmpere * 100
@@ -7029,7 +7170,6 @@ class ElrakningPanel {
       };
     } catch (error) {
       if (requestToken !== this._meterHistoryRequestToken) return;
-      this._meterPowerHistory = { date: null, points: [] };
       this._meterHistorySummary = {
         entity_id: entityId,
         success: false,
@@ -7048,10 +7188,10 @@ class ElrakningPanel {
   }
 
   _appendMeterPowerPoint(point) {
-    if (point?.phase_current_a) {
+    if (point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw) {
       this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());
       const timestamp = point.timestamp || new Date().toISOString();
-      const phaseHistory = { ...(this._meterPowerHistory.phase_history || {}) };
+      const phaseHistory = mergePhaseHistory(this._meterPowerHistory.phase_history, {});
       for (const [metric, values] of [["current", point.phase_current_a], ["voltage", point.phase_voltage_v], ["active_power", point.phase_active_power_kw]]) {
         if (!values || typeof values !== "object") continue;
         phaseHistory[metric] = { ...(phaseHistory[metric] || {}) };
@@ -7062,12 +7202,14 @@ class ElrakningPanel {
           const points = Array.isArray(phaseHistory[metric][phase]?.points) ? [...phaseHistory[metric][phase].points] : [];
           const nextPoint = { timestamp, value: metric === "current" ? Math.abs(value) : value };
           const index = points.findIndex((item) => item.timestamp === timestamp);
-          if (index >= 0) points[index] = nextPoint; else points.push(nextPoint);
+          if (index >= 0) points[index] = { ...points[index], ...nextPoint }; else points.push(nextPoint);
+          points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
           phaseHistory[metric][phase] = { ...(phaseHistory[metric][phase] || {}), points: points.slice(-2000) };
         }
       }
       this._meterPowerHistory.phase_history = phaseHistory;
-      this._renderEonGridPhaseSummary();
+      this._meterPowerHistory.last_live_merge_at = new Date().toISOString();
+      this._meterPowerHistory.last_live_timestamp = timestamp;
       this._renderLivePowerRow();
       this._renderPhaseHistoryCard();
     }

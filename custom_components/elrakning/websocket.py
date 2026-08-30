@@ -18,7 +18,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data, grid_variable_cost_ex_vat
-from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
+from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
@@ -696,12 +696,14 @@ async def websocket_chart_layers(hass, connection, msg):
     configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
     main_cards = await manager.async_get_main_cards(connection.user.id)
     price_comparison = await manager.async_get_price_comparison(connection.user.id)
+    phase_history_visible = await manager.async_get_phase_history_visible(connection.user.id)
     connection.send_result(msg["id"], {
         "success": True,
         "chart_layers": chart_layers,
         "configuration_cards_visible": configuration_cards_visible,
         "main_cards": main_cards,
         "price_comparison": price_comparison,
+        "phase_history_visible": phase_history_visible,
     })
 
 
@@ -717,6 +719,9 @@ async def websocket_chart_layers(hass, connection, msg):
         },
         vol.Optional("price_comparison", default={}): {
             vol.Optional(key): bool for key in PRICE_COMPARISON_DEFAULTS
+        },
+        vol.Optional("phase_history_visible", default={}): {
+            vol.Optional(key): bool for key in PHASE_HISTORY_VISIBLE_DEFAULTS
         },
     }
 )
@@ -740,12 +745,16 @@ async def websocket_chart_layers_set(hass, connection, msg):
     price_comparison = await manager.async_get_price_comparison(connection.user.id)
     if "price_comparison" in msg:
         price_comparison = await manager.async_set_price_comparison(connection.user.id, msg["price_comparison"])
+    phase_history_visible = await manager.async_get_phase_history_visible(connection.user.id)
+    if "phase_history_visible" in msg:
+        phase_history_visible = await manager.async_set_phase_history_visible(connection.user.id, msg["phase_history_visible"])
     connection.send_result(msg["id"], {
         "success": True,
         "chart_layers": chart_layers,
         "configuration_cards_visible": configuration_cards_visible,
         "main_cards": main_cards,
         "price_comparison": price_comparison,
+        "phase_history_visible": phase_history_visible,
     })
 
 
@@ -903,7 +912,12 @@ async def websocket_billing_history(hass, connection, msg):
         "start": billing["start"],
         "end": billing["end"],
         "energy_points": billing.get("points", []),
-        "energy_source": "home_assistant_recorder",
+        "energy_source": {
+            "method": "integrated_grid_power",
+            "entity_id": billing.get("entity_id"),
+            "source_entity": billing.get("entity_id"),
+            "raw_unit": "kW",
+        },
         "integration_method": "trapezoidal_power_integration",
         "energy_coverage": billing.get("coverage", {}),
         "price_periods": price_periods,

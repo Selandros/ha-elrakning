@@ -36,6 +36,7 @@ def serialize_provider_state(
             "device_name": None,
             "facility_name": None,
             "invoice_count": 0,
+            "invoice_history": [],
             "latest_invoice": None,
             "last_update": None,
             "error": None,
@@ -64,6 +65,7 @@ def serialize_provider_state(
         "device_name": metadata.get("device_name"),
         "facility_name": metadata.get("facility_name") or facility.get("name") or facility.get("address"),
         "invoice_count": len(invoices),
+        "invoice_history": [_public_invoice(invoice) for invoice in invoices],
         "latest_invoice": _public_invoice(latest) if latest else None,
         "last_update": active_data.get("last_update"),
         "error": public_error,
@@ -104,8 +106,9 @@ def _safe_facility_name(facility: dict[str, Any]) -> str | None:
 
 def _public_invoice(invoice: dict[str, Any]) -> dict[str, Any]:
     allowed = (
-        "invoice_date", "month", "due_date", "state", "is_paid",
-        "amount_due_ore", "amount_due_sek",
+        "invoice_date", "month", "billing_period", "due_date", "state", "is_paid",
+        "amount_due_ore", "amount_due_sek", "period_cost_sek",
+        "period_cost_before_credits_sek", "credits_applied_sek", "source",
     )
     return {key: invoice[key] for key in allowed if key in invoice}
 

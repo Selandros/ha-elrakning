@@ -50,6 +50,11 @@ PRICE_COMPARISON_DEFAULTS = {
     "electricity": True,
     "grid": False,
 }
+PHASE_HISTORY_VISIBLE_DEFAULTS = {
+    "l1": True,
+    "l2": True,
+    "l3": True,
+}
 
 
 class ElhandelManager:
@@ -200,6 +205,27 @@ class ElhandelManager:
             **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
             "price_comparison": current,
         }
+        await self.chart_preferences_store.async_save({"users": users})
+        return current
+
+    async def async_get_phase_history_visible(self, user_id: str) -> dict[str, bool]:
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) else {}
+        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
+        saved = user_state.get("phase_history_visible", {}) if isinstance(user_state, dict) else {}
+        return {
+            key: saved[key] if isinstance(saved, dict) and isinstance(saved.get(key), bool) else default
+            for key, default in PHASE_HISTORY_VISIBLE_DEFAULTS.items()
+        }
+
+    async def async_set_phase_history_visible(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
+        current = await self.async_get_phase_history_visible(user_id)
+        for key, value in updates.items():
+            if key in PHASE_HISTORY_VISIBLE_DEFAULTS and isinstance(value, bool):
+                current[key] = value
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
+        users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "phase_history_visible": current}
         await self.chart_preferences_store.async_save({"users": users})
         return current
 

@@ -145,7 +145,7 @@ def _phase_voltage(state: State | Any) -> float | None:
     return _finite_state_value(state)
 
 
-def _phase_active_power_kw(state: State | Any) -> float | None:
+def _phase_active_power_kw(state: State | Any, invert_power: bool = False) -> float | None:
     attributes = getattr(state, "attributes", {})
     if str(attributes.get("device_class", "")).lower() != "power":
         return None
@@ -155,7 +155,8 @@ def _phase_active_power_kw(state: State | Any) -> float | None:
     value = _finite_state_value(state)
     if value is None:
         return None
-    return value / 1000 if unit == "w" else value * 1000 if unit == "mw" else value
+    normalized = value / 1000 if unit == "w" else value * 1000 if unit == "mw" else value
+    return -normalized if invert_power else normalized
 
 
 class MeterManager:
@@ -182,13 +183,17 @@ class MeterManager:
         if entity_id != self.mapping.get("power_entity") and phase_kind is None and not phase_entity:
             return
         if phase_entity or phase_kind is not None:
-            validators = {"current": _current_ampere, "voltage": _phase_voltage, "active_power": _phase_active_power_kw}
+            invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
             phase_values = {
                 kind: {
-                    phase: validators[kind](self.hass.states.get(phase_entity_id))
+                    phase: validator(self.hass.states.get(phase_entity_id))
                     for phase, phase_entity_id in entities.items()
                 }
-                for kind, entities in self._phase_source_entities.items()
+                for kind, entities, validator in (
+                    ("current", self._phase_source_entities["current"], _current_ampere),
+                    ("voltage", self._phase_source_entities["voltage"], _phase_voltage),
+                    ("active_power", self._phase_source_entities["active_power"], lambda state: _phase_active_power_kw(state, invert_power)),
+                )
             }
             self.hass.bus.async_fire(
                 METER_POWER_UPDATE_EVENT,
@@ -198,6 +203,7 @@ class MeterManager:
                     "phase_current_a": phase_values["current"],
                     "phase_voltage_v": phase_values["voltage"],
                     "phase_active_power_kw": phase_values["active_power"],
+                    METER_INVERT_FIELD: invert_power,
                 },
             )
             return
@@ -297,7 +303,10 @@ class MeterManager:
             for phase, entity_id in phase_sources["voltage"].items()
         }
         phase_power_values = {
-            phase: _phase_active_power_kw(self.hass.states.get(entity_id))
+            phase: _phase_active_power_kw(
+                self.hass.states.get(entity_id),
+                bool(self.mapping.get(METER_INVERT_FIELD)),
+            )
             for phase, entity_id in phase_sources["active_power"].items()
         }
         result.update({
@@ -554,26 +563,37 @@ class MeterManager:
         for kind, entities in (phase_entities or {}).items():
             validator = validators[kind]
             for phase, phase_entity_id in entities.items():
-                phase_history[kind][phase] = {
-                    "entity_id": phase_entity_id,
-                    "points": [
-                        {"timestamp": state.last_updated.isoformat(), "value": abs(value) if kind == "current" else value, **({"raw_value": value} if kind == "current" else {})}
-                        for state in history_by_entity.get(phase_entity_id, [])
-                        if (value := validator(state)) is not None and getattr(state, "last_updated", None) is not None
-                    ],
-                }
+                history_points = []
+                for state in history_by_entity.get(phase_entity_id, []):
+                    timestamp = getattr(state, "last_updated", None)
+                    raw_value = _finite_state_value(state)
+                    value = (
+                        _phase_active_power_kw(state, invert_power)
+                        if kind == "active_power"
+                        else validator(state)
+                    )
+                    if value is None or timestamp is None:
+                        continue
+                    history_points.append({
+                        "timestamp": timestamp.isoformat(),
+                        "value": abs(value) if kind == "current" else value,
+                        "raw_value": raw_value,
+                        **({"inverted": invert_power} if kind == "active_power" else {}),
+                    })
+                phase_history[kind][phase] = {"entity_id": phase_entity_id, "points": history_points}
         for phase, phase_entity_id in (phase_entities or {}).get("current", {}).items():
             phase_values = []
             for state in history_by_entity.get(phase_entity_id, []):
                 value = _current_ampere(state)
                 timestamp = getattr(state, "last_updated", None)
                 if value is not None and timestamp is not None:
-                    phase_values.append((abs(value), timestamp))
+                    phase_values.append((abs(value), value, timestamp))
             max_entry = max(phase_values, key=lambda entry: entry[0], default=None)
             phase_current_history[phase] = {
                 "entity_id": phase_entity_id,
                 "max_a": max_entry[0] if max_entry else None,
-                "max_timestamp": max_entry[1].isoformat() if max_entry else None,
+                "max_raw_value": max_entry[1] if max_entry else None,
+                "max_timestamp": max_entry[2].isoformat() if max_entry else None,
                 "point_count": len(phase_values),
             }
         daily_max_phase_current_a = max(
@@ -583,10 +603,32 @@ class MeterManager:
         daily_phase_max = {
             phase: {
                 "ampere": item["max_a"],
+                "raw_value": item["max_raw_value"],
                 "timestamp": item["max_timestamp"],
             }
             for phase, item in phase_current_history.items()
         }
+        daily_max_phase = next(
+            (
+                {
+                    "phase": phase,
+                    "ampere": item["ampere"],
+                    "raw_value": item.get("raw_value"),
+                    "timestamp": item["timestamp"],
+                }
+                for phase, item in daily_phase_max.items()
+                if item["ampere"] is not None
+            ),
+            None,
+        )
+        for phase, item in daily_phase_max.items():
+            if item["ampere"] is not None and (daily_max_phase is None or item["ampere"] > daily_max_phase["ampere"]):
+                daily_max_phase = {
+                    "phase": phase,
+                    "ampere": item["ampere"],
+                    "raw_value": item.get("raw_value"),
+                    "timestamp": item["timestamp"],
+                }
         summary = {
             "entity_id": entity_id,
             "success": True,
@@ -602,6 +644,7 @@ class MeterManager:
             "phase_current_discovery_method": self._phase_current_discovery_method,
             "daily_max_phase_current_a": daily_max_phase_current_a,
             "daily_phase_max": daily_phase_max,
+            "daily_max_phase": daily_max_phase,
         }
         self._history_summary = summary
         await self._diagnostic(
@@ -623,6 +666,7 @@ class MeterManager:
             "phase_history": phase_history,
             "daily_max_phase_current_a": daily_max_phase_current_a,
             "daily_phase_max": daily_phase_max,
+            "daily_max_phase": daily_max_phase,
             "phase_current_source_entities": dict((phase_entities or {}).get("current", {})),
             "phase_source_entities": {kind: dict(entities) for kind, entities in (phase_entities or {}).items()},
             "phase_discovery_method": self._phase_current_discovery_method,

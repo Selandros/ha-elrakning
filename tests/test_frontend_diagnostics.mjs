@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -13,15 +13,29 @@ const output = formatDiagnosticsText([
 ], "0.0.64");
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
-assert.match(eonPanelSource, /data-eon-grid-phase-summary/);
-assert.match(eonPanelSource, /Fasbelastning idag/);
+assert.doesNotMatch(eonPanelSource, /data-eon-grid-phase-summary/);
+assert.doesNotMatch(eonPanelSource, /Fasbelastning idag/);
+assert.match(eonPanelSource, /Max fas idag/);
+assert.match(eonPanelSource, /Högsta säkringsandel/);
 assert.match(eonPanelSource, /daily_phase_max/);
 assert.match(eonPanelSource, /phase_current_source_entities/);
 assert.match(eonPanelSource, /mergeDailyPhaseMaxima/);
+assert.match(eonPanelSource, /mergePhaseHistory/);
+assert.match(eonPanelSource, /history_cache/);
+assert.match(eonPanelSource, /recorder_history/);
+assert.match(eonPanelSource, /last_live_merge_at/);
 assert.match(eonPanelSource, /data-phase-history-card/);
 assert.match(eonPanelSource, /data-phase-metric="current"/);
 assert.match(eonPanelSource, /data-phase-metric="voltage"/);
 assert.match(eonPanelSource, /data-phase-metric="active_power"/);
+assert.match(eonPanelSource, /data-phase-filter="l1"/);
+assert.match(eonPanelSource, /data-phase-filter="l2"/);
+assert.match(eonPanelSource, /data-phase-filter="l3"/);
+assert.match(eonPanelSource, /phase_history_visible/);
+assert.match(eonPanelSource, /phaseColors = PHASE_COLOR_MAP/);
+assert.match(eonPanelSource, /color: phaseColors\[phase\]/);
+assert.match(eonPanelSource, /active_phases:/);
+assert.match(eonPanelSource, /phase_color_map: PHASE_COLOR_MAP/);
 assert.match(eonPanelSource, /phase_source_entities/);
 assert.match(eonPanelSource, /phase-history-time-label/);
 assert.match(eonPanelSource, /phase-history-threshold/);
@@ -91,7 +105,7 @@ assert.match(eonPanelSource, /data-provider-source-copy/);
 assert.match(eonPanelSource, /aria-labelledby="provider-source-dialog-title"/);
 assert.match(eonPanelSource, /_showSourceDataDialog\("Source data", "Elmätare"/);
 assert.match(eonPanelSource, /_showSourceDataDialog\("Source data", `Faser/);
-assert.match(eonPanelSource, /_showSourceDataDialog\("Source data", "Estimerad faktura"/);
+assert.match(eonPanelSource, /data-live-power-source="invoice"/);
 assert.doesNotMatch(eonPanelSource, /data-meter-source-dialog|data-meter-source-close|data-meter-source-text/);
 assert.doesNotMatch(eonPanelSource, /_copyText\(JSON\.stringify\(this\._invoiceEstimateRaw/);
 const phaseHistoryBinder = eonPanelSource.slice(eonPanelSource.indexOf("  _bindPhaseHistoryCard()"), eonPanelSource.indexOf("  _renderPhaseHistoryCard()"));
@@ -116,6 +130,7 @@ assert.equal(providerLabel("Greenely", "Kvartsprisavtal"), "Greenely · Kvartspr
 assert.equal(providerLabel(undefined, "Kvartsprisavtal"), "Kvartsprisavtal");
 assert.equal(providerLabel(undefined, undefined), "");
 assert.equal(chartColor("solar"), CHART_COLORS.solar);
+assert.deepEqual(PHASE_COLOR_MAP, { l1: CHART_COLORS.phaseL1, l2: CHART_COLORS.phaseL2, l3: CHART_COLORS.phaseL3 });
 assert.match(chartColor("unknown"), /^#[0-9A-F]{6}$/i);
 assert.equal(POWER_DISPLAY_THRESHOLD_KW, 0.1);
 assert.equal(displayPowerValue(0.1), 0);
@@ -124,13 +139,17 @@ assert.equal(displayPowerValue(0.11), 0.11);
 assert.equal(displayPowerValue("not-a-number"), null);
 const phaseMaxima = mergeDailyPhaseMaxima({}, { l1: -12, l2: 7, l3: 9 }, "2026-08-30T12:00:00Z");
 assert.deepEqual(phaseMaxima, {
-  l1: { ampere: 12, timestamp: "2026-08-30T12:00:00.000Z" },
-  l2: { ampere: 7, timestamp: "2026-08-30T12:00:00.000Z" },
-  l3: { ampere: 9, timestamp: "2026-08-30T12:00:00.000Z" },
+  l1: { ampere: 12, raw_value: -12, timestamp: "2026-08-30T12:00:00.000Z" },
+  l2: { ampere: 7, raw_value: 7, timestamp: "2026-08-30T12:00:00.000Z" },
+  l3: { ampere: 9, raw_value: 9, timestamp: "2026-08-30T12:00:00.000Z" },
 });
 const updatedPhaseMaxima = mergeDailyPhaseMaxima(phaseMaxima, { l1: -10, l2: -8, l3: 11 }, "2026-08-30T13:00:00Z");
 assert.equal(updatedPhaseMaxima.l1.ampere, 12);
 assert.equal(updatedPhaseMaxima.l3.ampere, 11);
+const dailyMaxPhase = buildDailyMaxPhase(updatedPhaseMaxima, 16);
+assert.deepEqual(dailyMaxPhase, { phase: "l1", ampere: 12, raw_value: -12, timestamp: "2026-08-30T12:00:00.000Z", fuse_ampere: 16, utilization_percent: 75 });
+const tiedDailyMaxPhase = buildDailyMaxPhase({ l1: { ampere: 11, timestamp: "2026-08-30T12:00:00.000Z" }, l2: { ampere: 11, timestamp: "2026-08-30T13:00:00.000Z" } }, 16);
+assert.equal(tiedDailyMaxPhase.phase, "l1");
 const integrationStart = new Date("2026-08-23T00:00:00");
 const integrationEnd = new Date("2026-08-24T00:00:00");
 const powerPoints = (values) => values.map((value, index) => ({
@@ -143,8 +162,8 @@ assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([0, 1 / 3, 2 / 3, 1, 4 /
 assert.equal(integratePowerHistoryKwh(powerPoints([0.05, 0.05]), integrationStart, integrationEnd, new Date("2026-08-23T00:05:00")), 0.004166666666666667);
 const invoiceEstimate = buildInvoiceEstimate(
   [
-    { start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 },
-    { start: "2026-08-01T00:15:00Z", end: "2026-08-01T00:30:00Z", trade_customer_price_ore_per_kwh: 40 },
+    { start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20, spot_price_ex_vat: 0.1, electricity_cost_ex_vat: 0.1, vat: 0.05 },
+    { start: "2026-08-01T00:15:00Z", end: "2026-08-01T00:30:00Z", trade_customer_price_ore_per_kwh: 40, spot_price_ex_vat: 0.2, electricity_cost_ex_vat: 0.1, vat: 0.1 },
   ],
   [
     { timestamp: "2026-08-01T00:00:00Z", import_kw: 2 },
@@ -196,8 +215,28 @@ assert.equal(equalComparison.difference_sek, 0);
 assert.equal(equalComparison.difference_percent, 0);
 const partialActual = buildPreviousMonthActual({ trade: [{ month: "2026-07", amount_due_sek: 127.31 }], grid: [] }, "2026-08");
 assert.equal(buildInvoiceComparison({ estimated_month_total_sek: 368.18 }, partialActual).available, false);
+const creditedActual = buildPreviousMonthActual({ trade: [{ month: "2026-07", billing_period: "2026-07", period_cost_before_credits_sek: 312.45, credits_applied_sek: 312.45, amount_due_sek: 0, source: "synthetic_trade_invoice" }], grid: [] }, "2026-08");
+assert.equal(creditedActual.trade.available, true);
+assert.equal(creditedActual.trade.invoice_exists, true);
+assert.equal(creditedActual.trade.total_sek, 312.45);
+assert.equal(creditedActual.trade.period_cost_before_credits_sek, 312.45);
+assert.equal(creditedActual.trade.credits_applied_sek, 312.45);
+assert.equal(creditedActual.trade.amount_due_sek, 0);
+assert.equal(creditedActual.trade.comparison_value_sek, 312.45);
+assert.equal(creditedActual.trade.invoices[0].amount_due_sek, 0);
+assert.equal(creditedActual.trade.invoices[0].comparison_value_sek, 312.45);
+assert.equal(creditedActual.grid.available, false);
+assert.equal(creditedActual.grid.total_sek, null);
+assert.equal(creditedActual.grid.reason, "no_previous_invoice");
+assert.equal(creditedActual.coverage, "partial");
+assert.equal(creditedActual.comparison.reason, "previous_grid_invoice_missing");
+const creditedComparison = buildInvoiceComparison({ estimated_month_total_sek: 368.18 }, creditedActual);
+assert.equal(creditedComparison.available, false);
+assert.equal(creditedComparison.coverage, "partial");
+assert.equal(creditedComparison.reason, "previous_grid_invoice_missing");
 assert.equal(buildPreviousMonthActual({ trade: [{ invoice_date: "2026-08-03", amount_due_sek: 127.31 }], grid: [] }, "2026-08").coverage, "missing");
 const invoiceProvenance = buildInvoiceProvenance(invoiceEstimate, {
+  entity_id: "sensor.synthetic_grid_power",
   energy_points: [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }],
   integration_method: "trapezoidal_power_integration",
   grid_price: {
@@ -211,14 +250,57 @@ const invoiceProvenance = buildInvoiceProvenance(invoiceEstimate, {
 assert.equal(invoiceProvenance.energy_source.method, "integrated_grid_power");
 assert.equal(invoiceProvenance.energy_source.sample_count, 1);
 assert.equal(invoiceProvenance.energy_source.integration_method, "trapezoidal_power_integration");
+assert.equal(invoiceProvenance.energy_source.source_entities[0].entity_id, "sensor.synthetic_grid_power");
 assert.equal(invoiceProvenance.grid_variable.transfer_ore_per_kwh_gross, 97);
 assert.equal(invoiceProvenance.grid_variable.energy_tax_ore_per_kwh_gross, 45);
 assert.equal(invoiceProvenance.grid_variable.vat_included, true);
 assert.equal(invoiceProvenance.fixed_fees.applied_once, true);
+assert.equal(invoiceProvenance.energy_source.source_entity, "sensor.synthetic_grid_power");
+assert.equal(buildInvoiceProvenance(invoiceEstimate, { entity_id: "sensor.synthetic_grid_power" }).energy_source.source_entities[0].entity_id, "sensor.synthetic_grid_power");
+assert.equal(invoiceProvenance.vat_audit.spot.source_is_ex_vat, true);
+assert.equal(invoiceProvenance.vat_audit.trade_variable.source_is_ex_vat, true);
+assert.equal(invoiceProvenance.vat_audit.trade_variable.vat_component_present, true);
 assert.equal(invoiceProvenance.actual_so_far.imported_kwh, invoiceEstimate.imported_kwh_so_far);
 assert.equal(invoiceProvenance.forecast_remaining.method, invoiceEstimate.forecast_method);
 assert.equal(invoiceProvenance.calculation.estimated_total_sek, invoiceEstimate.estimated_month_total_sek);
+const calculation = invoiceProvenance.calculation;
+const calculatedTotal = [
+  calculation.trade_variable_actual_sek,
+  calculation.trade_variable_forecast_remaining_sek,
+  calculation.grid_transfer_actual_sek,
+  calculation.grid_transfer_forecast_remaining_sek,
+  calculation.grid_energy_tax_actual_sek,
+  calculation.grid_energy_tax_forecast_remaining_sek,
+  calculation.trade_fixed_sek,
+  calculation.grid_fixed_sek,
+].reduce((sum, value) => sum + (value || 0), 0);
+assert.ok(Math.abs(calculatedTotal - calculation.estimated_total_sek) < 1e-9);
 assert.equal(invoiceProvenance.vat_audit.grid_transfer.vat_added_by_us, false);
+assert.equal(invoiceProvenance.fixed_fees.trade.source, null);
+const fixedInvoiceEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  39,
+  new Date("2026-08-01T00:15:00Z"),
+);
+const fixedInvoiceProvenance = buildInvoiceProvenance(fixedInvoiceEstimate, { grid_price: { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25, transfer_ore_per_kwh_gross: 55, energy_tax_ore_per_kwh_gross: 45, vat_included: true } });
+assert.equal(fixedInvoiceProvenance.fixed_fees.trade.source, "provider_summary.tariff.fixed_fee_incl_vat_per_month");
+assert.ok(Math.abs(fixedInvoiceProvenance.calculation.component_sum_sek - fixedInvoiceEstimate.estimated_month_total_sek) < 1e-9);
+const coveredDurationEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-23T00:00:00Z", end: "2026-08-24T00:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
+  Array.from({ length: 289 }, (_, index) => ({ timestamp: new Date(Date.parse("2026-08-23T00:00:00Z") + index * 5 * 60 * 1000).toISOString(), import_kw: 2 })),
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  null,
+  new Date("2026-08-30T00:00:00Z"),
+);
+assert.ok(coveredDurationEstimate.data_coverage.coverage_percent > 3);
+assert.ok(coveredDurationEstimate.data_coverage.coverage_percent < 4);
+assert.ok(coveredDurationEstimate.forecast_missing_past_kwh > 0);
+assert.ok(coveredDurationEstimate.forecast_future_kwh > 0);
+assert.equal(coveredDurationEstimate.data_coverage.periods.observed_covered.kwh, coveredDurationEstimate.imported_kwh_so_far);
+assert.ok(coveredDurationEstimate.data_coverage.periods.missing_past.estimated_kwh > 0);
+assert.equal(coveredDurationEstimate.data_coverage.first_period, "2026-08-23T00:00:00.000Z");
 const gappedInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T01:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T01:00:00Z", import_kw: 2 }],
@@ -507,6 +589,45 @@ assert.equal(phaseProvenance.source.entities.l1.normalized_unit, "kW");
 assert.equal(phaseProvenance.source.entities.l1.conversion, "W / 1000");
 assert.equal(phaseProvenance.source.entities.l1.state_class, "measurement");
 assert.equal(phaseProvenance.source.discovery_method, "device_registry_and_phase_metadata");
+const invertedPhaseProvenance = buildPhaseProvenance(
+  "active_power",
+  {
+    invert_power: true,
+    phase_source_entities: { active_power: { l1: "sensor.phase_power_l1" } },
+  },
+  {},
+  { "sensor.phase_power_l1": { state: "160", attributes: { unit_of_measurement: "W", device_class: "power" } } },
+);
+assert.equal(invertedPhaseProvenance.source.entities.l1.normalized_value, -0.16);
+assert.equal(invertedPhaseProvenance.source.entities.l1.invert_power, true);
+assert.match(invertedPhaseProvenance.normalization, /invert_power=true/);
+const recorderPhaseHistory = {
+  current: Object.fromEntries(["l1", "l2", "l3"].map((phase) => [
+    phase,
+    {
+      points: Array.from({ length: 150 }, (_, index) => ({
+        timestamp: `2026-08-30T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00Z`,
+        value: index,
+      })),
+    },
+  ])),
+  voltage: { l1: { points: [{ timestamp: "2026-08-30T12:00:00Z", value: 230 }] } },
+  active_power: { l1: { points: [{ timestamp: "2026-08-30T12:00:00Z", value: 0.1 }] } },
+};
+const mergedPhaseHistory = mergePhaseHistory(recorderPhaseHistory, {
+  current: { l1: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 151 }] }, l2: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 151 }] }, l3: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 151 }] } },
+});
+assert.equal(mergedPhaseHistory.current.l1.points.length, 151);
+assert.equal(mergedPhaseHistory.current.l2.points.length, 151);
+assert.equal(mergedPhaseHistory.current.l3.points.length, 151);
+assert.equal(mergePhaseHistory(mergedPhaseHistory, {}).current.l1.points.length, 151);
+assert.equal(mergePhaseHistory(mergedPhaseHistory, { current: { l1: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 999 }] } } }).current.l1.points.length, 151);
+assert.equal(mergePhaseHistory(mergedPhaseHistory, { current: { l1: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 999 }] } } }).current.l1.points.at(-1).value, 999);
+assert.deepEqual(phaseHistoryPointCounts(mergedPhaseHistory), {
+  current: { l1: 151, l2: 151, l3: 151 },
+  voltage: { l1: 1, l2: 0, l3: 0 },
+  active_power: { l1: 1, l2: 0, l3: 0 },
+});
 for (const raw of [provenanceSolar, provenanceHouse, provenanceGrid, provenanceBattery]) {
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "token"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "password"), false);
@@ -516,7 +637,7 @@ assert.match(eonPanelSource, /data-live-power-scale/);
 assert.doesNotMatch(eonPanelSource, /data-live-power-max/);
 assert.doesNotMatch(eonPanelSource, /live-power-max/);
 assert.match(eonPanelSource, /data-live-power-copy-feedback/);
-assert.equal((eonPanelSource.match(/data-live-power-source=/g) || []).length, 4);
+assert.equal((eonPanelSource.match(/data-live-power-source=/g) || []).length, 5);
 assert.match(eonPanelSource, /Visa data/);
 assert.doesNotMatch(eonPanelSource, /Visa mätardata/);
 assert.match(eonPanelSource, /_livePowerRaw/);
@@ -1162,7 +1283,9 @@ assert.match(panelSource, /data-provider-invoice-cost="elnet"/);
 assert.match(panelSource, /estimated_month_total_sek/);
 assert.match(panelSource, /total_so_far_sek/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-copy-feedback/);
-assert.match(panelSource, /_updateInvoiceEstimateInteractivity/);
+assert.match(panelSource, /data-live-power-source="invoice"/);
+assert.doesNotMatch(panelSource, /_updateInvoiceEstimateInteractivity/);
+assert.doesNotMatch(panelSource, /invoice-estimate-card\.debug-copy-enabled/);
 assert.match(panelSource, /const CHART_COLORS = Object\.freeze/);
 assert.match(panelSource, /fill="\$\{chartColor\("solar"\)\}"/);
 assert.match(panelSource, /fill="\$\{chartColor\("solarForecast"\)\}"/);
