@@ -620,23 +620,32 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const expectedSoFarKwh = isToday && liveTodayKwh !== null && liveRemainingKwh !== null
       ? liveTodayKwh - liveRemainingKwh
       : null;
-    const utilizationDenominatorKwh = forecastKwh;
-    const performanceRatio = isToday && expectedSoFarKwh > 0 && actualKwh !== null
-      ? actualKwh / expectedSoFarKwh
+    const comparisonExpectedKwh = isToday ? expectedSoFarKwh : forecastKwh;
+    const comparisonBasis = isToday ? "forecast_so_far" : "full_day_forecast";
+    const comparisonIsValid = Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedKwh)
+      && actualKwh >= 0 && comparisonExpectedKwh > 0;
+    const forecastAccuracyPercent = comparisonIsValid
+      ? Math.max(0, Math.min(100, Math.min(actualKwh, comparisonExpectedKwh) / Math.max(actualKwh, comparisonExpectedKwh) * 100))
+      : null;
+    const forecastDeviationPercent = comparisonIsValid
+      ? (actualKwh - comparisonExpectedKwh) / comparisonExpectedKwh * 100
       : null;
     return {
       date: localDate,
       label: dayStart.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" }),
       producedKwh: actualKwh,
       forecastKwh,
-      utilizationPercent: utilizationDenominatorKwh > 0 && actualKwh !== null
-        ? actualKwh / utilizationDenominatorKwh * 100
-        : null,
+      utilizationPercent: forecastAccuracyPercent,
+      forecastAccuracyPercent,
+      forecastDeviationPercent,
+      forecastComparisonActualKwh: actualKwh,
+      forecastComparisonExpectedKwh: comparisonExpectedKwh,
+      forecastComparisonBasis: comparisonBasis,
       rawDayForecastKwh: forecastKwh,
       rawExpectedSoFarKwh: expectedSoFarKwh,
       actualSoFarKwh: isToday ? actualKwh : null,
-      performanceRatio,
-      performanceDeltaPercent: performanceRatio !== null ? (performanceRatio - 1) * 100 : null,
+      performanceRatio: comparisonIsValid ? actualKwh / comparisonExpectedKwh : null,
+      performanceDeltaPercent: forecastDeviationPercent,
     };
   });
 }
@@ -659,25 +668,19 @@ export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(
     if (Number.isFinite(day?.forecastKwh)) {
       lines.push(`Dagsprognos: ${day.forecastKwh} kWh`);
     }
-    if (Number.isFinite(day?.performanceDeltaPercent)) {
-      const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
-      lines.push(`Mot prognos hittills: ${sign}${day.performanceDeltaPercent} %`);
+    if (Number.isFinite(day?.forecastAccuracyPercent)) lines.push(`Prognosträff hittills: ${day.forecastAccuracyPercent} %`);
+    if (Number.isFinite(day?.forecastDeviationPercent)) {
+      const sign = day.forecastDeviationPercent >= 0 ? "+" : "";
+      lines.push(`Avvikelse: ${sign}${day.forecastDeviationPercent} %`);
     }
-    const forecastPower = Number(liveForecast?.power_now_kw);
-    if (Number.isFinite(forecastPower)) lines.push(`Forecast nu: ${forecastPower} kW`);
   } else if (Number.isFinite(day?.forecastKwh)) {
     lines.push(`Prognos: ${day.forecastKwh} kWh`);
-  }
-  if (day?.date === today && weather?.source === "smhi" && weather?.available) {
-    const condition = weather.current?.condition;
-    const cloudCoverage = Number(weather.current?.cloud_total ?? weather.current?.cloud_coverage);
-    if (condition || Number.isFinite(cloudCoverage)) {
-      const details = [condition, Number.isFinite(cloudCoverage) ? `Total molntäckning: ${cloudCoverage} %` : ""].filter(Boolean).join(", ");
-      lines.push(`SMHI: ${details}`);
+    if (Number.isFinite(day?.forecastAccuracyPercent)) lines.push(`Prognosträff: ${day.forecastAccuracyPercent} %`);
+    if (Number.isFinite(day?.forecastDeviationPercent)) {
+      const sign = day.forecastDeviationPercent >= 0 ? "+" : "";
+      lines.push(`Avvikelse: ${sign}${day.forecastDeviationPercent} %`);
     }
   }
-  const sunElevation = Number(sun?.elevation);
-  if (day?.date === today && Number.isFinite(sunElevation)) lines.push(`Solhöjd: ${sunElevation}°`);
   return lines;
 }
 
@@ -938,15 +941,21 @@ export function buildSolarHistoryTooltipFields(day, liveForecast, now = new Date
     const expectedSoFarKwh = liveTodayKwh !== null && liveRemainingKwh !== null ? liveTodayKwh - liveRemainingKwh : null;
     if (expectedSoFarKwh > 0) add("Prognos hittills", expectedSoFarKwh, `${tooltipNumber(expectedSoFarKwh)} kWh`);
     if (Number.isFinite(day?.forecastKwh)) add("Dagsprognos", day.forecastKwh, `${tooltipNumber(day.forecastKwh)} kWh`);
-    if (Number.isFinite(day?.performanceDeltaPercent)) {
-      const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
-      add("Mot prognos hittills", day.performanceDeltaPercent, `${sign}${tooltipNumber(day.performanceDeltaPercent, 1)} %`);
+    if (Number.isFinite(day?.forecastAccuracyPercent)) {
+      add("Prognosträff hittills", day.forecastAccuracyPercent, `${tooltipNumber(day.forecastAccuracyPercent, 1)} %`);
+    }
+    if (Number.isFinite(day?.forecastDeviationPercent)) {
+      const sign = day.forecastDeviationPercent >= 0 ? "+" : "";
+      add("Avvikelse", day.forecastDeviationPercent, `${sign}${tooltipNumber(day.forecastDeviationPercent, 1)} %`);
     }
   } else if (Number.isFinite(day?.forecastKwh)) {
     add("Prognos", day.forecastKwh, `${tooltipNumber(day.forecastKwh)} kWh`);
-    if (Number.isFinite(day?.performanceDeltaPercent)) {
-      const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
-      add("Mot prognos", day.performanceDeltaPercent, `${sign}${tooltipNumber(day.performanceDeltaPercent, 1)} %`);
+    if (Number.isFinite(day?.forecastAccuracyPercent)) {
+      add("Prognosträff", day.forecastAccuracyPercent, `${tooltipNumber(day.forecastAccuracyPercent, 1)} %`);
+    }
+    if (Number.isFinite(day?.forecastDeviationPercent)) {
+      const sign = day.forecastDeviationPercent >= 0 ? "+" : "";
+      add("Avvikelse", day.forecastDeviationPercent, `${sign}${tooltipNumber(day.forecastDeviationPercent, 1)} %`);
     }
   }
   return fields;

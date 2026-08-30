@@ -168,7 +168,7 @@ const solarToday = buildSolarDailyHistory(
   { today_kwh: 14.1, remaining_today_kwh: 6.5 },
 );
 assert.equal(solarToday[0].forecastKwh, 14.1);
-assert.ok(Math.abs(solarToday[0].utilizationPercent - 1 / 14.1 * 100) < 1e-12);
+assert.ok(Math.abs(solarToday[0].utilizationPercent - 1 / 7.6 * 100) < 1e-12);
 const solarTodayOverExpected = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 2, 13),
   { "2026-08-23": 2 },
@@ -176,7 +176,7 @@ const solarTodayOverExpected = buildSolarDailyHistory(
   1,
   { today_kwh: 2, remaining_today_kwh: 1 },
 );
-assert.equal(solarTodayOverExpected[0].utilizationPercent, 100);
+assert.equal(solarTodayOverExpected[0].utilizationPercent, 50);
 assert.equal(solarTodayOverExpected[0].performanceDeltaPercent, 100);
 const solarTodayMissingRemaining = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 1, 13),
@@ -185,7 +185,7 @@ const solarTodayMissingRemaining = buildSolarDailyHistory(
   1,
   { today_kwh: 14.1 },
 );
-assert.ok(Math.abs(solarTodayMissingRemaining[0].utilizationPercent - 1 / 14.1 * 100) < 1e-12);
+assert.equal(solarTodayMissingRemaining[0].utilizationPercent, null);
 const solarTodayPerformance = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 8.32, 13),
   { "2026-08-23": 16.57 },
@@ -193,15 +193,42 @@ const solarTodayPerformance = buildSolarDailyHistory(
   1,
   { today_kwh: 16.57, remaining_today_kwh: 10.39 },
 )[0];
-assert.ok(Math.abs(solarTodayPerformance.utilizationPercent - 8.32 / 16.57 * 100) < 1e-12);
+assert.ok(Math.abs(solarTodayPerformance.utilizationPercent - 6.18 / 8.32 * 100) < 1e-12);
 assert.ok(Math.abs(solarTodayPerformance.performanceDeltaPercent - ((8.32 / 6.18) - 1) * 100) < 1e-12);
-assert.ok(Math.abs(buildSolarDailyHistory(
+assert.equal(buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 23, 0, 0), 1, 13),
   { "2026-08-23": 14.1 },
   new Date(2026, 7, 23, 12, 0),
   1,
   { today_kwh: 14.1, remaining_today_kwh: 14.1 },
-)[0].utilizationPercent - 1 / 14.1 * 100) < 1e-12);
+)[0].utilizationPercent, null);
+const solarAccuracyEqual = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 10, 13),
+  { "2026-08-22": 10 },
+  new Date(2026, 7, 23, 12, 0),
+  2,
+)[0];
+assert.equal(solarAccuracyEqual.forecastAccuracyPercent, 100);
+assert.equal(solarAccuracyEqual.forecastDeviationPercent, 0);
+const solarAccuracyAbove = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 20, 13),
+  { "2026-08-22": 10 },
+  new Date(2026, 7, 23, 12, 0),
+  2,
+)[0];
+assert.equal(solarAccuracyAbove.forecastAccuracyPercent, 50);
+assert.equal(solarAccuracyAbove.forecastDeviationPercent, 100);
+const solarAccuracyBelow = buildSolarDailyHistory(
+  dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 5, 13),
+  { "2026-08-22": 10 },
+  new Date(2026, 7, 23, 12, 0),
+  2,
+)[0];
+assert.equal(solarAccuracyBelow.forecastAccuracyPercent, 50);
+assert.equal(solarAccuracyBelow.forecastDeviationPercent, -50);
+assert.equal(solarAccuracyAbove.forecastComparisonBasis, "full_day_forecast");
+assert.equal(solarAccuracyAbove.forecastComparisonActualKwh, solarAccuracyAbove.producedKwh);
+assert.equal(solarAccuracyAbove.forecastComparisonExpectedKwh, solarAccuracyAbove.forecastKwh);
 assert.deepEqual(buildSolarHistoryTooltipLines(
   { date: "2026-08-23", producedKwh: 0.67, forecastKwh: 18.83 },
   { today_kwh: 14.1, remaining_today_kwh: 3.96 },
@@ -223,7 +250,13 @@ assert.deepEqual(buildSolarHistoryTooltipLines(
   new Date(2026, 7, 23, 12, 0),
 ), ["Producerat: 0.67 kWh"]);
 const solarTooltipFields = buildSolarHistoryTooltipFields(
-  { date: "2026-08-23", producedKwh: 0.67, forecastKwh: 18.83, performanceDeltaPercent: 68.30936590100285 },
+  {
+    date: "2026-08-23",
+    producedKwh: 0.67,
+    forecastKwh: 18.83,
+    forecastAccuracyPercent: 54.7,
+    forecastDeviationPercent: 82.7,
+  },
   {
     today_kwh: 14.1, remaining_today_kwh: 3.96, this_hour_kwh: 1.2,
     next_hour_kwh: null, power_now_kw: 1.842, power_next_hour_kw: 2.1,
@@ -235,8 +268,9 @@ const solarTooltipFields = buildSolarHistoryTooltipFields(
 );
 assert.ok(solarTooltipFields.some((field) => field.label === "Prognos hittills" && field.rawValue === 10.14));
 assert.ok(!solarTooltipFields.some((field) => field.label.startsWith("Forecast") || field.label.startsWith("SMHI") || field.label === "Solhöjd"));
-assert.ok(solarTooltipFields.length <= 4);
-assert.ok(solarTooltipFields.some((field) => field.label === "Mot prognos hittills" && field.formatted === "+68,3 %"));
+assert.ok(solarTooltipFields.length <= 5);
+assert.ok(solarTooltipFields.some((field) => field.label === "Prognosträff hittills" && field.formatted === "54,7 %"));
+assert.ok(solarTooltipFields.some((field) => field.label === "Avvikelse" && field.formatted === "+82,7 %"));
 const liveTiles = buildLivePowerTiles(
   { consumption_kw: 0.63, solar_kw: 6.94, charging_kw: 0, discharging_kw: 0 },
   { power_kw: 2.43 },
@@ -320,7 +354,7 @@ const solarOverReference = buildSolarDailyHistory(
   2,
 );
 assert.equal(solarOverReference[0].forecastKwh, 1);
-assert.equal(solarOverReference[0].utilizationPercent, 200);
+assert.equal(solarOverReference[0].utilizationPercent, 50);
 assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].forecastKwh, null);
 assert.equal(buildSolarDailyHistory(dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 1, 13), [], new Date(2026, 7, 23, 12, 0), 2)[0].utilizationPercent, null);
 assert.equal(dailyHistory.length, 7);
@@ -771,7 +805,7 @@ const weatherTooltip = buildSolarHistoryTooltipLines(
   new Date(),
   { source: "smhi", available: true, current: { condition: "partlycloudy", cloud_coverage: 42 } },
 );
-assert.ok(weatherTooltip.includes("SMHI: partlycloudy, Total molntäckning: 42 %"));
+assert.ok(!weatherTooltip.some((line) => line.startsWith("SMHI:")));
 assert.match(panelSource, /battery-history-utilization/);
 assert.doesNotMatch(panelSource, /battery-history-hover/);
 assert.match(panelSource, /battery-history-day\.hovered \.battery-history-bar/);
