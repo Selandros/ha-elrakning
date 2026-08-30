@@ -1,3 +1,36 @@
+export const CHART_COLORS = Object.freeze({
+  priceCheap: "#67C98C",
+  priceNormal: "#B9A05D",
+  priceExpensive: "#E4687D",
+  solar: "#77C2A1",
+  solarForecast: "#77C2A1",
+  consumption: "#E87570",
+  import: "#F0A06A",
+  export: "#72AAF6",
+  charging: "#B76A8F",
+  discharging: "#DF5C8A",
+  soc: "#77C2A1",
+  socEstimated: "#5F9F82",
+  neutral: "#8590A6",
+});
+
+export function chartColor(key) {
+  return CHART_COLORS[key] || CHART_COLORS.neutral;
+}
+
+function chartSeriesColor(className) {
+  const colors = [
+    ["chart-meter-import", "import"],
+    ["chart-meter-export", "export"],
+    ["chart-power-solar", "solar"],
+    ["chart-power-consumption", "consumption"],
+    ["chart-power-charging", "charging"],
+    ["chart-power-discharging", "discharging"],
+  ];
+  const match = colors.find(([classToken]) => String(className).split(" ").includes(classToken));
+  return chartColor(match?.[1] || "neutral");
+}
+
 export function formatDiagnosticsText(entries, version) {
   const lines = ["Elräkning diagnostics", `Version: ${version}`, ""];
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -1851,8 +1884,6 @@ class ElrakningPanel {
         }
 
         .solar-history-reference-bar {
-          fill: rgba(119, 194, 161, 0.30);
-          fill: color-mix(in srgb, var(--solar-color) 30%, var(--ha-card-background, var(--card-background-color)));
           fill-opacity: .9;
           rx: 4;
           ry: 4;
@@ -4397,7 +4428,7 @@ class ElrakningPanel {
       const center = groupX(index);
       const chargingHeight = plot.top + plotHeight - y(day.chargingKwh);
       const dischargingHeight = plot.top + plotHeight - y(day.dischargingKwh);
-      return `<g class="battery-history-day" data-battery-history-index="${index}"><rect class="battery-history-bar charging" x="${center - barGap / 2 - barWidth}" y="${y(day.chargingKwh)}" width="${barWidth}" height="${chargingHeight}" /><rect class="battery-history-bar discharging" x="${center + barGap / 2}" y="${y(day.dischargingKwh)}" width="${barWidth}" height="${dischargingHeight}" /></g>`;
+      return `<g class="battery-history-day" data-battery-history-index="${index}"><rect class="battery-history-bar charging" fill="${chartColor("charging")}" x="${center - barGap / 2 - barWidth}" y="${y(day.chargingKwh)}" width="${barWidth}" height="${chargingHeight}" /><rect class="battery-history-bar discharging" fill="${chartColor("discharging")}" x="${center + barGap / 2}" y="${y(day.dischargingKwh)}" width="${barWidth}" height="${dischargingHeight}" /></g>`;
     }).join("");
     const yLabelMarkup = yLabels.map((level, index) => `<span class="battery-history-axis-label ${index === 0 ? "top" : index === 1 ? "middle" : "bottom"}">${this._formatNumber(level)}</span>`).join("");
     const xLabelMarkup = days.map((day, index) => `<span class="battery-history-x-label" style="left: ${(index + .5) / days.length * 100}%"><span class="battery-history-day-label">${day.label}</span><span class="battery-history-utilization">${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span></span>`).join("");
@@ -4487,10 +4518,10 @@ class ElrakningPanel {
     const bars = days.map((day, index) => {
       const center = groupX(index);
       const forecast = Number.isFinite(day.forecastKwh) && day.forecastKwh > 0
-        ? `<rect class="solar-history-reference-bar" x="${center - referenceBarWidth / 2}" y="${y(day.forecastKwh)}" width="${referenceBarWidth}" height="${plot.top + plotHeight - y(day.forecastKwh)}" />`
+        ? `<rect class="solar-history-reference-bar" fill="${chartColor("solarForecast")}" x="${center - referenceBarWidth / 2}" y="${y(day.forecastKwh)}" width="${referenceBarWidth}" height="${plot.top + plotHeight - y(day.forecastKwh)}" />`
         : "";
       const actual = Number.isFinite(day.producedKwh)
-        ? `<rect class="solar-history-bar" x="${center - barWidth / 2}" y="${y(day.producedKwh)}" width="${barWidth}" height="${plot.top + plotHeight - y(day.producedKwh)}" />`
+        ? `<rect class="solar-history-bar" fill="${chartColor("solar")}" x="${center - barWidth / 2}" y="${y(day.producedKwh)}" width="${barWidth}" height="${plot.top + plotHeight - y(day.producedKwh)}" />`
         : "";
       return `<g class="solar-history-day" data-solar-history-index="${index}">${forecast}${actual}</g>`;
     }).join("");
@@ -4593,15 +4624,15 @@ class ElrakningPanel {
     const lineMarkup = segments.filter((segment) => segment.length >= 2).map((segment) => {
       const coordinates = segment.map((point) => `${x(point.timestamp)} ${y(point.value)}`).join(" L ");
       const area = `M ${x(segment[0].timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(segment.at(-1).timestamp)} ${plot.top + plotHeight} Z`;
-      return `<path class="soc-area" d="${area}" /><path class="soc-line" d="M ${coordinates}" />`;
+      return `<path class="soc-area" fill="${chartColor("soc")}" d="${area}" /><path class="soc-line" fill="none" stroke="${chartColor("soc")}" d="M ${coordinates}" />`;
     }).join("");
     const estimatedMarkup = estimatedSegments.map(([from, to]) => {
       const coordinates = `${x(from.timestamp)} ${y(from.value)} L ${x(to.timestamp)} ${y(to.value)}`;
       const area = `M ${x(from.timestamp)} ${plot.top + plotHeight} L ${coordinates} L ${x(to.timestamp)} ${plot.top + plotHeight} Z`;
-      return `<path class="soc-estimated-area" d="${area}" /><path class="soc-estimated-line" d="M ${coordinates}" />`;
+      return `<path class="soc-estimated-area" fill="${chartColor("socEstimated")}" d="${area}" /><path class="soc-estimated-line" fill="none" stroke="${chartColor("socEstimated")}" d="M ${coordinates}" />`;
     }).join("");
     const singletonMarkup = segments.filter((segment) => segment.length === 1).map(([point]) =>
-      `<circle class="soc-singleton" cx="${x(point.timestamp)}" cy="${y(point.value)}" r="3" />`).join("");
+      `<circle class="soc-singleton" fill="${chartColor("soc")}" cx="${x(point.timestamp)}" cy="${y(point.value)}" r="3" />`).join("");
     const gridMarkup = [0, 50, 100].map((level) => {
       return `<line class="soc-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`;
     }).join("");
@@ -4632,7 +4663,7 @@ class ElrakningPanel {
         copy: (text) => this._copyText(text),
       });
       tooltip.hidden = false;
-      hover.innerHTML = `<circle class="chart-hover-marker chart-hover-marker-soc" cx="${pointX}" cy="${pointY}" r="4" />`;
+      hover.innerHTML = `<circle class="chart-hover-marker chart-hover-marker-soc" fill="${chartColor("soc")}" cx="${pointX}" cy="${pointY}" r="4" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointermove", update);
@@ -6345,18 +6376,20 @@ class ElrakningPanel {
   }
 
   buildMeterDisplayMarkup(points, key, className, x, meterY) {
+    const color = chartSeriesColor(className);
     const segments = this.buildMeterDisplaySegments(points, key).map((segment) => {
       if (segment.length < 2) return "";
-      return `<path class="${className}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
+      return `<path class="${className}" fill="none" stroke="${color}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
     }).join("");
     const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
       if (!isVisiblePowerValue(from?.[key]) || !isVisiblePowerValue(to?.[key])) return "";
-      return `<path class="${className} chart-interpolated-line" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
+      return `<path class="${className} chart-interpolated-line" fill="none" stroke="${color}" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
     }).join("");
     return `${segments}${interpolated}`;
   }
 
   buildMeterDisplayAreaMarkup(points, key, className, x, meterY) {
+    const color = chartSeriesColor(className);
     const segments = this.buildMeterDisplaySegments(points, key).map((segment) => {
       if (segment.length < 2) return "";
       const first = segment[0];
@@ -6364,12 +6397,12 @@ class ElrakningPanel {
       const firstX = x(first.timestamp);
       const lastX = x(last.timestamp);
       const baselineY = meterY(0);
-      return `<path class="${className}" d="M ${firstX} ${baselineY} L ${firstX} ${meterY(first[key])} ${this.buildSmoothMeterPath(segment, key, x, meterY).slice(1)} L ${lastX} ${baselineY} Z" />`;
+      return `<path class="${className}" fill="${color}" d="M ${firstX} ${baselineY} L ${firstX} ${meterY(first[key])} ${this.buildSmoothMeterPath(segment, key, x, meterY).slice(1)} L ${lastX} ${baselineY} Z" />`;
     }).join("");
     const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
       if (!isVisiblePowerValue(from?.[key]) || !isVisiblePowerValue(to?.[key])) return "";
       const baselineY = meterY(0);
-      return `<path class="${className} chart-interpolated-area" d="M ${x(from.timestamp)} ${baselineY} L ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])} L ${x(to.timestamp)} ${baselineY} Z" />`;
+      return `<path class="${className} chart-interpolated-area" fill="${color}" d="M ${x(from.timestamp)} ${baselineY} L ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])} L ${x(to.timestamp)} ${baselineY} Z" />`;
     }).join("");
     return `${segments}${interpolated}`;
   }
@@ -6581,7 +6614,7 @@ class ElrakningPanel {
       const end = new Date(period.end);
       const startX = x(period.start);
       const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
-      const barColor = category === "cheap" ? "#67C98C" : category === "expensive" ? "#E4687D" : "#B9A05D";
+      const barColor = chartColor(category === "cheap" ? "priceCheap" : category === "expensive" ? "priceExpensive" : "priceNormal");
       return `<rect class="chart-bar ${category}" fill="${barColor}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
@@ -6603,7 +6636,7 @@ class ElrakningPanel {
       ${bars}
       ${meterAreas}
       ${meterLines}
-      ${visibleLayers.average ? `<line class="chart-average" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
+      ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
       ${hourLabels}
     </svg><div class="chart-tooltip" hidden></div>`;
@@ -6780,19 +6813,19 @@ class ElrakningPanel {
           : null;
         const markers = [];
         if (visibleLayers.spot && Number.isFinite(hoverSnapshot.priceBarValue)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" cx="${priceMarkerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" fill="${chartColor("neutral")}" cx="${priceMarkerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
         }
         const importDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.meterSampleTime);
         if (visibleLayers.import && meterMarkerX !== null && isVisiblePowerValue(hoverSnapshot.importValue) && Number.isFinite(importDisplayY)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" cx="${meterMarkerX}" cy="${importDisplayY}" r="4" />`);
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" fill="${chartColor("import")}" cx="${meterMarkerX}" cy="${importDisplayY}" r="4" />`);
         }
         const exportDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.meterSampleTime);
         if (visibleLayers.export && meterMarkerX !== null && isVisiblePowerValue(hoverSnapshot.exportValue) && Number.isFinite(exportDisplayY)) {
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" cx="${meterMarkerX}" cy="${exportDisplayY}" r="4" />`);
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" fill="${chartColor("export")}" cx="${meterMarkerX}" cy="${exportDisplayY}" r="4" />`);
         }
         const powerMarkers = [
           ["solar", "pvValue", "solar"],
@@ -6803,7 +6836,7 @@ class ElrakningPanel {
         for (const [key, snapshotKey, className] of powerMarkers) {
           const value = hoverSnapshot[snapshotKey];
           if (!visibleLayers[key] || !isVisiblePowerValue(value)) continue;
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" cx="${priceMarkerX}" cy="${hoverGeometry.meterY(value)}" r="4" />`);
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" fill="${chartColor(className)}" cx="${priceMarkerX}" cy="${hoverGeometry.meterY(value)}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");
       }

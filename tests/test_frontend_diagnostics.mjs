@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -86,6 +86,8 @@ assert.equal(diagnosticComponent("price"), "Pris");
 assert.equal(providerLabel("Greenely", "Kvartsprisavtal"), "Greenely · Kvartsprisavtal");
 assert.equal(providerLabel(undefined, "Kvartsprisavtal"), "Kvartsprisavtal");
 assert.equal(providerLabel(undefined, undefined), "");
+assert.equal(chartColor("solar"), CHART_COLORS.solar);
+assert.match(chartColor("unknown"), /^#[0-9A-F]{6}$/i);
 assert.equal(POWER_DISPLAY_THRESHOLD_KW, 0.1);
 assert.equal(displayPowerValue(0.1), 0);
 assert.equal(displayPowerValue(-0.1), 0);
@@ -730,7 +732,7 @@ assert.match(panelSource, /buildSolarDailyHistory\(/);
 assert.match(panelSource, /const values = days\.flatMap\(\(day\) => \[day\.producedKwh, day\.forecastKwh\]\)/);
 assert.match(panelSource, /class="solar-history-reference-bar"/);
 assert.match(panelSource, /referenceBarWidth/);
-assert.match(panelSource, /solar-history-reference-bar \{[\s\S]*color-mix\(in srgb, var\(--solar-color\) 30%/);
+assert.match(panelSource, /solar-history-reference-bar" fill="\$\{chartColor\("solarForecast"\)\}"/);
 assert.match(panelSource, /solar-history-day\.hovered \.solar-history-reference-bar/);
 assert.match(panelSource, /buildSolarHistoryTooltipFields\(\n\s+day,/);
 assert.match(panelSource, /renderSharedTooltip\(tooltip/);
@@ -908,6 +910,16 @@ assert.match(panelSource, /estimated_month_total_sek/);
 assert.match(panelSource, /total_so_far_sek/);
 assert.match(panelSource, /data-invoice-estimate-copy-feedback/);
 assert.match(panelSource, /_updateInvoiceEstimateInteractivity/);
+assert.match(panelSource, /const CHART_COLORS = Object\.freeze/);
+assert.match(panelSource, /fill="\$\{chartColor\("solar"\)\}"/);
+assert.match(panelSource, /fill="\$\{chartColor\("solarForecast"\)\}"/);
+assert.match(panelSource, /stroke="\$\{color\}"/);
+assert.match(panelSource, /fill="\$\{color\}"/);
+assert.match(panelSource, /fill="\$\{chartColor\(className\)\}"/);
+assert.match(panelSource, /chartColor\("charging"\)/);
+assert.match(panelSource, /chartColor\("discharging"\)/);
+assert.match(panelSource, /chartColor\("soc"\)/);
+assert.doesNotMatch(panelSource, /\.solar-history-reference-bar \{[^}]*color-mix\(/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-copy>Kopiera raw-data/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-grid/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-status/);
@@ -1130,7 +1142,8 @@ assert.ok(chartBarExpensiveIndex >= 0 && chartBarExpensiveIndex < mobileMediaInd
 assert.match(panelSource, /\.chart-bar\.cheap \{\s*fill: #67C98C;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.normal \{\s*fill: #B9A05D;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\s*fill: #E4687D;\s*fill-opacity: \.32;/);
-assert.match(panelSource, /\.solar-history-reference-bar \{\s*fill: rgba\(119, 194, 161, 0\.30\);\s*fill: color-mix\(/);
+assert.match(panelSource, /\.solar-history-reference-bar \{\s*fill-opacity: \.9;/);
+assert.doesNotMatch(panelSource, /\.solar-history-reference-bar \{[^}]*color-mix\(/);
 assert.match(panelSource, /\.daily-energy-segment\.local \{\s*background: rgba\(119, 194, 161, 0\.70\);\s*background: color-mix\(/);
 assert.match(panelSource, /\.daily-energy-segment\.export \{\s*background: rgba\(114, 170, 246, 0\.70\);\s*background: color-mix\(/);
 assert.match(panelSource, /\.daily-energy-segment\.import \{\s*background: rgba\(240, 160, 106, 0\.70\);\s*background: color-mix\(/);
