@@ -2024,6 +2024,11 @@ class ElrakningPanel {
           --el-export-color: #72AAF6;
           --el-charging-color: #B76A8F;
           --el-discharging-color: #DF5C8A;
+          --chart-axis-font-size: 10px;
+          --chart-axis-font-weight: 400;
+          --chart-axis-line-height: 1;
+          --chart-axis-color: var(--secondary-text-color);
+          --chart-axis-opacity: 1;
           --solar-color: var(--el-solar-color);
           --consumption-color: var(--el-consumption-color);
           --grid-import-color: var(--el-import-color);
@@ -2365,13 +2370,14 @@ class ElrakningPanel {
         .battery-history-utilization {
           box-sizing: border-box;
           display: block;
-          font-size: 10px;
-          font-weight: 400;
-          line-height: 1;
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          line-height: var(--chart-axis-line-height);
         }
 
         .battery-history-axis-label {
-          color: var(--secondary-text-color);
+          color: var(--chart-axis-color);
+          opacity: var(--chart-axis-opacity);
           position: absolute;
           right: 0;
           text-align: center;
@@ -2468,13 +2474,14 @@ class ElrakningPanel {
         .solar-history-utilization {
           box-sizing: border-box;
           display: block;
-          font-size: 10px;
-          font-weight: 400;
-          line-height: 1;
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          line-height: var(--chart-axis-line-height);
         }
 
         .solar-history-axis-label {
-          color: var(--secondary-text-color);
+          color: var(--chart-axis-color);
+          opacity: var(--chart-axis-opacity);
           position: absolute;
           right: 0;
           text-align: center;
@@ -2743,10 +2750,11 @@ class ElrakningPanel {
         }
 
         .soc-label {
-          color: var(--secondary-text-color);
-          font-size: 10px;
-          font-weight: 400;
-          line-height: 1;
+          color: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          line-height: var(--chart-axis-line-height);
+          opacity: var(--chart-axis-opacity);
           position: absolute;
           left: 0;
           right: 0;
@@ -3108,17 +3116,21 @@ class ElrakningPanel {
 
         .phase-history-reference-label,
         .phase-history-time-label {
-          fill: var(--secondary-text-color);
-          font-size: 10px;
+          fill: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          opacity: var(--chart-axis-opacity);
         }
 
         .phase-history-reference-label {
-          font-weight: 400;
+          font-weight: var(--chart-axis-font-weight);
         }
 
         .phase-history-axis-label {
-          fill: var(--secondary-text-color);
-          font-size: 10px;
+          fill: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          opacity: var(--chart-axis-opacity);
         }
 
         .phase-history-line {
@@ -3957,8 +3969,10 @@ class ElrakningPanel {
         }
 
         .chart-label {
-          fill: var(--secondary-text-color);
-          font-size: var(--card-chart-label-size);
+          fill: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          opacity: var(--chart-axis-opacity);
         }
 
         .chart-average {
@@ -3974,8 +3988,10 @@ class ElrakningPanel {
         }
 
         .chart-meter-label {
-          fill: var(--secondary-text-color);
-          font-size: var(--card-chart-label-size);
+          fill: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          opacity: var(--chart-axis-opacity);
         }
 
         .chart-meter-import,
