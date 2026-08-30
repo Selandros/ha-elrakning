@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -154,6 +154,33 @@ const incompleteInvoiceEstimate = buildInvoiceEstimate(
   new Date("2026-08-01T00:15:00Z"),
 );
 assert.equal(incompleteInvoiceEstimate.data_coverage.missing_price_periods, 1);
+assert.equal(previousCalendarMonth("2026-08"), "2026-07");
+assert.equal(previousCalendarMonth("2027-01"), "2026-12");
+const previousActual = buildPreviousMonthActual({
+  trade: [
+    { invoice_date: "2026-08-03", month: "2026-07", amount_due_sek: 127.31 },
+    { invoice_date: "2026-08-03", month: "2026-08", amount_due_sek: 99 },
+  ],
+  grid: [{ invoice_date: "2026-08-14", month: "2026-07", amount_due_sek: 294.32 }],
+}, "2026-08");
+assert.equal(previousActual.month, "2026-07");
+assert.equal(previousActual.coverage, "complete");
+assert.equal(previousActual.total_sek, 421.63);
+const lowerComparison = buildInvoiceComparison({ estimated_month_total_sek: 368.18 }, previousActual);
+assert.equal(lowerComparison.available, true);
+assert.ok(Math.abs(lowerComparison.difference_sek + 53.45) < 1e-12);
+assert.ok(Math.abs(lowerComparison.difference_percent + 12.6766) < 0.01);
+assert.ok(lowerComparison.fill_percent < 100);
+assert.equal(lowerComparison.previous_marker_percent, 100);
+const higherComparison = buildInvoiceComparison({ estimated_month_total_sek: 493.73 }, previousActual);
+assert.ok(Math.abs(higherComparison.difference_sek - 72.1) < 1e-12);
+assert.ok(higherComparison.fill_percent > higherComparison.previous_marker_percent);
+const equalComparison = buildInvoiceComparison({ estimated_month_total_sek: 421.63 }, previousActual);
+assert.equal(equalComparison.difference_sek, 0);
+assert.equal(equalComparison.difference_percent, 0);
+const partialActual = buildPreviousMonthActual({ trade: [{ month: "2026-07", amount_due_sek: 127.31 }], grid: [] }, "2026-08");
+assert.equal(buildInvoiceComparison({ estimated_month_total_sek: 368.18 }, partialActual).available, false);
+assert.equal(buildPreviousMonthActual({ trade: [{ invoice_date: "2026-08-03", amount_due_sek: 127.31 }], grid: [] }, "2026-08").coverage, "missing");
 const gappedInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T01:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T01:00:00Z", import_kw: 2 }],

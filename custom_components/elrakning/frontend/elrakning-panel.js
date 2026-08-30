@@ -714,6 +714,73 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   };
 }
 
+export function previousCalendarMonth(month) {
+  if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (monthNumber < 1 || monthNumber > 12) return null;
+  const date = new Date(Date.UTC(year, monthNumber - 1, 1));
+  date.setUTCMonth(date.getUTCMonth() - 1);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
+  const month = previousCalendarMonth(selectedMonth);
+  const normalizeProvider = (items) => {
+    const matches = (Array.isArray(items) ? items : []).filter((invoice) => (
+      invoice && invoice.month === month && Number.isFinite(Number(invoice.amount_due_sek))
+    ));
+    const total = matches.reduce((sum, invoice) => sum + Number(invoice.amount_due_sek), 0);
+    return {
+      available: matches.length > 0,
+      total_sek: matches.length ? total : null,
+      invoices: matches.map((invoice) => ({ month: invoice.month, amount_due_sek: Number(invoice.amount_due_sek) })),
+    };
+  };
+  const trade = normalizeProvider(invoiceSources.trade);
+  const grid = normalizeProvider(invoiceSources.grid);
+  const coverage = trade.available && grid.available ? "complete" : trade.available || grid.available ? "partial" : "missing";
+  return {
+    month,
+    trade,
+    grid,
+    coverage,
+    total_sek: coverage === "complete" ? trade.total_sek + grid.total_sek : null,
+  };
+}
+
+export function buildInvoiceComparison(estimate, previousActual) {
+  const current = Number(estimate?.estimated_month_total_sek);
+  const previous = Number(previousActual?.total_sek);
+  const complete = previousActual?.coverage === "complete"
+    && Number.isFinite(current)
+    && Number.isFinite(previous)
+    && previous >= 0;
+  if (!complete) {
+    return {
+      available: false,
+      month: previousActual?.month || null,
+      coverage: previousActual?.coverage || "missing",
+      difference_sek: null,
+      difference_percent: null,
+      scale_max_sek: Number.isFinite(current) && current >= 0 ? current : null,
+      fill_percent: Number.isFinite(current) && current > 0 ? 100 : 0,
+      previous_marker_percent: null,
+    };
+  }
+  const scaleMax = Math.max(current, previous);
+  const difference = current - previous;
+  return {
+    available: true,
+    month: previousActual.month,
+    coverage: "complete",
+    difference_sek: difference,
+    difference_percent: previous > 0 ? difference / previous * 100 : null,
+    scale_max_sek: scaleMax,
+    fill_percent: scaleMax > 0 ? current / scaleMax * 100 : 0,
+    previous_marker_percent: scaleMax > 0 ? previous / scaleMax * 100 : 0,
+  };
+}
+
 export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capacityKwh, now = new Date(), dayCount = 7) {
   const current = new Date(now);
   const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
@@ -1229,6 +1296,9 @@ class ElrakningPanel {
             <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span></div>
             <span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
+            <span class="invoice-estimate-comparison" data-invoice-estimate-comparison hidden></span>
+            <div class="invoice-estimate-bar" data-invoice-estimate-bar hidden aria-label="Jämförelse med föregående månad"><span data-invoice-estimate-fill></span><i data-invoice-estimate-marker aria-hidden="true"></i></div>
+            <div class="invoice-estimate-scale" data-invoice-estimate-scale hidden><span>0</span><span data-invoice-estimate-scale-value></span></div>
             <span class="live-power-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
           </article>
         </section>
@@ -2597,7 +2667,7 @@ class ElrakningPanel {
         }
 
         .live-power-tile.invoice-estimate-card {
-          grid-template-rows: auto auto auto auto;
+          grid-template-rows: auto auto auto auto 5px auto auto;
           min-height: 0;
         }
 
@@ -2616,8 +2686,47 @@ class ElrakningPanel {
           grid-row: 3;
         }
 
+        .invoice-estimate-comparison {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          line-height: 1.2;
+          min-height: 15px;
+        }
+
+        .invoice-estimate-bar {
+          background: var(--divider-color);
+          border-radius: 999px;
+          height: 5px;
+          overflow: visible;
+          position: relative;
+        }
+
+        .invoice-estimate-bar span {
+          background: #77C2A1;
+          border-radius: inherit;
+          display: block;
+          height: 100%;
+        }
+
+        .invoice-estimate-bar i {
+          background: var(--secondary-text-color);
+          border-radius: 1px;
+          height: 11px;
+          position: absolute;
+          top: -3px;
+          width: 1px;
+        }
+
+        .invoice-estimate-scale {
+          color: var(--secondary-text-color);
+          display: flex;
+          font-size: 10px;
+          justify-content: space-between;
+          line-height: 1;
+        }
+
         .invoice-estimate-card .live-power-copy-feedback {
-          grid-row: 4;
+          grid-row: 7;
         }
 
         .provider-invoice-cost span {
@@ -5695,7 +5804,13 @@ class ElrakningPanel {
     const card = this.host.querySelector("[data-invoice-estimate-card]");
     const month = this.host.querySelector("[data-invoice-estimate-month]");
     const total = this.host.querySelector("[data-invoice-estimate-total]");
-    if (!card || !month || !total) return;
+    const comparisonText = this.host.querySelector("[data-invoice-estimate-comparison]");
+    const comparisonBar = this.host.querySelector("[data-invoice-estimate-bar]");
+    const comparisonFill = this.host.querySelector("[data-invoice-estimate-fill]");
+    const comparisonMarker = this.host.querySelector("[data-invoice-estimate-marker]");
+    const comparisonScale = this.host.querySelector("[data-invoice-estimate-scale]");
+    const comparisonScaleValue = this.host.querySelector("[data-invoice-estimate-scale-value]");
+    if (!card || !month || !total || !comparisonText || !comparisonBar || !comparisonFill || !comparisonMarker || !comparisonScale || !comparisonScaleValue) return;
     const billingHistory = this._billingHistory;
     const estimate = buildInvoiceEstimate(
       billingHistory?.price_periods,
@@ -5707,6 +5822,9 @@ class ElrakningPanel {
     card.hidden = !configured || !billingHistory;
     if (!configured || !billingHistory) {
       this._invoiceEstimateRaw = null;
+      comparisonText.hidden = true;
+      comparisonBar.hidden = true;
+      comparisonScale.hidden = true;
       this._renderInvoiceCardCosts();
       return;
     }
@@ -5714,13 +5832,44 @@ class ElrakningPanel {
     if (!estimate) {
       total.textContent = "–";
       this._invoiceEstimateRaw = null;
+      comparisonText.hidden = true;
+      comparisonBar.hidden = true;
+      comparisonScale.hidden = true;
       this._renderInvoiceCardCosts();
       return;
     }
     total.textContent = estimate.estimated_month_total_sek == null || !Number.isFinite(Number(estimate.estimated_month_total_sek))
       ? "–"
       : this._formatSek(Number(estimate.estimated_month_total_sek));
-    this._invoiceEstimateRaw = estimate;
+    const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(
+      billingHistory.invoice_sources || {
+        trade: billingHistory.trade_invoices,
+        grid: billingHistory.grid_invoices,
+      },
+      estimate.month,
+    );
+    const comparison = buildInvoiceComparison(estimate, previousActual);
+    const previousLabel = previousActual.month ? this._formatInvoiceMonth(previousActual.month).split(" ")[0] : "föregående månad";
+    if (comparison.available) {
+      const difference = Number(comparison.difference_sek);
+      const direction = difference < 0 ? "lägre" : difference > 0 ? "högre" : "samma som";
+      const amount = this._formatSek(Math.abs(difference));
+      const percent = comparison.difference_percent == null ? "" : ` · ${difference < 0 ? "−" : difference > 0 ? "+" : ""}${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
+      comparisonText.textContent = `${amount} ${direction} än ${previousLabel}${percent}`;
+      comparisonText.hidden = false;
+      comparisonBar.hidden = false;
+      comparisonScale.hidden = false;
+      comparisonFill.style.width = `${comparison.fill_percent}%`;
+      comparisonFill.style.backgroundColor = chartColor(difference <= 0 ? "solar" : "import");
+      comparisonMarker.style.left = `${comparison.previous_marker_percent}%`;
+      comparisonScaleValue.textContent = this._formatSek(comparison.scale_max_sek);
+    } else {
+      comparisonText.textContent = `Ingen komplett jämförelse för ${previousLabel}`;
+      comparisonText.hidden = false;
+      comparisonBar.hidden = true;
+      comparisonScale.hidden = true;
+    }
+    this._invoiceEstimateRaw = { ...estimate, current_estimate: estimate, previous_month_actual: previousActual, comparison };
     this._renderInvoiceCardCosts();
   }
 
