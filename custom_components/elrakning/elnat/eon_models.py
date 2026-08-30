@@ -82,43 +82,91 @@ def normalize_tariff(prices: Any, estimated_yearly_cost: Any) -> dict[str, Any]:
 
 def normalize_grouped_contracts(payload: Any, installation_ids: set[str]) -> list[dict[str, Any]]:
     """Normalize verified electricity-grid contracts from the app response."""
-    if not isinstance(payload, (Mapping, list)):
+    if not isinstance(payload, list):
         return []
     contracts = []
-    for item in _mapping_values(payload):
-        if item.get("contractType") != "ELECTRICITY_CONS_GRID":
+    for location in payload:
+        if not isinstance(location, Mapping) or not isinstance(location.get("contractsByType"), list):
             continue
-        installation_id = item.get("installationIdentifier") or item.get("installationId")
-        if not isinstance(installation_id, str) or installation_id not in installation_ids:
-            continue
-        contracts.append({
-            "installation_identifier": installation_id,
-            "agreement": {
-                "status": agreement_status(item.get("status"), item.get("startDate"), item.get("endDate")),
-                "type": item.get("contractType"),
-                "name": item.get("name"),
-                "start_date": item.get("startDate"),
-                "end_date": item.get("endDate"),
-            },
-            "facility": {
-                "fuse_ampere": _number_from(item.get("fuseSize")),
-                "price_area": _nested_value(item, "priceArea") or _nested_value(item, "gridArea", "priceArea"),
-                "grid_area": _nested_value(item, "gridArea", "name"),
-            },
-            "tariff": normalize_grouped_tariff(item),
-        })
+        for grouped in location["contractsByType"]:
+            if not isinstance(grouped, Mapping) or grouped.get("type") != "ELECTRICITY_CONS_GRID":
+                continue
+            installation_id = grouped.get("installationId")
+            if not isinstance(installation_id, str) or installation_id not in installation_ids:
+                continue
+            premise = grouped.get("premiseInformation")
+            premise = premise if isinstance(premise, Mapping) else {}
+            grouped_contracts = grouped.get("contracts")
+            if not isinstance(grouped_contracts, list):
+                continue
+            for contract in grouped_contracts:
+                if not isinstance(contract, Mapping):
+                    continue
+                contracts.append({
+                    "installation_identifier": installation_id,
+                    "agreement": {
+                        "status": agreement_status(contract.get("status"), contract.get("startDate"), contract.get("endDate")),
+                        "type": grouped.get("type"),
+                        "name": contract.get("name"),
+                        "start_date": contract.get("startDate"),
+                        "end_date": contract.get("endDate"),
+                    },
+                    "facility": {
+                        "fuse_ampere": _fuse_ampere(contract.get("fuseSize")),
+                        "price_area": normalize_price_area(premise.get("priceArea")),
+                        "grid_area": premise.get("gridArea"),
+                    },
+                    "tariff": normalize_grouped_tariff(contract),
+                })
     return contracts
 
 
 def normalize_grouped_tariff(contract: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalize only explicit PriceValue units from a grouped contract."""
+    """Normalize grouped tariff entries while preserving unknown verified rows."""
     prices = contract.get("prices") if isinstance(contract.get("prices"), Mapping) else {}
-    return {
-        "subscription_fee_sek_per_month": _price_value(prices.get("subscriptionFee"), "KR", "MONTH"),
-        "transfer_fee_ore_per_kwh": _price_value(prices.get("transferFee"), "ORE", "KWH"),
-        "energy_tax_ore_per_kwh": _price_value(prices.get("energyTax"), "ORE", "KWH"),
-        "estimated_yearly_cost_sek": _price_value(contract.get("estimatedYearlyCost"), "KR", "NONE"),
+    entries = []
+    raw_entries = prices.get("entries")
+    if isinstance(raw_entries, list):
+        for item in raw_entries:
+            if not isinstance(item, Mapping):
+                continue
+            price = item.get("price")
+            if not isinstance(price, Mapping):
+                continue
+            entries.append({
+                "key": item.get("name"),
+                "label": item.get("name"),
+                "value": price.get("value"),
+                "number_unit": price.get("numberUnit"),
+                "divisor_unit": price.get("divisorUnit"),
+            })
+    result = {
+        "title": prices.get("title"),
+        "subtitle": prices.get("subtitle"),
+        "entries": entries,
+        "subscription_fee_sek_per_month": None,
+        "transfer_fee_ore_per_kwh": None,
+        "energy_tax_ore_per_kwh": None,
+        "estimated_yearly_cost_sek": None,
     }
+    for entry in entries:
+        units = (entry["number_unit"], entry["divisor_unit"])
+        if entry["label"] == "Abonnemangsavgift" and units == ("KR", "MONTH"):
+            result["subscription_fee_sek_per_month"] = _number_from(entry["value"])
+        elif entry["label"] == "Elöverföringsavgift" and units == ("ORE", "KWH"):
+            result["transfer_fee_ore_per_kwh"] = _number_from(entry["value"])
+        elif entry["label"] == "Energiskatt" and units == ("ORE", "KWH"):
+            result["energy_tax_ore_per_kwh"] = _number_from(entry["value"])
+        elif entry["label"] == "Beräknad årskostnad" and units == ("KR", "NONE"):
+            result["estimated_yearly_cost_sek"] = _number_from(entry["value"])
+    return result
+
+
+def normalize_price_area(value: Any) -> str | None:
+    """Normalize the verified price-area spelling for neutral UI state."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return " ".join(value.strip().replace("_", " ").split())
 
 
 def _mapping_values(value: Any):
@@ -142,6 +190,17 @@ def _nested_value(value: Any, *keys: str) -> Any:
 
 def _number_from(value: Any) -> float | None:
     return float(value) if _is_number(value) else None
+
+
+def _fuse_ampere(value: Any) -> float | None:
+    """Parse the verified grouped-contract fuse-size representation."""
+    if isinstance(value, str):
+        value = value.strip().split(" ", 1)[0]
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return _number_from(value)
 
 
 def _price_value(value: Any, number_unit: str, divisor_unit: str) -> float | None:
@@ -229,7 +288,7 @@ def normalize_locations(payload: Any) -> list[dict[str, Any]]:
                 "street": address["fullStreet"],
                 "city": address["city"],
                 "postal_code": address["postalCode"],
-                "price_area": installation.get("priceArea"),
+                "price_area": normalize_price_area(installation.get("priceArea")),
                 "production": installation["production"],
                 "is_future": installation.get("isFuture"),
                 "elna_service_status": installation.get("elnaServiceStatus"),

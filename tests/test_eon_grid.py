@@ -112,6 +112,51 @@ def test_future_status_does_not_depend_on_current_date():
     assert models.agreement_status("ACTIVE", "2999-01-01", "Tillsvidare") == "future"
 
 
+def test_normalize_grouped_contracts_reads_verified_contracts_by_type_shape():
+    result = models.normalize_grouped_contracts([{
+        "contractsByType": [{
+            "type": "ELECTRICITY_CONS_GRID",
+            "installationId": "installation-1",
+            "premiseInformation": {"gridArea": "Elnätsområde Nord", "priceArea": "SE_2"},
+            "contracts": [{
+                "name": "16 A, upp till 8000 kWh/år. Elnätsområde Nord",
+                "startDate": "2999-10-01",
+                "endDate": None,
+                "status": "FUTURE",
+                "fuseSize": "16 A",
+                "prices": {
+                    "title": "Ditt pris",
+                    "subtitle": "Samtliga priser är inklusive moms.",
+                    "entries": [
+                        {"name": "Abonnemangsavgift", "price": {"value": 226.25, "numberUnit": "KR", "divisorUnit": "MONTH"}},
+                        {"name": "Elöverföringsavgift", "price": {"value": 97, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                        {"name": "Energiskatt", "price": {"value": 45, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                        {"name": "Beräknad årskostnad", "price": {"value": 6567, "numberUnit": "KR", "divisorUnit": "NONE"}},
+                        {"name": "Extra rad", "price": {"value": 1, "numberUnit": "KR", "divisorUnit": "NONE"}},
+                    ],
+                },
+            }],
+        }],
+    }], {"installation-1"})
+    contract = result[0]
+    assert contract["agreement"]["status"] == "future"
+    assert contract["agreement"]["type"] == "ELECTRICITY_CONS_GRID"
+    assert contract["facility"] == {"fuse_ampere": 16.0, "price_area": "SE 2", "grid_area": "Elnätsområde Nord"}
+    assert contract["tariff"]["subscription_fee_sek_per_month"] == 226.25
+    assert contract["tariff"]["transfer_fee_ore_per_kwh"] == 97.0
+    assert contract["tariff"]["energy_tax_ore_per_kwh"] == 45.0
+    assert contract["tariff"]["estimated_yearly_cost_sek"] == 6567.0
+    assert len(contract["tariff"]["entries"]) == 5
+
+
+def test_normalize_grouped_contracts_ignores_other_types_and_installations():
+    payload = [{"contractsByType": [
+        {"type": "ELECTRICITY_SUPPLY", "installationId": "installation-1", "contracts": [{}]},
+        {"type": "ELECTRICITY_CONS_GRID", "installationId": "other", "contracts": [{}]},
+    ]}]
+    assert models.normalize_grouped_contracts(payload, {"installation-1"}) == []
+
+
 def test_normalize_locations_selects_only_electricity_grid_installations():
     result = models.normalize_locations([{
         "installations": [
@@ -128,7 +173,7 @@ def test_normalize_locations_selects_only_electricity_grid_installations():
         "street": "Example 1",
         "city": "Town",
         "postal_code": "123 45",
-        "price_area": "SE_2",
+        "price_area": "SE 2",
         "production": False,
         "is_future": True,
         "elna_service_status": None,

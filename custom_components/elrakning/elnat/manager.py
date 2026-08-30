@@ -61,11 +61,7 @@ class GridManager:
         definition = get_grid_provider(provider_id)
         if not definition or not self.provider or definition is not self.definition:
             return {"status": "unsupported_provider", "error": "unsupported_provider"}
-        if auth_method == "app":
-            return await self.async_save_app_credentials(account_id, password)
-        if auth_method == "web":
-            return await self.async_save_web_credentials(account_id, password)
-        return {"status": "unsupported_auth_method", "error": "unsupported_auth_method"}
+        return await self.provider.async_login(auth_method, account_id, password)
 
     async def async_save_cookie_header(self, cookie_header: str) -> dict[str, Any]:
         return await self.provider.async_save_cookie_header(cookie_header)

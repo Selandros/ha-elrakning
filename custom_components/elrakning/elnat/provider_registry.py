@@ -23,7 +23,7 @@ GRID_PROVIDER_REGISTRY = {
     "eon": GridProviderDefinition(
         provider_id="eon",
         name="E.ON",
-        auth_methods=("app", "web"),
+        auth_methods=("app",),
         manager_factory=EonGridManager,
     ),
 }

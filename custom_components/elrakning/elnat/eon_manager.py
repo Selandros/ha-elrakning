@@ -132,6 +132,12 @@ class EonGridManager:
         await self._save_config(config)
         return await self._refresh_app(session)
 
+    async def async_login(self, auth_method: str, account_id: str, password: str) -> dict[str, Any]:
+        """Handle E.ON provider authentication without provider logic in GridManager."""
+        if auth_method == "app":
+            return await self.async_save_app_credentials(account_id, password)
+        return {"status": "unsupported_auth_method", "error": "unsupported_auth_method"}
+
     async def async_fetch_app_sources(self) -> dict[str, Any]:
         """Fetch all verified read-only App sources without changing normalized state."""
         config = self._config()
@@ -275,7 +281,19 @@ class EonGridManager:
         by_installation: dict[str, list[dict[str, Any]]] = {}
         for contract in contracts:
             by_installation.setdefault(contract["installation_identifier"], []).append(contract)
-        installation = locations[0]
+        installation = next(
+            (
+                item for item in locations
+                if any(contract["agreement"]["status"] == "active" for contract in by_installation.get(item["installation_identifier"], []))
+            ),
+            next(
+                (
+                    item for item in locations
+                    if any(contract["agreement"]["status"] == "future" for contract in by_installation.get(item["installation_identifier"], []))
+                ),
+                locations[0],
+            ),
+        )
         candidates = by_installation.get(installation["installation_identifier"], [])
         current = next((item for item in candidates if item["agreement"]["status"] == "active"), None)
         selected = current or next((item for item in candidates if item["agreement"]["status"] == "future"), None)
@@ -291,7 +309,16 @@ class EonGridManager:
         cost = calculate_eon_cost(amount, tariff) if agreement.get("status") == "active" else None
         return {
             "agreement": agreement,
-            "facility": {"price_area": installation.get("price_area"), "fuse_ampere": (selected or {}).get("facility", {}).get("fuse_ampere")},
+            "facility": {
+                "address": {
+                    "street": installation.get("street"),
+                    "city": installation.get("city"),
+                    "postal_code": installation.get("postal_code"),
+                },
+                "price_area": installation.get("price_area"),
+                "grid_area": (selected or {}).get("facility", {}).get("grid_area"),
+                "fuse_ampere": (selected or {}).get("facility", {}).get("fuse_ampere"),
+            },
             "tariff": tariff,
             "consumption": consumption,
             "cost": cost,
@@ -377,6 +404,11 @@ class EonGridManager:
         facility = self.state.get("facility") or {}
         config = self._config()
         auth_mode = "app" if config.get("auth") == "app" else "web" if self._web_config(config).get("cookies") else None
+        public_facility = {
+            key: facility[key]
+            for key in ("address", "price_area", "grid_area", "fuse_ampere")
+            if facility.get(key) is not None
+        }
         return {
             "configured": self.configured,
             "provider": "eon",
@@ -385,10 +417,7 @@ class EonGridManager:
             "auth_method": auth_mode,
             "reauth_required": self.state.get("reauth_required", False),
             "agreement": self.state.get("agreement"),
-            "facility": {
-                "price_area": facility.get("price_area"),
-                "fuse_ampere": facility.get("fuse_ampere"),
-            } if facility else None,
+            "facility": public_facility or None,
             "tariff": self.state.get("tariff"),
             "consumption": self.state.get("consumption"),
             "cost": self.state.get("cost"),

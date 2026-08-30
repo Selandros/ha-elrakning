@@ -122,16 +122,19 @@ def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
 
         async def async_get_grouped_contracts(self, *_args):
             return [{
-                "contractType": "ELECTRICITY_CONS_GRID",
-                "installationIdentifier": "app-installation",
-                "status": "ACTIVE",
-                "name": "Grid",
-                "prices": {
-                    "subscriptionFee": {"value": 100, "numberUnit": "KR", "divisorUnit": "MONTH"},
-                    "transferFee": {"value": 90, "numberUnit": "ORE", "divisorUnit": "KWH"},
-                    "energyTax": {"value": 40, "numberUnit": "ORE", "divisorUnit": "KWH"},
-                },
-                "estimatedYearlyCost": {"value": 2000, "numberUnit": "KR", "divisorUnit": "NONE"},
+                "contractsByType": [{
+                    "type": "ELECTRICITY_CONS_GRID",
+                    "installationId": "app-installation",
+                    "premiseInformation": {"gridArea": "Grid", "priceArea": "SE2"},
+                    "contracts": [{
+                        "status": "ACTIVE", "name": "Grid", "fuseSize": "16 A",
+                        "prices": {"entries": [
+                            {"name": "Abonnemangsavgift", "price": {"value": 100, "numberUnit": "KR", "divisorUnit": "MONTH"}},
+                            {"name": "Elöverföringsavgift", "price": {"value": 90, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                            {"name": "Energiskatt", "price": {"value": 40, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                        ]},
+                    }],
+                }],
             }]
 
         async def async_get_monthly_transfer(self, *args):
@@ -172,26 +175,34 @@ def test_app_state_prefers_active_contract_and_does_not_cost_future_tariff():
     sources = {
         "grouped_contracts": [
             {
-                "contractType": "ELECTRICITY_CONS_GRID",
-                "installationIdentifier": "installation",
-                "status": "FUTURE",
-                "startDate": "2099-01-01",
-                "prices": {
-                    "subscriptionFee": {"value": 999, "numberUnit": "KR", "divisorUnit": "MONTH"},
-                    "transferFee": {"value": 99, "numberUnit": "ORE", "divisorUnit": "KWH"},
-                    "energyTax": {"value": 49, "numberUnit": "ORE", "divisorUnit": "KWH"},
-                },
+                "contractsByType": [{
+                    "type": "ELECTRICITY_CONS_GRID",
+                    "installationId": "installation",
+                    "premiseInformation": {"gridArea": "Grid", "priceArea": "SE2"},
+                    "contracts": [{
+                        "status": "FUTURE", "startDate": "2099-01-01", "fuseSize": "16 A",
+                        "prices": {"entries": [
+                            {"name": "Abonnemangsavgift", "price": {"value": 999, "numberUnit": "KR", "divisorUnit": "MONTH"}},
+                            {"name": "Elöverföringsavgift", "price": {"value": 99, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                            {"name": "Energiskatt", "price": {"value": 49, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                        ]},
+                    }],
+                }],
             },
             {
-                "contractType": "ELECTRICITY_CONS_GRID",
-                "installationIdentifier": "installation",
-                "status": "ACTIVE",
-                "startDate": "2020-01-01",
-                "prices": {
-                    "subscriptionFee": {"value": 100, "numberUnit": "KR", "divisorUnit": "MONTH"},
-                    "transferFee": {"value": 90, "numberUnit": "ORE", "divisorUnit": "KWH"},
-                    "energyTax": {"value": 40, "numberUnit": "ORE", "divisorUnit": "KWH"},
-                },
+                "contractsByType": [{
+                    "type": "ELECTRICITY_CONS_GRID",
+                    "installationId": "installation",
+                    "premiseInformation": {"gridArea": "Grid", "priceArea": "SE2"},
+                    "contracts": [{
+                        "status": "ACTIVE", "startDate": "2020-01-01", "fuseSize": "16 A",
+                        "prices": {"entries": [
+                            {"name": "Abonnemangsavgift", "price": {"value": 100, "numberUnit": "KR", "divisorUnit": "MONTH"}},
+                            {"name": "Elöverföringsavgift", "price": {"value": 90, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                            {"name": "Energiskatt", "price": {"value": 40, "numberUnit": "ORE", "divisorUnit": "KWH"}},
+                        ]},
+                    }],
+                }],
             },
         ],
         "monthly_transfer": [{
@@ -433,6 +444,7 @@ def test_web_handoff_wrong_state_does_not_consume_valid_pending_state():
 
 def test_grid_registry_accepts_a_second_provider_without_core_changes():
     registry = _load_registry()
+    assert registry.GRID_PROVIDER_REGISTRY["eon"].auth_methods == ("app",)
     synthetic = registry.GridProviderDefinition("synthetic", "Synthetic Grid", ("app",), lambda hass, entry: object())
     registry.GRID_PROVIDER_REGISTRY[synthetic.provider_id] = synthetic
     try:

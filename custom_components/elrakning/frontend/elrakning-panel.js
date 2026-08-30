@@ -990,16 +990,11 @@ class ElrakningPanel {
       </div>
       <div class="provider-dialog" data-eon-grid-dialog hidden role="dialog" aria-modal="true" aria-labelledby="eon-grid-title">
         <div class="provider-dialog-card">
-          <h2 id="eon-grid-title">Konfigurera elnät</h2>
-          <div class="eon-auth-methods">
-            <section class="eon-auth-method" aria-labelledby="eon-app-title">
-              <h3 id="eon-app-title">E.ON App</h3>
-              <p>Logga in med ditt E.ON konto-ID och lösenord.</p>
-              <label>Användarnamn / konto-ID<input type="text" data-eon-grid-app-account autocomplete="username"></label>
-              <label>Lösenord<input type="password" data-eon-grid-app-password autocomplete="current-password"></label>
-              <button type="button" data-eon-grid-app-save>Logga in</button>
-            </section>
-          </div>
+          <h2 id="eon-grid-title">Välj elnätsbolag</h2>
+          <label>Elnätsbolag<select data-grid-provider aria-label="Elnätsbolag"></select></label>
+          <label>Konto-ID<input type="text" data-eon-grid-app-account autocomplete="username"></label>
+          <label>Lösenord<input type="password" data-eon-grid-app-password autocomplete="current-password"></label>
+          <button type="button" data-eon-grid-app-save>Logga in</button>
           <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
           <div class="provider-actions">
             <button type="button" data-eon-grid-cancel>Avbryt</button>
@@ -4968,6 +4963,7 @@ class ElrakningPanel {
       this.loadPriceData(),
       this.loadProviderState(),
       this.loadEonGridState(),
+      this.loadGridProviders(),
       this.loadRetainedHistory(),
       this.loadMeterState(loadHistory),
       this.loadPowerState(loadHistory),
@@ -5021,6 +5017,27 @@ class ElrakningPanel {
     }
   }
 
+  async loadGridProviders() {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/grid/providers" });
+      this._gridProviders = Array.isArray(response?.providers) ? response.providers : [];
+      const select = this.host.querySelector("[data-grid-provider]");
+      if (select) this._renderGridProviderOptions(select);
+    } catch {
+      this._gridProviders = [];
+    }
+  }
+
+  _renderGridProviderOptions(select) {
+    select.replaceChildren(...(this._gridProviders || []).map((provider) => {
+      const option = document.createElement("option");
+      option.value = provider.id;
+      option.textContent = provider.name;
+      return option;
+    }));
+  }
+
   _applyEonGridState(state) {
     this._eonGridState = state;
     const configured = state?.configured === true;
@@ -5035,7 +5052,7 @@ class ElrakningPanel {
     const tariff = state?.tariff || {};
     const consumption = state?.consumption || {};
     const cost = state?.cost || {};
-    provider.textContent = configured ? "E.ON · Elnät" : "";
+    provider.textContent = configured && state?.provider_name ? `${state.provider_name} · Elnät` : "";
     provider.hidden = !configured;
     const outage = state?.outage || {};
     status.textContent = configured
@@ -5053,13 +5070,18 @@ class ElrakningPanel {
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     const rows = [];
+    if (agreement.status === "future") rows.push(["Avtal", "Kommande avtal"]);
+    if (agreement.name) rows.push(["Avtal", agreement.name]);
     if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
+    if (facility.address?.street) rows.push(["Adress", facility.address.street]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
     if (facility.price_area) rows.push(["Elområde", facility.price_area]);
+    if (facility.grid_area) rows.push(["Nätområde", facility.grid_area]);
     if (consumption.status === "ok") rows.push(["Förbrukning", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
     if (tariff.subscription_fee_sek_per_month != null) rows.push(["Abonnemang", this._formatSek(tariff.subscription_fee_sek_per_month) + "/mån"]);
     if (tariff.transfer_fee_ore_per_kwh != null) rows.push(["Överföring", `${this._formatNumber(tariff.transfer_fee_ore_per_kwh)} öre/kWh`]);
     if (tariff.energy_tax_ore_per_kwh != null) rows.push(["Energiskatt", `${this._formatNumber(tariff.energy_tax_ore_per_kwh)} öre/kWh`]);
+    if (tariff.estimated_yearly_cost_sek != null) rows.push(["Beräknad årskostnad", this._formatSek(tariff.estimated_yearly_cost_sek)]);
     if (cost.total_sek != null) rows.push(["E.ON-kostnad", this._formatSek(cost.total_sek)]);
     summary.replaceChildren(...rows.flatMap(([label, value]) => {
       const left = document.createElement("strong");
@@ -5080,14 +5102,20 @@ class ElrakningPanel {
     const appSave = this.host.querySelector("[data-eon-grid-app-save]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !appAccount || !appPassword || !result || !appSave || !cancel || !remove) return;
+    const providerSelect = this.host.querySelector("[data-grid-provider]");
+    if (!open || !dialog || !appAccount || !appPassword || !result || !appSave || !cancel || !remove || !providerSelect) return;
+    this._renderGridProviderOptions(providerSelect);
     const close = () => {
       dialog.hidden = true;
       appAccount.value = "";
       appPassword.value = "";
       result.textContent = "";
     };
-    open.addEventListener("click", () => { dialog.hidden = false; appAccount.focus(); });
+    open.addEventListener("click", async () => {
+      dialog.hidden = false;
+      if (!this._gridProviders?.length) await this.loadGridProviders();
+      appAccount.focus();
+    });
     cancel.addEventListener("click", close);
     remove.addEventListener("click", async () => {
       remove.disabled = true;
@@ -5098,7 +5126,10 @@ class ElrakningPanel {
       appSave.disabled = true;
       result.textContent = "Verifierar session …";
       try {
-          const response = await this.hass.callWS({ type: "elrakning/grid/login", provider: "eon", auth_method: "app", account_id: appAccount.value.trim(), password: appPassword.value });
+          const selectedProvider = this._gridProviders?.find((item) => item.id === providerSelect.value);
+          const authMethod = selectedProvider?.auth_methods?.[0];
+          if (!selectedProvider || !authMethod) throw new Error("unsupported_provider");
+          const response = await this.hass.callWS({ type: "elrakning/grid/login", provider: selectedProvider.id, auth_method: authMethod, account_id: appAccount.value.trim(), password: appPassword.value });
         if (!response.success) throw new Error(response.error || "configuration_failed");
         this._applyEonGridState(response);
         result.textContent = "E.ON är konfigurerat";
