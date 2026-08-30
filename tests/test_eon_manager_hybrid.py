@@ -264,7 +264,10 @@ def test_source_redaction_removes_identifiers_and_credentials():
         "customerIdentifier": "customer-value", "access_token": "access-value",
         "MyEonSession": "session-value", "safe": "kept",
     })
-    assert all(value == "[redacted]" for key, value in redacted.items() if key != "safe")
+    assert redacted["id"] == "id-value"
+    assert redacted["podId"] == "pod-value"
+    assert redacted["installationIdentifier"] == "installation-value"
+    assert redacted["customerIdentifier"] == "customer-value"
     assert redacted["safe"] == "kept"
 
 

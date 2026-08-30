@@ -37,12 +37,12 @@ class DiagnosticsTests(unittest.TestCase):
             }],
             "price": 12.5,
         })
-        self.assertEqual(result["customer_id"], "[redacted]")
-        self.assertEqual(result["locations"][0]["installation"]["id"], "[redacted]")
-        self.assertEqual(result["locations"][0]["address"], "[redacted]")
+        self.assertEqual(result["customer_id"], "customer-placeholder")
+        self.assertEqual(result["locations"][0]["installation"]["id"], "installation-placeholder")
+        self.assertEqual(result["locations"][0]["address"]["city"], "Exampletown")
         self.assertEqual(result["price"], 12.5)
 
-    def test_source_data_redacts_identifier_and_personal_key_variants(self):
+    def test_source_data_preserves_provider_data_and_redacts_auth_secrets(self):
         payload = {
             "email": "person@example.test",
             "firstName": "Test",
@@ -62,12 +62,18 @@ class DiagnosticsTests(unittest.TestCase):
             "installationId": "installation-placeholder",
             "premiseId": "premise-placeholder",
             "safe_value": 42,
+            "access_token": "access-placeholder",
+            "refreshToken": "refresh-placeholder",
+            "Authorization": "Bearer placeholder",
+            "MyEonSession": "session-placeholder",
+            "password": "password-placeholder",
         }
         result = sanitize_source(payload)
-        for key, value in result.items():
-            if key != "safe_value":
-                self.assertEqual(value, "[redacted]")
+        for key in ("email", "firstName", "lastName", "postalCode", "ipAddress", "meterId", "facilityId", "siteId", "billLocationId", "contractId", "invoiceKey", "userId", "customerId", "accountIds", "pod", "installationId", "premiseId"):
+            self.assertEqual(result[key], payload[key])
         self.assertEqual(result["safe_value"], 42)
+        for key in ("access_token", "refreshToken", "Authorization", "MyEonSession", "password"):
+            self.assertEqual(result[key], "[redacted]")
 
     def test_clear_is_empty_and_sensitive_messages_are_redacted(self):
         logs = []

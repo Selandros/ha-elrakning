@@ -7,11 +7,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 MAX_DIAGNOSTICS = 500
-SENSITIVE = re.compile(r"(password|jwt|token|authorization|cookie|secret|pdf[_-]?url|ocr|personnummer|personal[_-]?number|ssn|credential|email|invoice[_-]?mail|first[_-]?name|last[_-]?name|address|street|postal[_-]?code|postcode|city|ip(?:[_-]?address)?|meter[_-]?id|user[_-]?id|customer[_-]?id|facility[_-]?id|site[_-]?id|bill[_-]?location[_-]?id|account[_-]?id|contract[_-]?id|invoice[_-]?key|point[_-]?of[_-]?delivery|pod|installation[_-]?(?:id|identifier)|premise[_-]?id|(^|[_-])name$|(^|[_-])ids?$)", re.IGNORECASE)
+SENSITIVE = re.compile(
+    r"(?:^|[_-])(?:password|passphrase|authorization|cookie|cookies|client[_-]?secret|api[_-]?key|"
+    r"access[_-]?token|refresh[_-]?token|id[_-]?token|current[_-]?token|session[_-]?(?:token|secret)|"
+    r"authorization[_-]?code|code[_-]?(?:verifier|challenge)|jwt|dpop|cat|credential|secret|token)(?:$|[_-])"
+    r"|^MyEon(?:Session|AccessToken|IDToken|ResumeAt|AccessScopes)$",
+    re.IGNORECASE,
+)
+DIAGNOSTIC_SENSITIVE = re.compile(
+    r"password|passphrase|authorization|cookie|token|secret|credential|jwt|dpop|cat|api[_-]?key|"
+    r"access[_-]?token|refresh[_-]?token|id[_-]?token",
+    re.IGNORECASE,
+)
 
 
 def sanitize_source_data(value: Any, key: str = "") -> Any:
-    """Recursively redact secrets, personal data, and stable source identifiers."""
+    """Recursively redact authentication and takeover-sensitive source values."""
     if SENSITIVE.search(key):
         return "[redacted]"
     if isinstance(value, dict):
@@ -27,7 +38,7 @@ def sanitize_diagnostic_text(value: Any) -> str:
     text = re.sub(r"https?://\S+", "[URL]", text)
     text = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[E-POST]", text)
     text = re.sub(r"\b\d{10,}\b", "[NUMMER]", text)
-    if SENSITIVE.search(text):
+    if DIAGNOSTIC_SENSITIVE.search(text):
         return "Sensitive diagnostic data redacted"
     return text[:500]
 

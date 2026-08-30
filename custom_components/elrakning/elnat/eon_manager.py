@@ -545,7 +545,7 @@ class EonGridManager:
 
 
 def _redact_source_data(value: Any) -> Any:
-    """Redact credentials and customer-account identifiers from raw source data."""
+    """Redact authentication secrets while preserving provider source semantics."""
     return sanitize_source_data(value)
 
 
