@@ -5324,7 +5324,7 @@ class ElrakningPanel {
   }
 
   _updateLivePowerCardInteractivity() {
-    for (const tile of this.host.querySelectorAll("[data-live-power-tile]")) {
+    for (const tile of this.host.querySelectorAll("[data-live-power-tile], [data-invoice-estimate-card]")) {
       tile.querySelector(".live-power-debug-footer")?.classList.toggle("visible", this._debugEnabled);
     }
   }
@@ -6529,6 +6529,8 @@ class ElrakningPanel {
     };
     card._livePowerRaw = this._invoiceEstimateRaw;
     this._renderInvoiceCardCosts();
+    const sourceButton = card.querySelector("[data-live-power-source]");
+    if (sourceButton) sourceButton.hidden = !this._debugEnabled;
     this._updateLivePowerCardInteractivity();
   }
 
