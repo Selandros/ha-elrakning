@@ -581,7 +581,7 @@ export function isPointerInsidePlot(svg, event, plot, width, height) {
   return pointerToPlotCoordinates(svg, event, plot, width, height)?.inside === true;
 }
 
-const DEBUG_SENSITIVE_KEY = /(token|password|secret|cookie|authorization|customer[_-]?id|account[_-]?id|point[_-]?of[_-]?delivery|installation[_-]?(?:id|identifier)|premise[_-]?id|session[_-]?id|email|first[_-]?name|last[_-]?name|address|street|postal[_-]?code|postcode|city|ip(?:[_-]?address)?|meter[_-]?id|facility[_-]?id|site[_-]?id|bill[_-]?location[_-]?id|contract[_-]?id|invoice[_-]?key|user[_-]?id|pod)/i;
+const DEBUG_SENSITIVE_KEY = /(?:^|[_-])(?:password|passcode|passphrase|authorization|cookie|cookies|client[_-]?secret|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|current[_-]?token|session[_-]?(?:token|secret)|csrf[_-]?token|security[_-]?token|authorization[_-]?code|code[_-]?(?:verifier|challenge)|jwt|dpop|cat|credential|secret|token)(?:$|[_-])|^MyEon(?:Session|AccessToken|IDToken|ResumeAt|AccessScopes)$/i;
 
 export function sanitizeDebugData(value, key = "") {
   if (DEBUG_SENSITIVE_KEY.test(key)) return "[redacted]";

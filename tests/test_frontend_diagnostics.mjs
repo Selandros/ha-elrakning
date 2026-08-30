@@ -716,9 +716,46 @@ for (const raw of [provenanceSolar, provenanceHouse, provenanceGrid, provenanceB
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "password"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "cookies"), false);
 }
-assert.equal(sanitizeDebugData({ token: "secret", customer_id: "customer", value: 1 }).token, "[redacted]");
-assert.equal(sanitizeDebugData({ token: "secret", customer_id: "customer", value: 1 }).customer_id, "[redacted]");
-assert.equal(sanitizeDebugData({ token: "secret", customer_id: "customer", value: 1 }).value, 1);
+const sourcePolicyFixture = sanitizeDebugData({
+  customerId: "customer-placeholder",
+  accountId: "account-placeholder",
+  installationId: "installation-placeholder",
+  premiseId: "premise-placeholder",
+  POD: "pod-placeholder",
+  meterId: "meter-placeholder",
+  deviceNumber: "device-placeholder",
+  contractId: "contract-placeholder",
+  invoiceKey: "invoice-placeholder",
+  name: "Example",
+  address: { city: "Exampletown" },
+  tariff: { transfer_price: 97 },
+  invoice_status: "issued",
+  token: "secret",
+  accessToken: "access-secret",
+  refreshToken: "refresh-secret",
+  authorization: "Bearer secret",
+  cookie: "session-cookie",
+  clientSecret: "client-secret",
+  apiKey: "api-secret",
+  nested: [{ session_token: "session-secret" }],
+});
+assert.equal(sourcePolicyFixture.customerId, "customer-placeholder");
+assert.equal(sourcePolicyFixture.accountId, "account-placeholder");
+assert.equal(sourcePolicyFixture.installationId, "installation-placeholder");
+assert.equal(sourcePolicyFixture.premiseId, "premise-placeholder");
+assert.equal(sourcePolicyFixture.POD, "pod-placeholder");
+assert.equal(sourcePolicyFixture.meterId, "meter-placeholder");
+assert.equal(sourcePolicyFixture.deviceNumber, "device-placeholder");
+assert.equal(sourcePolicyFixture.contractId, "contract-placeholder");
+assert.equal(sourcePolicyFixture.invoiceKey, "invoice-placeholder");
+assert.equal(sourcePolicyFixture.name, "Example");
+assert.equal(sourcePolicyFixture.address.city, "Exampletown");
+assert.equal(sourcePolicyFixture.tariff.transfer_price, 97);
+assert.equal(sourcePolicyFixture.invoice_status, "issued");
+for (const key of ["token", "accessToken", "refreshToken", "authorization", "cookie", "clientSecret", "apiKey"]) {
+  assert.equal(sourcePolicyFixture[key], "[redacted]");
+}
+assert.equal(sourcePolicyFixture.nested[0].session_token, "[redacted]");
 assert.doesNotMatch(eonPanelSource, /function copyChartRawData/);
 assert.match(eonPanelSource, /data-live-power-scale/);
 assert.doesNotMatch(eonPanelSource, /data-live-power-max/);
