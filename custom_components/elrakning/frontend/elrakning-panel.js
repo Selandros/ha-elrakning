@@ -3458,7 +3458,9 @@ class ElrakningPanel {
           }
 
           .soc-card .soc-chart {
+            box-sizing: border-box;
             height: auto;
+            padding-block: 4px;
           }
         }
 
@@ -3470,7 +3472,9 @@ class ElrakningPanel {
           }
 
           .soc-card .soc-chart {
+            box-sizing: border-box;
             height: auto;
+            padding-block: 0;
           }
         }
 
