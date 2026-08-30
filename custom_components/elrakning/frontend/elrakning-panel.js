@@ -2688,18 +2688,18 @@ class ElrakningPanel {
         }
 
         .chart-bar.cheap {
-          fill: rgba(103, 201, 140, 0.41);
-          fill: color-mix(in srgb, var(--el-price-cheap-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: #67C98C;
+          fill-opacity: .32;
         }
 
         .chart-bar.normal {
-          fill: rgba(185, 160, 93, 0.41);
-          fill: color-mix(in srgb, var(--el-price-normal-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: #B9A05D;
+          fill-opacity: .32;
         }
 
         .chart-bar.expensive {
-          fill: rgba(228, 104, 125, 0.41);
-          fill: color-mix(in srgb, var(--el-price-expensive-color) 41%, var(--ha-card-background, var(--card-background-color)));
+          fill: #E4687D;
+          fill-opacity: .32;
         }
 
         @media (max-width: 600px) {
@@ -6472,7 +6472,8 @@ class ElrakningPanel {
       const end = new Date(period.end);
       const startX = x(period.start);
       const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
-      return `<rect class="chart-bar ${category}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
+      const barColor = category === "cheap" ? "#67C98C" : category === "expensive" ? "#E4687D" : "#B9A05D";
+      return `<rect class="chart-bar ${category}" fill="${barColor}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
