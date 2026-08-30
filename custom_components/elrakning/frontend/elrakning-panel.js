@@ -329,6 +329,11 @@ export function normalizeMeterValue(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function localDateKey(value) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString("sv-SE") : null;
+}
+
 export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
 
 export function isVisiblePowerValue(value) {
@@ -343,16 +348,16 @@ export function displayPowerValue(value) {
 }
 
 export function buildDailyObservedMaxima(powerHistory = {}, meterHistory = {}, now = new Date()) {
-  const date = new Date(now).toLocaleDateString("sv-SE");
+  const date = localDateKey(now);
   const maxFor = (points, value) => (Array.isArray(points) ? points : [])
-    .filter((point) => new Date(point?.timestamp).toLocaleDateString("sv-SE") === date)
+    .filter((point) => localDateKey(point?.timestamp) === date)
     .map((point) => Math.abs(Number(value(point))))
     .filter(Number.isFinite)
     .reduce((maximum, current) => Math.max(maximum, current), 0);
   const series = powerHistory?.series || {};
   const meterPoints = Array.isArray(meterHistory?.points) ? meterHistory.points : [];
   const gridMaximum = meterPoints
-    .filter((point) => new Date(point?.timestamp).toLocaleDateString("sv-SE") === date)
+    .filter((point) => localDateKey(point?.timestamp) === date)
     .map((point) => Math.max(Math.abs(Number(point.import_kw)), Math.abs(Number(point.export_kw))))
     .filter(Number.isFinite)
     .reduce((maximum, current) => Math.max(maximum, current), 0);
@@ -678,7 +683,7 @@ export function buildPhaseProvenance(metric, meterState = {}, meterHistory = {},
   };
 }
 
-export function buildLivePowerProvenance(key, tile, powerState = {}, meterState = {}, meterHistory = {}, powerHistory = {}, states = {}, liveMaxima = {}) {
+export function buildLivePowerProvenance(key, tile, powerState = {}, meterState = {}, meterHistory = {}, powerHistory = {}, states = {}, liveMaxima = {}, now = new Date()) {
   const source = [];
   const add = (entityId, role) => { if (entityId) source.push(buildLiveSourceEntity(states, entityId, role)); };
   const sourceValueKw = (entityId) => {
@@ -741,21 +746,42 @@ export function buildLivePowerProvenance(key, tile, powerState = {}, meterState 
     derivation.discharging_input_kw = combined ? null : sourceValueKw(powerState.discharging_entity);
     derivation.formula = combined ? "signed_battery_kw -> charging_kw/discharging_kw" : "charging_entity_kw + discharging_entity_kw";
   }
-  const seriesMaximum = (series) => {
-    const values = Array.isArray(series?.points) ? series.points.map((point) => Math.abs(Number(point.value_kw))).filter(Number.isFinite) : [];
-    return values.length ? Math.max(...values) : null;
-  };
-  const historyMaxCandidates = key === "grid"
+  const date = localDateKey(now);
+  const maximumPoint = (points, value) => (Array.isArray(points) ? points : [])
+    .filter((point) => localDateKey(point?.timestamp) === date)
+    .map((point) => ({
+      point,
+      normalized_kw: Math.abs(Number(value(point))),
+    }))
+    .filter((candidate) => Number.isFinite(candidate.normalized_kw))
+    .reduce((maximum, candidate) => !maximum || candidate.normalized_kw > maximum.normalized_kw ? candidate : maximum, null);
+  const historyCandidates = key === "grid"
     ? [
-      seriesMaximum({ points: (meterHistory.points || []).map((point) => ({ value_kw: point.import_kw })) }),
-      seriesMaximum({ points: (meterHistory.points || []).map((point) => ({ value_kw: point.export_kw })) }),
+      maximumPoint(meterHistory.points, (point) => point.import_kw),
+      maximumPoint(meterHistory.points, (point) => point.export_kw),
     ]
     : key === "battery"
-      ? [seriesMaximum(powerHistory.series?.charging), seriesMaximum(powerHistory.series?.discharging)]
-      : [seriesMaximum(powerHistory.series?.[key === "house" ? "consumption" : key])];
-  const historyMax = historyMaxCandidates.filter(Number.isFinite).length
-    ? Math.max(...historyMaxCandidates.filter(Number.isFinite))
-    : null;
+      ? [
+        maximumPoint(powerHistory.series?.charging?.points, (point) => point.value_kw),
+        maximumPoint(powerHistory.series?.discharging?.points, (point) => point.value_kw),
+      ]
+      : [maximumPoint(powerHistory.series?.[key === "house" ? "consumption" : key]?.points, (point) => point.value_kw)];
+  const historyPointCandidate = historyCandidates
+    .filter(Boolean)
+    .reduce((maximum, candidate) => !maximum || candidate.normalized_kw > maximum.normalized_kw ? candidate : maximum, null);
+  const historyMax = historyPointCandidate?.normalized_kw ?? null;
+  const historyMaxPoint = historyPointCandidate ? {
+    timestamp: historyPointCandidate.point.timestamp ?? null,
+    entity_id: source[0]?.entity_id || null,
+    raw_value: historyPointCandidate.point.raw_value ?? historyPointCandidate.point.value_kw ?? historyPointCandidate.normalized_kw,
+    normalized_kw: historyPointCandidate.normalized_kw,
+  } : null;
+  const liveMax = Number(liveMaxima[key]);
+  const resultMax = Math.max(
+    ...(Number.isFinite(historyMax) ? [historyMax] : []),
+    ...(Number.isFinite(liveMax) ? [liveMax] : []),
+  );
+  const resultKw = Number.isFinite(resultMax) ? resultMax : tile?.maxToday ?? null;
   const history = {
     source: key === "grid" ? "home_assistant_recorder" : "home_assistant_recorder_or_live_state",
     entities: source.map((item) => item.entity_id).filter(Boolean),
@@ -770,11 +796,12 @@ export function buildLivePowerProvenance(key, tile, powerState = {}, meterState 
         : (Array.isArray(powerHistory.series?.[key === "house" ? "consumption" : key]?.points) ? powerHistory.series[key === "house" ? "consumption" : key].points.length : 0),
     history_max_kw: Number.isFinite(historyMax) ? historyMax : null,
     live_max_after_bootstrap_kw: Number.isFinite(Number(liveMaxima[key])) ? Number(liveMaxima[key]) : null,
-    result_kw: tile?.maxToday ?? null,
+    result_kw: resultKw,
     max_source: "raw_history_plus_live_daily_max",
-    presentation_max_matches_history: !Number.isFinite(historyMax) || !Number.isFinite(Number(tile?.maxToday))
+    presentation_max_matches_history: !Number.isFinite(historyMax) || !Number.isFinite(resultKw)
       ? null
-      : Math.abs(historyMax - Number(tile.maxToday)) < 1e-9,
+      : Math.abs(historyMax - Number(resultKw)) < 1e-9,
+    history_max_point: historyMaxPoint,
   };
   return {
     display: { current_kw: tile?.value ?? null, status: tile?.status ?? null },
@@ -791,7 +818,7 @@ export function buildLivePowerProvenance(key, tile, powerState = {}, meterState 
     history,
     presentation: {
       current_kw: tile?.value ?? null,
-      max_today_kw: tile?.maxToday ?? null,
+      max_today_kw: resultKw,
       scale_floor_kw: 1,
       scale_max_kw: tile?.scaleMax ?? null,
       fill_percent: tile?.fillPercent ?? null,

@@ -574,6 +574,59 @@ assert.equal(provenanceSolar.derivation.method, "sum_power_entities");
 const provenanceHouse = buildLivePowerProvenance("house", liveTiles.house, { consumption_entity: "sensor.house_power" }, {}, {}, {}, liveEntityStates, { house: 2 });
 assert.equal(provenanceHouse.source.entities[0].state, "2400");
 assert.equal(provenanceHouse.derivation.input_kw, 2.4);
+const provenanceHouseWithHistoryPeak = buildLivePowerProvenance(
+  "house",
+  liveTiles.house,
+  { consumption_entity: "sensor.house_power" },
+  {},
+  {},
+  { date: "2026-08-30", series: { consumption: { points: [{ timestamp: "2026-08-30T11:00:00Z", value_kw: 13.633 }] } } },
+  {},
+  { house: 8.009 },
+  new Date("2026-08-30T12:00:00Z"),
+);
+assert.equal(provenanceHouseWithHistoryPeak.history.history_max_kw, 13.633);
+assert.equal(provenanceHouseWithHistoryPeak.history.result_kw, 13.633);
+assert.deepEqual(provenanceHouseWithHistoryPeak.history.history_max_point, {
+  timestamp: "2026-08-30T11:00:00Z",
+  entity_id: "sensor.house_power",
+  raw_value: 13.633,
+  normalized_kw: 13.633,
+});
+const provenanceHouseWithLivePeak = buildLivePowerProvenance(
+  "house",
+  liveTiles.house,
+  { consumption_entity: "sensor.house_power" },
+  {},
+  {},
+  { date: "2026-08-30", series: { consumption: { points: [{ timestamp: "2026-08-30T11:00:00Z", value_kw: 7.5 }] } } },
+  {},
+  { house: 8.009 },
+  new Date("2026-08-30T12:00:00Z"),
+);
+assert.equal(provenanceHouseWithLivePeak.history.result_kw, 8.009);
+const provenanceHouseWithoutHistory = buildLivePowerProvenance(
+  "house",
+  liveTiles.house,
+  { consumption_entity: "sensor.house_power" },
+  {},
+  {},
+  { date: "2026-08-29", series: { consumption: { points: [{ timestamp: "2026-08-29T11:00:00Z", value_kw: 13.633 }] } } },
+  {},
+  { house: 8.009 },
+  new Date("2026-08-30T12:00:00Z"),
+);
+assert.equal(provenanceHouseWithoutHistory.history.history_max_kw, null);
+assert.equal(provenanceHouseWithoutHistory.history.result_kw, 8.009);
+const localDayMaxima = buildDailyObservedMaxima(
+  { series: { consumption: { points: [
+    { timestamp: "2026-08-29T21:59:59Z", value_kw: 20 },
+    { timestamp: "2026-08-29T22:00:00Z", value_kw: 9 },
+  ] } } },
+  {},
+  new Date("2026-08-30T00:30:00+02:00"),
+);
+assert.equal(localDayMaxima.house, 9);
 const provenanceGrid = buildLivePowerProvenance(
   "grid",
   gridTilesWithFuse.grid,
