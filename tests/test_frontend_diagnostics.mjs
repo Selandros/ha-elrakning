@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -182,6 +182,21 @@ assert.deepEqual(buildSolarHistoryTooltipLines(
   { today_kwh: 14.1, remaining_today_kwh: 14.1 },
   new Date(2026, 7, 23, 12, 0),
 ), ["Producerat: 0.67 kWh"]);
+const solarTooltipFields = buildSolarHistoryTooltipFields(
+  { date: "2026-08-23", producedKwh: 0.67, forecastKwh: 18.83, performanceDeltaPercent: 68.30936590100285 },
+  {
+    today_kwh: 14.1, remaining_today_kwh: 3.96, this_hour_kwh: 1.2,
+    next_hour_kwh: null, power_now_kw: 1.842, power_next_hour_kw: 2.1,
+    peak_time_today: "13:00", tomorrow_kwh: 12.5,
+  },
+  new Date(2026, 7, 23, 12, 0),
+  { source: "smhi", available: true, current: { condition: "partlycloudy", cloud_total: 88, temperature: 20.1 } },
+  { elevation: 36.7, azimuth: 181.2, rising: true, daylight: true },
+);
+assert.ok(solarTooltipFields.some((field) => field.label === "Forecast effekt nu" && field.rawValue === 1.842));
+assert.ok(solarTooltipFields.some((field) => field.label === "SMHI Total molntäckning" && field.formatted === "88 %"));
+assert.ok(!solarTooltipFields.some((field) => field.label === "Forecast nästa timme"));
+assert.ok(solarTooltipFields.some((field) => field.label === "Mot prognos hittills" && field.formatted === "+68,3 %"));
 const solarOverReference = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
   { "2026-08-22": 1 },
@@ -615,7 +630,8 @@ assert.match(panelSource, /class="solar-history-reference-bar"/);
 assert.match(panelSource, /referenceBarWidth/);
 assert.match(panelSource, /solar-history-reference-bar \{[\s\S]*color-mix\(in srgb, var\(--solar-color\) 30%/);
 assert.match(panelSource, /solar-history-day\.hovered \.solar-history-reference-bar/);
-assert.match(panelSource, /buildSolarHistoryTooltipLines\(day, this\._powerHistory\?\.solar_forecast/);
+assert.match(panelSource, /buildSolarHistoryTooltipFields\(\n\s+day,/);
+assert.match(panelSource, /renderSharedTooltip\(tooltip/);
 assert.match(panelSource, /Prognos hittills:/);
 assert.match(panelSource, /Dagsprognos:/);
 assert.doesNotMatch(panelSource, /<strong>\$\{day\.date\}<\/strong><span>Producerat:/);
@@ -629,9 +645,9 @@ assert.match(panelSource, /solar_weather/);
 assert.doesNotMatch(panelSource, /solar-history-reference-bar[\s\S]*referenceKwh/);
 assert.doesNotMatch(panelSource, /Solpotential/);
 assert.match(panelSource, /solar_array_metadata/);
-assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<span>Laddat:/);
+assert.match(panelSource, /renderSharedTooltip\(tooltip, \{[\s\S]*label: "Laddat"/);
+assert.match(panelSource, /renderSharedTooltip\(tooltip, \{[\s\S]*label: "Urladdat"/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Laddat:/);
-assert.match(panelSource, /<span>Urladdat: \$\{formatEnergy\(day\.dischargingKwh\)\}<\/span>`;/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*Kapacitetsutnyttjande:/);
 const weatherTooltip = buildSolarHistoryTooltipLines(
   { date: new Date().toLocaleDateString("sv-SE"), producedKwh: 1 },
@@ -738,7 +754,7 @@ assert.match(panelSource, /series\?\.soc\?\.points/);
 assert.match(panelSource, /value_percent/);
 assert.match(panelSource, /Math\.max\(0, Math\.min\(100, value\)\)/);
 assert.match(panelSource, /Ingen historik idag/);
-assert.match(panelSource, /Laddnivå: \$\{this\._formatNumber\(point\.value\)\} %/);
+assert.match(panelSource, /renderSharedTooltip\(tooltip, \{[\s\S]*label: "Laddnivå"/);
 assert.doesNotMatch(panelSource, /integratePowerHistoryKwh\([^)]*soc/);
 assert.match(panelSource, /\["Import idag", "energy_import_entity"\]/);
 assert.match(panelSource, /\["Export idag", "energy_export_entity"\]/);
@@ -977,7 +993,7 @@ assert.doesNotMatch(panelSource, /markerGroups/);
 assert.doesNotMatch(panelSource, /markerLayouts/);
 assert.doesNotMatch(panelSource, /markerMinY|markerHeight|markerGap/);
 assert.ok((panelSource.match(/var\(--ha-card-background, var\(--card-background-color\)\)/g) || []).length >= 4);
-assert.match(panelSource, /_buildVisibleTooltipRows\(comparisonPrice, details, layers = this\._chartLayerState\(\)\)/);
+assert.match(panelSource, /_buildVisibleTooltipFields\(comparisonPrice, details, layers = this\._chartLayerState\(\)\)/);
 assert.match(panelSource, /snapTooltipTimestamp\(/);
 assert.match(panelSource, /tooltipTimestamp = snapTooltipTimestamp/);
 assert.match(panelSource, /return start <= tooltipTimestamp && tooltipTimestamp < end/);
@@ -1085,7 +1101,7 @@ assert.match(panelSource, /importValue: meterValue\("import_kw"\)/);
 assert.match(panelSource, /exportValue: meterValue\("export_kw"\)/);
 assert.match(panelSource, /isVisiblePowerValue\(hoverSnapshot\.importValue\)/);
 assert.match(panelSource, /isVisiblePowerValue\(hoverSnapshot\.exportValue\)/);
-assert.match(panelSource, /_buildVisibleTooltipRows\(comparisonPrice, \{[\s\S]*hoverSnapshot\.importValue/);
+assert.match(panelSource, /_buildVisibleTooltipFields\(comparisonPrice, \{[\s\S]*hoverSnapshot\.importValue/);
 assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /buildMeterDisplayCoordinates\(segment, key, x, meterY\)/);
 assert.match(panelSource, /buildMeterDisplayPathSegments\(coordinates\)/);
@@ -1162,15 +1178,15 @@ assert.match(panelSource, /visibleLayers\.spot && Number\.isFinite\(hoverSnapsho
 assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /this\._priceComparisonVisible\.grid/);
 assert.match(panelSource, /this\._priceComparisonVisible\.electricity/);
-assert.match(panelSource, /rows\.push\(`<span class="tooltip-value">Spotpris: \$\{this\.formatPrice\(comparisonPrice\)\}<\/span>`\)/);
+assert.match(panelSource, /add\("Spotpris", comparisonPrice, this\.formatPrice\(comparisonPrice\)\)/);
 assert.doesNotMatch(panelSource, /<span class="tooltip-value">Elhandel:/);
 assert.doesNotMatch(panelSource, /<span class="tooltip-value">Elnät:/);
 assert.match(panelSource, /layers\.import && isVisiblePowerValue\(details\?\.import_kw\)/);
 assert.match(panelSource, /layers\.export && isVisiblePowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /tooltip-meter-import/);
 assert.match(panelSource, /tooltip-meter-export/);
-assert.match(panelSource, /tooltip\.innerHTML =/);
-assert.match(panelSource, /\$\{tooltipRows\}/);
+assert.match(panelSource, /renderSharedTooltip\(tooltip/);
+assert.match(panelSource, /fields: tooltipFields/);
 assert.match(panelSource, /periods\.forEach\(\(period, index\) =>/);
 assert.match(panelSource, /_hoverIsolatedLayer = null/);
 assert.match(panelSource, /_effectiveChartLayerState\(\)/);

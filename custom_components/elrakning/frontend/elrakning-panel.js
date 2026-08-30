@@ -669,6 +669,118 @@ function positionChartTooltip(chart, tooltip, clientX, clientY, obstacles = [], 
   tooltip.style.top = `${fallbackTop}px`;
 }
 
+function tooltipValueIsPresent(value) {
+  return value !== null && value !== undefined && value !== ""
+    && !(typeof value === "number" && !Number.isFinite(value));
+}
+
+export function renderSharedTooltip(tooltip, { title = "", fields = [], rawData = null, copyData = null, copy }) {
+  if (!tooltip) return;
+  const validFields = fields.filter((field) => tooltipValueIsPresent(field?.value));
+  const feedback = tooltip.querySelector(".tooltip-copy-feedback");
+  tooltip.replaceChildren();
+  if (title) {
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    tooltip.append(heading);
+  }
+  for (const field of validFields) {
+    const row = document.createElement("span");
+    row.className = `tooltip-value ${field.className || ""}`.trim();
+    row.textContent = `${field.label}: ${field.formatted ?? field.value}`;
+    tooltip.append(row);
+  }
+  if (feedback) tooltip.append(feedback);
+  const rawFields = validFields.map((field) => `${field.label}: ${field.rawValue ?? field.value}`);
+  tooltip.dataset.copyText = copyData || [title, ...rawFields].filter(Boolean).join("\n");
+  tooltip.dataset.rawData = rawData ? JSON.stringify(rawData) : "";
+  bindSharedTooltipCopy(tooltip, copy);
+}
+
+function bindSharedTooltipCopy(tooltip, copy) {
+  if (tooltip.dataset.copyBound === "true") return;
+  tooltip.dataset.copyBound = "true";
+  const getFeedback = () => {
+    let feedback = tooltip.querySelector(".tooltip-copy-feedback");
+    if (!feedback) {
+      feedback = document.createElement("span");
+      feedback.className = "tooltip-copy-feedback";
+      feedback.hidden = true;
+      tooltip.append(feedback);
+    }
+    return feedback;
+  };
+  tooltip.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (typeof copy !== "function" || !tooltip.dataset.copyText) return;
+    try {
+      await copy(tooltip.dataset.copyText);
+      const feedback = getFeedback();
+      feedback.textContent = "Kopierat";
+      feedback.hidden = false;
+      window.setTimeout(() => { feedback.hidden = true; }, 1500);
+    } catch {
+      const feedback = getFeedback();
+      feedback.textContent = "Kunde inte kopiera";
+      feedback.hidden = false;
+      window.setTimeout(() => { feedback.hidden = true; }, 1500);
+    }
+  });
+}
+
+const tooltipNumber = (value, maximumFractionDigits = 2) => Number(value).toLocaleString("sv-SE", {
+  maximumFractionDigits,
+});
+
+export function buildSolarHistoryTooltipFields(day, liveForecast, now = new Date(), weather = null, sun = null) {
+  const fields = [];
+  const add = (label, value, formatted = value) => {
+    if (tooltipValueIsPresent(value)) fields.push({ label, value, rawValue: value, formatted });
+  };
+  if (Number.isFinite(day?.producedKwh)) add("Producerat", day.producedKwh, `${tooltipNumber(day.producedKwh)} kWh`);
+  const today = new Date(now).toLocaleDateString("sv-SE");
+  if (day?.date === today) {
+    const liveTodayKwh = Number.isFinite(Number(liveForecast?.today_kwh)) ? Number(liveForecast.today_kwh) : null;
+    const liveRemainingKwh = Number.isFinite(Number(liveForecast?.remaining_today_kwh)) ? Number(liveForecast.remaining_today_kwh) : null;
+    const expectedSoFarKwh = liveTodayKwh !== null && liveRemainingKwh !== null ? liveTodayKwh - liveRemainingKwh : null;
+    if (expectedSoFarKwh > 0) add("Prognos hittills", expectedSoFarKwh, `${tooltipNumber(expectedSoFarKwh)} kWh`);
+    if (Number.isFinite(day?.forecastKwh)) add("Dagsprognos", day.forecastKwh, `${tooltipNumber(day.forecastKwh)} kWh`);
+    if (Number.isFinite(day?.performanceDeltaPercent)) {
+      const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
+      add("Mot prognos hittills", day.performanceDeltaPercent, `${sign}${tooltipNumber(day.performanceDeltaPercent, 1)} %`);
+    }
+    const forecastFields = [
+      ["Forecast idag", "today_kwh", "kWh"], ["Forecast kvar idag", "remaining_today_kwh", "kWh"],
+      ["Forecast denna timme", "this_hour_kwh", "kWh"], ["Forecast nästa timme", "next_hour_kwh", "kWh"],
+      ["Forecast effekt nu", "power_now_kw", "kW"], ["Forecast effekt nästa timme", "power_next_hour_kw", "kW"],
+      ["Topp tid idag", "peak_time_today", ""], ["Forecast imorgon", "tomorrow_kwh", "kWh"],
+    ];
+    for (const [label, key, unit] of forecastFields) {
+      const value = liveForecast?.[key];
+      const numeric = unit && unit !== "" ? Number(value) : value;
+      if (unit && tooltipValueIsPresent(value) && Number.isFinite(numeric)) add(label, numeric, `${tooltipNumber(numeric)} ${unit}`);
+      else if (!unit) add(label, value);
+    }
+    const current = weather?.current || {};
+    add("SMHI", current.condition);
+    for (const [label, key] of [["Total molntäckning", "cloud_total"], ["Låga moln", "cloud_low"], ["Mellanhöga moln", "cloud_medium"], ["Höga moln", "cloud_high"], ["Temperatur", "temperature"], ["Nederbörd", "precipitation"], ["Nederbördssannolikhet", "precipitation_probability"]]) {
+      const value = Number(current[key]);
+      if (tooltipValueIsPresent(current[key]) && Number.isFinite(value)) add(`SMHI ${label}`, value, `${tooltipNumber(value, 1)}${key === "temperature" ? " °C" : key.includes("cloud") || key.includes("probability") ? " %" : ""}`);
+    }
+    for (const [label, key, suffix] of [["Solhöjd", "elevation", "°"], ["Solens azimut", "azimuth", "°"]]) {
+      const value = Number(sun?.[key]);
+      if (tooltipValueIsPresent(sun?.[key]) && Number.isFinite(value)) add(label, value, `${tooltipNumber(value, 1)}${suffix}`);
+    }
+    add("Stigande sol", typeof sun?.rising === "boolean" ? sun.rising : null, sun?.rising ? "Ja" : "Nej");
+    add("Dagsljus", typeof sun?.daylight === "boolean" ? sun.daylight : null, sun?.daylight ? "Ja" : "Nej");
+    add("Soluppgång", sun?.sunrise);
+    add("Solnedgång", sun?.sunset);
+  } else if (Number.isFinite(day?.forecastKwh)) {
+    add("Prognos", day.forecastKwh, `${tooltipNumber(day.forecastKwh)} kWh`);
+  }
+  return fields;
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -1790,7 +1902,7 @@ class ElrakningPanel {
           font-size: var(--price-card-text-size);
           line-height: 1.25;
           padding: 6px 8px;
-          pointer-events: none;
+          pointer-events: auto;
           position: absolute;
           white-space: nowrap;
           z-index: 2;
@@ -2670,7 +2782,7 @@ class ElrakningPanel {
           max-width: min(170px, calc(100% - 12px));
           overflow-wrap: anywhere;
           padding: clamp(4px, 1cqw, 5px) clamp(5px, 1.3cqw, 6px);
-          pointer-events: none;
+          pointer-events: auto;
           position: absolute;
           top: 0;
           white-space: normal;
@@ -2681,7 +2793,7 @@ class ElrakningPanel {
           font-size: 13px;
           max-width: min(420px, calc(100% - 16px));
           padding: 8px 10px;
-          pointer-events: none;
+          pointer-events: auto;
           white-space: pre-wrap;
         }
 
@@ -2690,6 +2802,13 @@ class ElrakningPanel {
           font-size: inherit;
           line-height: 1.15;
           margin-top: 2px;
+        }
+
+        .tooltip-copy-feedback {
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: .9em;
+          margin-top: 4px;
         }
 
         .chart-tooltip > strong {
@@ -3752,7 +3871,14 @@ class ElrakningPanel {
         group.classList.add("hovered");
         hoveredDay = group;
       }
-      tooltip.innerHTML = `<span>Laddat: ${formatEnergy(day.chargingKwh)}</span><span>Urladdat: ${formatEnergy(day.dischargingKwh)}</span>`;
+      renderSharedTooltip(tooltip, {
+        fields: [
+          { label: "Laddat", value: day.chargingKwh, formatted: formatEnergy(day.chargingKwh), rawValue: day.chargingKwh },
+          { label: "Urladdat", value: day.dischargingKwh, formatted: formatEnergy(day.dischargingKwh), rawValue: day.dischargingKwh },
+        ],
+        rawData: day,
+        copy: (text) => this._copyText(text),
+      });
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
@@ -3838,9 +3964,17 @@ class ElrakningPanel {
       hoveredDay?.classList.remove("hovered");
       group.classList.add("hovered");
       hoveredDay = group;
-      tooltip.innerHTML = buildSolarHistoryTooltipLines(day, this._powerHistory?.solar_forecast, new Date(), this._powerHistory?.solar_weather, this._powerHistory?.solar_sun)
-        .map((line) => `<span>${line.replace(/([0-9]+(?:\.[0-9]+)?) kWh$/, (value) => `${this._formatNumber(Number.parseFloat(value))} kWh`)}</span>`)
-        .join("");
+      renderSharedTooltip(tooltip, {
+        fields: buildSolarHistoryTooltipFields(
+          day,
+          this._powerHistory?.solar_forecast,
+          new Date(),
+          this._powerHistory?.solar_weather,
+          this._powerHistory?.solar_sun,
+        ),
+        rawData: day,
+        copy: (text) => this._copyText(text),
+      });
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
@@ -3943,7 +4077,12 @@ class ElrakningPanel {
       const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
       const pointX = x(point.timestamp);
       const pointY = y(point.value);
-      tooltip.innerHTML = `<strong>${new Date(point.timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</strong><span>Laddnivå: ${this._formatNumber(point.value)} %</span>`;
+      renderSharedTooltip(tooltip, {
+        title: new Date(point.timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }),
+        fields: [{ label: "Laddnivå", value: point.value, formatted: `${this._formatNumber(point.value)} %` }],
+        rawData: point,
+        copy: (text) => this._copyText(text),
+      });
       tooltip.hidden = false;
       hover.innerHTML = `<circle class="chart-hover-marker chart-hover-marker-soc" cx="${pointX}" cy="${pointY}" r="4" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
@@ -5817,16 +5956,19 @@ class ElrakningPanel {
     });
   }
 
-  _buildVisibleTooltipRows(comparisonPrice, details, layers = this._chartLayerState()) {
-    const rows = [];
+  _buildVisibleTooltipFields(comparisonPrice, details, layers = this._chartLayerState()) {
+    const fields = [];
+    const add = (label, value, formatted, className = "") => {
+      if (tooltipValueIsPresent(value)) fields.push({ label, value, formatted, className });
+    };
     if (layers.spot && Number.isFinite(comparisonPrice)) {
-      rows.push(`<span class="tooltip-value">Spotpris: ${this.formatPrice(comparisonPrice)}</span>`);
+      add("Spotpris", comparisonPrice, this.formatPrice(comparisonPrice));
     }
     if (layers.import && isVisiblePowerValue(details?.import_kw)) {
-      rows.push(`<span class="tooltip-value tooltip-meter-import">Import: ${this._formatNumber(details.import_kw)} kW</span>`);
+      add("Import", details.import_kw, `${this._formatNumber(details.import_kw)} kW`, "tooltip-meter-import");
     }
     if (layers.export && isVisiblePowerValue(details?.export_kw)) {
-      rows.push(`<span class="tooltip-value tooltip-meter-export">Export: ${this._formatNumber(details.export_kw)} kW</span>`);
+      add("Export", details.export_kw, `${this._formatNumber(details.export_kw)} kW`, "tooltip-meter-export");
     }
     const powerRows = [
       ["solar", "Sol", "tooltip-power-solar"],
@@ -5836,10 +5978,10 @@ class ElrakningPanel {
     ];
     for (const [key, label, className] of powerRows) {
       if (layers[key] && isVisiblePowerValue(details?.[`${key}_kw`])) {
-        rows.push(`<span class="tooltip-value ${className}">${label}: ${this._formatNumber(details[`${key}_kw`])} kW</span>`);
+        add(label, details[`${key}_kw`], `${this._formatNumber(details[`${key}_kw`])} kW`, className);
       }
     }
-    return rows.join("");
+    return fields;
   }
 
   _meterPointAtNearest(timestamp) {
@@ -5927,7 +6069,7 @@ class ElrakningPanel {
           else delete details[`${key}_kw`];
         }
       }
-      const tooltipRows = this._buildVisibleTooltipRows(comparisonPrice, {
+      const tooltipFields = this._buildVisibleTooltipFields(comparisonPrice, {
         import_kw: hoverSnapshot.importValue,
         export_kw: hoverSnapshot.exportValue,
         solar_kw: hoverSnapshot.pvValue,
@@ -5939,9 +6081,17 @@ class ElrakningPanel {
       if (details) {
         tooltip.textContent = tooltipText;
       } else {
-        tooltip.innerHTML = `<strong>${time}</strong>${tooltipRows}`;
+        renderSharedTooltip(tooltip, {
+          title: time,
+          fields: tooltipFields,
+          copy: (text) => this._copyText(text),
+        });
       }
       this._chartDebugCopyText = tooltipText;
+      if (details) {
+        tooltip.dataset.copyText = tooltipText;
+        bindSharedTooltipCopy(tooltip, (text) => this._copyText(text));
+      }
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
       const hoverGeometry = this._chartHoverGeometry;
       if (hoverMarkers && hoverGeometry) {
