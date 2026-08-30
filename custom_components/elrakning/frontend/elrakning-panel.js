@@ -382,18 +382,18 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
   const fuseUtilizationPercent = Number.isFinite(maxPhaseCurrentA) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
     ? maxPhaseCurrentA / fuseAmpere * 100
     : null;
-  grid = { ...grid, fuseAmpere: Number.isFinite(fuseAmpere) ? fuseAmpere : null, phaseCurrentA: phaseValues, maxPhaseCurrentA, fuseUtilizationPercent };
+  grid = { ...grid, colorKey: grid.direction || "neutral", fuseAmpere: Number.isFinite(fuseAmpere) ? fuseAmpere : null, phaseCurrentA: phaseValues, maxPhaseCurrentA, fuseUtilizationPercent };
   const charging = finiteMagnitude(powerState.charging_kw);
   const discharging = finiteMagnitude(powerState.discharging_kw);
   const chargingActive = charging !== null && charging > POWER_DISPLAY_THRESHOLD_KW;
   const dischargingActive = discharging !== null && discharging > POWER_DISPLAY_THRESHOLD_KW;
   const battery = chargingActive && dischargingActive
-    ? { value: null, status: "Inkonsekvent data", direction: "invalid", charging, discharging }
+    ? { value: null, status: "Inkonsekvent data", direction: "invalid", colorKey: "neutral", charging, discharging }
     : chargingActive
-      ? { value: charging, status: "Laddar", direction: "charging", charging, discharging }
+      ? { value: charging, status: "Laddar", direction: "charging", colorKey: "charging", charging, discharging }
       : dischargingActive
-        ? { value: discharging, status: "Urladdar", direction: "discharging", charging, discharging }
-        : { value: 0, status: "Vilar", direction: null, charging, discharging };
+        ? { value: discharging, status: "Urladdar", direction: "discharging", colorKey: "discharging", charging, discharging }
+        : { value: 0, status: "Vilar", direction: null, colorKey: "neutral", charging, discharging };
   const withScale = (tile, key) => {
     const current = Number.isFinite(tile.value) ? Math.abs(tile.value) : 0;
     const maxToday = Math.max(0, Number.isFinite(Number(maxima[key])) ? Number(maxima[key]) : current);
@@ -401,8 +401,8 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
     return { ...tile, maxToday, scaleMax, fillPercent: Math.max(0, Math.min(100, current / scaleMax * 100)) };
   };
   return {
-    house: withScale({ value: house, status: house === null ? "Ej tillgängligt" : "Förbrukar" }, "house"),
-    solar: withScale({ value: solar, status: solar === null ? "Ej tillgängligt" : "Producerar" }, "solar"),
+    house: withScale({ value: house, status: house === null ? "Ej tillgängligt" : "Förbrukar", colorKey: "consumption" }, "house"),
+    solar: withScale({ value: solar, status: solar === null ? "Ej tillgängligt" : "Producerar", colorKey: "solar" }, "solar"),
     grid: withScale(grid, "grid"),
     battery: withScale(battery, "battery"),
   };
@@ -4197,7 +4197,13 @@ class ElrakningPanel {
       const fill = element.querySelector("[data-live-power-fill]");
       if (value) value.textContent = Number.isFinite(tile.value) ? `${this._formatNumber(tile.value)} kW` : "—";
       if (status) status.textContent = tile.status;
-      if (fill) fill.style.width = `${tile.fillPercent}%`;
+      if (fill) {
+        fill.style.backgroundColor = chartColor(tile.colorKey);
+        fill.style.width = `${tile.fillPercent}%`;
+      }
+      if (status) status.style.color = Number.isFinite(tile.value) && tile.colorKey !== "neutral"
+        ? chartColor(tile.colorKey)
+        : "";
       const scale = element.querySelector("[data-live-power-scale]");
       if (scale) scale.textContent = `${this._formatNumber(tile.scaleMax)} kW`;
       if (key === "grid") {
