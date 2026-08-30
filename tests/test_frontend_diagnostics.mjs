@@ -851,6 +851,12 @@ assert.doesNotMatch(eonPanelSource, /debug-copy-enabled/);
 assert.match(eonPanelSource, /\.live-power-debug-footer\.visible \{/);
 assert.match(eonPanelSource, /JSON\.stringify\(safeSource, null, 2\)/);
 assert.match(eonPanelSource, /liveSource \|\| isEon \|\| cardSource/);
+const invoiceRenderSource = eonPanelSource.slice(
+  eonPanelSource.indexOf("  _renderInvoiceEstimateCard()"),
+  eonPanelSource.indexOf("  _renderInvoiceCardCosts()"),
+);
+assert.match(invoiceRenderSource, /card\._livePowerRaw = this\._invoiceEstimateRaw/);
+assert.match(invoiceRenderSource, /this\._updateLivePowerCardInteractivity\(\)/);
 assert.match(eonPanelSource, /data-live-power-grid-meta/);
 assert.match(eonPanelSource, /data-live-power-grid-fuse-status/);
 assert.match(eonPanelSource, /fill\.style\.backgroundColor = chartColor\(tile\.colorKey\)/);

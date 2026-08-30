@@ -6529,6 +6529,7 @@ class ElrakningPanel {
     };
     card._livePowerRaw = this._invoiceEstimateRaw;
     this._renderInvoiceCardCosts();
+    this._updateLivePowerCardInteractivity();
   }
 
   _renderInvoiceCardCosts() {
