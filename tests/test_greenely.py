@@ -304,6 +304,21 @@ class _Hass:
 
 
 class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ui_preference_get_is_pure_and_domain_updates_are_atomic(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        self.assertEqual(await manager.async_get_price_comparison("user-a"), {"electricity": True, "grid": False})
+        self.assertIsNone(manager.chart_preferences_store.data)
+
+        await manager.async_update_ui_preferences("user-a", {"price_comparison": {"electricity": False, "grid": True}})
+        await manager.async_update_ui_preferences("user-a", {"phase_history_visible": {"l2": False}})
+        await manager.async_update_ui_preferences("user-a", {"chart_layers": {"average": False}})
+        preferences = await manager.async_get_ui_preferences("user-a")
+        self.assertEqual(preferences["price_comparison"], {"electricity": False, "grid": True})
+        self.assertEqual(preferences["phase_history_visible"], {"l1": True, "l2": False, "l3": True})
+        self.assertFalse(preferences["chart_layers"]["average"])
+
     async def test_price_comparison_defaults_and_persists_per_user(self):
         manager = object.__new__(ElhandelManager)
         manager.chart_preferences_store = _Store()

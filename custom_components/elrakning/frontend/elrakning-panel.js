@@ -4467,22 +4467,24 @@ class ElrakningPanel {
     }
   }
 
-  async _persistChartPreferences() {
+  async _persistChartPreferences(updates = {}) {
     if (!this.hass?.callWS || !this._chartPreferencesReady) return;
     const payload = {
-        type: "elrakning/ui_preferences/set",
-        chart_layers: this._chartLayerState(),
-        price_comparison: { ...this._priceComparisonVisible },
-        phase_history_metric: this._phaseHistoryMetric,
-        phase_history_visible: { ...this._phaseHistoryVisible },
-        configuration_cards_visible: this._configurationCardsVisible,
-        main_cards: { ...this._mainCards },
+      type: "elrakning/ui_preferences/set",
+      ...updates,
     };
     this._chartPreferencesSavePromise = this._chartPreferencesSavePromise
       .catch(() => {})
       .then(async () => {
         try {
-          await this.hass.callWS(payload);
+          const response = await this.hass.callWS(payload);
+          if (updates.price_comparison && response?.price_comparison) {
+            this._applyPriceComparisonState(response.price_comparison);
+            this._syncPriceComparisonControls();
+            this.updatePriceSummary();
+            this.renderPriceChart();
+          }
+          return response;
         } catch {
           // Keep the UI responsive when preference persistence is unavailable.
         }
@@ -4512,7 +4514,7 @@ class ElrakningPanel {
           button.classList.toggle("active", this._meterPowerVisible[layer]);
           button.setAttribute("aria-pressed", String(this._meterPowerVisible[layer]));
           this.renderPriceChart();
-          this._persistChartPreferences();
+          this._persistChartPreferences({ chart_layers: this._chartLayerState() });
           return;
         }
         if (layer === "average") {
@@ -4520,7 +4522,7 @@ class ElrakningPanel {
           button.classList.toggle("active", this._averageLineVisible);
           button.setAttribute("aria-pressed", String(this._averageLineVisible));
           this.renderPriceChart();
-          this._persistChartPreferences();
+          this._persistChartPreferences({ chart_layers: this._chartLayerState() });
           return;
         }
         if (layer !== "spot") return;
@@ -4528,7 +4530,7 @@ class ElrakningPanel {
         button.classList.toggle("active", this._spotBarsVisible);
         button.setAttribute("aria-pressed", String(this._spotBarsVisible));
         this.renderPriceChart();
-        this._persistChartPreferences();
+        this._persistChartPreferences({ chart_layers: this._chartLayerState() });
       });
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
@@ -4540,7 +4542,7 @@ class ElrakningPanel {
         button.classList.toggle("active", this._previewLayersVisible[layer]);
         button.setAttribute("aria-pressed", String(this._previewLayersVisible[layer]));
         this.renderPriceChart();
-        this._persistChartPreferences();
+        this._persistChartPreferences({ chart_layers: this._chartLayerState() });
       });
     }
     for (const control of this.host.querySelectorAll("[data-price-layer]")) {
@@ -4552,7 +4554,7 @@ class ElrakningPanel {
         this._priceComparisonVisible[layer] = input.checked;
         this.updatePriceSummary();
         this.renderPriceChart();
-        this._persistChartPreferences();
+        this._persistChartPreferences({ price_comparison: { ...this._priceComparisonVisible } });
       });
     }
   }
@@ -4576,7 +4578,7 @@ class ElrakningPanel {
     if (!toggle) return;
     toggle.addEventListener("click", () => {
       this._applyConfigurationCardsVisibility(!this._configurationCardsVisible);
-      this._persistChartPreferences();
+      this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
     });
     this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
   }
@@ -4597,7 +4599,7 @@ class ElrakningPanel {
         this._mainCards[key] = input.checked;
         if (key === "elmatare") this._mainCards.consumption = false;
         this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
-        this._persistChartPreferences();
+        this._persistChartPreferences({ main_cards: { ...this._mainCards } });
       });
     }
   }
@@ -6848,7 +6850,7 @@ class ElrakningPanel {
           item.classList.toggle("active", active);
           item.setAttribute("aria-pressed", String(active));
         }
-        this._persistChartPreferences();
+        this._persistChartPreferences({ phase_history_metric: this._phaseHistoryMetric });
         this._renderPhaseHistoryCard();
       });
     }
@@ -6860,7 +6862,7 @@ class ElrakningPanel {
       if (!Object.hasOwn(this._phaseHistoryVisible, phase)) return;
       this._phaseHistoryVisible[phase] = item.getAttribute("aria-pressed") !== "true";
       this._syncPhaseHistoryVisibilityButtons();
-      this._persistChartPreferences();
+      this._persistChartPreferences({ phase_history_visible: { ...this._phaseHistoryVisible } });
       this._renderPhaseHistoryCard();
     };
     summary?.addEventListener("click", togglePhaseSummary);

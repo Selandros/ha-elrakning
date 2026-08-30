@@ -18,7 +18,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data, grid_variable_cost_ex_vat
-from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
+from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
@@ -692,18 +692,10 @@ async def websocket_chart_layers(hass, connection, msg):
     if not manager or not getattr(connection, "user", None):
         connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
         return
-    chart_layers = await manager.async_get_chart_layers(connection.user.id)
-    configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
-    main_cards = await manager.async_get_main_cards(connection.user.id)
-    price_comparison = await manager.async_get_price_comparison(connection.user.id)
-    phase_history_visible = await manager.async_get_phase_history_visible(connection.user.id)
+    preferences = await manager.async_get_ui_preferences(connection.user.id)
     connection.send_result(msg["id"], {
         "success": True,
-        "chart_layers": chart_layers,
-        "configuration_cards_visible": configuration_cards_visible,
-        "main_cards": main_cards,
-        "price_comparison": price_comparison,
-        "phase_history_visible": phase_history_visible,
+        **preferences,
     })
 
 
@@ -723,6 +715,7 @@ async def websocket_chart_layers(hass, connection, msg):
         vol.Optional("phase_history_visible", default={}): {
             vol.Optional(key): bool for key in PHASE_HISTORY_VISIBLE_DEFAULTS
         },
+        vol.Optional("phase_history_metric"): vol.In(PHASE_HISTORY_METRICS),
     }
 )
 @websocket_api.async_response
@@ -731,30 +724,22 @@ async def websocket_chart_layers_set(hass, connection, msg):
     if not manager or not getattr(connection, "user", None):
         connection.send_result(msg["id"], {"success": False, "error": "not_configured"})
         return
-    chart_layers = await manager.async_get_chart_layers(connection.user.id)
-    if "chart_layers" in msg:
-        chart_layers = await manager.async_set_chart_layers(connection.user.id, msg["chart_layers"])
-    configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
-    if "configuration_cards_visible" in msg:
-        configuration_cards_visible = await manager.async_set_configuration_cards_visible(
-            connection.user.id, msg["configuration_cards_visible"]
+    updates = {
+        key: msg[key]
+        for key in (
+            "chart_layers",
+            "configuration_cards_visible",
+            "main_cards",
+            "price_comparison",
+            "phase_history_visible",
+            "phase_history_metric",
         )
-    main_cards = await manager.async_get_main_cards(connection.user.id)
-    if "main_cards" in msg:
-        main_cards = await manager.async_set_main_cards(connection.user.id, msg["main_cards"])
-    price_comparison = await manager.async_get_price_comparison(connection.user.id)
-    if "price_comparison" in msg:
-        price_comparison = await manager.async_set_price_comparison(connection.user.id, msg["price_comparison"])
-    phase_history_visible = await manager.async_get_phase_history_visible(connection.user.id)
-    if "phase_history_visible" in msg:
-        phase_history_visible = await manager.async_set_phase_history_visible(connection.user.id, msg["phase_history_visible"])
+        if key in msg
+    }
+    preferences = await manager.async_update_ui_preferences(connection.user.id, updates) if updates else await manager.async_get_ui_preferences(connection.user.id)
     connection.send_result(msg["id"], {
         "success": True,
-        "chart_layers": chart_layers,
-        "configuration_cards_visible": configuration_cards_visible,
-        "main_cards": main_cards,
-        "price_comparison": price_comparison,
-        "phase_history_visible": phase_history_visible,
+        **preferences,
     })
 
 

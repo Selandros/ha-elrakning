@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -55,6 +56,8 @@ PHASE_HISTORY_VISIBLE_DEFAULTS = {
     "l2": True,
     "l3": True,
 }
+PHASE_HISTORY_METRIC_DEFAULT = "current"
+PHASE_HISTORY_METRICS = {"current", "voltage", "active_power"}
 
 
 class ElhandelManager:
@@ -67,6 +70,7 @@ class ElhandelManager:
         self.diagnostics_store = Store(hass, 1, "elrakning.diagnostics")
         self.preferences_store = Store(hass, 1, "elrakning.frontend_preferences")
         self.chart_preferences_store = Store(hass, 1, "elrakning.chart_preferences")
+        self._chart_preferences_lock = asyncio.Lock()
         self.frontend_preferences = {"debug_enabled": False}
         self.lifecycle = LifecycleManager(hass)
         self.diagnostics: list[dict[str, Any]] = []
@@ -149,139 +153,120 @@ class ElhandelManager:
         return await self.async_get_frontend_preferences()
 
     async def async_get_chart_layers(self, user_id: str) -> dict[str, bool]:
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) else {}
-        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
-        chart_layers = user_state.get("chart_layers", {}) if isinstance(user_state, dict) else {}
-        result = {
-            key: chart_layers[key] if isinstance(chart_layers, dict) and isinstance(chart_layers.get(key), bool) else default
-            for key, default in CHART_LAYER_DEFAULTS.items()
-        }
-        if not isinstance(users, dict):
-            users = {}
-        if not isinstance(users.get(user_id), dict) or users[user_id].get("chart_layers") != result:
-            users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "chart_layers": result}
-            await self.chart_preferences_store.async_save({"users": users})
-        return result
+        preferences = await self.async_get_ui_preferences(user_id)
+        return preferences["chart_layers"]
 
     async def async_set_chart_layers(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
-        current = await self.async_get_chart_layers(user_id)
-        for key, value in updates.items():
-            if key in CHART_LAYER_DEFAULTS and isinstance(value, bool):
-                current[key] = value
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
-        users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "chart_layers": current}
-        await self.chart_preferences_store.async_save({"users": users})
-        return current
+        return (await self.async_update_ui_preferences(user_id, {"chart_layers": updates}))["chart_layers"]
 
     async def async_get_price_comparison(self, user_id: str) -> dict[str, bool]:
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) else {}
-        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
-        saved = user_state.get("price_comparison", {}) if isinstance(user_state, dict) else {}
-        result = {
-            key: saved[key] if isinstance(saved, dict) and isinstance(saved.get(key), bool) else default
-            for key, default in PRICE_COMPARISON_DEFAULTS.items()
-        }
-        if not isinstance(users, dict):
-            users = {}
-        if not isinstance(users.get(user_id), dict) or users[user_id].get("price_comparison") != result:
-            users[user_id] = {
-                **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
-                "price_comparison": result,
-            }
-            await self.chart_preferences_store.async_save({"users": users})
-        return result
+        preferences = await self.async_get_ui_preferences(user_id)
+        return preferences["price_comparison"]
 
     async def async_set_price_comparison(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
-        current = await self.async_get_price_comparison(user_id)
-        for key, value in updates.items():
-            if key in PRICE_COMPARISON_DEFAULTS and isinstance(value, bool):
-                current[key] = value
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
-        users[user_id] = {
-            **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
-            "price_comparison": current,
-        }
-        await self.chart_preferences_store.async_save({"users": users})
-        return current
+        return (await self.async_update_ui_preferences(user_id, {"price_comparison": updates}))["price_comparison"]
 
-    async def async_get_phase_history_visible(self, user_id: str) -> dict[str, bool]:
-        stored = await self.chart_preferences_store.async_load()
+    def _ui_preferences_from_stored(self, stored: Any, user_id: str) -> dict[str, Any]:
         users = stored.get("users", {}) if isinstance(stored, dict) else {}
         user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
-        saved = user_state.get("phase_history_visible", {}) if isinstance(user_state, dict) else {}
+        if not isinstance(user_state, dict):
+            user_state = {}
+
+        def merge(defaults: dict[str, bool], key: str) -> dict[str, bool]:
+            saved = user_state.get(key, {})
+            return {
+                name: saved[name] if isinstance(saved, dict) and isinstance(saved.get(name), bool) else default
+                for name, default in defaults.items()
+            }
+
+        main_cards = merge(MAIN_CARD_DEFAULTS, "main_cards")
         return {
-            key: saved[key] if isinstance(saved, dict) and isinstance(saved.get(key), bool) else default
-            for key, default in PHASE_HISTORY_VISIBLE_DEFAULTS.items()
+            "chart_layers": merge(CHART_LAYER_DEFAULTS, "chart_layers"),
+            "price_comparison": merge(PRICE_COMPARISON_DEFAULTS, "price_comparison"),
+            "phase_history_visible": merge(PHASE_HISTORY_VISIBLE_DEFAULTS, "phase_history_visible"),
+            "phase_history_metric": (
+                user_state.get("phase_history_metric")
+                if user_state.get("phase_history_metric") in PHASE_HISTORY_METRICS
+                else PHASE_HISTORY_METRIC_DEFAULT
+            ),
+            "configuration_cards_visible": (
+                user_state.get("configuration_cards_visible")
+                if isinstance(user_state.get("configuration_cards_visible"), bool)
+                else CONFIGURATION_CARDS_VISIBLE_DEFAULT
+            ),
+            "main_cards": main_cards,
         }
 
-    async def async_set_phase_history_visible(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
-        current = await self.async_get_phase_history_visible(user_id)
-        for key, value in updates.items():
-            if key in PHASE_HISTORY_VISIBLE_DEFAULTS and isinstance(value, bool):
-                current[key] = value
+    async def async_get_ui_preferences(self, user_id: str) -> dict[str, Any]:
+        """Load preferences without mutating the store."""
         stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
-        users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "phase_history_visible": current}
-        await self.chart_preferences_store.async_save({"users": users})
-        return current
+        return self._ui_preferences_from_stored(stored, user_id)
 
-    async def async_get_configuration_cards_visible(self, user_id: str) -> bool:
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) else {}
-        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
-        visible = user_state.get("configuration_cards_visible") if isinstance(user_state, dict) else None
-        result = visible if isinstance(visible, bool) else CONFIGURATION_CARDS_VISIBLE_DEFAULT
-        if not isinstance(users, dict):
-            users = {}
-        if not isinstance(users.get(user_id), dict) or users[user_id].get("configuration_cards_visible") != result:
+    def _get_chart_preferences_lock(self) -> asyncio.Lock:
+        lock = getattr(self, "_chart_preferences_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._chart_preferences_lock = lock
+        return lock
+
+    async def async_update_ui_preferences(self, user_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        """Atomically merge one or more preference domains for one user."""
+        async with self._get_chart_preferences_lock():
+            stored = await self.chart_preferences_store.async_load()
+            users = stored.get("users", {}) if isinstance(stored, dict) else {}
+            if not isinstance(users, dict):
+                users = {}
+            existing = users.get(user_id) if isinstance(users.get(user_id), dict) else {}
+            current = self._ui_preferences_from_stored(stored, user_id)
+
+            for domain, value in updates.items():
+                if domain in ("chart_layers", "price_comparison", "phase_history_visible", "main_cards"):
+                    defaults = {
+                        "chart_layers": CHART_LAYER_DEFAULTS,
+                        "price_comparison": PRICE_COMPARISON_DEFAULTS,
+                        "phase_history_visible": PHASE_HISTORY_VISIBLE_DEFAULTS,
+                        "main_cards": MAIN_CARD_DEFAULTS,
+                    }[domain]
+                    if isinstance(value, dict):
+                        current[domain] = {
+                            key: value[key] if key in value and isinstance(value[key], bool) else current[domain][key]
+                            for key in defaults
+                        }
+                elif domain == "configuration_cards_visible" and isinstance(value, bool):
+                    current[domain] = value
+                elif domain == "phase_history_metric" and value in PHASE_HISTORY_METRICS:
+                    current[domain] = value
+
             users[user_id] = {
-                **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
-                "configuration_cards_visible": result,
+                **existing,
+                "chart_layers": current["chart_layers"],
+                "price_comparison": current["price_comparison"],
+                "phase_history_visible": current["phase_history_visible"],
+                "phase_history_metric": current["phase_history_metric"],
+                "configuration_cards_visible": current["configuration_cards_visible"],
+                "main_cards": current["main_cards"],
             }
             await self.chart_preferences_store.async_save({"users": users})
-        return result
+            saved = await self.chart_preferences_store.async_load()
+            return self._ui_preferences_from_stored(saved, user_id)
+
+    async def async_get_phase_history_visible(self, user_id: str) -> dict[str, bool]:
+        return (await self.async_get_ui_preferences(user_id))["phase_history_visible"]
+
+    async def async_set_phase_history_visible(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
+        return (await self.async_update_ui_preferences(user_id, {"phase_history_visible": updates}))["phase_history_visible"]
+
+    async def async_get_configuration_cards_visible(self, user_id: str) -> bool:
+        return (await self.async_get_ui_preferences(user_id))["configuration_cards_visible"]
 
     async def async_set_configuration_cards_visible(self, user_id: str, visible: bool) -> bool:
-        result = bool(visible)
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
-        users[user_id] = {
-            **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
-            "configuration_cards_visible": result,
-        }
-        await self.chart_preferences_store.async_save({"users": users})
-        return result
+        return (await self.async_update_ui_preferences(user_id, {"configuration_cards_visible": bool(visible)}))["configuration_cards_visible"]
 
     async def async_get_main_cards(self, user_id: str) -> dict[str, bool]:
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) else {}
-        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
-        main_cards = user_state.get("main_cards", {}) if isinstance(user_state, dict) else {}
-        result = {
-            key: main_cards[key] if isinstance(main_cards, dict) and isinstance(main_cards.get(key), bool) else default
-            for key, default in MAIN_CARD_DEFAULTS.items()
-        }
-        if not isinstance(users, dict):
-            users = {}
-        if not isinstance(users.get(user_id), dict) or users[user_id].get("main_cards") != result:
-            users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "main_cards": result}
-            await self.chart_preferences_store.async_save({"users": users})
-        return result
+        return (await self.async_get_ui_preferences(user_id))["main_cards"]
 
     async def async_set_main_cards(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
-        current = await self.async_get_main_cards(user_id)
-        for key, value in updates.items():
-            if key in MAIN_CARD_DEFAULTS and isinstance(value, bool):
-                current[key] = value
-        stored = await self.chart_preferences_store.async_load()
-        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
-        users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "main_cards": current}
-        await self.chart_preferences_store.async_save({"users": users})
-        return current
+        return (await self.async_update_ui_preferences(user_id, {"main_cards": updates}))["main_cards"]
 
     def async_start_refresh(self, reason: str = "startup") -> None:
         if not self.lifecycle.has_refresh_unsubscribe():
