@@ -415,7 +415,7 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
   });
 }
 
-export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date()) {
+export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(), weather = null) {
   const lines = [];
   if (Number.isFinite(day?.producedKwh)) {
     lines.push(`Producerat: ${day.producedKwh} kWh`);
@@ -435,6 +435,14 @@ export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(
     }
   } else if (Number.isFinite(day?.forecastKwh)) {
     lines.push(`Prognos: ${day.forecastKwh} kWh`);
+  }
+  if (day?.date === today && weather?.source === "smhi" && weather?.available) {
+    const condition = weather.current?.condition;
+    const cloudCoverage = Number(weather.current?.cloud_coverage);
+    if (condition || Number.isFinite(cloudCoverage)) {
+      const details = [condition, Number.isFinite(cloudCoverage) ? `${cloudCoverage} % moln` : ""].filter(Boolean).join(", ");
+      lines.push(`SMHI: ${details}`);
+    }
   }
   return lines;
 }
@@ -673,7 +681,7 @@ class ElrakningPanel {
     this._meterHistorySummary = null;
     this._meterHistoryRequestToken = 0;
     this._powerState = null;
-    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {} };
+    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] } };
     this._powerHistoryRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
@@ -3853,7 +3861,7 @@ class ElrakningPanel {
       hoveredDay?.classList.remove("hovered");
       group.classList.add("hovered");
       hoveredDay = group;
-      tooltip.innerHTML = buildSolarHistoryTooltipLines(day, this._powerHistory?.solar_forecast, new Date())
+      tooltip.innerHTML = buildSolarHistoryTooltipLines(day, this._powerHistory?.solar_forecast, new Date(), this._powerHistory?.solar_weather)
         .map((line) => `<span>${line.replace(/([0-9]+(?:\.[0-9]+)?) kWh$/, (value) => `${this._formatNumber(Number.parseFloat(value))} kWh`)}</span>`)
         .join("");
       tooltip.hidden = false;
@@ -4009,12 +4017,13 @@ class ElrakningPanel {
         solar_analysis: response?.solar_analysis || { available: false, days: [] },
         solar_forecast: response?.solar_forecast || { available: false },
         solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
+        solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
       };
       this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
-      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {} };
+      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] } };
       this._refreshPowerEnergyState();
     }
   }
@@ -4871,6 +4880,10 @@ class ElrakningPanel {
         () => this.loadSolarForecast(),
         "elrakning_solar_forecast_update",
       );
+      this._solarWeatherEventUnsubscribePromise = hass.connection.subscribeEvents(
+        () => this.loadPowerHistory(),
+        "elrakning_solar_weather_update",
+      );
       this._diagnosticsEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this._loadDiagnosticsState?.(),
         "elrakning_diagnostics_update",
@@ -4922,6 +4935,11 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._solarWeatherEventUnsubscribePromise) {
+      Promise.resolve(this._solarWeatherEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
     if (this._diagnosticsEventUnsubscribePromise) {
       Promise.resolve(this._diagnosticsEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -4942,6 +4960,7 @@ class ElrakningPanel {
     this._meterPowerEventUnsubscribePromise = null;
     this._powerEventUnsubscribePromise = null;
     this._solarForecastEventUnsubscribePromise = null;
+    this._solarWeatherEventUnsubscribePromise = null;
     this._diagnosticsEventUnsubscribePromise = null;
     this._readyEventUnsubscribePromise = null;
     this._connectionReadyListener = null;

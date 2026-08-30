@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
-from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT
+from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .elnat.manager import GridManager
@@ -17,6 +17,7 @@ from .elnat.eon_handoff import async_register_eon_handoff_views
 from .meter import MeterManager
 from .power import PowerManager
 from .solar_forecast import SolarForecastManager
+from .solar_weather import SolarWeatherManager
 from .websocket import async_register_websocket_commands
 
 PANEL_PATH = DOMAIN
@@ -55,6 +56,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     solar_forecast_manager = SolarForecastManager(hass, manager.async_diagnostic)
     await solar_forecast_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_forecast_manager"] = solar_forecast_manager
+    solar_weather_manager = SolarWeatherManager(hass)
+    await solar_weather_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["solar_weather_manager"] = solar_weather_manager
     grid_manager = GridManager(hass, entry)
     await grid_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
@@ -74,6 +78,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     frontend_data["eon_grid_unsub"] = hass.bus.async_listen(
         EON_GRID_UPDATE_EVENT,
+        lambda _: _schedule_price_update(hass),
+    )
+    frontend_data["solar_weather_unsub"] = hass.bus.async_listen(
+        SOLAR_WEATHER_UPDATE_EVENT,
         lambda _: _schedule_price_update(hass),
     )
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
@@ -136,6 +144,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if unsubscribe := frontend_data.pop("eon_grid_unsub", None):
         unsubscribe()
+    if unsubscribe := frontend_data.pop("solar_weather_unsub", None):
+        unsubscribe()
+    if solar_weather_manager := frontend_data.pop("solar_weather_manager", None):
+        await solar_weather_manager.async_shutdown()
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
         unsubscribe()
     coordinator.cancel_midnight_recovery()

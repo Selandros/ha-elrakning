@@ -613,6 +613,8 @@ assert.match(panelSource, /\.solar-history-chart \.soc-tooltip > span/);
 assert.match(panelSource, /solar_forecast_baselines/);
 assert.match(panelSource, /elrakning\/solar_forecast_state/);
 assert.match(panelSource, /elrakning_solar_forecast_update/);
+assert.match(panelSource, /elrakning_solar_weather_update/);
+assert.match(panelSource, /solar_weather/);
 assert.doesNotMatch(panelSource, /solar-history-reference-bar[\s\S]*referenceKwh/);
 assert.doesNotMatch(panelSource, /Solpotential/);
 assert.match(panelSource, /solar_array_metadata/);
@@ -620,6 +622,13 @@ assert.match(panelSource, /tooltip\.innerHTML = `[^`]*<span>Laddat:/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*<strong>\$\{day\.date\}<\/strong><span>Laddat:/);
 assert.match(panelSource, /<span>Urladdat: \$\{formatEnergy\(day\.dischargingKwh\)\}<\/span>`;/);
 assert.doesNotMatch(panelSource, /tooltip\.innerHTML = `[^`]*Kapacitetsutnyttjande:/);
+const weatherTooltip = buildSolarHistoryTooltipLines(
+  { date: new Date().toLocaleDateString("sv-SE"), producedKwh: 1 },
+  null,
+  new Date(),
+  { source: "smhi", available: true, current: { condition: "partlycloudy", cloud_coverage: 42 } },
+);
+assert.ok(weatherTooltip.includes("SMHI: partlycloudy, 42 % moln"));
 assert.match(panelSource, /battery-history-utilization/);
 assert.doesNotMatch(panelSource, /battery-history-hover/);
 assert.match(panelSource, /battery-history-day\.hovered \.battery-history-bar/);
