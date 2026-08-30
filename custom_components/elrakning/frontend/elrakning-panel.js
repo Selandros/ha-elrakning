@@ -1181,7 +1181,6 @@ class ElrakningPanel {
           <div class="invoice-estimate-heading"><strong>Estimerad faktura</strong><span data-invoice-estimate-month></span></div>
           <div class="invoice-estimate-grid" data-invoice-estimate-grid></div>
           <p class="invoice-estimate-status" data-invoice-estimate-status></p>
-          <button type="button" data-invoice-estimate-copy>Kopiera raw-data</button>
           <span class="invoice-estimate-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
         </section>
 
@@ -2294,7 +2293,7 @@ class ElrakningPanel {
 
         .invoice-estimate-card {
           display: grid;
-          gap: 12px;
+          gap: 10px;
         }
 
         .invoice-estimate-heading {
@@ -2314,22 +2313,67 @@ class ElrakningPanel {
 
         .invoice-estimate-grid {
           display: grid;
-          gap: 5px 18px;
-          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 10px 18px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
-        .invoice-estimate-grid strong {
+        .invoice-estimate-kpi {
+          display: grid;
+          gap: 2px;
+          min-width: 0;
+        }
+
+        .invoice-estimate-kpi strong {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          font-weight: 400;
+        }
+
+        .invoice-estimate-kpi output {
+          font-size: 14px;
+          min-width: 0;
+          white-space: nowrap;
+        }
+
+        .invoice-estimate-kpi-primary {
+          grid-column: 1 / -1;
+        }
+
+        .invoice-estimate-kpi-primary output {
+          font-size: clamp(28px, 6cqw, 40px);
+          font-weight: 500;
+          line-height: 1;
+        }
+
+        .invoice-estimate-kpi-secondary {
+          grid-column: 1 / -1;
+        }
+
+        .invoice-estimate-kpi-secondary output {
+          font-size: 18px;
           font-weight: 500;
         }
 
-        .invoice-estimate-grid .total {
-          border-top: 1px solid var(--divider-color);
-          margin-top: 4px;
-          padding-top: 7px;
+        .invoice-estimate-kpi-secondary strong {
+          font-size: 12px;
         }
 
-        .invoice-estimate-card button {
-          justify-self: start;
+        .invoice-estimate-copy-feedback {
+          min-height: 1em;
+        }
+
+        .invoice-estimate-card.debug-copy-enabled {
+          cursor: pointer;
+        }
+
+        @media (max-width: 420px) {
+          .invoice-estimate-grid {
+            gap: 8px 10px;
+          }
+
+          .invoice-estimate-kpi output {
+            font-size: 13px;
+          }
         }
 
         .retained-history {
@@ -3679,6 +3723,7 @@ class ElrakningPanel {
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     this._updateLivePowerCardInteractivity();
+    this._updateInvoiceEstimateInteractivity();
   }
 
   _bindMeterDialog() {
@@ -5331,47 +5376,66 @@ class ElrakningPanel {
       this._invoiceEstimateRaw = null;
       return;
     }
-    const rows = [
-      ["Elhandel", estimate.completeness.trade_variable ? estimate.trade.total_so_far_sek : "Rörligt saknas", ""],
-      ["Elnät", estimate.completeness.grid_variable ? estimate.grid.total_so_far_sek : "Rörligt saknas", ""],
-      ["Hittills", estimate.completeness.trade_variable && estimate.completeness.grid_variable ? estimate.total_so_far_sek : "Underlag saknas", "total"],
-      ["Prognos månad", estimate.estimated_month_total_sek, "total"],
-      ["Import hittills", estimate.imported_kwh_so_far, "kWh"],
+    const formatSekOrDash = (value) => value == null || !Number.isFinite(Number(value)) ? "–" : this._formatSek(Number(value));
+    const formatKwhOrDash = (value) => value == null || !Number.isFinite(Number(value)) ? "–" : `${this._formatNumber(Number(value))} kWh`;
+    const kpis = [
+      ["Prognos månad", formatSekOrDash(estimate.estimated_month_total_sek), "invoice-estimate-kpi-primary"],
+      ["Hittills", formatSekOrDash(estimate.total_so_far_sek), "invoice-estimate-kpi-secondary"],
+      ["Elhandel", formatSekOrDash(estimate.trade.total_so_far_sek), ""],
+      ["Elnät", formatSekOrDash(estimate.grid.total_so_far_sek), ""],
+      ["Import", formatKwhOrDash(estimate.imported_kwh_so_far), ""],
     ];
-    grid.replaceChildren(...rows.flatMap(([labelText, value, className]) => {
+    grid.replaceChildren(...kpis.map(([labelText, value, className]) => {
+      const item = document.createElement("div");
+      item.className = `invoice-estimate-kpi ${className}`.trim();
       const label = document.createElement("strong");
-      label.className = className;
       label.textContent = labelText;
-      const output = document.createElement("span");
-      output.className = className;
-      output.textContent = typeof value === "string"
-        ? value
-        : value === null || !Number.isFinite(Number(value))
-          ? "–"
-          : className === "kWh" ? `${this._formatNumber(Number(value))} kWh` : this._formatSek(Number(value));
-      return [label, output];
+      const output = document.createElement("output");
+      output.textContent = value;
+      item.append(label, output);
+      return item;
     }));
     const coverage = estimate.data_coverage;
-    status.textContent = coverage.missing_price_periods || coverage.missing_energy_periods
-      ? `Delvis underlag · ${estimate.forecast_method}`
-      : estimate.completeness.trade_fixed ? estimate.forecast_method : `Estimat exkl. elhandelns fasta avgift · ${estimate.forecast_method}`;
+    status.textContent = coverage.missing_price_periods || coverage.missing_energy_periods || estimate.forecast_confidence === "partial_data"
+      ? "Delvis underlag"
+      : "";
+    status.hidden = !status.textContent;
     this._invoiceEstimateRaw = estimate;
   }
 
   _bindInvoiceEstimate() {
-    const copy = this.host.querySelector("[data-invoice-estimate-copy]");
+    this._updateInvoiceEstimateInteractivity();
+  }
+
+  _updateInvoiceEstimateInteractivity() {
+    const card = this.host.querySelector("[data-invoice-estimate-card]");
     const feedback = this.host.querySelector("[data-invoice-estimate-copy-feedback]");
-    if (!copy || !feedback) return;
-    copy.addEventListener("click", async () => {
-      if (!this._invoiceEstimateRaw) return;
-      try {
-        await this._copyText(JSON.stringify(this._invoiceEstimateRaw, null, 2));
-        feedback.textContent = "Kopierat";
-        window.setTimeout(() => { feedback.textContent = ""; }, 1500);
-      } catch {
-        feedback.textContent = "Kunde inte kopiera";
-      }
-    });
+    if (!card || !feedback) return;
+    if (this._debugEnabled && !card._invoiceCopyEnabled) {
+      const copy = async () => {
+        if (!this._invoiceEstimateRaw) return;
+        try {
+          await this._copyText(JSON.stringify(this._invoiceEstimateRaw, null, 2));
+          feedback.textContent = "Kopierat";
+          window.clearTimeout(card._invoiceCopyTimer);
+          card._invoiceCopyTimer = window.setTimeout(() => { feedback.textContent = ""; }, 1400);
+        } catch {
+          feedback.textContent = "Kunde inte kopiera";
+        }
+      };
+      const click = () => { void copy(); };
+      card.addEventListener("click", click);
+      card._invoiceCopyEnabled = true;
+      card._invoiceCopyClick = click;
+      card.classList.add("debug-copy-enabled");
+    } else if (!this._debugEnabled && card._invoiceCopyEnabled) {
+      card.removeEventListener("click", card._invoiceCopyClick);
+      window.clearTimeout(card._invoiceCopyTimer);
+      feedback.textContent = "";
+      delete card._invoiceCopyEnabled;
+      delete card._invoiceCopyClick;
+      card.classList.remove("debug-copy-enabled");
+    }
   }
 
   _formatInvoiceMonth(value) {
