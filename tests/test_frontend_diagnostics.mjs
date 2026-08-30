@@ -256,6 +256,8 @@ assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 0 }).batter
 assert.equal(buildLivePowerTiles({ charging_kw: 0, discharging_kw: 3.1 }).battery.status, "Urladdar");
 assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 3.1 }).battery.status, "Inkonsekvent data");
 assert.match(eonPanelSource, /data-live-power-scale/);
+assert.doesNotMatch(eonPanelSource, /data-live-power-max/);
+assert.doesNotMatch(eonPanelSource, /live-power-max/);
 assert.match(eonPanelSource, /data-live-power-copy-feedback/);
 assert.match(eonPanelSource, /_livePowerRaw/);
 assert.match(eonPanelSource, /JSON\.stringify\(raw, null, 2\)/);

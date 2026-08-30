@@ -1021,7 +1021,7 @@ class ElrakningPanel {
 
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1029,7 +1029,7 @@ class ElrakningPanel {
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
-            <div class="live-power-heading"><span class="live-power-title">Sol</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Sol</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1037,7 +1037,7 @@ class ElrakningPanel {
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
@@ -1046,7 +1046,7 @@ class ElrakningPanel {
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
-            <div class="live-power-heading"><span class="live-power-title">Batteri</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Batteri</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -2472,14 +2472,6 @@ class ElrakningPanel {
           height: 100%;
           transform-origin: left center;
           transition: width 120ms ease;
-        }
-
-        .live-power-max {
-          color: var(--secondary-text-color);
-          font-size: 10px;
-          flex: 0 1 auto;
-          margin-left: auto;
-          text-align: right;
         }
 
         .live-power-scale {
@@ -4145,11 +4137,9 @@ class ElrakningPanel {
       const value = element.querySelector("[data-live-power-value]");
       const status = element.querySelector("[data-live-power-status]");
       const fill = element.querySelector("[data-live-power-fill]");
-      const max = element.querySelector("[data-live-power-max]");
       if (value) value.textContent = Number.isFinite(tile.value) ? `${this._formatNumber(tile.value)} kW` : "—";
       if (status) status.textContent = tile.status;
       if (fill) fill.style.width = `${tile.fillPercent}%`;
-      if (max) max.textContent = `Max idag ${this._formatNumber(tile.maxToday)} kW`;
       const scale = element.querySelector("[data-live-power-scale]");
       if (scale) scale.textContent = `${this._formatNumber(tile.scaleMax)} kW`;
       element.dataset.livePowerDirection = tile.direction || "idle";
