@@ -1304,6 +1304,7 @@ class ElrakningPanel {
         }
 
         .header-icon-button:hover {
+          background: rgba(255, 255, 255, 0.12);
           background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
         }
 
@@ -1346,6 +1347,7 @@ class ElrakningPanel {
 
         .provider-dialog, .provider-source-dialog {
           align-items: center;
+          background: rgba(0, 0, 0, 0.30);
           background: color-mix(in srgb, var(--primary-background-color) 70%, transparent);
           display: flex;
           inset: 0;
@@ -1357,6 +1359,7 @@ class ElrakningPanel {
 
         .meter-dialog, .meter-source-dialog {
           align-items: center;
+          background: rgba(0, 0, 0, 0.30);
           background: color-mix(in srgb, var(--primary-background-color) 70%, transparent);
           display: flex;
           inset: 0;
@@ -1717,6 +1720,7 @@ class ElrakningPanel {
         }
 
         .solar-history-reference-bar {
+          fill: rgba(119, 194, 161, 0.30);
           fill: color-mix(in srgb, var(--solar-color) 30%, var(--ha-card-background, var(--card-background-color)));
           fill-opacity: .9;
           rx: 4;
@@ -1808,18 +1812,22 @@ class ElrakningPanel {
         }
 
         .daily-energy-segment.local {
+          background: rgba(119, 194, 161, 0.70);
           background: color-mix(in srgb, var(--daily-energy-local-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.supply {
+          background: rgba(119, 194, 161, 0.70);
           background: color-mix(in srgb, var(--daily-energy-local-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.export {
+          background: rgba(114, 170, 246, 0.70);
           background: color-mix(in srgb, var(--daily-energy-export-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .daily-energy-segment.import {
+          background: rgba(240, 160, 106, 0.70);
           background: color-mix(in srgb, var(--daily-energy-import-color) 70%, var(--ha-card-background, var(--card-background-color)));
         }
 
@@ -2302,6 +2310,7 @@ class ElrakningPanel {
         }
 
         .live-power-bar {
+          background: rgba(255, 255, 255, 0.14);
           background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
           border-radius: 999px;
           height: 5px;
@@ -2537,14 +2546,17 @@ class ElrakningPanel {
         }
 
         .chart-bar.cheap {
+          fill: rgba(103, 201, 140, 0.41);
           fill: color-mix(in srgb, var(--el-price-cheap-color) 41%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-bar.normal {
+          fill: rgba(185, 160, 93, 0.41);
           fill: color-mix(in srgb, var(--el-price-normal-color) 41%, var(--ha-card-background, var(--card-background-color)));
         }
 
         .chart-bar.expensive {
+          fill: rgba(228, 104, 125, 0.41);
           fill: color-mix(in srgb, var(--el-price-expensive-color) 41%, var(--ha-card-background, var(--card-background-color)));
         }
 
