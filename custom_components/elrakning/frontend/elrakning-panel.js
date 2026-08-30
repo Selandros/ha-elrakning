@@ -3105,6 +3105,41 @@ class ElrakningPanel {
           width: 100%;
         }
 
+        .phase-history-axis-overlay {
+          inset: 0;
+          pointer-events: none;
+          position: absolute;
+        }
+
+        .phase-history-axis-overlay .phase-history-axis-label,
+        .phase-history-axis-overlay .phase-history-time-label {
+          color: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          line-height: var(--chart-axis-line-height);
+          opacity: var(--chart-axis-opacity);
+          position: absolute;
+          white-space: nowrap;
+        }
+
+        .phase-history-axis-overlay .phase-history-axis-label {
+          left: 4px;
+          transform: translateY(-50%);
+        }
+
+        .phase-history-axis-overlay .phase-history-time-label {
+          bottom: 5px;
+          transform: translateX(-50%);
+        }
+
+        .phase-history-axis-overlay .phase-history-time-label:first-child {
+          transform: none;
+        }
+
+        .phase-history-axis-overlay .phase-history-time-label:last-child {
+          transform: translateX(-100%);
+        }
+
         .phase-history-gridline {
           stroke: var(--divider-color);
           stroke-width: 1;
@@ -7020,7 +7055,11 @@ class ElrakningPanel {
     const phaseColors = PHASE_COLOR_MAP;
     const grid = [0, 0.5, 1].map((ratio) => {
       const value = maxValue - ratio * (maxValue - minValue);
-      return `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="phase-history-axis-label" x="4" y="${y(value) + 3}">${this._formatNumber(value)} ${unit}</text>`;
+      return `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" />`;
+    }).join("");
+    const yAxisLabels = [0, 0.5, 1].map((ratio) => {
+      const value = maxValue - ratio * (maxValue - minValue);
+      return `<span class="phase-history-axis-label" style="top:${(y(value) / height) * 100}%">${this._formatNumber(value)} ${unit}</span>`;
     }).join("");
     const threshold = metric === "current" && Number.isFinite(fuse) && fuse > 0
       ? `<line class="phase-history-threshold" x1="${plot.left}" y1="${y(fuse)}" x2="${width - plot.right}" y2="${y(fuse)}" /><text class="phase-history-reference-label" x="${width - plot.right - 4}" y="${y(fuse) - 4}" text-anchor="end">${this._formatNumber(fuse)} A · Säkring</text>`
@@ -7028,10 +7067,11 @@ class ElrakningPanel {
     const zero = metric === "active_power" ? `<line class="phase-history-zero-line" x1="${plot.left}" y1="${y(0)}" x2="${width - plot.right}" y2="${y(0)}" /><text class="phase-history-reference-label" x="${width - plot.right - 4}" y="${y(0) - 4}" text-anchor="end">0 kW</text>` : "";
     const tickCount = useDayAxis ? 8 : 6;
     const timeTicks = Array.from({ length: tickCount + 1 }, (_, index) => axisStart + timeRange * index / tickCount);
-    const timeAxis = timeTicks.map((timestamp) => {
+    const timeAxis = timeTicks.map((timestamp, index) => {
       const date = new Date(timestamp);
       const labelText = useDayAxis ? date.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" });
-      return `<text class="phase-history-time-label" x="${x(timestamp)}" y="${height - 5}" text-anchor="middle">${labelText}</text>`;
+      const transform = index === 0 ? "none" : index === timeTicks.length - 1 ? "translateX(-100%)" : "translateX(-50%)";
+      return `<span class="phase-history-time-label" style="left:${(x(timestamp) / width) * 100}%;transform:${transform}">${labelText}</span>`;
     }).join("");
     const lines = Object.entries(phasePoints).map(([phase, points]) => {
       const segments = [];
@@ -7054,24 +7094,37 @@ class ElrakningPanel {
       )).join("");
       return `${real}${interpolated}`;
     }).join("");
-    const svgMarkup = `${grid}${threshold}${zero}${lines}${timeAxis}<g class="phase-history-hover" aria-hidden="true"></g>`;
-    let svg = chart.querySelector(".phase-history-svg");
-    let tooltip = chart.querySelector(".soc-tooltip");
-    if (!svg || !tooltip) {
-      chart.replaceChildren();
-      svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.classList.add("phase-history-svg");
-      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-      svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", `${label} per fas`);
-      tooltip = document.createElement("div");
-      tooltip.className = "soc-tooltip";
-      tooltip.hidden = true;
-      chart.append(svg, tooltip);
-    }
+    const svgMarkup = `${grid}${threshold}${zero}${lines}<g class="phase-history-hover" aria-hidden="true"></g>`;
+    // Recreate the interactive SVG when the canonical render state changes.
+    // This prevents pointer handlers from retaining stale metric closures.
+    chart.replaceChildren();
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("phase-history-svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `${label} per fas`);
+    const tooltip = document.createElement("div");
+    tooltip.className = "soc-tooltip";
+    tooltip.hidden = true;
+    const axisOverlay = document.createElement("div");
+    axisOverlay.className = "phase-history-axis-overlay";
+    axisOverlay.innerHTML = `${yAxisLabels}${timeAxis}`;
+    chart.append(svg, axisOverlay, tooltip);
     svg.innerHTML = svgMarkup;
     const hover = svg.querySelector(".phase-history-hover");
-    const nearest = (timestamp) => Object.fromEntries(Object.entries(phasePoints).map(([phase, points]) => [phase, points.reduce((best, point) => !best || Math.abs(new Date(point.timestamp) - timestamp) < Math.abs(new Date(best.timestamp) - timestamp) ? point : best, null)]));
+    const canonicalTimestamps = [...new Set(Object.values(phasePoints).flat().map((point) => point.timestamp))]
+      .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+    const nearestCanonicalTimestamp = (timestamp) => canonicalTimestamps.reduce(
+      (best, candidate) => !best || Math.abs(new Date(candidate).getTime() - timestamp.getTime())
+        < Math.abs(new Date(best).getTime() - timestamp.getTime()) ? candidate : best,
+      null,
+    );
+    const pointsAtCanonicalTimestamp = (timestamp) => Object.fromEntries(
+      Object.entries(phasePoints).map(([phase, points]) => [
+        phase,
+        points.find((point) => point.timestamp === timestamp) || null,
+      ]),
+    );
     const update = (event) => {
       const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
       if (!pointer?.inside) {
@@ -7080,19 +7133,17 @@ class ElrakningPanel {
       }
       const ratio = (pointer.viewX - plot.left) / Math.max(1, width - plot.left - plot.right);
       const timestamp = new Date(axisStart + ratio * timeRange);
-      const selected = nearest(timestamp);
+      const selectedTimestamp = nearestCanonicalTimestamp(timestamp);
+      const selected = pointsAtCanonicalTimestamp(selectedTimestamp);
       const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, color: phaseColors[phase], formatted: `${metric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
-      renderSharedTooltip(tooltip, { title: timestamp.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }), fields });
+      renderSharedTooltip(tooltip, { title: new Date(selectedTimestamp).toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }), fields });
       tooltip.hidden = false;
       hover.innerHTML = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => `<circle class="chart-hover-marker" fill="${phaseColors[phase]}" cx="${x(point.timestamp)}" cy="${y(Number(point.value))}" r="4" />`).join("");
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     const clear = () => { tooltip.hidden = true; hover.replaceChildren(); };
-    if (svg.dataset.phaseHistoryBound !== "true") {
-      svg.addEventListener("pointermove", update);
-      svg.addEventListener("pointerleave", clear);
-      svg.dataset.phaseHistoryBound = "true";
-    }
+    svg.addEventListener("pointermove", update);
+    svg.addEventListener("pointerleave", clear);
   }
 
   async loadBillingHistory() {
