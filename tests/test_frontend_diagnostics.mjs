@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -181,6 +181,28 @@ assert.equal(equalComparison.difference_percent, 0);
 const partialActual = buildPreviousMonthActual({ trade: [{ month: "2026-07", amount_due_sek: 127.31 }], grid: [] }, "2026-08");
 assert.equal(buildInvoiceComparison({ estimated_month_total_sek: 368.18 }, partialActual).available, false);
 assert.equal(buildPreviousMonthActual({ trade: [{ invoice_date: "2026-08-03", amount_due_sek: 127.31 }], grid: [] }, "2026-08").coverage, "missing");
+const invoiceProvenance = buildInvoiceProvenance(invoiceEstimate, {
+  energy_points: [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }],
+  integration_method: "trapezoidal_power_integration",
+  grid_price: {
+    transfer_ore_per_kwh_gross: 97,
+    energy_tax_ore_per_kwh_gross: 45,
+    vat_included: true,
+    source: "grid_contract",
+  },
+  trade_vat_included: false,
+});
+assert.equal(invoiceProvenance.energy_source.method, "integrated_grid_power");
+assert.equal(invoiceProvenance.energy_source.sample_count, 1);
+assert.equal(invoiceProvenance.energy_source.integration_method, "trapezoidal_power_integration");
+assert.equal(invoiceProvenance.grid_variable.transfer_ore_per_kwh_gross, 97);
+assert.equal(invoiceProvenance.grid_variable.energy_tax_ore_per_kwh_gross, 45);
+assert.equal(invoiceProvenance.grid_variable.vat_included, true);
+assert.equal(invoiceProvenance.fixed_fees.applied_once, true);
+assert.equal(invoiceProvenance.actual_so_far.imported_kwh, invoiceEstimate.imported_kwh_so_far);
+assert.equal(invoiceProvenance.forecast_remaining.method, invoiceEstimate.forecast_method);
+assert.equal(invoiceProvenance.calculation.estimated_total_sek, invoiceEstimate.estimated_month_total_sek);
+assert.equal(invoiceProvenance.vat_audit.grid_transfer.vat_added_by_us, false);
 const gappedInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T01:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T01:00:00Z", import_kw: 2 }],
@@ -1125,7 +1147,8 @@ assert.doesNotMatch(panelSource, /data-invoice-estimate-grid/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-status/);
 assert.doesNotMatch(panelSource, /Prognos för månaden/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-total[\s\S]*Hittills/);
-assert.doesNotMatch(panelSource, /estimate\.forecast_method/);
+assert.match(panelSource, /forecast_method/);
+assert.match(panelSource, /buildInvoiceProvenance\(/);
 assert.match(panelSource, /buildInvoiceEstimate\(/);
 assert.match(panelSource, /elrakning\/billing_history/);
 assert.match(panelSource, /this\._billingHistory/);

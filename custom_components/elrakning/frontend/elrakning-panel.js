@@ -661,6 +661,9 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
       start: period.start,
       end: period.end,
       import_kwh: importKwh,
+      spot_price_ex_vat_ore_per_kwh: Number.isFinite(Number(period.spot_price_ex_vat)) ? Number(period.spot_price_ex_vat) * 100 : null,
+      electricity_cost_ex_vat_ore_per_kwh: Number.isFinite(Number(period.electricity_cost_ex_vat)) ? Number(period.electricity_cost_ex_vat) * 100 : null,
+      vat_ore_per_kwh: Number.isFinite(Number(period.vat)) ? Number(period.vat) * 100 : null,
       trade_price_ore_per_kwh_gross: tradeOre,
       grid_price_ore_per_kwh_gross: gridGross,
       trade_cost_sek: importKwh * tradeOre / 100,
@@ -702,6 +705,11 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek + (accruedGridFixed || 0) },
     total_so_far_sek: variableSoFarSek + fixedSoFarSek,
     estimated_month_total_sek: forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek,
+    forecast_import_kwh: forecastImportKwh,
+    forecast_remaining_kwh: forecastImportKwh === null ? null : Math.max(0, forecastImportKwh - importedKwh),
+    forecast_remaining_days: remainingDays,
+    forecast_remaining_trade_variable_sek: forecastImportKwh === null || tradeWeighted === null ? null : Math.max(0, forecastImportKwh - importedKwh) * tradeWeighted / 100,
+    forecast_remaining_grid_variable_sek: forecastImportKwh === null || gridWeighted === null ? null : Math.max(0, forecastImportKwh - importedKwh) * gridWeighted / 100,
     forecast_method: "actual imported energy and volume-weighted observed gross prices; remaining energy uses observed daily average",
     forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 ? "complete_available_data" : "partial_data",
     data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: observedPricePeriods ? coveredEnergyPeriods / observedPricePeriods * 100 : 0, first_period: coveredStart ? new Date(coveredStart).toISOString() : null, last_period: coveredEnd ? new Date(coveredEnd).toISOString() : null },
@@ -778,6 +786,110 @@ export function buildInvoiceComparison(estimate, previousActual) {
     scale_max_sek: scaleMax,
     fill_percent: scaleMax > 0 ? current / scaleMax * 100 : 0,
     previous_marker_percent: scaleMax > 0 ? previous / scaleMax * 100 : 0,
+  };
+}
+
+export function buildInvoiceProvenance(estimate, billingHistory = {}) {
+  if (!estimate) return null;
+  const gridPrice = billingHistory.grid_price || {};
+  const energyPoints = Array.isArray(billingHistory.energy_points) ? billingHistory.energy_points : [];
+  const rows = Array.isArray(estimate.rows) ? estimate.rows.map((row) => ({
+    timestamp: row.start,
+    imported_kwh: row.import_kwh,
+    trade: {
+      ore_per_kwh_gross: row.trade_price_ore_per_kwh_gross,
+      vat_included: billingHistory.trade_vat_included ?? null,
+      spot_price_ex_vat_ore_per_kwh: row.spot_price_ex_vat_ore_per_kwh,
+      electricity_cost_ex_vat_ore_per_kwh: row.electricity_cost_ex_vat_ore_per_kwh,
+      vat_ore_per_kwh: row.vat_ore_per_kwh,
+    },
+    grid: {
+      transfer_ore_per_kwh_gross: Number.isFinite(Number(gridPrice.transfer_ore_per_kwh_gross)) ? Number(gridPrice.transfer_ore_per_kwh_gross) : null,
+      energy_tax_ore_per_kwh_gross: Number.isFinite(Number(gridPrice.energy_tax_ore_per_kwh_gross)) ? Number(gridPrice.energy_tax_ore_per_kwh_gross) : null,
+      variable_total_ore_per_kwh_gross: row.grid_price_ore_per_kwh_gross,
+      vat_included: gridPrice.vat_included ?? null,
+    },
+    trade_cost_sek: row.trade_cost_sek,
+    grid_cost_sek: row.grid_cost_sek,
+  })) : [];
+  const tradeFixed = Number.isFinite(Number(estimate.trade?.fixed_fee_sek)) ? Number(estimate.trade.fixed_fee_sek) : null;
+  const gridFixed = Number.isFinite(Number(estimate.grid?.fixed_fee_sek)) ? Number(estimate.grid.fixed_fee_sek) : null;
+  return {
+    energy_source: {
+      method: billingHistory.energy_source?.method || "integrated_grid_power",
+      entity_id: billingHistory.energy_source?.entity_id || null,
+      source_entity: billingHistory.energy_source?.source_entity || null,
+      raw_unit: billingHistory.energy_source?.raw_unit || "kW",
+      sample_count: energyPoints.length || null,
+      period_start_value: billingHistory.energy_source?.period_start_value ?? null,
+      current_value: billingHistory.energy_source?.current_value ?? null,
+      imported_kwh_so_far: estimate.imported_kwh_so_far,
+      integration_method: billingHistory.integration_method || "trapezoidal_power_integration",
+      result_kwh: estimate.imported_kwh_so_far,
+    },
+    trade_variable: {
+      rows,
+      formula: "sum(imported_kwh * trade_customer_price_ore_per_kwh_gross / 100)",
+      total_sek: estimate.trade?.variable_cost_sek ?? null,
+    },
+    grid_variable: {
+      transfer_ore_per_kwh_gross: gridPrice.transfer_ore_per_kwh_gross ?? null,
+      energy_tax_ore_per_kwh_gross: gridPrice.energy_tax_ore_per_kwh_gross ?? null,
+      variable_total_ore_per_kwh_gross: estimate.grid_weighted_average_ore_per_kwh ?? null,
+      vat_included: gridPrice.vat_included ?? null,
+      formula: "(transfer + energy_tax) * imported_kwh / 100",
+      total_sek: estimate.grid?.variable_cost_sek ?? null,
+    },
+    fixed_fees: {
+      trade: { monthly_fee_sek: tradeFixed, vat_included: billingHistory.trade_fixed_vat_included ?? null, source: billingHistory.trade_fixed_source || null },
+      grid: { monthly_fee_sek: gridFixed, vat_included: gridPrice.vat_included ?? null, source: gridPrice.source || null },
+      total_monthly_fixed_sek: (tradeFixed !== null && gridFixed !== null) ? tradeFixed + gridFixed : null,
+      applied_once: true,
+    },
+    actual_so_far: {
+      imported_kwh: estimate.imported_kwh_so_far,
+      trade_variable_sek: estimate.trade?.variable_cost_sek ?? null,
+      grid_variable_sek: estimate.grid?.variable_cost_sek ?? null,
+      fixed_fee_accrual_sek: (estimate.trade?.accrued_fixed_fee_sek || 0) + (estimate.grid?.accrued_fixed_fee_sek || 0),
+      total_sek: estimate.total_so_far_sek ?? null,
+    },
+    forecast_remaining: {
+      method: estimate.forecast_method,
+      days_remaining: billingHistory.days_remaining ?? null,
+      forecast_import_kwh: estimate.forecast_import_kwh ?? null,
+      forecast_remaining_kwh: estimate.forecast_remaining_kwh ?? null,
+      forecast_trade_variable_sek: estimate.forecast_remaining_trade_variable_sek ?? null,
+      forecast_grid_variable_sek: estimate.forecast_remaining_grid_variable_sek ?? null,
+      total_sek: billingHistory.forecast_remaining_total_sek ?? null,
+      spot_price_source: billingHistory.spot_price_source || null,
+      fallback_price: billingHistory.fallback_price ?? null,
+      confidence: estimate.forecast_confidence,
+      coverage: estimate.data_coverage || null,
+    },
+    estimated_month: {
+      variable_actual_sek: (estimate.trade?.variable_cost_sek || 0) + (estimate.grid?.variable_cost_sek || 0),
+      variable_forecast_sek: estimate.estimated_month_total_sek == null ? null : estimate.estimated_month_total_sek - (tradeFixed || 0) - (gridFixed || 0),
+      trade_monthly_fee_sek: tradeFixed,
+      grid_monthly_fee_sek: gridFixed,
+      estimated_total_sek: estimate.estimated_month_total_sek,
+    },
+    calculation: {
+      trade_variable_sek: estimate.trade?.variable_cost_sek ?? null,
+      trade_fixed_sek: tradeFixed,
+      grid_transfer_sek: gridPrice.transfer_ore_per_kwh_gross == null ? null : estimate.grid?.variable_cost_sek * Number(gridPrice.transfer_ore_per_kwh_gross) / Number(estimate.grid_weighted_average_ore_per_kwh || gridPrice.variable_total_ore_per_kwh_gross),
+      grid_energy_tax_sek: gridPrice.energy_tax_ore_per_kwh_gross == null ? null : estimate.grid?.variable_cost_sek * Number(gridPrice.energy_tax_ore_per_kwh_gross) / Number(estimate.grid_weighted_average_ore_per_kwh || gridPrice.variable_total_ore_per_kwh_gross),
+      grid_fixed_sek: gridFixed,
+      other_sek: 0,
+      estimated_total_sek: estimate.estimated_month_total_sek,
+      formula: "trade_variable + trade_fixed + grid_transfer + grid_energy_tax + grid_fixed",
+    },
+    vat_audit: {
+      spot: { included_at_source: billingHistory.spot_vat_included ?? null, vat_added_by_us: billingHistory.spot_vat_added_by_us ?? null },
+      trade_variable: { included_at_source: billingHistory.trade_vat_included ?? null, vat_added_by_us: billingHistory.trade_vat_added_by_us ?? null },
+      grid_transfer: { included_at_source: gridPrice.vat_included ?? null, vat_added_by_us: gridPrice.vat_included === true ? false : null },
+      energy_tax: { included_at_source: gridPrice.vat_included ?? null, vat_added_by_us: gridPrice.vat_included === true ? false : null },
+      grid_fixed_fee: { included_at_source: gridPrice.vat_included ?? null, vat_added_by_us: gridPrice.vat_included === true ? false : null },
+    },
   };
 }
 
@@ -5869,7 +5981,13 @@ class ElrakningPanel {
       comparisonBar.hidden = true;
       comparisonScale.hidden = true;
     }
-    this._invoiceEstimateRaw = { ...estimate, current_estimate: estimate, previous_month_actual: previousActual, comparison };
+    this._invoiceEstimateRaw = {
+      ...estimate,
+      current_estimate: estimate,
+      previous_month_actual: previousActual,
+      comparison,
+      provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: this._eonGridPrice || billingHistory.grid_price }),
+    };
     this._renderInvoiceCardCosts();
   }
 
