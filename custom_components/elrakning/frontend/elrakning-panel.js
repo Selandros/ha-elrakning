@@ -6560,15 +6560,10 @@ class ElrakningPanel {
     const add = (label, value, formatted, className = "") => {
       if (tooltipValueIsPresent(value)) fields.push({ label, value, formatted, className });
     };
-    const tradeVisible = this._priceComparisonVisible.electricity;
     const gridVisible = this._priceComparisonVisible.grid && this._eonGridPrice;
     if (layers.spot && Number.isFinite(comparisonPrice)) {
-      const label = tradeVisible && gridVisible
-        ? "Totalpris"
-        : gridVisible
-          ? "Elnät"
-          : "Elhandel";
-      const value = gridVisible && !tradeVisible
+      const label = "Spotpris";
+      const value = gridVisible && !this._priceComparisonVisible.electricity
         ? Number(this._eonGridPrice.variable_total_ore_per_kwh_gross)
         : comparisonPrice;
       if (Number.isFinite(value)) add(label, value, this.formatPrice(value));

@@ -1282,11 +1282,11 @@ assert.match(panelSource, /visibleLayers\.spot && Number\.isFinite\(hoverSnapsho
 assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /this\._priceComparisonVisible\.grid/);
 assert.match(panelSource, /this\._priceComparisonVisible\.electricity/);
-assert.match(panelSource, /const label = tradeVisible && gridVisible[\s\S]*\? "Totalpris"[\s\S]*\? "Elnät"[\s\S]*: "Elhandel"/);
+assert.match(panelSource, /const label = "Spotpris";/);
 assert.match(panelSource, /add\(label, value, this\.formatPrice\(value\)\)/);
 assert.match(panelSource, /\.chart-tooltip \{[\s\S]*pointer-events: none;/);
 assert.match(panelSource, /\.chart-tooltip\.debug-tooltip \{[\s\S]*pointer-events: none;/);
-assert.doesNotMatch(panelSource, /add\("Spotpris", comparisonPrice/);
+assert.doesNotMatch(panelSource, /const label = tradeVisible && gridVisible[\s\S]*\? "Totalpris"[\s\S]*\? "Elnät"[\s\S]*: "Elhandel"/);
 assert.doesNotMatch(panelSource, /add\("Överföring"/);
 assert.match(panelSource, /layers\.import && isVisiblePowerValue\(details\?\.import_kw\)/);
 assert.match(panelSource, /layers\.export && isVisiblePowerValue\(details\?\.export_kw\)/);
