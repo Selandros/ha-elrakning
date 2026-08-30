@@ -298,6 +298,61 @@ def test_source_redaction_preserves_semantic_contract_and_price_fields_nested():
     assert redacted["nested"][0] == {"customerId": "[redacted]", "installationId": "[redacted]"}
 
 
+def test_app_source_data_explains_grid_card_from_canonical_state():
+    source = manager_module._build_app_source_data(
+        {
+            "agreement": {"name": "Elnät", "start_date": "2026-10-01"},
+            "facility": {
+                "address": {"street": "Example 1"},
+                "price_area": "SE 2",
+                "grid_area": "MEL",
+                "fuse_ampere": 16,
+            },
+            "tariff": {
+                "grid_price": {"variable_total_ore_per_kwh_gross": 142},
+                "subscription_fee_sek_per_month": 226.25,
+                "transfer_fee_ore_per_kwh": 97,
+                "energy_tax_ore_per_kwh": 45,
+                "estimated_yearly_cost_sek": 6567,
+            },
+            "cost": {
+                "subscription_fee_sek": 226.25,
+                "transfer_cost_sek": 9.7,
+                "energy_tax_sek": 4.5,
+                "total_sek": 240.45,
+            },
+            "consumption": {"status": "ok", "consumption_kwh": 10},
+            "outage": {"status": "no_known_outage", "outages": []},
+        },
+        {
+            "contract_accounts": {"allAccountIds": ["account-placeholder"]},
+            "locations": [],
+            "grouped_contracts": [],
+            "monthly_transfer": [{"payload": {"transfer": [{"consumption": {"total": 10, "padded": False}}]}}],
+            "outages": [],
+            "source_status": {},
+        },
+        {
+            "state": {"phase_source_entities": {"current": {"l2": "sensor.phase_l2"}}},
+            "history": {
+                "phase_discovery_method": "device_registry_and_phase_metadata",
+                "daily_phase_max": {"l2": {"ampere": 10.38, "raw_value": -10.38, "timestamp": "2026-08-30T12:00:00+02:00"}},
+                "daily_max_phase": {"phase": "l2", "ampere": 10.38, "raw_value": -10.38, "timestamp": "2026-08-30T12:00:00+02:00"},
+            },
+        },
+    )
+    assert source["normalized"]["fuse_ampere"] == 16
+    assert source["normalized"]["transfer_ore_per_kwh"] == 97
+    assert source["phase_metrics"]["daily_max_phase"]["phase"] == "l2"
+    assert source["phase_metrics"]["fuse_utilization_percent"] == 64.875
+    assert source["current_month_cost"]["total_sek"] == 240.45
+    assert source["current_month_cost"]["variable_grid_ore_per_kwh"] == 142
+    assert source["outage"]["status"] == "no_known_outage"
+    assert source["provider_monthly_transfer"] == {
+        "value": 10, "padded": False, "usable_as_actual_consumption": True,
+    }
+
+
 def test_web_api_request_uses_bearer_without_explicit_web_cookies():
     calls = []
 

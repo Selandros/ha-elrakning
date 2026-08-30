@@ -370,17 +370,11 @@ class EonGridManager:
         config = self._config()
         if config.get("auth") == "app":
             sources = await self.async_fetch_app_sources()
-            return {
-                "provider": "eon",
-                "provider_name": "E.ON",
-                "auth_mode": "app",
-                "contract_accounts": _redact_source_data(sources["contract_accounts"]),
-                "locations": _redact_source_data(sources["locations"]),
-                "grouped_contracts": _redact_source_data(sources["grouped_contracts"]),
-                "monthly_transfer": _redact_source_data(sources["monthly_transfer"]),
-                "outages": _redact_source_data(sources["outages"]),
-                "source_status": sources["source_status"],
-            }
+            meter_source = {}
+            meter_manager = self.hass.data.get(DOMAIN, {}).get("meter_manager")
+            if meter_manager is not None and hasattr(meter_manager, "async_source"):
+                meter_source = await meter_manager.async_source()
+            return _build_app_source_data(self.state, sources, meter_source)
 
         web = self._web_config(config)
         if isinstance(web.get("cookies"), dict) and web.get("customer_id"):
@@ -547,6 +541,120 @@ class EonGridManager:
 def _redact_source_data(value: Any) -> Any:
     """Redact authentication secrets while preserving provider source semantics."""
     return sanitize_source_data(value)
+
+
+def _build_app_source_data(
+    state: dict[str, Any], sources: dict[str, Any], meter_source: dict[str, Any]
+) -> dict[str, Any]:
+    """Combine provider responses with the canonical values rendered by the cards."""
+    agreement = state.get("agreement") or {}
+    facility = state.get("facility") or {}
+    tariff = state.get("tariff") or {}
+    cost = state.get("cost") or {}
+    consumption = state.get("consumption") or {}
+    meter_state = meter_source.get("state") if isinstance(meter_source, dict) else {}
+    meter_history = meter_source.get("history") if isinstance(meter_source, dict) else {}
+    meter_state = meter_state if isinstance(meter_state, dict) else {}
+    meter_history = meter_history if isinstance(meter_history, dict) else {}
+    daily_max_phase = meter_history.get("daily_max_phase")
+    daily_phase_max = meter_history.get("daily_phase_max")
+    daily_max_phase = daily_max_phase if isinstance(daily_max_phase, dict) else None
+    daily_phase_max = daily_phase_max if isinstance(daily_phase_max, dict) else None
+    fuse = facility.get("fuse_ampere")
+    max_ampere = daily_max_phase.get("ampere") if daily_max_phase else None
+    utilization = (
+        float(max_ampere) / float(fuse) * 100
+        if _is_number(max_ampere) and _is_number(fuse) and float(fuse) > 0
+        else None
+    )
+    grid_price = tariff.get("grid_price") if isinstance(tariff, dict) else None
+    source_status = sources.get("source_status") or {}
+    return _redact_source_data({
+        "provider": "eon",
+        "provider_name": "E.ON",
+        "auth_mode": "app",
+        "card": "grid-provider",
+        "contract_accounts": sources.get("contract_accounts"),
+        "locations": sources.get("locations"),
+        "grouped_contracts": sources.get("grouped_contracts"),
+        "monthly_transfer": sources.get("monthly_transfer"),
+        "outages": sources.get("outages"),
+        "source_status": source_status,
+        "normalized": {
+            "provider": "E.ON",
+            "contract_name": agreement.get("name") or agreement.get("description"),
+            "contract_start": agreement.get("start_date"),
+            "address": facility.get("address"),
+            "fuse_ampere": fuse,
+            "price_area": facility.get("price_area"),
+            "grid_area": facility.get("grid_area"),
+            "subscription_sek_per_month": tariff.get("subscription_fee_sek_per_month"),
+            "transfer_ore_per_kwh": tariff.get("transfer_fee_ore_per_kwh"),
+            "energy_tax_ore_per_kwh": tariff.get("energy_tax_ore_per_kwh"),
+            "yearly_cost_sek": tariff.get("estimated_yearly_cost_sek"),
+        },
+        "phase_metrics": {
+            "daily_phase_max": daily_phase_max,
+            "daily_max_phase": (
+                {**daily_max_phase, "fuse_ampere": fuse, "utilization_percent": utilization}
+                if daily_max_phase else None
+            ),
+            "fuse_utilization_percent": utilization,
+            "source_entities": meter_state.get("phase_source_entities"),
+            "discovery_method": meter_history.get("phase_discovery_method"),
+        },
+        "current_month_cost": {
+            "total_sek": cost.get("total_sek"),
+            "fixed_sek": cost.get("subscription_fee_sek"),
+            "variable_sek": (
+                cost.get("transfer_cost_sek", 0) + cost.get("energy_tax_sek", 0)
+                if _number_pair(cost.get("transfer_cost_sek"), cost.get("energy_tax_sek"))
+                else None
+            ),
+            "imported_kwh": consumption.get("consumption_kwh") if consumption.get("status") == "ok" else None,
+            "subscription_sek_per_month": tariff.get("subscription_fee_sek_per_month"),
+            "transfer_ore_per_kwh": tariff.get("transfer_fee_ore_per_kwh"),
+            "energy_tax_ore_per_kwh": tariff.get("energy_tax_ore_per_kwh"),
+            "variable_grid_ore_per_kwh": grid_price.get("variable_total_ore_per_kwh_gross") if isinstance(grid_price, dict) else None,
+            "source": "canonical_eon_grid_cost",
+        },
+        "provider_monthly_transfer": _monthly_transfer_provenance(
+            sources.get("monthly_transfer"), consumption
+        ),
+        "outage": state.get("outage"),
+        "provenance": {
+            "contract_tariff": "E.ON grouped_contracts",
+            "address_area_fuse": "E.ON Locations plus canonical contract state",
+            "phase_max": "Home Assistant meter phase history",
+            "current_month_cost": "canonical E.ON grid cost state",
+            "outage": "E.ON OutagesV2",
+        },
+    })
+
+
+def _monthly_transfer_provenance(value: Any, consumption: dict[str, Any]) -> dict[str, Any]:
+    """Expose provider padding without replacing the raw response."""
+    for item in value if isinstance(value, list) else []:
+        payload = item.get("payload") if isinstance(item, dict) else None
+        if not isinstance(payload, dict) or not isinstance(payload.get("transfer"), list):
+            continue
+        for transfer in payload["transfer"]:
+            provider_consumption = transfer.get("consumption") if isinstance(transfer, dict) else None
+            if isinstance(provider_consumption, dict):
+                return {
+                    "value": provider_consumption.get("total"),
+                    "padded": provider_consumption.get("padded"),
+                    "usable_as_actual_consumption": consumption.get("status") == "ok",
+                }
+    return {"value": None, "padded": None, "usable_as_actual_consumption": consumption.get("status") == "ok"}
+
+
+def _number_pair(left: Any, right: Any) -> bool:
+    return _is_number(left) and _is_number(right)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _grouped_contract_installation_ids(payload: Any) -> tuple[list[str], list[str]]:
