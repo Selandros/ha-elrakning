@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -21,6 +21,8 @@ assert.match(eonPanelSource, /daily_phase_max/);
 assert.match(eonPanelSource, /phase_current_source_entities/);
 assert.match(eonPanelSource, /mergeDailyPhaseMaxima/);
 assert.match(eonPanelSource, /mergePhaseHistory/);
+assert.match(eonPanelSource, /createMeterPowerHistoryState/);
+assert.match(eonPanelSource, /mergeMeterPowerHistoryPoint/);
 assert.match(eonPanelSource, /history_cache/);
 assert.match(eonPanelSource, /recorder_history/);
 assert.match(eonPanelSource, /last_live_merge_at/);
@@ -618,6 +620,44 @@ const recorderPhaseHistory = {
 const mergedPhaseHistory = mergePhaseHistory(recorderPhaseHistory, {
   current: { l1: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 151 }] }, l2: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 151 }] }, l3: { points: [{ timestamp: "2026-08-30T02:30:00Z", value: 151 }] } },
 });
+
+const seededMeterHistory = {
+  ...createMeterPowerHistoryState("2026-08-30"),
+  phase_history: recorderPhaseHistory,
+  points: [{ timestamp: "2026-08-30T11:55:00.000Z", import_kw: 0.1, export_kw: 0 }],
+  phase_source_entities: { current: { l1: "sensor.l1", l2: "sensor.l2", l3: "sensor.l3" } },
+  phase_discovery_method: "device_registry_and_phase_metadata",
+  loaded_at: "2026-08-30T11:00:00.000Z",
+};
+const liveMeterEvent = {
+  timestamp: "2026-08-30T12:00:00.000Z",
+  entity_id: "sensor.grid_power",
+  phase_current_a: { l1: -1, l2: 2, l3: 3 },
+  phase_voltage_v: { l1: 230, l2: 231, l3: 232 },
+  phase_active_power_kw: { l1: 0.1, l2: 0.2, l3: 0.3 },
+  import_kw: 0.4,
+  export_kw: 0,
+};
+const afterLiveMeterEvent = mergeMeterPowerHistoryPoint(seededMeterHistory, liveMeterEvent, "sensor.grid_power");
+assert.equal(afterLiveMeterEvent.phase_history.current.l1.points.length, 151);
+assert.equal(afterLiveMeterEvent.phase_history.current.l2.points.length, 151);
+assert.equal(afterLiveMeterEvent.phase_history.current.l3.points.length, 151);
+assert.equal(afterLiveMeterEvent.phase_history.voltage.l1.points.length, 2);
+assert.equal(afterLiveMeterEvent.phase_history.active_power.l1.points.length, 2);
+assert.equal(afterLiveMeterEvent.points.length, 2);
+assert.equal(afterLiveMeterEvent.phase_source_entities.current.l1, "sensor.l1");
+assert.equal(afterLiveMeterEvent.phase_discovery_method, "device_registry_and_phase_metadata");
+assert.equal(afterLiveMeterEvent.loaded_at, "2026-08-30T11:00:00.000Z");
+assert.equal(afterLiveMeterEvent.last_live_timestamp, "2026-08-30T12:00:00.000Z");
+let repeatedMeterHistory = afterLiveMeterEvent;
+for (let iteration = 1; iteration <= 50; iteration += 1) {
+  repeatedMeterHistory = mergeMeterPowerHistoryPoint(repeatedMeterHistory, {
+    ...liveMeterEvent,
+    timestamp: `2026-08-30T12:${String(iteration).padStart(2, "0")}:00.000Z`,
+  }, "sensor.grid_power");
+  assert.equal(repeatedMeterHistory.phase_history.current.l1.points.length, 151 + iteration);
+  assert.deepEqual(Object.keys(repeatedMeterHistory), Object.keys(afterLiveMeterEvent));
+}
 assert.equal(mergedPhaseHistory.current.l1.points.length, 151);
 assert.equal(mergedPhaseHistory.current.l2.points.length, 151);
 assert.equal(mergedPhaseHistory.current.l3.points.length, 151);

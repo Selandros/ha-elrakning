@@ -477,6 +477,62 @@ export function mergePhaseHistory(existing = {}, incoming = {}) {
   return merged;
 }
 
+export function createMeterPowerHistoryState(date = null) {
+  return {
+    date,
+    points: [],
+    phase_current_history: {},
+    phase_history: {},
+    phase_source_entities: {},
+    phase_discovery_method: null,
+    daily_phase_max: {},
+    daily_max_phase: null,
+    daily_max_phase_current_a: null,
+    daily_max_fuse_utilization_percent: null,
+    phase_current_source_entities: {},
+    phase_current_discovery_method: null,
+    loaded_at: null,
+    last_live_merge_at: null,
+    last_live_timestamp: null,
+  };
+}
+
+export function mergeMeterPowerHistoryPoint(history = {}, point = {}, powerEntityId = null) {
+  let next = { ...history };
+  if (point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw) {
+    const timestamp = point.timestamp || new Date().toISOString();
+    const phaseHistory = mergePhaseHistory(history.phase_history, {});
+    for (const [metric, values] of [["current", point.phase_current_a], ["voltage", point.phase_voltage_v], ["active_power", point.phase_active_power_kw]]) {
+      if (!values || typeof values !== "object") continue;
+      phaseHistory[metric] = { ...(phaseHistory[metric] || {}) };
+      for (const phase of ["l1", "l2", "l3"]) {
+        const raw = values[phase];
+        const value = raw == null ? NaN : Number(raw);
+        if (!Number.isFinite(value)) continue;
+        const points = Array.isArray(phaseHistory[metric][phase]?.points) ? [...phaseHistory[metric][phase].points] : [];
+        const nextPoint = { timestamp, value: metric === "current" ? Math.abs(value) : value };
+        const index = points.findIndex((item) => item.timestamp === timestamp);
+        if (index >= 0) points[index] = { ...points[index], ...nextPoint }; else points.push(nextPoint);
+        points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
+        phaseHistory[metric][phase] = { ...(phaseHistory[metric][phase] || {}), points: points.slice(-2000) };
+      }
+    }
+    next = { ...next, phase_history: phaseHistory, last_live_merge_at: new Date().toISOString(), last_live_timestamp: timestamp };
+  }
+  if (!point?.timestamp || (point.entity_id && point.entity_id !== powerEntityId)) return next;
+  const timestamp = new Date(point.timestamp);
+  if (Number.isNaN(timestamp.getTime())) return next;
+  const date = timestamp.toLocaleDateString("sv-SE");
+  const currentDate = next.date || date;
+  if (date !== currentDate) return next;
+  const points = Array.isArray(next.points) ? [...next.points] : [];
+  const nextPoint = { timestamp: timestamp.toISOString(), import_kw: normalizeMeterValue(point.import_kw), export_kw: normalizeMeterValue(point.export_kw) };
+  const index = points.findIndex((item) => item.timestamp === nextPoint.timestamp);
+  if (index >= 0) points[index] = nextPoint; else points.push(nextPoint);
+  points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
+  return { ...next, date: currentDate, points };
+}
+
 export function phaseHistoryPointCounts(history = {}) {
   return Object.fromEntries(["current", "voltage", "active_power"].map((metric) => [
     metric,
@@ -1528,7 +1584,7 @@ class ElrakningPanel {
     this._tooltipOrbit = { angle: null };
     this._priceHeaderLayoutObserver = null;
     this._chartPreferencesReady = false;
-    this._meterPowerHistory = { date: null, points: [], phase_history: {}, loaded_at: null, last_live_merge_at: null, last_live_timestamp: null };
+    this._meterPowerHistory = createMeterPowerHistoryState();
     this._livePowerMaxima = { date: null, house: 0, solar: 0, grid: 0, battery: 0 };
     this._meterTooltipPoints = [];
     this._meterCanonicalPoints = [];
@@ -7102,7 +7158,19 @@ class ElrakningPanel {
   _updateLivePhaseMaxima(phaseCurrentA, timestamp = new Date()) {
     if (!phaseCurrentA || typeof phaseCurrentA !== "object") return;
     const date = timestamp.toLocaleDateString("sv-SE");
-    if (this._meterPowerHistory?.date !== date) this._meterPowerHistory = { date, points: [] };
+    if (this._meterPowerHistory?.date !== date) {
+      this._meterPowerHistory = {
+        ...createMeterPowerHistoryState(date),
+        ...this._meterPowerHistory,
+        date,
+        points: [],
+        phase_history: {},
+        daily_phase_max: {},
+        daily_max_phase: null,
+        daily_max_phase_current_a: null,
+        daily_max_fuse_utilization_percent: null,
+      };
+    }
     const dailyPhaseMax = mergeDailyPhaseMaxima(this._meterPowerHistory.daily_phase_max, phaseCurrentA, timestamp);
     this._meterPowerHistory = {
       ...this._meterPowerHistory,
@@ -7163,7 +7231,7 @@ class ElrakningPanel {
       const responseDate = response?.date || null;
       const existingDate = this._meterPowerHistory?.date || null;
       const samePeriod = !existingDate || !responseDate || existingDate === responseDate;
-      const previousHistory = samePeriod ? this._meterPowerHistory : { date: responseDate, points: [] };
+      const previousHistory = samePeriod ? this._meterPowerHistory : createMeterPowerHistoryState(responseDate);
       this._meterPowerHistory = {
         date: responseDate,
         points: Array.isArray(response?.points) ? response.points : previousHistory.points || [],
@@ -7213,51 +7281,23 @@ class ElrakningPanel {
   }
 
   _appendMeterPowerPoint(point) {
-    if (point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw) {
+    const hasPhaseData = Boolean(point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw);
+    if (hasPhaseData) {
       this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());
-      const timestamp = point.timestamp || new Date().toISOString();
-      const phaseHistory = mergePhaseHistory(this._meterPowerHistory.phase_history, {});
-      for (const [metric, values] of [["current", point.phase_current_a], ["voltage", point.phase_voltage_v], ["active_power", point.phase_active_power_kw]]) {
-        if (!values || typeof values !== "object") continue;
-        phaseHistory[metric] = { ...(phaseHistory[metric] || {}) };
-        for (const phase of ["l1", "l2", "l3"]) {
-          const raw = values[phase];
-          const value = raw == null ? NaN : Number(raw);
-          if (!Number.isFinite(value)) continue;
-          const points = Array.isArray(phaseHistory[metric][phase]?.points) ? [...phaseHistory[metric][phase].points] : [];
-          const nextPoint = { timestamp, value: metric === "current" ? Math.abs(value) : value };
-          const index = points.findIndex((item) => item.timestamp === timestamp);
-          if (index >= 0) points[index] = { ...points[index], ...nextPoint }; else points.push(nextPoint);
-          points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
-          phaseHistory[metric][phase] = { ...(phaseHistory[metric][phase] || {}), points: points.slice(-2000) };
-        }
-      }
-      this._meterPowerHistory.phase_history = phaseHistory;
-      this._meterPowerHistory.last_live_merge_at = new Date().toISOString();
-      this._meterPowerHistory.last_live_timestamp = timestamp;
+      this._meterPowerHistory = mergeMeterPowerHistoryPoint(
+        this._meterPowerHistory,
+        point,
+        this._meterState?.power_entity,
+      );
       this._renderLivePowerRow();
       this._renderPhaseHistoryCard();
     }
-    if (!point?.timestamp) return;
-    if (point.entity_id && point.entity_id !== this._meterState?.power_entity) return;
-    const timestamp = new Date(point.timestamp);
-    if (Number.isNaN(timestamp.getTime())) return;
-    const date = timestamp.toLocaleDateString("sv-SE");
-    const currentDate = this._meterPowerHistory.date || date;
-    if (date !== currentDate) return;
-    const points = Array.isArray(this._meterPowerHistory.points)
-      ? [...this._meterPowerHistory.points]
-      : [];
-    const next = {
-      timestamp: timestamp.toISOString(),
-      import_kw: normalizeMeterValue(point.import_kw),
-      export_kw: normalizeMeterValue(point.export_kw),
-    };
-    const index = points.findIndex((item) => item.timestamp === next.timestamp);
-    if (index >= 0) points[index] = next;
-    else points.push(next);
-    points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
-    this._meterPowerHistory = { date: currentDate, points };
+    if (!point?.timestamp || (point.entity_id && point.entity_id !== this._meterState?.power_entity)) return;
+    this._meterPowerHistory = mergeMeterPowerHistoryPoint(
+      this._meterPowerHistory,
+      point,
+      this._meterState?.power_entity,
+    );
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     this._renderInvoiceEstimateCard();
   }
