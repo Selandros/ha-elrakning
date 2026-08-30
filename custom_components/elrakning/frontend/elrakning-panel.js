@@ -2947,7 +2947,7 @@ class ElrakningPanel {
         }
 
         .phase-history-row {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: 1fr;
           margin-top: 16px;
         }
 
@@ -2996,12 +2996,6 @@ class ElrakningPanel {
 
         .card-source-action {
           margin-top: 16px;
-        }
-
-        @media (max-width: 700px) {
-          .phase-history-row {
-            grid-template-columns: 1fr;
-          }
         }
 
         .phase-history-card {

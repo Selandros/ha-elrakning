@@ -34,6 +34,8 @@ assert.match(eonPanelSource, /history_cache/);
 assert.match(eonPanelSource, /recorder_history/);
 assert.match(eonPanelSource, /last_live_merge_at/);
 assert.match(eonPanelSource, /data-phase-history-card/);
+assert.match(eonPanelSource, /\.phase-history-row \{\n\s+grid-template-columns: 1fr;\n\s+margin-top: 16px;/);
+assert.doesNotMatch(eonPanelSource, /\.phase-history-row \{\n\s+grid-template-columns: repeat\(2/);
 assert.match(eonPanelSource, /data-phase-metric="current"/);
 assert.match(eonPanelSource, /data-phase-metric="voltage"/);
 assert.match(eonPanelSource, /data-phase-metric="active_power"/);
