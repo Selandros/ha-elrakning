@@ -76,6 +76,15 @@ export function providerLabel(providerName, agreementName) {
     .join(" · ");
 }
 
+export function invoicePeriodLabel(invoice) {
+  if (!invoice || typeof invoice !== "object") return null;
+  for (const key of ["month", "billing_period"]) {
+    const value = invoice[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -6466,7 +6475,8 @@ class ElrakningPanel {
     if (period.weighted_spot_average_ore_per_kwh != null) rows.push([`Snittspot ${this._formatInvoiceMonth(period.period_start)}`, `${this._formatNumber(period.weighted_spot_average_ore_per_kwh)} öre/kWh`]);
     if (period.credit_closing_sek > 0) rows.push(["Tillgodo", this._formatSek(period.credit_closing_sek)]);
     if (latest) {
-      rows.push(["Senaste faktura", this._formatInvoiceMonth(latest.invoice_date || latest.month)]);
+      const invoicePeriod = invoicePeriodLabel(latest);
+      if (invoicePeriod) rows.push(["Senaste faktura", this._formatInvoiceMonth(invoicePeriod)]);
       if (period.amount_due_sek != null) rows.push(["Att betala", this._formatSek(period.amount_due_sek)]);
     }
     summary.replaceChildren(...rows.flatMap(([label, value]) => {
