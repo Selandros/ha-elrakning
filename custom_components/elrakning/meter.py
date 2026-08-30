@@ -138,8 +138,9 @@ class MeterManager:
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
         self.mapping[METER_INVERT_FIELD] = False
         self._history_summary: dict[str, Any] | None = None
-        self._history_inflight: dict[tuple[str, str, bool], asyncio.Task] = {}
+        self._history_inflight: dict[tuple[str, str, bool, tuple[tuple[str, str], ...]], asyncio.Task] = {}
         self._phase_current_entities: dict[str, str] = {}
+        self._phase_current_discovery_method = "device_registry_and_phase_metadata"
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     async def _async_state_changed(self, event: Event) -> None:
@@ -250,6 +251,8 @@ class MeterManager:
         result.update({
             "phase_current_a": {phase: phase_values.get(phase) for phase in ("l1", "l2", "l3")},
             "phase_current_entities": dict(phase_entities),
+            "phase_current_source_entities": dict(phase_entities),
+            "phase_current_discovery_method": self._phase_current_discovery_method,
             "phase_current_available": any(value is not None for value in phase_values.values()),
         })
         for field, output, divisor in (
@@ -346,13 +349,15 @@ class MeterManager:
             await self._diagnostic("INFO", "meter_history_request_success", "Meter history loaded · 0 points")
             return {"success": True, "entity_id": None, "date": date, "points": [], "history": summary}
         invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
-        key = (entity_id, date, invert_power)
+        phase_entities = dict(self._phase_current_entities or self._discover_phase_current_entities())
+        phase_key = tuple(sorted(phase_entities.items()))
+        key = (entity_id, date, invert_power, phase_key)
         task = self._history_inflight.get(key)
         if task is None:
-            task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date, invert_power))
+            task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date, invert_power, phase_entities))
             self._history_inflight[key] = task
 
-            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool] = key) -> None:
+            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool, tuple[tuple[str, str], ...]] = key) -> None:
                 if self._history_inflight.get(request_key) is completed:
                     self._history_inflight.pop(request_key, None)
 
@@ -431,19 +436,21 @@ class MeterManager:
         end,
         date: str,
         invert_power: bool = False,
+        phase_entities: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Run one Recorder history operation shared by identical callers."""
         try:
             from homeassistant.components.recorder import get_instance, history
 
             recorder = get_instance(self.hass)
+            requested_entities = [entity_id, *(phase_entities or {}).values()]
             history_by_entity = await recorder.async_add_executor_job(
                 partial(
                     history.get_significant_states,
                     self.hass,
                     start,
                     end,
-                    entity_ids=[entity_id],
+                    entity_ids=requested_entities,
                     include_start_time_state=True,
                     significant_changes_only=False,
                     minimal_response=False,
@@ -473,6 +480,32 @@ class MeterManager:
             (max(point["import_kw"], point["export_kw"]) for point in points),
             default=None,
         )
+        phase_current_history = {}
+        for phase, phase_entity_id in (phase_entities or {}).items():
+            phase_values = []
+            for state in history_by_entity.get(phase_entity_id, []):
+                value = _current_ampere(state)
+                timestamp = getattr(state, "last_updated", None)
+                if value is not None and timestamp is not None:
+                    phase_values.append((abs(value), timestamp))
+            max_entry = max(phase_values, key=lambda entry: entry[0], default=None)
+            phase_current_history[phase] = {
+                "entity_id": phase_entity_id,
+                "max_a": max_entry[0] if max_entry else None,
+                "max_timestamp": max_entry[1].isoformat() if max_entry else None,
+                "point_count": len(phase_values),
+            }
+        daily_max_phase_current_a = max(
+            (abs(item["max_a"]) for item in phase_current_history.values() if item["max_a"] is not None),
+            default=None,
+        )
+        daily_phase_max = {
+            phase: {
+                "ampere": item["max_a"],
+                "timestamp": item["max_timestamp"],
+            }
+            for phase, item in phase_current_history.items()
+        }
         summary = {
             "entity_id": entity_id,
             "success": True,
@@ -482,6 +515,10 @@ class MeterManager:
             "last_timestamp": points[-1]["timestamp"] if points else None,
             "max_abs_kw": round(max_abs_kw, 3) if max_abs_kw is not None else None,
             METER_INVERT_FIELD: invert_power,
+            "phase_current_source_entities": dict(phase_entities or {}),
+            "phase_current_discovery_method": self._phase_current_discovery_method,
+            "daily_max_phase_current_a": daily_max_phase_current_a,
+            "daily_phase_max": daily_phase_max,
         }
         self._history_summary = summary
         await self._diagnostic(
@@ -493,4 +530,15 @@ class MeterManager:
             f"Last: {summary['last_timestamp'] or 'none'} · "
             f"Max: {summary['max_abs_kw'] if summary['max_abs_kw'] is not None else 'none'} kW",
         )
-        return {"success": True, "entity_id": entity_id, "date": date, "points": points, "history": summary}
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "date": date,
+            "points": points,
+            "history": summary,
+            "phase_current_history": phase_current_history,
+            "daily_max_phase_current_a": daily_max_phase_current_a,
+            "daily_phase_max": daily_phase_max,
+            "phase_current_source_entities": dict(phase_entities or {}),
+            "phase_current_discovery_method": self._phase_current_discovery_method,
+        }

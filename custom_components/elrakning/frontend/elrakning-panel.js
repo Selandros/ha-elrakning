@@ -375,10 +375,10 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
   }
   const fuseAmpere = Number(meterState.facility?.fuse_ampere ?? meterState.fuse_ampere);
   const phaseValues = meterState.phase_current_a && typeof meterState.phase_current_a === "object"
-    ? Object.fromEntries(["l1", "l2", "l3"].map((phase) => [phase, Number(meterState.phase_current_a[phase])]))
+    ? Object.fromEntries(["l1", "l2", "l3"].map((phase) => [phase, meterState.phase_current_a[phase] == null ? null : Number(meterState.phase_current_a[phase])]))
     : {};
   const validPhaseValues = Object.values(phaseValues).filter(Number.isFinite);
-  const maxPhaseCurrentA = validPhaseValues.length ? Math.max(...validPhaseValues) : null;
+  const maxPhaseCurrentA = validPhaseValues.length ? Math.max(...validPhaseValues.map((value) => Math.abs(value))) : null;
   const fuseUtilizationPercent = Number.isFinite(maxPhaseCurrentA) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
     ? maxPhaseCurrentA / fuseAmpere * 100
     : null;
@@ -406,6 +406,21 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
     grid: withScale(grid, "grid"),
     battery: withScale(battery, "battery"),
   };
+}
+
+export function mergeDailyPhaseMaxima(dailyPhaseMax = {}, phaseCurrentA = {}, timestamp = new Date()) {
+  const next = { ...(dailyPhaseMax || {}) };
+  const timestampValue = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  const timestampText = Number.isNaN(timestampValue.getTime()) ? null : timestampValue.toISOString();
+  for (const phase of ["l1", "l2", "l3"]) {
+    const raw = phaseCurrentA?.[phase];
+    const value = raw == null ? NaN : Number(raw);
+    if (!Number.isFinite(value)) continue;
+    const magnitude = Math.abs(value);
+    const previous = Number(next[phase]?.ampere);
+    if (!Number.isFinite(previous) || magnitude > previous) next[phase] = { ampere: magnitude, timestamp: timestampText };
+  }
+  return next;
 }
 
 export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
@@ -1208,6 +1223,7 @@ class ElrakningPanel {
               </div>
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
+              <div class="eon-grid-phase-summary" data-eon-grid-phase-summary hidden></div>
               <p class="provider-invoice-cost" data-provider-invoice-cost="elnet" hidden><span>Kostnad denna månad</span><strong></strong></p>
               <button type="button" class="configuration-control" data-eon-grid-configure>Konfigurera</button>
               <button type="button" data-eon-grid-source hidden>Vad har vi för data?</button>
@@ -2268,6 +2284,49 @@ class ElrakningPanel {
           gap: 6px 18px;
           grid-template-columns: minmax(130px, auto) 1fr;
           margin-top: 14px;
+        }
+
+        .eon-grid-phase-summary {
+          display: grid;
+          gap: 6px;
+          margin-top: 12px;
+        }
+
+        .eon-grid-phase-summary h3 {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          font-weight: 400;
+          margin: 0 0 2px;
+        }
+
+        .eon-grid-phase-row {
+          align-items: center;
+          display: grid;
+          gap: 8px;
+          grid-template-columns: 22px minmax(0, 1fr) auto;
+          min-width: 0;
+        }
+
+        .eon-grid-phase-label,
+        .eon-grid-phase-value {
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          white-space: nowrap;
+        }
+
+        .eon-grid-phase-bar {
+          background: rgba(255, 255, 255, 0.14);
+          border-radius: 999px;
+          height: 5px;
+          min-width: 0;
+          overflow: hidden;
+        }
+
+        .eon-grid-phase-bar span {
+          background: var(--secondary-text-color);
+          border-radius: inherit;
+          display: block;
+          height: 100%;
         }
 
         .source-provider {
@@ -4258,6 +4317,12 @@ class ElrakningPanel {
           phase_current_a: tile.phaseCurrentA,
           max_phase_current_a: tile.maxPhaseCurrentA,
           fuse_utilization_percent: tile.fuseUtilizationPercent,
+          current_max_phase_a: tile.maxPhaseCurrentA,
+          current_fuse_utilization_percent: tile.fuseUtilizationPercent,
+          daily_max_phase_current_a: this._meterPowerHistory?.daily_max_phase_current_a ?? null,
+          daily_max_fuse_utilization_percent: this._meterPowerHistory?.daily_max_fuse_utilization_percent ?? null,
+          phase_current_source_entities: this._meterState?.phase_current_source_entities || this._meterState?.phase_current_entities || {},
+          phase_current_discovery_method: this._meterState?.phase_current_discovery_method || this._meterPowerHistory?.phase_current_discovery_method || null,
           phase_current_available: Number.isFinite(tile.maxPhaseCurrentA),
           phase_current_source: Number.isFinite(tile.maxPhaseCurrentA) ? "home_assistant" : null,
         } : {}),
@@ -5890,6 +5955,54 @@ class ElrakningPanel {
     }));
   }
 
+  _renderEonGridPhaseSummary() {
+    const summary = this.host.querySelector("[data-eon-grid-phase-summary]");
+    if (!summary) return;
+    const configured = this._eonGridState?.configured === true;
+    const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+    const dailyPhaseMax = this._meterPowerHistory?.daily_phase_max || {};
+    const values = ["l1", "l2", "l3"].map((phase) => {
+      const raw = dailyPhaseMax[phase]?.ampere;
+      return raw == null ? null : Number(raw);
+    });
+    if (!configured || !values.some(Number.isFinite)) {
+      summary.replaceChildren();
+      summary.hidden = true;
+      return;
+    }
+    const heading = document.createElement("h3");
+    heading.textContent = "Fasbelastning idag";
+    const rows = [heading];
+    for (const [index, phase] of ["l1", "l2", "l3"].entries()) {
+      const value = values[index];
+      const row = document.createElement("div");
+      row.className = "eon-grid-phase-row";
+      const label = document.createElement("span");
+      label.className = "eon-grid-phase-label";
+      label.textContent = phase.toUpperCase();
+      const bar = document.createElement("div");
+      bar.className = "eon-grid-phase-bar";
+      const fill = document.createElement("span");
+      fill.style.backgroundColor = chartColor("neutral");
+      fill.style.width = Number.isFinite(value) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
+        ? `${Math.max(0, Math.min(100, value / fuseAmpere * 100))}%`
+        : "0%";
+      bar.append(fill);
+      const output = document.createElement("span");
+      output.className = "eon-grid-phase-value";
+      const utilization = Number.isFinite(value) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
+        ? ` · ${this._formatNumber(value / fuseAmpere * 100)} %`
+        : "";
+      output.textContent = Number.isFinite(value)
+        ? `${this._formatNumber(value)}${Number.isFinite(fuseAmpere) && fuseAmpere > 0 ? ` / ${this._formatNumber(fuseAmpere)} A` : " A"}${utilization}`
+        : "—";
+      row.append(label, bar, output);
+      rows.push(row);
+    }
+    summary.replaceChildren(...rows);
+    summary.hidden = false;
+  }
+
   _applyEonGridState(state) {
     this._eonGridState = state;
     this._eonGridPrice = state?.grid_price || state?.tariff?.grid_price || null;
@@ -5905,6 +6018,12 @@ class ElrakningPanel {
     const tariff = state?.tariff || {};
     const consumption = state?.consumption || {};
     const cost = state?.cost || {};
+    const dailyMaxPhaseCurrentA = Number.isFinite(Number(state?.daily_max_phase_current_a))
+      ? Number(state.daily_max_phase_current_a)
+      : this._meterPowerHistory?.daily_max_phase_current_a;
+    const dailyFuseUtilizationPercent = Number.isFinite(Number(state?.daily_max_fuse_utilization_percent))
+      ? Number(state.daily_max_fuse_utilization_percent)
+      : this._meterPowerHistory?.daily_max_fuse_utilization_percent;
     provider.textContent = configured && state?.provider_name ? `${state.provider_name} · Elnät` : "";
     provider.hidden = !configured;
     const outage = state?.outage || {};
@@ -5929,11 +6048,11 @@ class ElrakningPanel {
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
     if (facility.price_area) rows.push(["Elområde", facility.price_area]);
     if (facility.grid_area) rows.push(["Nätområde", facility.grid_area]);
-    if (Number.isFinite(Number(state?.daily_max_phase_current_a))) {
-      rows.push(["Max fas idag", `${this._formatNumber(Number(state.daily_max_phase_current_a))} A`]);
+    if (Number.isFinite(dailyMaxPhaseCurrentA)) {
+      rows.push(["Max fas idag", `${this._formatNumber(dailyMaxPhaseCurrentA)} A`]);
     }
-    if (Number.isFinite(Number(state?.daily_max_fuse_utilization_percent))) {
-      rows.push(["Högsta säkringsandel", `${this._formatNumber(Number(state.daily_max_fuse_utilization_percent))} %`]);
+    if (Number.isFinite(dailyFuseUtilizationPercent)) {
+      rows.push(["Högsta säkringsandel", `${this._formatNumber(dailyFuseUtilizationPercent)} %`]);
     }
     if (consumption.status === "ok") rows.push(["Förbrukning", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
     if (tariff.subscription_fee_sek_per_month != null) rows.push(["Abonnemang", this._formatSek(tariff.subscription_fee_sek_per_month) + "/mån"]);
@@ -5949,6 +6068,7 @@ class ElrakningPanel {
       return [left, right];
     }));
     summary.hidden = !configured || rows.length === 0;
+    this._renderEonGridPhaseSummary();
     this._renderInvoiceCardCosts();
     this._updatePriceComparisonControls();
     if (this.host.querySelector(".price-chart") && this.priceData.periods.length) this.renderPriceChart();
@@ -6056,6 +6176,7 @@ class ElrakningPanel {
 
   _applyMeterState(state) {
     this._meterState = state;
+    this._updateLivePhaseMaxima(state?.phase_current_a);
     const provider = this.host.querySelector('[data-provider-name="elmatare"]');
     const source = this.host.querySelector("[data-meter-source]");
     const label = providerLabel(state?.provider_name, state?.device_name);
@@ -6066,7 +6187,28 @@ class ElrakningPanel {
     if (source) source.hidden = !this._debugEnabled || state?.configured !== true;
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
+    this._renderEonGridPhaseSummary();
     this._renderInvoiceEstimateCard();
+  }
+
+  _updateLivePhaseMaxima(phaseCurrentA, timestamp = new Date()) {
+    if (!phaseCurrentA || typeof phaseCurrentA !== "object") return;
+    const date = timestamp.toLocaleDateString("sv-SE");
+    if (this._meterPowerHistory?.date !== date) this._meterPowerHistory = { date, points: [] };
+    const dailyPhaseMax = mergeDailyPhaseMaxima(this._meterPowerHistory.daily_phase_max, phaseCurrentA, timestamp);
+    this._meterPowerHistory = {
+      ...this._meterPowerHistory,
+      daily_phase_max: dailyPhaseMax,
+      daily_max_phase_current_a: Math.max(
+        ...Object.values(dailyPhaseMax).map((item) => Number(item?.ampere)).filter(Number.isFinite),
+        0,
+      ) || null,
+    };
+    const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+    const dailyMax = this._meterPowerHistory.daily_max_phase_current_a;
+    this._meterPowerHistory.daily_max_fuse_utilization_percent = Number.isFinite(dailyMax) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
+      ? dailyMax / fuseAmpere * 100
+      : null;
   }
 
   async loadMeterState(loadHistory = false) {
@@ -6112,8 +6254,19 @@ class ElrakningPanel {
       this._meterPowerHistory = {
         date: response?.date || null,
         points: Array.isArray(response?.points) ? response.points : [],
+        phase_current_history: response?.phase_current_history || {},
+        daily_phase_max: response?.daily_phase_max || {},
+        daily_max_phase_current_a: Number.isFinite(Number(response?.daily_max_phase_current_a)) ? Number(response.daily_max_phase_current_a) : null,
+        phase_current_source_entities: response?.phase_current_source_entities || this._meterState?.phase_current_source_entities || {},
+        phase_current_discovery_method: response?.phase_current_discovery_method || this._meterState?.phase_current_discovery_method || null,
       };
+      const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+      const dailyMaxPhase = this._meterPowerHistory.daily_max_phase_current_a;
+      this._meterPowerHistory.daily_max_fuse_utilization_percent = Number.isFinite(dailyMaxPhase) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
+        ? dailyMaxPhase / fuseAmpere * 100
+        : null;
       this._rebuildLivePowerMaxima();
+      if (this._eonGridState?.configured === true) this._applyEonGridState(this._eonGridState);
       this._meterHistorySummary = response.history || {
         entity_id: response?.entity_id || entityId,
         success: true,
@@ -6141,6 +6294,11 @@ class ElrakningPanel {
   }
 
   _appendMeterPowerPoint(point) {
+    if (point?.phase_current_a) {
+      this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());
+      this._renderEonGridPhaseSummary();
+      this._renderLivePowerRow();
+    }
     if (!point?.timestamp) return;
     if (point.entity_id && point.entity_id !== this._meterState?.power_entity) return;
     const timestamp = new Date(point.timestamp);

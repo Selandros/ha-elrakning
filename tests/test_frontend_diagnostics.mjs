@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -13,6 +13,11 @@ const output = formatDiagnosticsText([
 ], "0.0.64");
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
+assert.match(eonPanelSource, /data-eon-grid-phase-summary/);
+assert.match(eonPanelSource, /Fasbelastning idag/);
+assert.match(eonPanelSource, /daily_phase_max/);
+assert.match(eonPanelSource, /phase_current_source_entities/);
+assert.match(eonPanelSource, /mergeDailyPhaseMaxima/);
 assert.match(eonPanelSource, /elrakning\/grid\/state/);
 assert.match(eonPanelSource, /data-eon-grid-app-account/);
 assert.match(eonPanelSource, /data-eon-grid-app-password/);
@@ -93,6 +98,15 @@ assert.equal(displayPowerValue(0.1), 0);
 assert.equal(displayPowerValue(-0.1), 0);
 assert.equal(displayPowerValue(0.11), 0.11);
 assert.equal(displayPowerValue("not-a-number"), null);
+const phaseMaxima = mergeDailyPhaseMaxima({}, { l1: -12, l2: 7, l3: 9 }, "2026-08-30T12:00:00Z");
+assert.deepEqual(phaseMaxima, {
+  l1: { ampere: 12, timestamp: "2026-08-30T12:00:00.000Z" },
+  l2: { ampere: 7, timestamp: "2026-08-30T12:00:00.000Z" },
+  l3: { ampere: 9, timestamp: "2026-08-30T12:00:00.000Z" },
+});
+const updatedPhaseMaxima = mergeDailyPhaseMaxima(phaseMaxima, { l1: -10, l2: -8, l3: 11 }, "2026-08-30T13:00:00Z");
+assert.equal(updatedPhaseMaxima.l1.ampere, 12);
+assert.equal(updatedPhaseMaxima.l3.ampere, 11);
 const integrationStart = new Date("2026-08-23T00:00:00");
 const integrationEnd = new Date("2026-08-24T00:00:00");
 const powerPoints = (values) => values.map((value, index) => ({
@@ -298,6 +312,13 @@ const gridTilesWithFuse = buildLivePowerTiles(
 );
 assert.equal(gridTilesWithFuse.grid.fuseAmpere, 16);
 assert.ok(Math.abs(gridTilesWithFuse.grid.fuseUtilizationPercent - 61.25) < 1e-12);
+const gridTilesWithNegativePhase = buildLivePowerTiles(
+  {},
+  { power_kw: 0, phase_current_a: { l1: -14, l2: 3, l3: 4 }, facility: { fuse_ampere: 16 } },
+  {},
+);
+assert.equal(gridTilesWithNegativePhase.grid.maxPhaseCurrentA, 14);
+assert.equal(gridTilesWithNegativePhase.grid.fuseUtilizationPercent, 87.5);
 assert.equal(liveTiles.battery.status, "Vilar");
 assert.equal(liveTiles.battery.fillPercent, 0);
 assert.equal(buildLivePowerTiles({}, {}).solar.scaleMax, 1);

@@ -136,6 +136,99 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             meter.er.async_get = original_registry
 
+    async def test_power_history_reuses_discovered_phase_entities(self):
+        class Entry:
+            def __init__(self, device_id, unique_id):
+                self.device_id = device_id
+                self.unique_id = unique_id
+                self.original_name = None
+
+        phase_entities = {
+            "l1": "sensor.current_l1",
+            "l2": "sensor.current_l2",
+            "l3": "sensor.current_l3",
+        }
+        states = {
+            "sensor.power": types.SimpleNamespace(
+                entity_id="sensor.power", state="0", attributes={"unit_of_measurement": "kW", "device_class": "power"},
+            ),
+            **{
+                entity_id: types.SimpleNamespace(
+                    entity_id=entity_id, state=str(value),
+                    attributes={"unit_of_measurement": "A", "device_class": "current"},
+                    last_updated=datetime(2026, 8, 23, 10, tzinfo=timezone.utc),
+                )
+                for entity_id, value in zip(phase_entities.values(), (7.2, 9.8, 8.4))
+            },
+        }
+        hass = _hass("sensor.power")
+        hass.states.async_all = lambda *args: list(states.values())
+        hass.states.get = states.get
+        captured = []
+
+        class Registry:
+            def async_get(self, entity_id):
+                return Entry("meter-device", entity_id)
+
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        recorder.get_instance = lambda _hass: hass.recorder
+
+        def get_history(*args, **kwargs):
+            captured.append(kwargs["entity_ids"])
+            return {
+                "sensor.power": [types.SimpleNamespace(
+                    state="1", attributes={"unit_of_measurement": "kW"},
+                    last_updated=datetime(2026, 8, 23, 10, tzinfo=timezone.utc),
+                )],
+                "sensor.current_l1": [types.SimpleNamespace(
+                    state="-14", attributes={"unit_of_measurement": "A", "device_class": "current"},
+                    last_updated=datetime(2026, 8, 23, 10, tzinfo=timezone.utc),
+                )],
+                "sensor.current_l2": [types.SimpleNamespace(
+                    state="9.8", attributes={"unit_of_measurement": "A", "device_class": "current"},
+                    last_updated=datetime(2026, 8, 23, 10, tzinfo=timezone.utc),
+                )],
+                "sensor.current_l3": [types.SimpleNamespace(
+                    state="8.4", attributes={"unit_of_measurement": "A", "device_class": "current"},
+                    last_updated=datetime(2026, 8, 23, 10, tzinfo=timezone.utc),
+                )],
+            }
+
+        history.get_significant_states = get_history
+        recorder.history = history
+        previous_registry = meter.er.async_get
+        previous_modules = {
+            name: sys.modules.get(name)
+            for name in ("homeassistant.components", "homeassistant.components.recorder", "homeassistant.components.recorder.history")
+        }
+        components = types.ModuleType("homeassistant.components")
+        components.recorder = recorder
+        sys.modules.update({
+            "homeassistant.components": components,
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        })
+        meter.er.async_get = lambda _hass: Registry()
+        try:
+            manager = meter.MeterManager(hass)
+            await manager.async_save_mapping({"power_entity": "sensor.power"})
+            result = await manager.async_power_history()
+        finally:
+            meter.er.async_get = previous_registry
+            for name, original in previous_modules.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.assertEqual(captured, [["sensor.power", "sensor.current_l1", "sensor.current_l2", "sensor.current_l3"]])
+        self.assertEqual(result["daily_max_phase_current_a"], 14)
+        self.assertEqual(result["phase_current_history"]["l1"]["max_a"], 14)
+        self.assertEqual(result["phase_current_history"]["l1"]["max_timestamp"], "2026-08-23T10:00:00+00:00")
+        self.assertEqual(result["daily_phase_max"]["l1"]["ampere"], 14)
+        self.assertEqual(result["phase_current_source_entities"], phase_entities)
+        self.assertEqual(result["phase_current_discovery_method"], "device_registry_and_phase_metadata")
+
     async def test_power_units_are_accepted(self):
         for unit in ("W", "kW"):
             hass = _hass("sensor.power")
