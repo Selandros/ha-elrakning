@@ -426,6 +426,136 @@ export function mergeDailyPhaseMaxima(dailyPhaseMax = {}, phaseCurrentA = {}, ti
   return next;
 }
 
+export function buildLiveSourceEntity(states, entityId, role) {
+  const state = entityId && states?.[entityId];
+  return {
+    entity_id: entityId || null,
+    state: state?.state ?? null,
+    unit: state?.attributes?.unit_of_measurement ?? null,
+    device_class: state?.attributes?.device_class ?? null,
+    last_updated: state?.last_updated ?? null,
+    role,
+  };
+}
+
+export function buildLivePowerProvenance(key, tile, powerState = {}, meterState = {}, meterHistory = {}, powerHistory = {}, states = {}, liveMaxima = {}) {
+  const source = [];
+  const add = (entityId, role) => { if (entityId) source.push(buildLiveSourceEntity(states, entityId, role)); };
+  const sourceValueKw = (entityId) => {
+    const snapshot = source.find((item) => item.entity_id === entityId);
+    const raw = Number(snapshot?.state);
+    if (!Number.isFinite(raw)) return null;
+    const unit = String(snapshot?.unit || "").toLowerCase();
+    if (unit === "w") return raw / 1000;
+    if (unit === "mw") return raw * 1000;
+    if (unit === "kw") return raw;
+    return null;
+  };
+  const derivation = { method: "unavailable", input_count: 0, result_kw: tile?.value ?? null };
+  if (key === "solar") {
+    const entities = Array.isArray(powerState.solar_entities) ? powerState.solar_entities : [];
+    entities.forEach((entityId) => add(entityId, "solar_power"));
+    derivation.method = "sum_power_entities";
+    derivation.input_count = entities.length;
+    derivation.unit_conversion = "source_units_to_kW";
+    derivation.invert = false;
+    derivation.inputs_kw = entities.map((entityId) => sourceValueKw(entityId));
+    derivation.result_kw_from_inputs = derivation.inputs_kw.every((value) => Number.isFinite(value))
+      ? derivation.inputs_kw.reduce((sum, value) => sum + value, 0)
+      : null;
+    derivation.formula = entities.length ? entities.map((_, index) => `pv${index + 1}_kw`).join(" + ") : "no solar entities";
+  } else if (key === "house") {
+    add(powerState.consumption_entity, "consumption_power");
+    derivation.method = powerState.consumption_entity ? "explicit_consumption_entity" : "unavailable";
+    derivation.input_count = powerState.consumption_entity ? 1 : 0;
+    derivation.unit_conversion = "source_units_to_kW";
+    derivation.invert = false;
+    derivation.input_kw = sourceValueKw(powerState.consumption_entity);
+    derivation.formula = powerState.consumption_entity ? "consumption_entity_kw" : "no consumption entity";
+  } else if (key === "grid") {
+    add(meterState.power_entity, "grid_active_power");
+    for (const [phase, entityId] of Object.entries(meterState.phase_current_source_entities || meterState.phase_current_entities || {})) add(entityId, `phase_${phase}_current`);
+    derivation.method = meterState.power_entity ? "normalize_signed_meter_power" : "unavailable";
+    derivation.input_count = source.length;
+    derivation.unit_conversion = "source_units_to_kW";
+    derivation.invert = meterState.invert_power === true;
+    derivation.input_signed_kw = sourceValueKw(meterState.power_entity);
+    derivation.input_signed_kw_after_invert = Number.isFinite(derivation.input_signed_kw)
+      ? (derivation.invert ? -derivation.input_signed_kw : derivation.input_signed_kw)
+      : null;
+    derivation.formula = meterState.power_entity ? "signed_power -> import_kw/export_kw -> magnitude" : "no grid power entity";
+  } else if (key === "battery") {
+    const combined = Boolean(powerState.battery_power_entity);
+    add(powerState.battery_power_entity, "battery_power");
+    add(powerState.charging_entity, "battery_charging");
+    add(powerState.discharging_entity, "battery_discharging");
+    derivation.method = combined ? "split_signed_battery_power" : "separate_charge_discharge_entities";
+    derivation.input_count = source.length;
+    derivation.unit_conversion = "source_units_to_kW";
+    derivation.invert = powerState.invert_battery_power === true;
+    derivation.input_signed_kw = combined ? sourceValueKw(powerState.battery_power_entity) : null;
+    derivation.input_signed_kw_after_invert = Number.isFinite(derivation.input_signed_kw)
+      ? (derivation.invert ? -derivation.input_signed_kw : derivation.input_signed_kw)
+      : null;
+    derivation.charging_input_kw = combined ? null : sourceValueKw(powerState.charging_entity);
+    derivation.discharging_input_kw = combined ? null : sourceValueKw(powerState.discharging_entity);
+    derivation.formula = combined ? "signed_battery_kw -> charging_kw/discharging_kw" : "charging_entity_kw + discharging_entity_kw";
+  }
+  const seriesMaximum = (series) => {
+    const values = Array.isArray(series?.points) ? series.points.map((point) => Math.abs(Number(point.value_kw))).filter(Number.isFinite) : [];
+    return values.length ? Math.max(...values) : null;
+  };
+  const historyMaxCandidates = key === "grid"
+    ? [
+      seriesMaximum({ points: (meterHistory.points || []).map((point) => ({ value_kw: point.import_kw })) }),
+      seriesMaximum({ points: (meterHistory.points || []).map((point) => ({ value_kw: point.export_kw })) }),
+    ]
+    : key === "battery"
+      ? [seriesMaximum(powerHistory.series?.charging), seriesMaximum(powerHistory.series?.discharging)]
+      : [seriesMaximum(powerHistory.series?.[key === "house" ? "consumption" : key])];
+  const historyMax = historyMaxCandidates.filter(Number.isFinite).length
+    ? Math.max(...historyMaxCandidates.filter(Number.isFinite))
+    : null;
+  const history = {
+    source: key === "grid" ? "home_assistant_recorder" : "home_assistant_recorder_or_live_state",
+    entities: source.map((item) => item.entity_id).filter(Boolean),
+    from: meterHistory.date ? `${meterHistory.date}T00:00:00` : powerHistory.date ? `${powerHistory.date}T00:00:00` : null,
+    to: null,
+    method: "maximum_observed_magnitude",
+    history_point_count: key === "grid"
+      ? (Array.isArray(meterHistory.points) ? meterHistory.points.length : 0)
+      : key === "battery"
+        ? (Array.isArray(powerHistory.series?.charging?.points) ? powerHistory.series.charging.points.length : 0)
+          + (Array.isArray(powerHistory.series?.discharging?.points) ? powerHistory.series.discharging.points.length : 0)
+        : (Array.isArray(powerHistory.series?.[key === "house" ? "consumption" : key]?.points) ? powerHistory.series[key === "house" ? "consumption" : key].points.length : 0),
+    history_max_kw: Number.isFinite(historyMax) ? historyMax : null,
+    live_max_after_bootstrap_kw: Number.isFinite(Number(liveMaxima[key])) ? Number(liveMaxima[key]) : null,
+    result_kw: tile?.maxToday ?? null,
+  };
+  return {
+    display: { current_kw: tile?.value ?? null, status: tile?.status ?? null },
+    source: {
+      entities: source,
+      ...(key === "grid" ? {
+        phase_current_entities: meterState.phase_current_source_entities || meterState.phase_current_entities || {},
+        phase_source_entities: meterState.phase_source_entities || {},
+        fuse_ampere: meterState.facility?.fuse_ampere ?? null,
+        fuse_source: "grid_provider_canonical_facility",
+      } : {}),
+    },
+    derivation: { ...derivation, result_kw: tile?.value ?? null },
+    history,
+    presentation: {
+      current_kw: tile?.value ?? null,
+      max_today_kw: tile?.maxToday ?? null,
+      scale_floor_kw: 1,
+      scale_max_kw: tile?.scaleMax ?? null,
+      fill_percent: tile?.fillPercent ?? null,
+      status: tile?.status ?? null,
+    },
+  };
+}
+
 export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const dayEndMs = new Date(dayEnd).getTime();
@@ -4443,28 +4573,24 @@ class ElrakningPanel {
         }
       }
       element.dataset.livePowerDirection = tile.direction || "idle";
-      element._livePowerRaw = {
-        current_kw: tile.value,
-        max_today_kw: tile.maxToday,
-        scale_max_kw: tile.scaleMax,
-        fill_percent: tile.fillPercent,
-        status: tile.status,
-        ...(key === "grid" ? {
-          direction: tile.direction,
-          fuse_ampere: tile.fuseAmpere,
-          phase_current_a: tile.phaseCurrentA,
-          max_phase_current_a: tile.maxPhaseCurrentA,
-          fuse_utilization_percent: tile.fuseUtilizationPercent,
-          current_max_phase_a: tile.maxPhaseCurrentA,
-          current_fuse_utilization_percent: tile.fuseUtilizationPercent,
-          daily_max_phase_current_a: this._meterPowerHistory?.daily_max_phase_current_a ?? null,
-          daily_max_fuse_utilization_percent: this._meterPowerHistory?.daily_max_fuse_utilization_percent ?? null,
-          phase_current_source_entities: this._meterState?.phase_current_source_entities || this._meterState?.phase_current_entities || {},
-          phase_current_discovery_method: this._meterState?.phase_current_discovery_method || this._meterPowerHistory?.phase_current_discovery_method || null,
-          phase_current_available: Number.isFinite(tile.maxPhaseCurrentA),
-          phase_current_source: Number.isFinite(tile.maxPhaseCurrentA) ? "home_assistant" : null,
-        } : {}),
-      };
+      element._livePowerRaw = buildLivePowerProvenance(
+        key,
+        tile,
+        this._powerState || {},
+        meterState,
+        this._meterPowerHistory || {},
+        this._powerHistory || {},
+        this.hass?.states || {},
+        this._livePowerMaxima || {},
+      );
+      if (key === "grid") {
+        element._livePowerRaw.display.direction = tile.direction;
+        element._livePowerRaw.presentation.direction = tile.direction;
+        element._livePowerRaw.presentation.fuse_ampere = tile.fuseAmpere;
+        element._livePowerRaw.presentation.phase_current_a = tile.phaseCurrentA;
+        element._livePowerRaw.presentation.fuse_utilization_percent = tile.fuseUtilizationPercent;
+        element._livePowerRaw.history.daily_phase_max = this._meterPowerHistory?.daily_phase_max || {};
+      }
     }
   }
 

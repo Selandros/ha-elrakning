@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -351,6 +351,87 @@ assert.equal(buildLivePowerTiles({}, { power_kw: 0 }).grid.colorKey, "neutral");
 assert.equal(buildLivePowerTiles({ charging_kw: 1 }, {}).battery.colorKey, "charging");
 assert.equal(buildLivePowerTiles({ discharging_kw: 1 }, {}).battery.colorKey, "discharging");
 assert.equal(buildLivePowerTiles({}, {}).battery.colorKey, "neutral");
+const liveEntityStates = {
+  "sensor.pv_a": { state: "1200", attributes: { unit_of_measurement: "W", device_class: "power" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.pv_b": { state: "0.8", attributes: { unit_of_measurement: "kW", device_class: "power" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.house_power": { state: "2400", attributes: { unit_of_measurement: "W", device_class: "power" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.grid_power": { state: "-350", attributes: { unit_of_measurement: "W", device_class: "power" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.l1": { state: "-8.2", attributes: { unit_of_measurement: "A", device_class: "current" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.l2": { state: "6.4", attributes: { unit_of_measurement: "A", device_class: "current" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.l3": { state: "7.1", attributes: { unit_of_measurement: "A", device_class: "current" }, last_updated: "2026-08-30T12:00:00Z" },
+  "sensor.battery_power": { state: "-900", attributes: { unit_of_measurement: "W", device_class: "power" }, last_updated: "2026-08-30T12:00:00Z" },
+};
+const provenanceSolar = buildLivePowerProvenance(
+  "solar",
+  liveTiles.solar,
+  { solar_entities: ["sensor.pv_a", "sensor.pv_b"] },
+  {},
+  {},
+  {},
+  liveEntityStates,
+  { solar: 2 },
+);
+assert.deepEqual(provenanceSolar.source.entities.map((item) => item.entity_id), ["sensor.pv_a", "sensor.pv_b"]);
+assert.deepEqual(provenanceSolar.derivation.inputs_kw, [1.2, 0.8]);
+assert.equal(provenanceSolar.derivation.result_kw_from_inputs, 2);
+assert.equal(provenanceSolar.derivation.method, "sum_power_entities");
+const provenanceHouse = buildLivePowerProvenance("house", liveTiles.house, { consumption_entity: "sensor.house_power" }, {}, {}, {}, liveEntityStates, { house: 2 });
+assert.equal(provenanceHouse.source.entities[0].state, "2400");
+assert.equal(provenanceHouse.derivation.input_kw, 2.4);
+const provenanceGrid = buildLivePowerProvenance(
+  "grid",
+  gridTilesWithFuse.grid,
+  {},
+  {
+    power_entity: "sensor.grid_power",
+    invert_power: true,
+    phase_current_source_entities: { l1: "sensor.l1", l2: "sensor.l2", l3: "sensor.l3" },
+    phase_source_entities: { current: { l1: "sensor.l1", l2: "sensor.l2", l3: "sensor.l3" } },
+    facility: { fuse_ampere: 16 },
+  },
+  { date: "2026-08-30", points: [{ timestamp: "2026-08-30T12:00:00Z", import_kw: 0, export_kw: 0.35 }] },
+  {},
+  liveEntityStates,
+  { grid: 0.35 },
+);
+assert.equal(provenanceGrid.derivation.input_signed_kw, -0.35);
+assert.equal(provenanceGrid.derivation.input_signed_kw_after_invert, 0.35);
+assert.equal(provenanceGrid.source.fuse_ampere, 16);
+assert.deepEqual(provenanceGrid.source.phase_current_entities, { l1: "sensor.l1", l2: "sensor.l2", l3: "sensor.l3" });
+assert.equal(provenanceGrid.source.entities.find((item) => item.entity_id === "sensor.l1").role, "phase_l1_current");
+assert.equal(provenanceGrid.history.history_max_kw, 0.35);
+const provenanceBattery = buildLivePowerProvenance(
+  "battery",
+  liveTiles.battery,
+  { battery_power_entity: "sensor.battery_power", invert_battery_power: true },
+  {},
+  {},
+  {},
+  liveEntityStates,
+  { battery: 0.9 },
+);
+assert.equal(provenanceBattery.derivation.method, "split_signed_battery_power");
+assert.equal(provenanceBattery.derivation.input_signed_kw, -0.9);
+assert.equal(provenanceBattery.derivation.input_signed_kw_after_invert, 0.9);
+const provenanceSeparateBattery = buildLivePowerProvenance(
+  "battery",
+  buildLivePowerTiles({ charging_kw: 0.4, discharging_kw: 0.2 }, {}).battery,
+  { charging_entity: "sensor.charge", discharging_entity: "sensor.discharge" },
+  {},
+  {},
+  { series: { charging: { points: [{ value_kw: 0.4 }] }, discharging: { points: [{ value_kw: 0.2 }] } } },
+  { ...liveEntityStates, "sensor.charge": { state: "400", attributes: { unit_of_measurement: "W" } }, "sensor.discharge": { state: "0.2", attributes: { unit_of_measurement: "kW" } } },
+  { battery: 0.4 },
+);
+assert.equal(provenanceSeparateBattery.derivation.method, "separate_charge_discharge_entities");
+assert.equal(provenanceSeparateBattery.derivation.charging_input_kw, 0.4);
+assert.equal(provenanceSeparateBattery.derivation.discharging_input_kw, 0.2);
+assert.equal(buildLiveSourceEntity(liveEntityStates, "sensor.pv_a", "solar_power").unit, "W");
+for (const raw of [provenanceSolar, provenanceHouse, provenanceGrid, provenanceBattery]) {
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, "token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, "password"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, "cookies"), false);
+}
 assert.match(eonPanelSource, /data-live-power-scale/);
 assert.doesNotMatch(eonPanelSource, /data-live-power-max/);
 assert.doesNotMatch(eonPanelSource, /live-power-max/);
