@@ -550,7 +550,10 @@ def _redact_source_data(value: Any) -> Any:
         "accountid", "customeridentifier", "customerid", "contractaccountidentifier",
         "installationidentifier", "pointofdeliverynumber", "podid", "devicenumber",
         "premiseid", "installationids", "allaccountids", "session", "id", "password",
-        "token", "secret", "cookie", "authorization",
+        "token", "secret", "cookie", "authorization", "credential", "email", "name",
+        "firstname", "lastname", "address", "street", "postal", "city", "ip",
+        "meter", "facility", "site", "bill", "contract", "invoice", "userid",
+        "user", "installation", "premise", "pod",
     )
     # Keep the provider-local wrapper for compatibility and apply the shared policy last.
     if isinstance(value, dict):

@@ -1893,7 +1893,7 @@ class ElrakningPanel {
             </div>
             <p class="provider-processing-error" data-provider-processing-error hidden>Fel vid senaste hämtning</p>
             <button type="button" class="configuration-control" data-electricity-configure>Konfigurera</button>
-            <button type="button" data-provider-source hidden>Vad har vi för data?</button>
+            <button type="button" data-provider-source hidden>Visa data</button>
             <button type="button" data-greenely-parse-latest hidden>Tolka senaste</button>
           </article>
 
@@ -1906,7 +1906,7 @@ class ElrakningPanel {
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
               <p class="provider-invoice-cost" data-provider-invoice-cost="elnet" hidden><span>Kostnad denna månad</span><strong></strong></p>
-              <button type="button" data-eon-grid-source hidden>Vad har vi för data?</button>
+              <button type="button" data-eon-grid-source hidden>Visa data</button>
           </article>
 
         </section>

@@ -13,6 +13,8 @@ const output = formatDiagnosticsText([
 ], "0.0.64");
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
+assert.doesNotMatch(eonPanelSource, /Vad har vi för data\?/);
+assert.doesNotMatch(eonPanelSource, /data-provider-card="(?:elmatare|solar|battery)"/);
 assert.doesNotMatch(eonPanelSource, /data-eon-grid-phase-summary/);
 assert.doesNotMatch(eonPanelSource, /Fasbelastning idag/);
 assert.match(eonPanelSource, /Max fas idag/);

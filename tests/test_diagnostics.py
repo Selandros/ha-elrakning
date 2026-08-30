@@ -42,6 +42,33 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["locations"][0]["address"], "[redacted]")
         self.assertEqual(result["price"], 12.5)
 
+    def test_source_data_redacts_identifier_and_personal_key_variants(self):
+        payload = {
+            "email": "person@example.test",
+            "firstName": "Test",
+            "lastName": "Person",
+            "postalCode": "123 45",
+            "ipAddress": "192.0.2.1",
+            "meterId": "meter-placeholder",
+            "facilityId": "facility-placeholder",
+            "siteId": "site-placeholder",
+            "billLocationId": "bill-placeholder",
+            "contractId": "contract-placeholder",
+            "invoiceKey": "invoice-placeholder",
+            "userId": "user-placeholder",
+            "customerId": "customer-placeholder",
+            "accountIds": ["account-placeholder"],
+            "pod": "pod-placeholder",
+            "installationId": "installation-placeholder",
+            "premiseId": "premise-placeholder",
+            "safe_value": 42,
+        }
+        result = sanitize_source(payload)
+        for key, value in result.items():
+            if key != "safe_value":
+                self.assertEqual(value, "[redacted]")
+        self.assertEqual(result["safe_value"], 42)
+
     def test_clear_is_empty_and_sensitive_messages_are_redacted(self):
         logs = []
         append(logs, "INFO", "source", "loaded", "credentials were used")

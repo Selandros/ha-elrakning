@@ -325,6 +325,27 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
         await manager.async_set_price_comparison("user-a", {"grid": True})
         self.assertTrue((await manager.async_get_price_comparison("user-a"))["grid"])
 
+    async def test_phase_visibility_defaults_and_persists_all_off_state(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        self.assertEqual(
+            await manager.async_get_phase_history_visible("user-a"),
+            {"l1": True, "l2": True, "l3": True},
+        )
+        updated = await manager.async_set_phase_history_visible(
+            "user-a", {"l1": False, "l2": False, "l3": False},
+        )
+        self.assertEqual(updated, {"l1": False, "l2": False, "l3": False})
+        self.assertEqual(await manager.async_get_phase_history_visible("user-a"), updated)
+
+    async def test_phase_visibility_partial_update_preserves_other_phases(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        updated = await manager.async_set_phase_history_visible("user-a", {"l2": False})
+        self.assertEqual(updated, {"l1": True, "l2": False, "l3": True})
+
     async def test_chart_layers_are_initialized_per_user_and_preserve_existing_values(self):
         manager = object.__new__(ElhandelManager)
         manager.chart_preferences_store = _Store()
