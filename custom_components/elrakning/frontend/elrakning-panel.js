@@ -3016,7 +3016,7 @@ class ElrakningPanel {
           max-width: min(170px, calc(100% - 12px));
           overflow-wrap: anywhere;
           padding: clamp(4px, 1cqw, 5px) clamp(5px, 1.3cqw, 6px);
-          pointer-events: auto;
+          pointer-events: none;
           position: absolute;
           top: 0;
           white-space: normal;
@@ -3027,7 +3027,7 @@ class ElrakningPanel {
           font-size: 13px;
           max-width: min(420px, calc(100% - 16px));
           padding: 8px 10px;
-          pointer-events: auto;
+          pointer-events: none;
           white-space: pre-wrap;
         }
 
@@ -6290,18 +6290,18 @@ class ElrakningPanel {
     const add = (label, value, formatted, className = "") => {
       if (tooltipValueIsPresent(value)) fields.push({ label, value, formatted, className });
     };
+    const tradeVisible = this._priceComparisonVisible.electricity;
+    const gridVisible = this._priceComparisonVisible.grid && this._eonGridPrice;
     if (layers.spot && Number.isFinite(comparisonPrice)) {
-      add("Spotpris", comparisonPrice, this.formatPrice(comparisonPrice));
-    }
-    if (this._priceComparisonVisible.grid && this._eonGridPrice) {
-      const gridPrice = this._eonGridPrice;
-      add("Överföring", gridPrice.transfer_ore_per_kwh_gross, `${this._formatNumber(gridPrice.transfer_ore_per_kwh_gross)} öre/kWh`);
-      add("Energiskatt", gridPrice.energy_tax_ore_per_kwh_gross, `${this._formatNumber(gridPrice.energy_tax_ore_per_kwh_gross)} öre/kWh`);
-      add("Rörligt totalt", gridPrice.variable_total_ore_per_kwh_gross, `${this._formatNumber(gridPrice.variable_total_ore_per_kwh_gross)} öre/kWh`);
-      add("Abonnemang", gridPrice.fixed_monthly_sek, `${this._formatSek(gridPrice.fixed_monthly_sek)}/mån`);
-      add("Beräknad årskostnad", gridPrice.yearly_estimated_sek, this._formatSek(gridPrice.yearly_estimated_sek));
-      add("Moms", gridPrice.vat_included ? "inkluderad" : "okänd", gridPrice.vat_included ? "inkluderad" : "okänd");
-      add("Källa", gridPrice.source, gridPrice.source);
+      const label = tradeVisible && gridVisible
+        ? "Totalpris"
+        : gridVisible
+          ? "Elnät"
+          : "Elhandel";
+      const value = gridVisible && !tradeVisible
+        ? Number(this._eonGridPrice.variable_total_ore_per_kwh_gross)
+        : comparisonPrice;
+      if (Number.isFinite(value)) add(label, value, this.formatPrice(value));
     }
     if (layers.import && isVisiblePowerValue(details?.import_kw)) {
       add("Import", details.import_kw, `${this._formatNumber(details.import_kw)} kW`, "tooltip-meter-import");
