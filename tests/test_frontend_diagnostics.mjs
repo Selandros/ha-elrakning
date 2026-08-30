@@ -61,6 +61,16 @@ assert.match(eonPanelSource, /phase-history-threshold/);
 assert.match(eonPanelSource, /Säkring/);
 assert.match(eonPanelSource, /phase-history-zero-line/);
 assert.match(eonPanelSource, /buildPhaseProvenance/);
+const appendMeterPowerPointSource = eonPanelSource.slice(
+  eonPanelSource.indexOf("  _appendMeterPowerPoint(point)"),
+  eonPanelSource.indexOf("  _periodCustomerPrice(period)")
+);
+assert.doesNotMatch(appendMeterPowerPointSource, /_renderInvoiceEstimateCard\(\)/);
+const applyMeterStateSource = eonPanelSource.slice(
+  eonPanelSource.indexOf("  _applyMeterState(state)"),
+  eonPanelSource.indexOf("  _updateLivePhaseMaxima(")
+);
+assert.doesNotMatch(applyMeterStateSource, /_renderInvoiceEstimateCard\(\)/);
 assert.match(eonPanelSource, /state_class/);
 assert.match(eonPanelSource, /chartColor\("phaseL1"\)/);
 assert.match(eonPanelSource, /chartColor\("phaseL2"\)/);

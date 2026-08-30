@@ -7399,7 +7399,6 @@ class ElrakningPanel {
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
     this._renderPhaseHistoryCard();
-    this._renderInvoiceEstimateCard();
   }
 
   _updateLivePhaseMaxima(phaseCurrentA, timestamp = new Date()) {
@@ -7546,7 +7545,6 @@ class ElrakningPanel {
       this._meterState?.power_entity,
     );
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
-    this._renderInvoiceEstimateCard();
   }
 
   _periodCustomerPrice(period) {
