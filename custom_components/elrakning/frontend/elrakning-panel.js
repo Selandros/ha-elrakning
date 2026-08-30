@@ -2529,7 +2529,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-row {
-          align-items: start;
+          align-items: stretch;
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2541,6 +2541,7 @@ class ElrakningPanel {
 
         @container (max-width: 760px) {
           .daily-energy-row {
+            align-items: start;
             grid-template-columns: 1fr;
           }
         }
@@ -3283,7 +3284,7 @@ class ElrakningPanel {
 
 
         .live-power-row {
-          align-items: start;
+          align-items: stretch;
           display: grid;
           gap: 12px;
           grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3459,7 +3460,7 @@ class ElrakningPanel {
         }
 
         .grid {
-          align-items: start;
+          align-items: stretch;
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

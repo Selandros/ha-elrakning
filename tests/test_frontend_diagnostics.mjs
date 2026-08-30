@@ -1240,12 +1240,12 @@ assert.match(panelSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/
 assert.match(panelSource, /\.daily-energy-grid \{\n\s+align-items: start;/);
 assert.match(panelSource, /data-soc-card/);
 assert.match(panelSource, /Batteri SOC/);
-assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: start;\n\s+display: grid;\n\s+gap: 16px;\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
-assert.doesNotMatch(panelSource, /align-items: stretch;/);
+assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: stretch;\n\s+display: grid;\n\s+gap: 16px;\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+assert.match(panelSource, /@container \(max-width: 760px\) \{[\s\S]*\.daily-energy-row \{\n\s+align-items: start;/);
 assert.match(panelSource, /daily-energy-row[\s\S]*data-daily-energy[\s\S]*data-soc-card/);
 assert.doesNotMatch(panelSource, /_syncSocCardHeight|_setupSocCardHeightObserver/);
-assert.match(panelSource, /\.live-power-row \{\n\s+align-items: start;/);
-assert.match(panelSource, /\.grid \{\n\s+align-items: start;/);
+assert.match(panelSource, /\.live-power-row \{\n\s+align-items: stretch;/);
+assert.match(panelSource, /\.grid \{\n\s+align-items: stretch;/);
 assert.match(panelSource, /\.soc-card \{[\s\S]*display: block;/);
 assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-row \{\n\s+grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.daily-energy-card \{[\s\S]*min-width: 0;/);
@@ -1264,7 +1264,7 @@ assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4
 assert.match(panelSource, /\.daily-energy-percent\.second \{[\s\S]*right: clamp\(4px, 1\.25cqw, 6px\);/);
 assert.match(panelSource, /\.daily-energy-total \{[\s\S]*text-align: right;\n\s+\}/);
 assert.doesNotMatch(panelSource, /--el-soc-color/);
-assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-solar-color\);[\s\S]*display: flex;[\s\S]*flex-direction: column;/);
+assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-solar-color\);[\s\S]*display: block;/);
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-estimated-area \{[\s\S]*fill: #5f9f82;[\s\S]*fill-opacity: \.22;/);
