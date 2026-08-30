@@ -3091,10 +3091,13 @@ class ElrakningPanel {
         }
 
         .phase-history-summary strong {
-          display: none;
+          color: var(--primary-text-color);
+          font-size: var(--price-card-text-size);
+          font-weight: 500;
         }
 
         .phase-history-chart {
+          margin-top: 16px;
           min-height: 180px;
           overflow-anchor: none;
           position: relative;
@@ -5734,7 +5737,7 @@ class ElrakningPanel {
       this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")
         && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
-        this.renderPriceChart();
+        this.renderPriceChart({ liveUpdate: true });
       }
     }
   }
@@ -7098,7 +7101,32 @@ class ElrakningPanel {
       )).join("");
       return `${real}${interpolated}`;
     }).join("");
-    const svgMarkup = `${grid}${threshold}${zero}${lines}<g class="phase-history-hover" aria-hidden="true"></g>`;
+    const svgMarkup = `<g data-phase-dynamic="grid">${grid}</g><g data-phase-dynamic="threshold">${threshold}</g><g data-phase-dynamic="zero">${zero}</g><g data-phase-dynamic="lines">${lines}</g><g class="phase-history-hover" aria-hidden="true"></g>`;
+    const existingSvg = chart.querySelector(".phase-history-svg");
+    const existingAxisOverlay = chart.querySelector(".phase-history-axis-overlay");
+    if (existingSvg
+      && existingAxisOverlay
+      && existingSvg.querySelector('[data-phase-dynamic="grid"]')
+      && existingSvg.querySelector('[data-phase-dynamic="threshold"]')
+      && existingSvg.querySelector('[data-phase-dynamic="zero"]')
+      && existingSvg.querySelector('[data-phase-dynamic="lines"]')) {
+      existingSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      existingSvg.querySelector('[data-phase-dynamic="grid"]').innerHTML = grid;
+      existingSvg.querySelector('[data-phase-dynamic="threshold"]').innerHTML = threshold;
+      existingSvg.querySelector('[data-phase-dynamic="zero"]').innerHTML = zero;
+      existingSvg.querySelector('[data-phase-dynamic="lines"]').innerHTML = lines;
+      existingAxisOverlay.innerHTML = `${yAxisLabels}${timeAxis}`;
+      this._phaseRenderSignature = renderSignature;
+      this._phaseInteraction = {
+        plot, width, height, axisStart, timeRange, phasePoints, phaseColors, metric, unit, x, y,
+        svg: existingSvg,
+        tooltip: chart.querySelector(".soc-tooltip"),
+        hover: existingSvg.querySelector(".phase-history-hover"),
+        canonicalTimestamps: [...new Set(Object.values(phasePoints).flat().map((point) => point.timestamp))]
+          .sort((left, right) => new Date(left).getTime() - new Date(right).getTime()),
+      };
+      return;
+    }
     // Recreate the interactive SVG when the canonical render state changes.
     // This prevents pointer handlers from retaining stale metric closures.
     chart.replaceChildren();
@@ -7129,21 +7157,45 @@ class ElrakningPanel {
         points.find((point) => point.timestamp === timestamp) || null,
       ]),
     );
+    this._phaseInteraction = { plot, width, height, axisStart, timeRange, phasePoints, phaseColors, metric, unit, x, y, svg, tooltip, hover, canonicalTimestamps };
     const update = (event) => {
-      const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
+      const state = this._phaseInteraction || {};
+      const activeSvg = state.svg || svg;
+      const activePlot = state.plot || plot;
+      const activeWidth = state.width || width;
+      const activeHeight = state.height || height;
+      const activeAxisStart = state.axisStart || axisStart;
+      const activeTimeRange = state.timeRange || timeRange;
+      const activePhasePoints = state.phasePoints || phasePoints;
+      const activePhaseColors = state.phaseColors || phaseColors;
+      const activeMetric = state.metric || metric;
+      const activeUnit = state.unit || unit;
+      const activeTooltip = state.tooltip || tooltip;
+      const activeHover = state.hover || hover;
+      const activeX = state.x || x;
+      const activeY = state.y || y;
+      const activeTimestamps = state.canonicalTimestamps || canonicalTimestamps;
+      const pointer = pointerToPlotCoordinates(activeSvg, event, activePlot, activeWidth, activeHeight);
       if (!pointer?.inside) {
         clear();
         return;
       }
-      const ratio = (pointer.viewX - plot.left) / Math.max(1, width - plot.left - plot.right);
-      const timestamp = new Date(axisStart + ratio * timeRange);
-      const selectedTimestamp = nearestCanonicalTimestamp(timestamp);
-      const selected = pointsAtCanonicalTimestamp(selectedTimestamp);
-      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, color: phaseColors[phase], formatted: `${metric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
-      renderSharedTooltip(tooltip, { title: new Date(selectedTimestamp).toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }), fields });
-      tooltip.hidden = false;
-      hover.innerHTML = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => `<circle class="chart-hover-marker" fill="${phaseColors[phase]}" cx="${x(point.timestamp)}" cy="${y(Number(point.value))}" r="4" />`).join("");
-      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+      const ratio = (pointer.viewX - activePlot.left) / Math.max(1, activeWidth - activePlot.left - activePlot.right);
+      const timestamp = new Date(activeAxisStart + ratio * activeTimeRange);
+      const selectedTimestamp = activeTimestamps.reduce(
+        (best, candidate) => !best || Math.abs(new Date(candidate).getTime() - timestamp.getTime())
+          < Math.abs(new Date(best).getTime() - timestamp.getTime()) ? candidate : best,
+        null,
+      );
+      const selected = Object.fromEntries(Object.entries(activePhasePoints).map(([phase, points]) => [
+        phase,
+        points.find((point) => point.timestamp === selectedTimestamp) || null,
+      ]));
+      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, color: activePhaseColors[phase], formatted: `${activeMetric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(activeMetric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${activeUnit}` }));
+      renderSharedTooltip(activeTooltip, { title: new Date(selectedTimestamp).toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }), fields });
+      activeTooltip.hidden = false;
+      activeHover.innerHTML = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => `<circle class="chart-hover-marker" fill="${activePhaseColors[phase]}" cx="${activeX(point.timestamp)}" cy="${activeY(Number(point.value))}" r="4" />`).join("");
+      positionChartTooltip(chart, activeTooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     const clear = () => { tooltip.hidden = true; hover.replaceChildren(); };
     svg.addEventListener("pointermove", update);
@@ -7550,7 +7602,7 @@ class ElrakningPanel {
     );
     if (this.host.querySelector(".price-chart")
       && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
-      this.renderPriceChart();
+      this.renderPriceChart({ liveUpdate: true });
     }
   }
 
@@ -7879,9 +7931,10 @@ class ElrakningPanel {
     return `${segments}${interpolated}`;
   }
 
-  renderPriceChart() {
+  renderPriceChart(options = {}) {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
+    const liveUpdate = options.liveUpdate === true;
 
     if (!this.priceData.periods.length) {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
@@ -8103,12 +8156,28 @@ class ElrakningPanel {
       meterY,
       meterDisplayY: (key, timestamp) => this.meterDisplayYAt(meterDisplayGeometry[key], timestamp, x),
     };
+    const dynamicChartMarkup = {
+      grid: meterGrid,
+      areas: meterAreas,
+      lines: meterLines,
+    };
+    const existingSvg = liveUpdate ? chart.querySelector(".chart-svg") : null;
+    if (existingSvg
+      && existingSvg.querySelector('[data-price-dynamic="grid"]')
+      && existingSvg.querySelector('[data-price-dynamic="areas"]')
+      && existingSvg.querySelector('[data-price-dynamic="lines"]')) {
+      for (const [key, markup] of Object.entries(dynamicChartMarkup)) {
+        existingSvg.querySelector(`[data-price-dynamic="${key}"]`).innerHTML = markup;
+      }
+      this._priceChartLiveSignature = this._getPriceChartLiveSignature();
+      return;
+    }
     chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
-      ${meterGrid}
+      <g data-price-dynamic="grid">${meterGrid}</g>
       ${bars}
-      ${meterAreas}
-      ${meterLines}
+      <g data-price-dynamic="areas">${meterAreas}</g>
+      <g data-price-dynamic="lines">${meterLines}</g>
       ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
       ${hourLabels}
