@@ -1443,7 +1443,6 @@ class ElrakningPanel {
             <span class="invoice-estimate-comparison" data-invoice-estimate-comparison hidden></span>
             <div class="invoice-estimate-bar" data-invoice-estimate-bar hidden aria-label="Jämförelse med föregående månad"><span data-invoice-estimate-fill></span><i data-invoice-estimate-marker aria-hidden="true"></i></div>
             <div class="invoice-estimate-scale" data-invoice-estimate-scale hidden><span>0</span><span data-invoice-estimate-scale-value></span></div>
-            <span class="live-power-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
           </article>
         </section>
 
@@ -1556,7 +1555,6 @@ class ElrakningPanel {
             <div class="phase-history-summary" data-phase-history-summary></div>
             <div class="phase-history-chart" data-phase-history-chart></div>
             <button type="button" data-phase-history-copy hidden>Visa data</button>
-            <span class="phase-history-copy-feedback" data-phase-history-copy-feedback aria-live="polite"></span>
           </article>
         </div>
 
@@ -1629,9 +1627,9 @@ class ElrakningPanel {
           <div class="diagnostics-list" data-diagnostics-list></div>
         </section>
       </main>
-      <div class="provider-source-dialog" data-provider-source-dialog hidden role="dialog" aria-modal="true">
+      <div class="provider-source-dialog" data-provider-source-dialog hidden role="dialog" aria-modal="true" aria-labelledby="provider-source-dialog-title">
         <div class="provider-dialog-card">
-          <h2>Source data</h2>
+          <h2 id="provider-source-dialog-title">Source data</h2>
           <p class="source-provider" data-provider-source-provider hidden></p>
           <pre data-provider-source-text></pre>
           <button type="button" data-provider-source-copy disabled>Kopiera</button>
@@ -1658,13 +1656,6 @@ class ElrakningPanel {
             <button type="button" data-meter-cancel>Avbryt</button>
             <button type="button" data-meter-save disabled>Spara</button>
           </div>
-        </div>
-      </div>
-      <div class="meter-source-dialog" data-meter-source-dialog hidden role="dialog" aria-modal="true">
-        <div class="provider-dialog-card">
-          <h2>Mätardata</h2>
-          <pre data-meter-source-text></pre>
-          <button type="button" data-meter-source-close>Stäng</button>
         </div>
       </div>
       <div class="meter-dialog power-dialog" data-power-dialog hidden role="dialog" aria-modal="true" aria-labelledby="power-title">
@@ -1867,7 +1858,7 @@ class ElrakningPanel {
           z-index: 2;
         }
 
-        .meter-dialog, .meter-source-dialog {
+        .meter-dialog {
           align-items: center;
           background: rgba(0, 0, 0, 0.30);
           background: color-mix(in srgb, var(--primary-background-color) 70%, transparent);
@@ -1879,7 +1870,7 @@ class ElrakningPanel {
           z-index: 2;
         }
 
-        .meter-dialog[hidden], .meter-source-dialog[hidden] {
+        .meter-dialog[hidden] {
           display: none;
         }
 
@@ -2547,6 +2538,11 @@ class ElrakningPanel {
           width: 100%;
         }
 
+        .provider-source-dialog .provider-dialog-card {
+          max-height: calc(100vh - 40px);
+          overflow: auto;
+        }
+
         .provider-dialog-card label {
           color: var(--secondary-text-color);
           display: block;
@@ -2638,9 +2634,12 @@ class ElrakningPanel {
         }
 
         .provider-source-dialog pre {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          min-width: 0;
           color: var(--secondary-text-color);
           max-height: 60vh;
           overflow: auto;
+          user-select: text;
           white-space: pre-wrap;
         }
 
@@ -5467,24 +5466,33 @@ class ElrakningPanel {
     };
   }
 
+  _showSourceDataDialog(title, sourceLabel, data) {
+    const dialog = this.host.querySelector("[data-provider-source-dialog]");
+    const heading = dialog?.querySelector("h2");
+    const provider = this.host.querySelector("[data-provider-source-provider]");
+    const text = this.host.querySelector("[data-provider-source-text]");
+    const copy = this.host.querySelector("[data-provider-source-copy]");
+    if (!dialog || !heading || !provider || !text || !copy) return;
+    heading.textContent = title;
+    provider.textContent = sourceLabel ? `Källa: ${sourceLabel}` : "";
+    provider.hidden = !sourceLabel;
+    text.textContent = JSON.stringify(data, null, 2);
+    copy.disabled = false;
+    copy.textContent = "Kopiera";
+    dialog.hidden = false;
+  }
+
   _bindMeterSourceDialog() {
     const open = this.host.querySelector("[data-meter-source]");
-    const dialog = this.host.querySelector("[data-meter-source-dialog]");
-    const close = this.host.querySelector("[data-meter-source-close]");
-    const text = this.host.querySelector("[data-meter-source-text]");
-    if (!open || !dialog || !close || !text) return;
-    const dismiss = () => { dialog.hidden = true; text.textContent = ""; };
+    if (!open) return;
     open.addEventListener("click", async () => {
-      dialog.hidden = false;
-      text.textContent = "Hämtar mätardata …";
       try {
         const response = await this.hass.callWS({ type: "elrakning/meter_source" });
-        text.textContent = JSON.stringify(response, null, 2);
+        this._showSourceDataDialog("Source data", "Elmätare", response);
       } catch {
-        text.textContent = "Mätardata kunde inte hämtas.";
+        this._showSourceDataDialog("Source data", "Elmätare", { error: "meter_source_unavailable" });
       }
     });
-    close.addEventListener("click", dismiss);
   }
 
   _bindRetainedHistory() {
@@ -5836,10 +5844,12 @@ class ElrakningPanel {
     const copy = this.host.querySelector("[data-provider-source-copy]");
     const provider = this.host.querySelector("[data-provider-source-provider]");
     const text = this.host.querySelector("[data-provider-source-text]");
+    const heading = dialog?.querySelector("h2");
     const liveSources = [...this.host.querySelectorAll("[data-live-power-source]")];
-    if (!open || !eonOpen || !dialog || !close || !copy || !provider || !text) return;
+    if (!open || !eonOpen || !dialog || !close || !copy || !provider || !text || !heading) return;
     const dismiss = () => {
       dialog.hidden = true;
+      heading.textContent = "Source data";
       provider.hidden = true;
       provider.textContent = "";
       text.textContent = "";
@@ -5850,6 +5860,7 @@ class ElrakningPanel {
       const liveSource = event.currentTarget.closest?.("[data-live-power-tile]");
       const liveSourceName = event.currentTarget.dataset.livePowerSource;
       dialog.hidden = false;
+      heading.textContent = "Source data";
       text.textContent = "Hämtar Source data …";
       provider.hidden = true;
       provider.textContent = "";
@@ -5887,6 +5898,12 @@ class ElrakningPanel {
       }
     });
     close.addEventListener("click", dismiss);
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dismiss();
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !dialog.hidden) dismiss();
+    });
   }
 
   _bindDiagnostics() {
@@ -6072,29 +6089,17 @@ class ElrakningPanel {
 
   _updateInvoiceEstimateInteractivity() {
     const card = this.host.querySelector("[data-invoice-estimate-card]");
-    const feedback = this.host.querySelector("[data-invoice-estimate-copy-feedback]");
-    if (!card || !feedback) return;
+    if (!card) return;
     if (this._debugEnabled && !card._invoiceCopyEnabled) {
-      const copy = async () => {
-        if (!this._invoiceEstimateRaw) return;
-        try {
-          await this._copyText(JSON.stringify(this._invoiceEstimateRaw, null, 2));
-          feedback.textContent = "Kopierat";
-          window.clearTimeout(card._invoiceCopyTimer);
-          card._invoiceCopyTimer = window.setTimeout(() => { feedback.textContent = ""; }, 1400);
-        } catch {
-          feedback.textContent = "Kunde inte kopiera";
-        }
+      const click = () => {
+        if (this._invoiceEstimateRaw) this._showSourceDataDialog("Source data", "Estimerad faktura", this._invoiceEstimateRaw);
       };
-      const click = () => { void copy(); };
       card.addEventListener("click", click);
       card._invoiceCopyEnabled = true;
       card._invoiceCopyClick = click;
       card.classList.add("debug-copy-enabled");
     } else if (!this._debugEnabled && card._invoiceCopyEnabled) {
       card.removeEventListener("click", card._invoiceCopyClick);
-      window.clearTimeout(card._invoiceCopyTimer);
-      feedback.textContent = "";
       delete card._invoiceCopyEnabled;
       delete card._invoiceCopyClick;
       card.classList.remove("debug-copy-enabled");
@@ -6511,11 +6516,10 @@ class ElrakningPanel {
     }
     this._syncPhaseHistoryMetricButtons();
     const copy = this.host.querySelector("[data-phase-history-copy]");
-    const feedback = this.host.querySelector("[data-phase-history-copy-feedback]");
-    copy?.addEventListener("click", async () => {
+    copy?.addEventListener("click", () => {
       if (!this._debugEnabled || !this._meterPowerHistory?.phase_history) return;
-      try {
-        await this._copyText(JSON.stringify({
+      const metricLabels = { current: "Ström", voltage: "Spänning", active_power: "Effekt" };
+      this._showSourceDataDialog("Source data", `Faser · ${metricLabels[this._phaseHistoryMetric] || this._phaseHistoryMetric}`, {
           metric: this._phaseHistoryMetric,
           ...buildPhaseProvenance(
             this._phaseHistoryMetric,
@@ -6528,14 +6532,7 @@ class ElrakningPanel {
             this.hass?.states || {},
           ),
           phase_history: this._meterPowerHistory.phase_history,
-        }, null, 2));
-        if (feedback) {
-          feedback.textContent = "Kopierat";
-          window.setTimeout(() => { feedback.textContent = ""; }, 1400);
-        }
-      } catch {
-        if (feedback) feedback.textContent = "Kunde inte kopiera";
-      }
+        });
     });
   }
 
