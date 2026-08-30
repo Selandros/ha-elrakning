@@ -47,8 +47,6 @@ GRID_PROVIDERS_COMMAND = f"{DOMAIN}/grid/providers"
 GRID_STATE_COMMAND = f"{DOMAIN}/grid/state"
 GRID_LOGIN_COMMAND = f"{DOMAIN}/grid/login"
 GRID_SOURCE_DATA_COMMAND = f"{DOMAIN}/grid/source_data"
-GRID_COMMON_API_PROBE_COMMAND = f"{DOMAIN}/grid/common_api_probe"
-GRID_GROUPED_CONTRACTS_PROBE_COMMAND = f"{DOMAIN}/grid/grouped_contracts_probe"
 GRID_WEB_HANDOFF_START_COMMAND = f"{DOMAIN}/grid/web_handoff_start"
 GRID_REMOVE_COMMAND = f"{DOMAIN}/grid/remove"
 ELECTRICITY_HISTORY_STATE_COMMAND = f"{DOMAIN}/electricity_history_state"
@@ -95,8 +93,6 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_grid_state)
     websocket_api.async_register_command(hass, websocket_grid_login)
     websocket_api.async_register_command(hass, websocket_grid_source_data)
-    websocket_api.async_register_command(hass, websocket_grid_common_api_probe)
-    websocket_api.async_register_command(hass, websocket_grid_grouped_contracts_probe)
     websocket_api.async_register_command(hass, websocket_grid_web_handoff_start)
     websocket_api.async_register_command(hass, websocket_grid_remove)
     websocket_api.async_register_command(hass, websocket_electricity_history_state)
@@ -407,36 +403,6 @@ async def websocket_grid_remove(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "grid_unavailable"})
         return
     connection.send_result(msg["id"], {"success": True, **await manager.async_remove()})
-
-
-@websocket_api.websocket_command({vol.Required("type"): GRID_COMMON_API_PROBE_COMMAND})
-@websocket_api.async_response
-async def websocket_grid_common_api_probe(hass, connection, msg):
-    manager = _grid_manager(hass)
-    if manager is None:
-        connection.send_result(msg["id"], {"success": False, "error": "grid_unavailable"})
-        return
-    try:
-        result = await manager.async_common_api_probe()
-    except Exception as err:
-        connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "probe_failed")})
-        return
-    connection.send_result(msg["id"], {"success": True, **result})
-
-
-@websocket_api.websocket_command({vol.Required("type"): GRID_GROUPED_CONTRACTS_PROBE_COMMAND})
-@websocket_api.async_response
-async def websocket_grid_grouped_contracts_probe(hass, connection, msg):
-    manager = _grid_manager(hass)
-    if manager is None:
-        connection.send_result(msg["id"], {"success": False, "error": "grid_unavailable"})
-        return
-    try:
-        result = await manager.async_grouped_contracts_probe()
-    except Exception as err:
-        connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "probe_failed")})
-        return
-    connection.send_result(msg["id"], {"success": True, **result})
 
 
 @websocket_api.websocket_command({vol.Required("type"): GRID_WEB_HANDOFF_START_COMMAND})

@@ -688,9 +688,6 @@ class ElrakningPanel {
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
     this._eonGridEventUnsubscribePromise = null;
-    this._eonWebHandoffPending = false;
-    this._eonHandoffStatusListener = null;
-    this._eonHandoffAckResolver = null;
     this._connectionReadyListener = null;
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
@@ -985,14 +982,6 @@ class ElrakningPanel {
               <label>Användarnamn / konto-ID<input type="text" data-eon-grid-app-account autocomplete="username"></label>
               <label>Lösenord<input type="password" data-eon-grid-app-password autocomplete="current-password"></label>
               <button type="button" data-eon-grid-app-save>Logga in</button>
-              <button type="button" data-eon-grid-common-api-probe hidden>Testa Common API</button>
-              <button type="button" data-eon-grid-grouped-contracts-probe hidden>Testa kontrakts-API</button>
-            </section>
-            <section class="eon-auth-method" aria-labelledby="eon-web-title">
-              <h3 id="eon-web-title">Mitt E.ON / Webb</h3>
-              <p>Logga in i E.ON:s webbportal och anslut den verifierade sessionen.</p>
-              <button type="button" data-eon-grid-web-connect>Anslut Mitt E.ON</button>
-              <p data-eon-grid-web-status aria-live="polite">Inte ansluten.</p>
             </section>
           </div>
           <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
@@ -2828,7 +2817,6 @@ class ElrakningPanel {
     this._syncThemeBackground();
     this._bindElectricityProviderDialog();
     this._bindEonGridDialog();
-    this._bindEonHandoffStatus();
     this._bindRetainedHistory();
     this._bindMeterDialog();
     this._bindPowerDialog();
@@ -3128,23 +3116,12 @@ class ElrakningPanel {
   _applyDebugVisibility() {
     const source = this.host.querySelector("[data-provider-source]");
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
-    const eonCommonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
-    const groupedContractsProbe = this.host.querySelector("[data-eon-grid-grouped-contracts-probe]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
-    if (eonCommonApiProbe) eonCommonApiProbe.hidden = !this._isEonCommonApiProbeVisible();
-    if (groupedContractsProbe) groupedContractsProbe.hidden = !this._isEonCommonApiProbeVisible();
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
-  }
-
-  _isEonCommonApiProbeVisible() {
-    return this._debugEnabled
-      && this._eonGridState?.configured === true
-      && this._eonGridState?.provider === "eon"
-      && this._eonGridState?.auth_method === "app";
   }
 
   _bindMeterDialog() {
@@ -4970,10 +4947,6 @@ class ElrakningPanel {
     window.removeEventListener("resize", this._onThemeResize);
     window.removeEventListener("focus", this._onThemeFocus);
     document.removeEventListener("visibilitychange", this._onThemeVisibility);
-    if (this._eonHandoffStatusListener) window.removeEventListener("message", this._eonHandoffStatusListener);
-    this._eonHandoffStatusListener = null;
-    if (this._eonHandoffAckResolver) this._eonHandoffAckResolver("helper_unreachable");
-    this._eonHandoffAckResolver = null;
     this._themeResizeObserver?.disconnect();
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
@@ -5045,15 +5018,11 @@ class ElrakningPanel {
   _applyEonGridState(state) {
     this._eonGridState = state;
     const configured = state?.configured === true;
-    if (configured) this._eonWebHandoffPending = false;
     const status = this.host.querySelector("[data-eon-grid-status]");
     const provider = this.host.querySelector('[data-provider-name="elnet"]');
     const summary = this.host.querySelector("[data-eon-grid-summary]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
     const sourceButton = this.host.querySelector("[data-eon-grid-source]");
-    const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
-    const groupedContractsProbe = this.host.querySelector("[data-eon-grid-grouped-contracts-probe]");
-    const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
     if (!status || !provider || !summary) return;
     const agreement = state?.agreement || {};
     const facility = state?.facility || {};
@@ -5075,16 +5044,8 @@ class ElrakningPanel {
               : "Ej aktivt"
       : "Ej konfigurerad";
     status.hidden = false;
-    if (webStatus) {
-      webStatus.textContent = configured && state?.auth_method === "web"
-        ? "Ansluten."
-        : this._eonWebHandoffPending
-          ? "Väntar på E.ON-inloggning …"
-          : "Inte ansluten.";
-    }
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
-    if (commonApiProbe) commonApiProbe.hidden = !this._isEonCommonApiProbeVisible();
     const rows = [];
     if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
@@ -5109,15 +5070,11 @@ class ElrakningPanel {
     const dialog = this.host.querySelector("[data-eon-grid-dialog]");
     const appAccount = this.host.querySelector("[data-eon-grid-app-account]");
     const appPassword = this.host.querySelector("[data-eon-grid-app-password]");
-    const webConnect = this.host.querySelector("[data-eon-grid-web-connect]");
-    const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
     const result = this.host.querySelector("[data-eon-grid-result]");
     const appSave = this.host.querySelector("[data-eon-grid-app-save]");
-    const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
-    const groupedContractsProbe = this.host.querySelector("[data-eon-grid-grouped-contracts-probe]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !appAccount || !appPassword || !webConnect || !result || !appSave || !cancel || !remove || !commonApiProbe || !groupedContractsProbe) return;
+    if (!open || !dialog || !appAccount || !appPassword || !result || !appSave || !cancel || !remove) return;
     const close = () => {
       dialog.hidden = true;
       appAccount.value = "";
@@ -5129,54 +5086,6 @@ class ElrakningPanel {
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try { this._applyEonGridState(await this.hass.callWS({ type: "elrakning/grid/remove" })); close(); } finally { remove.disabled = false; }
-    });
-    commonApiProbe.addEventListener("click", async () => {
-      commonApiProbe.disabled = true;
-      result.textContent = "Testar Common API …";
-      try {
-        const response = await this.hass.callWS({ type: "elrakning/grid/common_api_probe" });
-        if (response.status === "ok") {
-          const sourceDialog = this.host.querySelector("[data-provider-source-dialog]");
-          const sourceProvider = this.host.querySelector("[data-provider-source-provider]");
-          const sourceText = this.host.querySelector("[data-provider-source-text]");
-          const sourceCopy = this.host.querySelector("[data-provider-source-copy]");
-          if (sourceDialog && sourceProvider && sourceText && sourceCopy) {
-            sourceProvider.textContent = "Källa: E.ON Common API (Bearer-probe)";
-            sourceProvider.hidden = false;
-            sourceText.textContent = JSON.stringify(response.payload, null, 2);
-            sourceCopy.disabled = false;
-            sourceDialog.hidden = false;
-          }
-          result.textContent = "Common API fungerar med Bearer-token.";
-        } else if (response.status === "denied_401") result.textContent = "Common API nekade: 401.";
-        else if (response.status === "denied_403") result.textContent = "Common API nekade: 403.";
-        else result.textContent = "Common API svarade med ett API-fel.";
-      } catch { result.textContent = "Common API-probet kunde inte genomföras."; }
-      finally { commonApiProbe.disabled = false; }
-    });
-    groupedContractsProbe.addEventListener("click", async () => {
-      groupedContractsProbe.disabled = true;
-      result.textContent = "Testar kontrakts-API …";
-      try {
-        const response = await this.hass.callWS({ type: "elrakning/grid/grouped_contracts_probe" });
-        if (response.status === "ok") {
-          const sourceDialog = this.host.querySelector("[data-provider-source-dialog]");
-          const sourceProvider = this.host.querySelector("[data-provider-source-provider]");
-          const sourceText = this.host.querySelector("[data-provider-source-text]");
-          const sourceCopy = this.host.querySelector("[data-provider-source-copy]");
-          if (sourceDialog && sourceProvider && sourceText && sourceCopy) {
-            sourceProvider.textContent = "Källa: E.ON kontrakts-API";
-            sourceProvider.hidden = false;
-            sourceText.textContent = JSON.stringify(response.payload, null, 2);
-            sourceCopy.disabled = false;
-            sourceDialog.hidden = false;
-          }
-          result.textContent = "Kontrakts-API svarade 200.";
-        } else if (response.status === "denied_401") result.textContent = "Kontrakts-API nekade: 401.";
-        else if (response.status === "denied_403") result.textContent = "Kontrakts-API nekade: 403.";
-        else result.textContent = "Kontrakts-API svarade med ett API-fel.";
-      } catch { result.textContent = "Kontrakts-API-probet kunde inte genomföras."; }
-      finally { groupedContractsProbe.disabled = false; }
     });
     appSave.addEventListener("click", async () => {
       if (!appAccount.value.trim() || !appPassword.value) return;
@@ -5192,79 +5101,6 @@ class ElrakningPanel {
         result.textContent = error.message === "reauth_required" ? "E.ON-inloggningen behöver göras om." : "E.ON-inloggningen kunde inte verifieras.";
       } finally { appSave.disabled = false; }
     });
-    webConnect.addEventListener("click", async () => {
-      webConnect.disabled = true;
-      if (webStatus) webStatus.textContent = "Väntar på inloggning …";
-      result.textContent = "Öppnar Mitt E.ON …";
-      const popup = window.open("about:blank", "_blank");
-      try {
-        const response = await this.hass.callWS({ type: "elrakning/grid/web_handoff_start" });
-        if (!response.success) throw new Error(response.error || "handoff_failed");
-        if (typeof response.state !== "string" || response.state.length < 32) throw new Error("handoff_failed");
-        const ack = new Promise((resolve) => {
-          const timeout = window.setTimeout(() => {
-            this._eonHandoffAckResolver = null;
-            resolve("helper_unreachable");
-          }, 5000);
-          this._eonHandoffAckResolver = (status) => {
-            window.clearTimeout(timeout);
-            this._eonHandoffAckResolver = null;
-            resolve(status);
-          };
-        });
-        window.postMessage({ type: "elrakning-eon-handoff-state", state: response.state }, window.location.origin);
-        const ackStatus = await ack;
-        if (ackStatus !== "handoff_state_stored") throw new Error(ackStatus || "helper_unreachable");
-        this._eonWebHandoffPending = true;
-        if (popup) popup.location.href = response.url;
-        else window.open(response.url, "_blank");
-        result.textContent = "Logga in i Mitt E.ON. Anslutningen slutförs automatiskt efter lyckad inloggning.";
-      } catch (error) {
-        popup?.close();
-        const helperError = ["helper_unreachable", "helper_not_configured", "handoff_rejected"].includes(error.message);
-        if (webStatus && !helperError) webStatus.textContent = "Handoff kunde inte startas.";
-        if (result && !helperError) result.textContent = error.message === "handoff_unavailable" ? "Mitt E.ON-handoff är inte tillgänglig." : "Mitt E.ON kunde inte öppnas.";
-        webConnect.disabled = false;
-      }
-    });
-  }
-
-  _bindEonHandoffStatus() {
-    if (this._eonHandoffStatusListener) return;
-    const messages = {
-      completed: "Mitt E.ON är anslutet.",
-      helper_state_received: "Helper kontaktad.",
-      handoff_state_stored: "Väntar på Mitt E.ON.",
-      eon_page_loaded: "Mitt E.ON öppet.",
-      eon_session_ready: "E.ON-session hittad.",
-      handoff_posting: "Överför E.ON-session.",
-      eon_session_validation_failed: "E.ON-sessionen kunde inte verifieras.",
-      helper_not_configured: "Chrome-hjälpen är inte konfigurerad.",
-      helper_unreachable: "Chrome-hjälpen kunde inte nås.",
-      pending_missing: "Ingen väntande anslutning hittades.",
-      handoff_expired: "Anslutningen hann gå ut.",
-      eon_session_missing: "Ingen inloggad Mitt E.ON-session hittades.",
-      ha_unreachable: "Home Assistant kunde inte nås.",
-      handoff_rejected: "Mitt E.ON-anslutningen nekades.",
-    };
-    this._eonHandoffStatusListener = (event) => {
-      if (event.source !== window || event.origin !== window.location.origin) return;
-      if (event.data?.type !== "elrakning-eon-handoff-status") return;
-      const status = messages[event.data.status];
-      if (!status) return;
-      if (event.data.status !== "helper_state_received" && this._eonHandoffAckResolver) {
-        this._eonHandoffAckResolver(event.data.status);
-      }
-      const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
-      const result = this.host.querySelector("[data-eon-grid-result]");
-      const webConnect = this.host.querySelector("[data-eon-grid-web-connect]");
-      if (webStatus) webStatus.textContent = status;
-      if (result) result.textContent = status;
-      if (webConnect && ["completed", "helper_not_configured", "helper_unreachable", "pending_missing", "handoff_expired", "eon_session_missing", "ha_unreachable", "handoff_rejected"].includes(event.data.status)) webConnect.disabled = false;
-      this._eonWebHandoffPending = event.data.status !== "completed";
-      if (event.data.status === "completed") void this.loadEonGridState();
-    };
-    window.addEventListener("message", this._eonHandoffStatusListener);
   }
 
   _applyProviderState(state) {

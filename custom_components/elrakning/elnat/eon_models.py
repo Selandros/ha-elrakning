@@ -80,6 +80,78 @@ def normalize_tariff(prices: Any, estimated_yearly_cost: Any) -> dict[str, Any]:
     }
 
 
+def normalize_grouped_contracts(payload: Any, installation_ids: set[str]) -> list[dict[str, Any]]:
+    """Normalize verified electricity-grid contracts from the app response."""
+    if not isinstance(payload, (Mapping, list)):
+        return []
+    contracts = []
+    for item in _mapping_values(payload):
+        if item.get("contractType") != "ELECTRICITY_CONS_GRID":
+            continue
+        installation_id = item.get("installationIdentifier") or item.get("installationId")
+        if not isinstance(installation_id, str) or installation_id not in installation_ids:
+            continue
+        contracts.append({
+            "installation_identifier": installation_id,
+            "agreement": {
+                "status": agreement_status(item.get("status"), item.get("startDate"), item.get("endDate")),
+                "type": item.get("contractType"),
+                "name": item.get("name"),
+                "start_date": item.get("startDate"),
+                "end_date": item.get("endDate"),
+            },
+            "facility": {
+                "fuse_ampere": _number_from(item.get("fuseSize")),
+                "price_area": _nested_value(item, "priceArea") or _nested_value(item, "gridArea", "priceArea"),
+                "grid_area": _nested_value(item, "gridArea", "name"),
+            },
+            "tariff": normalize_grouped_tariff(item),
+        })
+    return contracts
+
+
+def normalize_grouped_tariff(contract: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize only explicit PriceValue units from a grouped contract."""
+    prices = contract.get("prices") if isinstance(contract.get("prices"), Mapping) else {}
+    return {
+        "subscription_fee_sek_per_month": _price_value(prices.get("subscriptionFee"), "KR", "MONTH"),
+        "transfer_fee_ore_per_kwh": _price_value(prices.get("transferFee"), "ORE", "KWH"),
+        "energy_tax_ore_per_kwh": _price_value(prices.get("energyTax"), "ORE", "KWH"),
+        "estimated_yearly_cost_sek": _price_value(contract.get("estimatedYearlyCost"), "KR", "NONE"),
+    }
+
+
+def _mapping_values(value: Any):
+    if isinstance(value, Mapping):
+        yield value
+        for nested in value.values():
+            yield from _mapping_values(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _mapping_values(nested)
+
+
+def _nested_value(value: Any, *keys: str) -> Any:
+    current = value
+    for key in keys:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _number_from(value: Any) -> float | None:
+    return float(value) if _is_number(value) else None
+
+
+def _price_value(value: Any, number_unit: str, divisor_unit: str) -> float | None:
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("numberUnit") != number_unit or value.get("divisorUnit") != divisor_unit:
+        return None
+    return _number_from(value.get("value"))
+
+
 def parse_monthly_consumption(payload: Any, year: int, month: int) -> dict[str, Any]:
     """Parse only the verified Monthly energy response contract."""
     if not isinstance(payload, Mapping):

@@ -16,8 +16,20 @@ def test_eon_source_data_command_and_manager_path_exist():
 
 def test_source_data_reuses_manager_session_instead_of_logging_in_inline():
     method = manager_text().split("    async def async_source_data", 1)[1].split("    def public_state", 1)[0]
-    assert "_get_app_session" in method
+    assert "async_fetch_app_sources" in method
     assert "async_login" not in method
+
+
+def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
+    source = manager_text()
+    collector = source.split("    async def async_fetch_app_sources", 1)[1].split("    async def async_save_web_credentials", 1)[0]
+    assert "async_get_contract_accounts" in collector
+    assert "async_get_locations" in collector
+    assert "async_get_grouped_contracts" in collector
+    assert "async_get_monthly_transfer" in collector
+    assert "async_get_outages" in collector
+    assert "self._app_source_snapshot = sources" in collector
+    assert "async_fetch_app_sources()" in source.split("    async def async_source_data", 1)[1]
 
 
 def test_source_redaction_covers_credentials_and_account_identifiers():

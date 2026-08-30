@@ -116,8 +116,23 @@ def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
             return [{"installations": [{
                 "id": "app-installation", "podId": "app-pod", "productType": "ELECTRICITY",
                 "serviceType": "GRID", "production": False, "isFuture": False,
-                "priceArea": "SE2", "address": {"fullStreet": "Street 1", "city": "Town", "postalCode": "123 45"},
+                "priceArea": "SE2", "isSme": False,
+                "address": {"fullStreet": "Street 1", "city": "Town", "postalCode": "123 45"},
             }]}]
+
+        async def async_get_grouped_contracts(self, *_args):
+            return [{
+                "contractType": "ELECTRICITY_CONS_GRID",
+                "installationIdentifier": "app-installation",
+                "status": "ACTIVE",
+                "name": "Grid",
+                "prices": {
+                    "subscriptionFee": {"value": 100, "numberUnit": "KR", "divisorUnit": "MONTH"},
+                    "transferFee": {"value": 90, "numberUnit": "ORE", "divisorUnit": "KWH"},
+                    "energyTax": {"value": 40, "numberUnit": "ORE", "divisorUnit": "KWH"},
+                },
+                "estimatedYearlyCost": {"value": 2000, "numberUnit": "KR", "divisorUnit": "NONE"},
+            }]
 
         async def async_get_monthly_transfer(self, *args):
             return {"productType": "ELECTRICITY", "aggregation": "MONTH", "transfer": [{
@@ -145,8 +160,56 @@ def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
         manager_module.EonAppClient = original
     assert result["configured"] is True
     assert result["consumption"]["status"] == "ok"
-    assert result["tariff"] is None
+    assert result["tariff"]["subscription_fee_sek_per_month"] == 100
     assert result["reauth_required"] is False
+
+
+def test_app_state_prefers_active_contract_and_does_not_cost_future_tariff():
+    from datetime import date
+
+    manager = object.__new__(manager_module.EonGridManager)
+    today = date.today().isoformat()
+    sources = {
+        "grouped_contracts": [
+            {
+                "contractType": "ELECTRICITY_CONS_GRID",
+                "installationIdentifier": "installation",
+                "status": "FUTURE",
+                "startDate": "2099-01-01",
+                "prices": {
+                    "subscriptionFee": {"value": 999, "numberUnit": "KR", "divisorUnit": "MONTH"},
+                    "transferFee": {"value": 99, "numberUnit": "ORE", "divisorUnit": "KWH"},
+                    "energyTax": {"value": 49, "numberUnit": "ORE", "divisorUnit": "KWH"},
+                },
+            },
+            {
+                "contractType": "ELECTRICITY_CONS_GRID",
+                "installationIdentifier": "installation",
+                "status": "ACTIVE",
+                "startDate": "2020-01-01",
+                "prices": {
+                    "subscriptionFee": {"value": 100, "numberUnit": "KR", "divisorUnit": "MONTH"},
+                    "transferFee": {"value": 90, "numberUnit": "ORE", "divisorUnit": "KWH"},
+                    "energyTax": {"value": 40, "numberUnit": "ORE", "divisorUnit": "KWH"},
+                },
+            },
+        ],
+        "monthly_transfer": [{
+            "installation_id": "installation",
+            "payload": {
+                "productType": "ELECTRICITY", "aggregation": "MONTH",
+                "transfer": [{"timestamp": f"{today[:7]}-01T00:00:00Z", "consumption": {"total": 10, "padded": False}}],
+            },
+        }],
+        "outages": [],
+    }
+    state = manager._build_app_state(sources, [{
+        "installation_identifier": "installation", "point_of_delivery_number": "pod",
+        "price_area": "SE2", "production": False, "is_future": False,
+    }])
+    assert state["agreement"]["status"] == "active"
+    assert state["tariff"]["subscription_fee_sek_per_month"] == 100
+    assert state["cost"]["total_sek"] == 113
 
 
 def test_public_state_filters_internal_installation_identifiers():
@@ -378,109 +441,6 @@ def test_grid_registry_accepts_a_second_provider_without_core_changes():
         assert registry.configured_grid_provider(entry) is synthetic
     finally:
         registry.GRID_PROVIDER_REGISTRY.pop(synthetic.provider_id, None)
-
-
-def test_common_api_probe_uses_existing_app_session_and_redacts_result():
-    class Session:
-        customer_id = "synthetic-customer"
-
-        def __init__(self):
-            self.calls = []
-
-        async def async_request_bearer_json(self, method, url, **kwargs):
-            self.calls.append((method, url, kwargs))
-            return {"status": 200, "payload": {
-                "customerIdentifier": "synthetic-customer",
-                "installation": {"pointOfDeliveryNumber": "synthetic-pod"},
-                "prices": {"transferFee": 97},
-            }}
-
-    manager = object.__new__(manager_module.EonGridManager)
-    manager._config = lambda: {"auth": "app", "customer_id": "synthetic-customer"}
-    manager._app_session = Session()
-    result = asyncio.run(manager.async_common_api_probe())
-    assert result["status"] == "ok"
-    assert result["payload"]["customerIdentifier"] == "[redacted]"
-    assert result["payload"]["installation"]["pointOfDeliveryNumber"] == "[redacted]"
-    method, url, kwargs = manager._app_session.calls[0]
-    assert method == "GET"
-    assert url.endswith("/rest/v2/user")
-    assert kwargs["params"] == {"readMeterChange": "true", "customerId": "synthetic-customer"}
-
-
-def test_grouped_contracts_probe_uses_explicit_installation_groups_without_state_mutation():
-    class Session:
-        pass
-
-    class Client:
-        calls = []
-
-        def __init__(self, session):
-            assert session is app_session
-
-        async def async_get_contract_accounts(self):
-            self.calls.append("accounts")
-            return {"allAccountIds": ["synthetic-account"]}
-
-        async def async_get_locations(self):
-            self.calls.append("locations")
-            return [{"installations": [
-                {"id": "private-installation", "productType": "ELECTRICITY", "serviceType": "GRID", "isSme": False},
-                {"id": "sme-installation", "productType": "ELECTRICITY", "serviceType": "GRID", "isSme": True},
-                {"id": "unclassified-installation", "productType": "ELECTRICITY", "serviceType": "GRID"},
-            ]}]
-
-        async def async_get_grouped_contracts(self, private_ids, sme_ids):
-            self.calls.append((private_ids, sme_ids))
-            return {"status": 200, "payload": {"ElectricityElna": {"contracts": [{"id": "sensitive"}], "prices": {"entries": [{"name": "Transfer", "price": {"value": 97, "numberUnit": "öre"}}]}}}}
-
-    manager = object.__new__(manager_module.EonGridManager)
-    manager._config = lambda: {"auth": "app", "account_id": "synthetic-account", "password": "synthetic-password"}
-    manager._app_session = Session()
-    app_session = manager._app_session
-    manager._get_app_session = lambda config: _async_return(app_session)
-    before = {"unchanged": True}
-    manager.state = before
-    original = manager_module.EonAppClient
-    manager_module.EonAppClient = Client
-    try:
-        result = asyncio.run(manager.async_grouped_contracts_probe())
-    finally:
-        manager_module.EonAppClient = original
-    assert result["status"] == "ok"
-    assert result["http_status"] == 200
-    assert result["request"]["private_installation_count"] == 1
-    assert result["request"]["sme_installation_count"] == 1
-    assert Client.calls == ["accounts", "locations", (["private-installation"], ["sme-installation"])]
-    assert result["payload"]["ElectricityElna"]["contracts"][0]["id"] == "[redacted]"
-    assert manager.state is before
-
-
-def test_grouped_contracts_probe_does_not_send_empty_installation_groups():
-    class Client:
-        def __init__(self, session):
-            pass
-
-        async def async_get_contract_accounts(self):
-            return {}
-
-        async def async_get_locations(self):
-            return [{"installations": [{"id": "unknown", "productType": "ELECTRICITY", "serviceType": "GRID"}]}]
-
-        async def async_get_grouped_contracts(self, private_ids, sme_ids):
-            raise AssertionError("empty installation groups were sent")
-
-    manager = object.__new__(manager_module.EonGridManager)
-    manager._config = lambda: {"auth": "app"}
-    manager._get_app_session = lambda config: _async_return(object())
-    original = manager_module.EonAppClient
-    manager_module.EonAppClient = Client
-    try:
-        result = asyncio.run(manager.async_grouped_contracts_probe())
-    finally:
-        manager_module.EonAppClient = original
-    assert result["status"] == "api_error"
-    assert result["error"] == "installation_ids_missing"
 
 
 async def _async_return(value):

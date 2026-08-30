@@ -92,13 +92,11 @@ class EonAppClient:
 
     async def async_get_grouped_contracts(
         self, private_installation_ids: list[str], sme_installation_ids: list[str]
-    ) -> dict[str, Any]:
-        """Fetch the isolated contract diagnostic using explicit installation groups."""
+    ) -> Any:
+        """Fetch grouped contracts for the classified electricity-grid installations."""
         params: dict[str, list[str]] = {}
         if private_installation_ids:
             params["privateInstallationIds"] = private_installation_ids
         if sme_installation_ids:
             params["smeInstallationIds"] = sme_installation_ids
-        return await self.session.request_json(
-            "GET", GROUPED_CONTRACTS_URL, params=params, _diagnostic_status=True
-        )
+        return await self.session.request_json("GET", GROUPED_CONTRACTS_URL, params=params)

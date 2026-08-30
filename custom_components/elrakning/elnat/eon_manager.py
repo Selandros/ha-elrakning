@@ -11,11 +11,12 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from homeassistant.helpers.storage import Store
 
 from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
-from .eon_auth import COMMON_API_USER_URL, EonAppSession, EonAuthError, EonSession
+from .eon_auth import EonAppSession, EonAuthError, EonSession
 from .eon_client import EonAppClient, EonClient
 from .eon_models import (
     calculate_eon_cost,
     normalize_locations,
+    normalize_grouped_contracts,
     normalize_outage,
     normalize_user_profile,
     parse_monthly_consumption,
@@ -36,6 +37,7 @@ class EonGridManager:
         self._pending_web_handoff: dict[str, Any] | None = None
         self._app_session: EonAppSession | None = None
         self._web_session: EonSession | None = None
+        self._app_source_snapshot: dict[str, Any] | None = None
 
     @property
     def configured(self) -> bool:
@@ -130,69 +132,93 @@ class EonGridManager:
         await self._save_config(config)
         return await self._refresh_app(session)
 
+    async def async_fetch_app_sources(self) -> dict[str, Any]:
+        """Fetch all verified read-only App sources without changing normalized state."""
+        config = self._config()
+        session = await self._get_app_session(config)
+        client = EonAppClient(session)
+        sources: dict[str, Any] = {
+            "contract_accounts": None,
+            "locations": None,
+            "grouped_contracts": None,
+            "monthly_transfer": [],
+            "outages": [],
+            "source_status": {},
+        }
+
+        async def fetch(name: str, request):
+            try:
+                payload = await request()
+            except EonAuthError:
+                raise
+            except Exception:
+                sources["source_status"][name] = {"status": "failed", "error": "api_error"}
+                return None
+            sources["source_status"][name] = {"status": "ok"}
+            return payload
+
+        sources["contract_accounts"] = await fetch("contract_accounts", client.async_get_contract_accounts)
+        sources["locations"] = await fetch("locations", client.async_get_locations)
+        try:
+            locations = normalize_locations(sources["locations"])
+        except (TypeError, ValueError):
+            locations = []
+        private_ids, sme_ids = _grouped_contract_installation_ids(sources["locations"])
+        if private_ids or sme_ids:
+            sources["grouped_contracts"] = await fetch(
+                "grouped_contracts",
+                lambda: client.async_get_grouped_contracts(private_ids, sme_ids),
+            )
+        else:
+            sources["source_status"]["grouped_contracts"] = {"status": "skipped", "error": "installation_ids_missing"}
+
+        now = date.today()
+        month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        month_end = datetime(
+            now.year + (1 if now.month == 12 else 0),
+            1 if now.month == 12 else now.month + 1,
+            1,
+            tzinfo=timezone.utc,
+        )
+        monthly_status = []
+        outage_status = []
+        for installation in locations:
+            installation_id = installation["installation_identifier"]
+            try:
+                monthly = await client.async_get_monthly_transfer(
+                    installation_id,
+                    month_start.isoformat(),
+                    month_end.isoformat(),
+                    installation["production"],
+                    installation["street"],
+                    installation["city"],
+                    installation["postal_code"],
+                )
+                sources["monthly_transfer"].append({"installation_id": installation_id, "payload": monthly})
+                monthly_status.append({"status": "ok"})
+            except EonAuthError:
+                raise
+            except Exception:
+                monthly_status.append({"status": "failed", "error": "api_error"})
+            pod = installation["point_of_delivery_number"]
+            try:
+                outage = await client.async_get_outages(pod)
+                sources["outages"].append({"installation_id": installation_id, "payload": outage})
+                outage_status.append({"status": "ok"})
+            except EonAuthError:
+                raise
+            except Exception:
+                outage_status.append({"status": "failed", "error": "api_error"})
+        sources["source_status"]["monthly_transfer"] = monthly_status or [{"status": "skipped"}]
+        sources["source_status"]["outages"] = outage_status or [{"status": "skipped"}]
+        self._app_source_snapshot = sources
+        return sources
+
     async def async_save_web_credentials(self, account_id: str, password: str) -> dict[str, Any]:
         """Report the unsupported browser-bound web login without changing app state."""
         if not account_id.strip() or not password:
             return {"status": "invalid_input", "error": "invalid_input"}
         return {"status": "browser_attestation_required", "error": "browser_attestation_required"}
-
-    async def async_common_api_probe(self) -> dict[str, Any]:
-        """Check whether the existing app token is accepted by the Common API."""
-        config = self._config()
-        if config.get("auth") != "app" or self._app_session is None:
-            raise EonAuthError("reauth_required")
-        customer_id = self._app_session.customer_id or config.get("customer_id")
-        if not isinstance(customer_id, str) or not customer_id:
-            raise EonAuthError("customer_id_missing")
-        result = await self._app_session.async_request_bearer_json(
-            "GET",
-            COMMON_API_USER_URL,
-            params={"readMeterChange": "true", "customerId": customer_id},
-        )
-        status = result["status"]
-        response = {"provider": "eon", "provider_name": "E.ON", "probe": True, "http_status": status}
-        if status == 200:
-            response["status"] = "ok"
-            response["payload"] = _redact_source_data(result.get("payload"))
-        elif status in (401, 403):
-            response["status"] = f"denied_{status}"
-        else:
-            response["status"] = "api_error"
-        return response
-
-    async def async_grouped_contracts_probe(self) -> dict[str, Any]:
-        """Inspect the app contract endpoint without changing normalized grid state."""
-        config = self._config()
-        if config.get("auth") != "app":
-            raise EonAuthError("reauth_required")
-        session = await self._get_app_session(config)
-        client = EonAppClient(session)
-        await client.async_get_contract_accounts()
-        raw_locations = await client.async_get_locations()
-        private_ids, sme_ids = _grouped_contract_installation_ids(raw_locations)
-        request_info = {
-            "host": "api.mobile-apps.eon.se",
-            "path": "/middlelayer/contracts/grouped",
-            "private_installation_count": len(private_ids),
-            "sme_installation_count": len(sme_ids),
-        }
-        if not private_ids and not sme_ids:
-            return {
-                "status": "api_error",
-                "http_status": None,
-                "request": request_info,
-                "error": "installation_ids_missing",
-            }
-        result = await client.async_get_grouped_contracts(private_ids, sme_ids)
-        http_status = result.get("status")
-        response = {"http_status": http_status, "request": request_info}
-        if http_status == 200:
-            response.update({"status": "ok", "payload": _redact_source_data(result.get("payload"))})
-        elif http_status in (401, 403):
-            response["status"] = f"denied_{http_status}"
-        else:
-            response["status"] = "api_error"
-        return response
 
     async def async_refresh(self) -> dict[str, Any]:
         config = self._config()
@@ -224,49 +250,12 @@ class EonGridManager:
     async def _refresh_app(self, session: EonAppSession | None = None) -> dict[str, Any]:
         config = self._config()
         try:
-            session = await self._get_app_session(config, session)
-            client = EonAppClient(session)
-            await client.async_get_contract_accounts()
-            locations = normalize_locations(await client.async_get_locations())
+            await self._get_app_session(config, session)
+            sources = await self.async_fetch_app_sources()
+            locations = normalize_locations(sources.get("locations"))
             if not locations:
                 raise ValueError("location_missing")
-            if len(locations) > 1:
-                raise ValueError("location_selection_required")
-            installation = locations[0]
-            now = date.today()
-            month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-            month_end = datetime(
-                now.year + (1 if now.month == 12 else 0),
-                1 if now.month == 12 else now.month + 1,
-                1,
-                tzinfo=timezone.utc,
-            )
-            monthly = await client.async_get_monthly_transfer(
-                installation["installation_identifier"],
-                month_start.isoformat(),
-                month_end.isoformat(),
-                installation["production"],
-                installation["street"],
-                installation["city"],
-                installation["postal_code"],
-            )
-            outage = normalize_outage(await client.async_get_outages(installation["point_of_delivery_number"]))
-            state = {
-                "agreement": {"status": "future" if installation.get("is_future") is True else "configured", "type": "ELECTRICITY_GRID"},
-                "facility": {
-                    "installation_identifier": installation.get("installation_identifier"),
-                    "point_of_delivery_number": installation.get("point_of_delivery_number"),
-                    "price_area": installation.get("price_area"),
-                },
-                "tariff": None,
-                "consumption": parse_monthly_transfer(monthly, now.year, now.month),
-                "cost": None,
-                "outage": outage,
-                "app_authenticated": True,
-                "reauth_required": False,
-                "error": None,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            state = self._build_app_state(sources, locations)
             self.state = state
             await self.store.async_save(self.state)
         except ValueError as err:
@@ -277,6 +266,41 @@ class EonGridManager:
             await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
+
+    def _build_app_state(self, sources: dict[str, Any], locations: list[dict[str, Any]]) -> dict[str, Any]:
+        """Build public-safe app state from the collector snapshot."""
+        now = date.today()
+        installation_ids = {item["installation_identifier"] for item in locations}
+        contracts = normalize_grouped_contracts(sources.get("grouped_contracts"), installation_ids)
+        by_installation: dict[str, list[dict[str, Any]]] = {}
+        for contract in contracts:
+            by_installation.setdefault(contract["installation_identifier"], []).append(contract)
+        installation = locations[0]
+        candidates = by_installation.get(installation["installation_identifier"], [])
+        current = next((item for item in candidates if item["agreement"]["status"] == "active"), None)
+        selected = current or next((item for item in candidates if item["agreement"]["status"] == "future"), None)
+        monthly = next((item["payload"] for item in sources.get("monthly_transfer", []) if item.get("installation_id") == installation["installation_identifier"]), None)
+        outage_payload = next((item["payload"] for item in sources.get("outages", []) if item.get("installation_id") == installation["installation_identifier"]), None)
+        consumption = parse_monthly_transfer(monthly, now.year, now.month) if monthly is not None else {"status": "missing", "resolution": "Monthly"}
+        agreement = selected["agreement"] if selected else {
+            "status": "future" if installation.get("is_future") is True else "configured",
+            "type": "ELECTRICITY_CONS_GRID",
+        }
+        tariff = selected.get("tariff") if selected else None
+        amount = consumption.get("consumption_kwh") if consumption.get("status") == "ok" else None
+        cost = calculate_eon_cost(amount, tariff) if agreement.get("status") == "active" else None
+        return {
+            "agreement": agreement,
+            "facility": {"price_area": installation.get("price_area"), "fuse_ampere": (selected or {}).get("facility", {}).get("fuse_ampere")},
+            "tariff": tariff,
+            "consumption": consumption,
+            "cost": cost,
+            "outage": normalize_outage(outage_payload) if outage_payload is not None else None,
+            "app_authenticated": True,
+            "reauth_required": False,
+            "error": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     async def _get_app_session(
         self, config: dict[str, Any], session: EonAppSession | None = None
@@ -312,41 +336,17 @@ class EonGridManager:
         """Fetch the active E.ON source payload only after an explicit request."""
         config = self._config()
         if config.get("auth") == "app":
-            session = await self._get_app_session(config)
-            client = EonAppClient(session)
-            contract_accounts = await client.async_get_contract_accounts()
-            locations = await client.async_get_locations()
-            normalized = normalize_locations(locations)
-            monthly = {}
-            outages: Any = []
-            if len(normalized) == 1:
-                installation = normalized[0]
-                now = date.today()
-                month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-                month_end = datetime(
-                    now.year + (1 if now.month == 12 else 0),
-                    1 if now.month == 12 else now.month + 1,
-                    1,
-                    tzinfo=timezone.utc,
-                )
-                monthly = await client.async_get_monthly_transfer(
-                    installation["installation_identifier"],
-                    month_start.isoformat(),
-                    month_end.isoformat(),
-                    installation["production"],
-                    installation["street"],
-                    installation["city"],
-                    installation["postal_code"],
-                )
-                outages = await client.async_get_outages(installation["point_of_delivery_number"])
+            sources = await self.async_fetch_app_sources()
             return {
                 "provider": "eon",
                 "provider_name": "E.ON",
                 "auth_mode": "app",
-                "contract_accounts": _redact_source_data(contract_accounts),
-                "locations": _redact_source_data(locations),
-                "monthly_transfer": _redact_source_data(monthly),
-                "outages": _redact_source_data(outages),
+                "contract_accounts": _redact_source_data(sources["contract_accounts"]),
+                "locations": _redact_source_data(sources["locations"]),
+                "grouped_contracts": _redact_source_data(sources["grouped_contracts"]),
+                "monthly_transfer": _redact_source_data(sources["monthly_transfer"]),
+                "outages": _redact_source_data(sources["outages"]),
+                "source_status": sources["source_status"],
             }
 
         web = self._web_config(config)
