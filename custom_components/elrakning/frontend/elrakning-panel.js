@@ -3540,7 +3540,7 @@ class ElrakningPanel {
     const batteryIsConfigured = batteryConfigured || batteryPowerConfigured;
     const values = {
       solar: solarConfigured ? [["Effekt just nu", this._powerState.solar_kw, "kW"]] : [],
-      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"], ["Laddnivå", this._powerState.soc_percent, "%"], ["Kapacitet", this._powerState.capacity_kwh, "kWh"]] : [],
+      battery: batteryIsConfigured ? [["Laddning", this._powerState.charging_kw, "kW"], ["Urladdning", this._powerState.discharging_kw, "kW"]] : [],
     };
     for (const [cardType, rows] of Object.entries(values)) {
       const status = this.host.querySelector(`[data-power-status="${cardType === "battery" ? "battery" : "solar"}"]`);
@@ -3602,20 +3602,9 @@ class ElrakningPanel {
     const rows = [];
     if (loadConfigured) {
       rows.push(["Husets last", displayPowerValue(power.consumption_kw), "kW"]);
-      rows.push(["Förbrukat idag", power.consumption_energy_kwh, "kWh"]);
     }
     if (meterConfigured) {
       rows.push(["Nät just nu", displayPowerValue(meter.power_kw), "kW"]);
-      if (meter.energy_import_entity && meter.energy_import_valid === false) {
-        rows.push(["Import idag", "Byt sensor", ""]);
-      } else if (typeof meter.energy_import_kwh === "number") {
-        rows.push(["Import idag", meter.energy_import_kwh, "kWh"]);
-      }
-      if (meter.energy_export_entity && meter.energy_export_valid === false) {
-        rows.push(["Export idag", "Byt sensor", ""]);
-      } else if (typeof meter.energy_export_kwh === "number") {
-        rows.push(["Export idag", meter.energy_export_kwh, "kWh"]);
-      }
     }
     const validRows = rows.filter(([, value, unit]) =>
       unit === "" ? value === "Byt sensor" : typeof value === "number" && Number.isFinite(value));
