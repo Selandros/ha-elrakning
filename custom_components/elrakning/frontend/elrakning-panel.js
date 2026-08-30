@@ -407,7 +407,7 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
       ? { value: charging, status: "Laddar", direction: "charging", colorKey: "charging", charging, discharging }
       : dischargingActive
         ? { value: discharging, status: "Urladdar", direction: "discharging", colorKey: "discharging", charging, discharging }
-        : { value: 0, status: "Vilar", direction: null, colorKey: "neutral", charging, discharging };
+      : { value: 0, status: "Ingen aktivitet", direction: null, colorKey: "neutral", charging, discharging };
   const withScale = (tile, key) => {
     const current = Number.isFinite(tile.value) ? Math.abs(tile.value) : 0;
     const maxToday = Math.max(0, Number.isFinite(Number(maxima[key])) ? Number(maxima[key]) : current);
@@ -416,7 +416,7 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
   };
   return {
     house: withScale({ value: house, status: house === null ? "Ej tillgängligt" : "Förbrukar", colorKey: "consumption" }, "house"),
-    solar: withScale({ value: solar, status: solar === null ? "Ej tillgängligt" : "Producerar", colorKey: "solar" }, "solar"),
+    solar: withScale({ value: solar, status: solar === null ? "Ej tillgängligt" : solar === 0 ? "Ingen produktion" : "Producerar", colorKey: solar === 0 ? "neutral" : "solar" }, "solar"),
     grid: withScale(grid, "grid"),
     battery: withScale(battery, "battery"),
   };

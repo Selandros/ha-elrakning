@@ -500,6 +500,8 @@ assert.equal(liveTiles.house.maxToday, 2);
 assert.equal(liveTiles.house.fillPercent, 31.5);
 assert.equal(liveTiles.solar.value, 6.94);
 assert.equal(liveTiles.solar.status, "Producerar");
+assert.equal(buildLivePowerTiles({ solar_kw: 0 }, {}).solar.status, "Ingen produktion");
+assert.equal(buildLivePowerTiles({ solar_kw: 0 }, {}).solar.colorKey, "neutral");
 assert.equal(liveTiles.grid.value, 2.43);
 assert.equal(liveTiles.grid.status, "Importerar");
 const gridTilesWithPhases = buildLivePowerTiles(
@@ -523,7 +525,8 @@ const gridTilesWithNegativePhase = buildLivePowerTiles(
 );
 assert.equal(gridTilesWithNegativePhase.grid.maxPhaseCurrentA, 14);
 assert.equal(gridTilesWithNegativePhase.grid.fuseUtilizationPercent, 87.5);
-assert.equal(liveTiles.battery.status, "Vilar");
+assert.equal(liveTiles.battery.status, "Ingen aktivitet");
+assert.equal(buildLivePowerTiles({ charging_kw: 0, discharging_kw: 0 }, {}).battery.status, "Ingen aktivitet");
 assert.equal(liveTiles.battery.fillPercent, 0);
 assert.equal(buildLivePowerTiles({}, {}).solar.scaleMax, 1);
 assert.equal(buildLivePowerTiles({ solar_kw: 5.24 }, {}).solar.scaleMax, 5.24);
