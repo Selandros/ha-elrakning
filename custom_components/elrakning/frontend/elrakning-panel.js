@@ -1078,11 +1078,11 @@ class ElrakningPanel {
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
-          <article class="card invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
+          <article class="live-power-tile invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
-            <div class="invoice-estimate-heading"><strong>Estimerad faktura</strong><span data-invoice-estimate-month></span></div>
-            <div class="invoice-estimate-main"><output data-invoice-estimate-total>–</output><span>Prognos för månaden</span></div>
-            <span class="invoice-estimate-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
+            <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span><span class="live-power-grid-meta" data-invoice-estimate-month></span></div>
+            <strong class="live-power-value" data-invoice-estimate-total>–</strong>
+            <span class="live-power-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
           </article>
         </section>
 
@@ -2292,39 +2292,9 @@ class ElrakningPanel {
         }
 
         .invoice-estimate-card {
-          display: grid;
-          gap: 10px;
           min-height: 0;
-          padding: 12px 14px;
         }
 
-        .invoice-estimate-heading {
-          align-items: baseline;
-          display: flex;
-          gap: 10px;
-          justify-content: space-between;
-        }
-
-        .invoice-estimate-heading > span,
-        .invoice-estimate-status,
-        .invoice-estimate-copy-feedback {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          margin: 0;
-        }
-
-        .invoice-estimate-main {
-          display: grid;
-          gap: 3px;
-        }
-
-        .invoice-estimate-main output {
-          font-size: clamp(28px, 6cqw, 40px);
-          font-weight: 500;
-          line-height: 1;
-        }
-
-        .invoice-estimate-main span,
         .provider-invoice-cost span {
           color: var(--secondary-text-color);
           font-size: 12px;
@@ -2341,22 +2311,8 @@ class ElrakningPanel {
           font-weight: 500;
         }
 
-        .invoice-estimate-copy-feedback {
-          min-height: 1em;
-        }
-
         .invoice-estimate-card.debug-copy-enabled {
           cursor: pointer;
-        }
-
-        @media (max-width: 420px) {
-          .invoice-estimate-grid {
-            gap: 8px 10px;
-          }
-
-          .invoice-estimate-kpi output {
-            font-size: 13px;
-          }
         }
 
         .retained-history {
