@@ -1046,7 +1046,7 @@ class ElrakningPanel {
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
             <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
-            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
+            <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="house" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
             <div class="live-power-heading"><span class="live-power-title">Sol</span></div>
@@ -1055,7 +1055,7 @@ class ElrakningPanel {
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
             <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
-            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
+            <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
             <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span></div>
@@ -1063,9 +1063,8 @@ class ElrakningPanel {
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
-            <span class="live-power-grid-fuse-status" data-live-power-grid-fuse-status hidden></span>
-            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
-            <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
+            <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
+            <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="grid" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
             <div class="live-power-heading"><span class="live-power-title">Batteri</span></div>
@@ -1074,7 +1073,7 @@ class ElrakningPanel {
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
             <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
-            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
+            <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="battery" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
@@ -2289,7 +2288,7 @@ class ElrakningPanel {
         }
 
         .live-power-tile.invoice-estimate-card {
-          grid-template-rows: 18px 15px 30px 12px;
+          grid-template-rows: auto auto auto auto;
           min-height: 0;
         }
 
@@ -2299,7 +2298,9 @@ class ElrakningPanel {
 
         .invoice-estimate-month {
           grid-row: 2;
-          justify-self: end;
+          margin-left: 0;
+          justify-self: start;
+          text-align: left;
         }
 
         .invoice-estimate-card .live-power-value {
@@ -2438,7 +2439,7 @@ class ElrakningPanel {
           container-type: inline-size;
           display: grid;
           align-content: start;
-          grid-template-rows: 18px 30px 15px 5px 14px 12px 12px;
+          grid-template-rows: auto auto auto 5px auto 12px minmax(0, auto);
           row-gap: 4px;
           min-width: 0;
           padding: 12px 14px;
@@ -2530,13 +2531,25 @@ class ElrakningPanel {
           text-align: right;
         }
 
+        .live-power-debug-footer {
+          align-items: center;
+          display: none;
+          gap: 8px;
+          justify-content: space-between;
+          min-width: 0;
+        }
+
+        .live-power-tile.debug-copy-enabled .live-power-debug-footer.visible {
+          display: flex;
+        }
+
         .live-power-tile.debug-copy-enabled {
           cursor: pointer;
         }
 
         .live-power-action {
           font-size: 11px;
-          margin: 5px 0 0;
+          margin: 0;
           padding: 4px 7px;
           width: max-content;
         }
@@ -3681,10 +3694,12 @@ class ElrakningPanel {
     const source = this.host.querySelector("[data-provider-source]");
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const meterSource = this.host.querySelector("[data-meter-source]");
+    const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
+    liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     this._updateLivePowerCardInteractivity();
     this._updateInvoiceEstimateInteractivity();
@@ -4275,7 +4290,7 @@ class ElrakningPanel {
       if (enabled && !tile._livePowerCopyEnabled) {
         const copy = () => { void this._copyLivePowerTile(tile); };
         const clickHandler = (event) => {
-          if (event.target.closest("[data-meter-source]")) return;
+          if (event.target.closest("[data-meter-source], [data-live-power-source]")) return;
           copy();
         };
         const keydownHandler = (event) => {
@@ -4291,6 +4306,7 @@ class ElrakningPanel {
         tile.tabIndex = 0;
         tile.setAttribute("role", "button");
         tile.classList.add("debug-copy-enabled");
+        tile.querySelector(".live-power-debug-footer")?.classList.add("visible");
       } else if (!enabled && tile._livePowerCopyEnabled) {
         tile.removeEventListener("click", tile._livePowerCopyClickHandler);
         tile.removeEventListener("keydown", tile._livePowerCopyKeydownHandler);
@@ -4303,6 +4319,7 @@ class ElrakningPanel {
         tile.removeAttribute("tabindex");
         tile.removeAttribute("role");
         tile.classList.remove("debug-copy-enabled");
+        tile.querySelector(".live-power-debug-footer")?.classList.remove("visible");
       }
     }
   }
@@ -5206,6 +5223,7 @@ class ElrakningPanel {
     const copy = this.host.querySelector("[data-provider-source-copy]");
     const provider = this.host.querySelector("[data-provider-source-provider]");
     const text = this.host.querySelector("[data-provider-source-text]");
+    const liveSources = [...this.host.querySelectorAll("[data-live-power-source]")];
     if (!open || !eonOpen || !dialog || !close || !copy || !provider || !text) return;
     const dismiss = () => {
       dialog.hidden = true;
@@ -5216,21 +5234,25 @@ class ElrakningPanel {
     };
     const loadSource = async (event) => {
       const isEon = event.currentTarget === eonOpen;
+      const liveSource = event.currentTarget.closest?.("[data-live-power-tile]");
+      const liveSourceName = event.currentTarget.dataset.livePowerSource;
       dialog.hidden = false;
       text.textContent = "Hämtar Source data …";
       provider.hidden = true;
       provider.textContent = "";
       copy.disabled = true;
       try {
-        const source = isEon
+        const source = liveSource
+          ? liveSource._livePowerRaw || {}
+          : isEon
           ? await this.hass.callWS({ type: "elrakning/grid/source_data" })
           : await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
-        const providerName = source.provider_name || source.facility?.provider_name;
+        const providerName = liveSource ? liveSourceName : source.provider_name || source.facility?.provider_name;
         if (typeof providerName === "string" && providerName.trim()) {
           provider.textContent = `Källa: ${providerName.trim()}`;
           provider.hidden = false;
         }
-        text.textContent = isEon
+        text.textContent = liveSource || isEon
           ? JSON.stringify(source, null, 2)
           : JSON.stringify({ facility: source.facility, contracts: source.contracts, invoices: source.invoices.items, consumption: { total: source.consumption.total, items: source.consumption.items } }, null, 2);
         copy.disabled = false;
@@ -5240,6 +5262,7 @@ class ElrakningPanel {
     };
     open.addEventListener("click", loadSource);
     eonOpen.addEventListener("click", loadSource);
+    liveSources.forEach((button) => button.addEventListener("click", loadSource));
     copy.addEventListener("click", async () => {
       try {
         await this._copyText(text.textContent);
@@ -5906,6 +5929,12 @@ class ElrakningPanel {
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
     if (facility.price_area) rows.push(["Elområde", facility.price_area]);
     if (facility.grid_area) rows.push(["Nätområde", facility.grid_area]);
+    if (Number.isFinite(Number(state?.daily_max_phase_current_a))) {
+      rows.push(["Max fas idag", `${this._formatNumber(Number(state.daily_max_phase_current_a))} A`]);
+    }
+    if (Number.isFinite(Number(state?.daily_max_fuse_utilization_percent))) {
+      rows.push(["Högsta säkringsandel", `${this._formatNumber(Number(state.daily_max_fuse_utilization_percent))} %`]);
+    }
     if (consumption.status === "ok") rows.push(["Förbrukning", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
     if (tariff.subscription_fee_sek_per_month != null) rows.push(["Abonnemang", this._formatSek(tariff.subscription_fee_sek_per_month) + "/mån"]);
     if (tariff.transfer_fee_ore_per_kwh != null) rows.push(["Överföring", `${this._formatNumber(tariff.transfer_fee_ore_per_kwh)} öre/kWh`]);
