@@ -2413,7 +2413,6 @@ class ElrakningPanel {
           box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
           box-sizing: border-box;
           container-type: inline-size;
-          cursor: pointer;
           display: flex;
           flex-direction: column;
           min-width: 0;
@@ -2487,6 +2486,10 @@ class ElrakningPanel {
           font-size: 10px;
           min-height: 1.2em;
           text-align: right;
+        }
+
+        .live-power-tile.debug-copy-enabled {
+          cursor: pointer;
         }
 
         .live-power-action {
@@ -3627,6 +3630,7 @@ class ElrakningPanel {
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
+    this._updateLivePowerCardInteractivity();
   }
 
   _bindMeterDialog() {
@@ -4168,21 +4172,46 @@ class ElrakningPanel {
   }
 
   _bindLivePowerCards() {
-    for (const tile of this.host.querySelectorAll("[data-live-power-tile]")) {
-      const copy = () => { void this._copyLivePowerTile(tile); };
-      tile.addEventListener("click", (event) => {
-        if (event.target.closest("[data-meter-source]")) return;
-        copy();
-      });
-      tile.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        copy();
-      });
-      tile.tabIndex = 0;
-      tile.setAttribute("role", "button");
-    }
+    this._updateLivePowerCardInteractivity();
     this._renderLivePowerRow();
+  }
+
+  _updateLivePowerCardInteractivity() {
+    const enabled = this._debugEnabled;
+    for (const tile of this.host.querySelectorAll("[data-live-power-tile]")) {
+      if (enabled && !tile._livePowerCopyEnabled) {
+        const copy = () => { void this._copyLivePowerTile(tile); };
+        const clickHandler = (event) => {
+          if (event.target.closest("[data-meter-source]")) return;
+          copy();
+        };
+        const keydownHandler = (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          copy();
+        };
+        tile.addEventListener("click", clickHandler);
+        tile.addEventListener("keydown", keydownHandler);
+        tile._livePowerCopyEnabled = true;
+        tile._livePowerCopyClickHandler = clickHandler;
+        tile._livePowerCopyKeydownHandler = keydownHandler;
+        tile.tabIndex = 0;
+        tile.setAttribute("role", "button");
+        tile.classList.add("debug-copy-enabled");
+      } else if (!enabled && tile._livePowerCopyEnabled) {
+        tile.removeEventListener("click", tile._livePowerCopyClickHandler);
+        tile.removeEventListener("keydown", tile._livePowerCopyKeydownHandler);
+        window.clearTimeout(tile._livePowerFeedbackTimer);
+        const feedback = tile.querySelector("[data-live-power-copy-feedback]");
+        if (feedback) feedback.textContent = "";
+        delete tile._livePowerCopyEnabled;
+        delete tile._livePowerCopyClickHandler;
+        delete tile._livePowerCopyKeydownHandler;
+        tile.removeAttribute("tabindex");
+        tile.removeAttribute("role");
+        tile.classList.remove("debug-copy-enabled");
+      }
+    }
   }
 
   _renderDailyEnergyCard() {
