@@ -1083,6 +1083,7 @@ class ElrakningPanel {
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
@@ -1091,17 +1092,18 @@ class ElrakningPanel {
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
             <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
-            <span class="live-power-grid-fuse-status" data-live-power-grid-fuse-status hidden></span>
-            <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-grid-fuse-status" data-live-power-grid-fuse-status hidden></span>
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
+            <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
             <div class="live-power-heading"><span class="live-power-title">Batteri</span></div>
@@ -1109,11 +1111,13 @@ class ElrakningPanel {
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-grid-fuse-status live-power-grid-fuse-status-spacer" aria-hidden="true"></span>
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
-            <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span><span class="live-power-grid-meta" data-invoice-estimate-month></span></div>
+            <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span></div>
+            <span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
             <span class="live-power-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
           </article>
@@ -2452,8 +2456,9 @@ class ElrakningPanel {
           box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
           box-sizing: border-box;
           container-type: inline-size;
-          display: flex;
-          flex-direction: column;
+          display: grid;
+          grid-template-rows: minmax(18px, auto) 30px minmax(15px, auto) 5px 14px minmax(12px, auto) minmax(12px, auto);
+          row-gap: 4px;
           min-width: 0;
           padding: 12px 14px;
           position: relative;
@@ -2492,19 +2497,19 @@ class ElrakningPanel {
           font-size: clamp(18px, 3.2cqw, 26px);
           font-weight: 500;
           line-height: 1.15;
-          margin-top: 12px;
+          margin-top: 0;
         }
 
         .live-power-status {
           color: var(--secondary-text-color);
           font-size: 12px;
-          margin-top: 2px;
+          margin-top: 0;
         }
 
         .live-power-grid-fuse-status {
           color: var(--secondary-text-color);
           font-size: 10px;
-          margin-top: 3px;
+          margin-top: 0;
         }
 
         .live-power-bar {
@@ -2512,7 +2517,7 @@ class ElrakningPanel {
           background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
           border-radius: 999px;
           height: 5px;
-          margin-top: 14px;
+          margin-top: 0;
           overflow: hidden;
         }
 
@@ -2530,7 +2535,7 @@ class ElrakningPanel {
           display: flex;
           font-size: 10px;
           justify-content: space-between;
-          margin-top: 5px;
+          margin-top: 0;
         }
 
         .live-power-copy-feedback {
