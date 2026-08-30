@@ -310,9 +310,15 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
 
         first = await manager.async_get_price_comparison("user-a")
         self.assertEqual(first, {"electricity": True, "grid": False})
-        updated = await manager.async_set_price_comparison("user-a", {"electricity": False, "grid": True})
-        self.assertEqual(updated, {"electricity": False, "grid": True})
-        self.assertEqual(await manager.async_get_price_comparison("user-a"), updated)
+        for expected in (
+            {"electricity": False, "grid": False},
+            {"electricity": True, "grid": False},
+            {"electricity": False, "grid": True},
+            {"electricity": True, "grid": True},
+        ):
+            updated = await manager.async_set_price_comparison("user-a", expected)
+            self.assertEqual(updated, expected)
+            self.assertEqual(await manager.async_get_price_comparison("user-a"), expected)
         self.assertEqual(
             await manager.async_get_price_comparison("user-b"),
             {"electricity": True, "grid": False},

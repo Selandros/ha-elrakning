@@ -1650,6 +1650,7 @@ class ElrakningPanel {
     this._tooltipOrbit = { angle: null };
     this._priceHeaderLayoutObserver = null;
     this._chartPreferencesReady = false;
+    this._chartPreferencesSavePromise = Promise.resolve();
     this._meterPowerHistory = createMeterPowerHistoryState();
     this._livePowerMaxima = { date: null, house: 0, solar: 0, grid: 0, battery: 0 };
     this._meterTooltipPoints = [];
@@ -4468,19 +4469,25 @@ class ElrakningPanel {
 
   async _persistChartPreferences() {
     if (!this.hass?.callWS || !this._chartPreferencesReady) return;
-    try {
-      await this.hass.callWS({
+    const payload = {
         type: "elrakning/ui_preferences/set",
         chart_layers: this._chartLayerState(),
-        price_comparison: this._priceComparisonVisible,
+        price_comparison: { ...this._priceComparisonVisible },
         phase_history_metric: this._phaseHistoryMetric,
-        phase_history_visible: this._phaseHistoryVisible,
+        phase_history_visible: { ...this._phaseHistoryVisible },
         configuration_cards_visible: this._configurationCardsVisible,
-        main_cards: this._mainCards,
+        main_cards: { ...this._mainCards },
+    };
+    this._chartPreferencesSavePromise = this._chartPreferencesSavePromise
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await this.hass.callWS(payload);
+        } catch {
+          // Keep the UI responsive when preference persistence is unavailable.
+        }
       });
-    } catch {
-      // Keep the UI responsive when preference persistence is unavailable.
-    }
+    return this._chartPreferencesSavePromise;
   }
 
   _bindChartLegend() {
