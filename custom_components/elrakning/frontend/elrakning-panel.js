@@ -300,7 +300,33 @@ export function displayPowerValue(value) {
   return Math.abs(numeric) <= POWER_DISPLAY_THRESHOLD_KW ? 0 : numeric;
 }
 
-export function buildLivePowerTiles(powerState = {}, meterState = {}) {
+export function buildDailyObservedMaxima(powerHistory = {}, meterHistory = {}, now = new Date()) {
+  const date = new Date(now).toLocaleDateString("sv-SE");
+  const maxFor = (points, value) => (Array.isArray(points) ? points : [])
+    .filter((point) => new Date(point?.timestamp).toLocaleDateString("sv-SE") === date)
+    .map((point) => Math.abs(Number(value(point))))
+    .filter(Number.isFinite)
+    .reduce((maximum, current) => Math.max(maximum, current), 0);
+  const series = powerHistory?.series || {};
+  const meterPoints = Array.isArray(meterHistory?.points) ? meterHistory.points : [];
+  const gridMaximum = meterPoints
+    .filter((point) => new Date(point?.timestamp).toLocaleDateString("sv-SE") === date)
+    .map((point) => Math.max(Math.abs(Number(point.import_kw)), Math.abs(Number(point.export_kw))))
+    .filter(Number.isFinite)
+    .reduce((maximum, current) => Math.max(maximum, current), 0);
+  return {
+    date,
+    house: maxFor(series.consumption?.points, (point) => point.value_kw),
+    solar: maxFor(series.solar?.points, (point) => point.value_kw),
+    grid: gridMaximum,
+    battery: Math.max(
+      maxFor(series.charging?.points, (point) => point.value_kw),
+      maxFor(series.discharging?.points, (point) => point.value_kw),
+    ),
+  };
+}
+
+export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {}) {
   const finiteMagnitude = (value) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : null;
   const house = finiteMagnitude(powerState.consumption_kw);
   const solar = finiteMagnitude(powerState.solar_kw);
@@ -325,11 +351,17 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}) {
       : dischargingActive
         ? { value: discharging, status: "Urladdar", direction: "discharging", charging, discharging }
         : { value: 0, status: "Vilar", direction: null, charging, discharging };
+  const withScale = (tile, key) => {
+    const current = Number.isFinite(tile.value) ? Math.abs(tile.value) : 0;
+    const maxToday = Math.max(0, Number.isFinite(Number(maxima[key])) ? Number(maxima[key]) : current);
+    const scaleMax = Math.max(1, maxToday);
+    return { ...tile, maxToday, scaleMax, fillPercent: Math.max(0, Math.min(100, current / scaleMax * 100)) };
+  };
   return {
-    house: { value: house, status: house === null ? "Ej tillgängligt" : "Förbrukar" },
-    solar: { value: solar, status: solar === null ? "Ej tillgängligt" : "Producerar" },
-    grid,
-    battery,
+    house: withScale({ value: house, status: house === null ? "Ej tillgängligt" : "Förbrukar" }, "house"),
+    solar: withScale({ value: solar, status: solar === null ? "Ej tillgängligt" : "Producerar" }, "solar"),
+    grid: withScale(grid, "grid"),
+    battery: withScale(battery, "battery"),
   };
 }
 
@@ -836,6 +868,7 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = null;
     this._chartPreferencesReady = false;
     this._meterPowerHistory = { date: null, points: [] };
+    this._livePowerMaxima = { date: null, house: 0, solar: 0, grid: 0, battery: 0 };
     this._meterTooltipPoints = [];
     this._meterCanonicalPoints = [];
     this._meterCanonicalPointMap = new Map();
@@ -894,6 +927,8 @@ class ElrakningPanel {
             <span class="live-power-title">Hus</span>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
+            <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
+            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
             <div class="soc-tooltip live-power-tooltip" hidden></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
@@ -901,6 +936,8 @@ class ElrakningPanel {
             <span class="live-power-title">Sol</span>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
+            <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
+            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
             <div class="soc-tooltip live-power-tooltip" hidden></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
@@ -909,6 +946,8 @@ class ElrakningPanel {
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
+            <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
+            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
             <div class="soc-tooltip live-power-tooltip" hidden></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
@@ -916,6 +955,8 @@ class ElrakningPanel {
             <span class="live-power-title">Batteri</span>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
+            <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
+            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
             <div class="soc-tooltip live-power-tooltip" hidden></div>
           </article>
         </section>
@@ -2259,6 +2300,31 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: 12px;
           grid-column: 2;
+        }
+
+        .live-power-bar {
+          background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
+          border-radius: 999px;
+          grid-column: 2;
+          height: 5px;
+          margin-top: 8px;
+          overflow: hidden;
+        }
+
+        .live-power-bar span {
+          background: var(--primary-color);
+          border-radius: inherit;
+          display: block;
+          height: 100%;
+          transform-origin: left center;
+          transition: width 120ms ease;
+        }
+
+        .live-power-max {
+          color: var(--secondary-text-color);
+          font-size: 10px;
+          grid-column: 2;
+          margin-top: 4px;
         }
 
         .live-power-action {
@@ -3881,31 +3947,56 @@ class ElrakningPanel {
     this._renderDailyEnergyCard();
   }
 
+  _rebuildLivePowerMaxima() {
+    const rebuilt = buildDailyObservedMaxima(this._powerHistory, this._meterPowerHistory, new Date());
+    this._livePowerMaxima = rebuilt;
+    this._renderLivePowerRow();
+  }
+
   _renderLivePowerRow() {
     const row = this.host.querySelector("[data-live-power-row]");
     if (!row) return;
-    const tiles = buildLivePowerTiles(this._powerState || {}, this._meterState || {});
+    const now = new Date();
+    const date = now.toLocaleDateString("sv-SE");
+    if (this._livePowerMaxima.date !== date) {
+      this._livePowerMaxima = { date, house: 0, solar: 0, grid: 0, battery: 0 };
+    }
+    const currentTiles = buildLivePowerTiles(this._powerState || {}, this._meterState || {});
+    for (const key of ["house", "solar", "grid", "battery"]) {
+      if (Number.isFinite(currentTiles[key].value)) this._livePowerMaxima[key] = Math.max(this._livePowerMaxima[key], Math.abs(currentTiles[key].value));
+    }
+    const tiles = buildLivePowerTiles(this._powerState || {}, this._meterState || {}, this._livePowerMaxima);
+    const withMeta = (key, fields) => [
+      ...fields,
+      { label: "Max idag", value: tiles[key].maxToday, formatted: `${this._formatNumber(tiles[key].maxToday)} kW` },
+      { label: "Dagskala", value: tiles[key].scaleMax, formatted: `${this._formatNumber(tiles[key].scaleMax)} kW` },
+      { label: "Bar", value: tiles[key].fillPercent, formatted: `${this._formatNumber(tiles[key].fillPercent)} %` },
+    ];
     const fieldSets = {
-      house: [{ label: "Hus just nu", value: tiles.house.value, formatted: tiles.house.value === null ? "—" : `${this._formatNumber(tiles.house.value)} kW` }],
-      solar: [{ label: "Sol just nu", value: tiles.solar.value, formatted: tiles.solar.value === null ? "—" : `${this._formatNumber(tiles.solar.value)} kW` }],
-      grid: [
+      house: withMeta("house", [{ label: "Hus just nu", value: tiles.house.value, formatted: tiles.house.value === null ? "—" : `${this._formatNumber(tiles.house.value)} kW` }]),
+      solar: withMeta("solar", [{ label: "Sol just nu", value: tiles.solar.value, formatted: tiles.solar.value === null ? "—" : `${this._formatNumber(tiles.solar.value)} kW` }]),
+      grid: withMeta("grid", [
         { label: "Nät just nu", value: Number.isFinite(Number(this._meterState?.power_kw)) ? Number(this._meterState.power_kw) : null, formatted: Number.isFinite(tiles.grid.value) ? `${this._formatNumber(tiles.grid.value)} kW` : "—" },
         { label: "Riktning", value: tiles.grid.direction, formatted: tiles.grid.status },
         { label: "Visat värde", value: tiles.grid.value, formatted: Number.isFinite(tiles.grid.value) ? `${this._formatNumber(tiles.grid.value)} kW` : "—" },
-      ],
-      battery: [
+      ]),
+      battery: withMeta("battery", [
         { label: "Laddning", value: tiles.battery.charging, formatted: Number.isFinite(tiles.battery.charging) ? `${this._formatNumber(tiles.battery.charging)} kW` : "—" },
         { label: "Urladdning", value: tiles.battery.discharging, formatted: Number.isFinite(tiles.battery.discharging) ? `${this._formatNumber(tiles.battery.discharging)} kW` : "—" },
         { label: "Status", value: tiles.battery.status, formatted: tiles.battery.status },
-      ],
+      ]),
     };
     for (const [key, tile] of Object.entries(tiles)) {
       const element = row.querySelector(`[data-live-power-tile="${key}"]`);
       if (!element) continue;
       const value = element.querySelector("[data-live-power-value]");
       const status = element.querySelector("[data-live-power-status]");
+      const fill = element.querySelector("[data-live-power-fill]");
+      const max = element.querySelector("[data-live-power-max]");
       if (value) value.textContent = Number.isFinite(tile.value) ? `${this._formatNumber(tile.value)} kW` : "—";
       if (status) status.textContent = tile.status;
+      if (fill) fill.style.width = `${tile.fillPercent}%`;
+      if (max) max.textContent = `Max idag ${this._formatNumber(tile.maxToday)} kW`;
       element.dataset.livePowerDirection = tile.direction || "idle";
       element._livePowerFields = fieldSets[key];
     }
@@ -4338,6 +4429,7 @@ class ElrakningPanel {
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: response?.solar_sun || { available: false },
       };
+      this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
@@ -5590,6 +5682,7 @@ class ElrakningPanel {
         date: response?.date || null,
         points: Array.isArray(response?.points) ? response.points : [],
       };
+      this._rebuildLivePowerMaxima();
       this._meterHistorySummary = response.history || {
         entity_id: response?.entity_id || entityId,
         success: true,

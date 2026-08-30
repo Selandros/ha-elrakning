@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildEnergyBalance, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -197,15 +197,28 @@ assert.ok(solarTooltipFields.some((field) => field.label === "Forecast effekt nu
 assert.ok(solarTooltipFields.some((field) => field.label === "SMHI Total molntäckning" && field.formatted === "88 %"));
 assert.ok(!solarTooltipFields.some((field) => field.label === "Forecast nästa timme"));
 assert.ok(solarTooltipFields.some((field) => field.label === "Mot prognos hittills" && field.formatted === "+68,3 %"));
-assert.deepEqual(buildLivePowerTiles(
+const liveTiles = buildLivePowerTiles(
   { consumption_kw: 0.63, solar_kw: 6.94, charging_kw: 0, discharging_kw: 0 },
   { power_kw: 2.43 },
-), {
-  house: { value: 0.63, status: "Förbrukar" },
-  solar: { value: 6.94, status: "Producerar" },
-  grid: { value: 2.43, status: "Importerar", direction: "import" },
-  battery: { value: 0, status: "Vilar", direction: null, charging: 0, discharging: 0 },
-});
+  { house: 2, solar: 10, grid: 5, battery: 4 },
+);
+assert.equal(liveTiles.house.value, 0.63);
+assert.equal(liveTiles.house.status, "Förbrukar");
+assert.equal(liveTiles.house.maxToday, 2);
+assert.equal(liveTiles.house.fillPercent, 31.5);
+assert.equal(liveTiles.solar.value, 6.94);
+assert.equal(liveTiles.solar.status, "Producerar");
+assert.equal(liveTiles.grid.value, 2.43);
+assert.equal(liveTiles.grid.status, "Importerar");
+assert.equal(liveTiles.battery.status, "Vilar");
+assert.equal(liveTiles.battery.fillPercent, 0);
+const maxima = buildDailyObservedMaxima({ series: {
+  solar: { points: [{ timestamp: "2026-08-30T10:00:00+02:00", value_kw: 4.2 }] },
+  consumption: { points: [{ timestamp: "2026-08-30T11:00:00+02:00", value_kw: 2.1 }] },
+  charging: { points: [{ timestamp: "2026-08-30T12:00:00+02:00", value_kw: 3.5 }] },
+  discharging: { points: [{ timestamp: "2026-08-30T13:00:00+02:00", value_kw: 4.4 }] },
+} }, { points: [{ timestamp: "2026-08-30T14:00:00+02:00", import_kw: 5.2, export_kw: 0 }] }, new Date("2026-08-30T15:00:00+02:00"));
+assert.deepEqual(maxima, { date: "2026-08-30", house: 2.1, solar: 4.2, grid: 5.2, battery: 4.4 });
 assert.equal(buildLivePowerTiles({}, { power_kw: -0.11 }).grid.status, "Exporterar");
 assert.equal(buildLivePowerTiles({}, { power_kw: 0.05 }).grid.status, "Ingen överföring");
 assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 0 }).battery.status, "Laddar");
