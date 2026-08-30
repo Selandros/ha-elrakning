@@ -1740,11 +1740,6 @@ class ElrakningPanel {
                 <button type="button" data-phase-metric="voltage" aria-pressed="false">Spänning</button>
                 <button type="button" data-phase-metric="active_power" aria-pressed="false">Effekt</button>
               </div>
-              <div class="phase-history-filter-selector" role="group" aria-label="Faser">
-                <button type="button" data-phase-filter="l1" aria-pressed="true">L1</button>
-                <button type="button" data-phase-filter="l2" aria-pressed="true">L2</button>
-                <button type="button" data-phase-filter="l3" aria-pressed="true">L3</button>
-              </div>
             </div>
             <div class="phase-history-summary" data-phase-history-summary></div>
             <div class="phase-history-chart" data-phase-history-chart></div>
@@ -2870,14 +2865,7 @@ class ElrakningPanel {
           gap: 6px;
         }
 
-        .phase-history-filter-selector {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-
-        .phase-history-metric-selector button,
-        .phase-history-filter-selector button {
+        .phase-history-metric-selector button {
           background: transparent;
           border: 1px solid var(--divider-color);
           border-radius: 999px;
@@ -2902,7 +2890,19 @@ class ElrakningPanel {
 
         .phase-history-summary div {
           color: var(--secondary-text-color);
+          cursor: pointer;
+          opacity: 0.48;
           text-align: center;
+          transition: opacity 120ms ease;
+        }
+
+        .phase-history-summary div.active {
+          opacity: 1;
+        }
+
+        .phase-history-summary div:focus-visible,
+        .phase-history-summary div:hover {
+          opacity: 0.78;
         }
 
         .phase-history-phase-label {
@@ -4270,10 +4270,11 @@ class ElrakningPanel {
   }
 
   _syncPhaseHistoryVisibilityButtons() {
-    for (const button of this.host.querySelectorAll("[data-phase-filter]")) {
-      const active = this._phaseHistoryVisible[button.dataset.phaseFilter] === true;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
+    for (const item of this.host.querySelectorAll("[data-phase-summary]")) {
+      const active = this._phaseHistoryVisible[item.dataset.phaseSummary] === true;
+      item.classList.toggle("active", active);
+      item.classList.toggle("inactive", !active);
+      item.setAttribute("aria-pressed", String(active));
     }
   }
 
@@ -6663,16 +6664,23 @@ class ElrakningPanel {
         this._renderPhaseHistoryCard();
       });
     }
-    for (const button of this.host.querySelectorAll("[data-phase-filter]")) {
-      button.addEventListener("click", () => {
-        const phase = button.dataset.phaseFilter;
-        if (!Object.hasOwn(this._phaseHistoryVisible, phase)) return;
-        this._phaseHistoryVisible[phase] = button.getAttribute("aria-pressed") !== "true";
-        this._syncPhaseHistoryVisibilityButtons();
-        this._persistChartPreferences();
-        this._renderPhaseHistoryCard();
-      });
-    }
+    const summary = this.host.querySelector("[data-phase-history-summary]");
+    const togglePhaseSummary = (event) => {
+      const item = event.target.closest("[data-phase-summary]");
+      if (!item || !summary.contains(item)) return;
+      const phase = item.dataset.phaseSummary;
+      if (!Object.hasOwn(this._phaseHistoryVisible, phase)) return;
+      this._phaseHistoryVisible[phase] = item.getAttribute("aria-pressed") !== "true";
+      this._syncPhaseHistoryVisibilityButtons();
+      this._persistChartPreferences();
+      this._renderPhaseHistoryCard();
+    };
+    summary?.addEventListener("click", togglePhaseSummary);
+    summary?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      togglePhaseSummary(event);
+    });
     this._syncPhaseHistoryMetricButtons();
     this._syncPhaseHistoryVisibilityButtons();
     const copy = this.host.querySelector("[data-phase-history-copy]");
@@ -6731,18 +6739,19 @@ class ElrakningPanel {
     card.hidden = !cardAvailable;
     const copy = this.host.querySelector("[data-phase-history-copy]");
     if (copy) copy.hidden = !this._debugEnabled || !cardAvailable;
-    if (!hasActivePoints) {
-      summary.replaceChildren();
-      chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
-      return;
-    }
     const labels = { current: ["Ström", "A"], voltage: ["Spänning", "V"], active_power: ["Effekt", "kW"] };
     const [label, unit] = labels[metric];
     const live = metric === "current" ? this._meterState?.phase_current_a : metric === "voltage" ? this._meterState?.phase_voltage_v : this._meterState?.phase_active_power_kw;
-    summary.replaceChildren(...["l1", "l2", "l3"].filter((phase) => this._phaseHistoryVisible[phase]).map((phase) => {
+    summary.replaceChildren(...["l1", "l2", "l3"].map((phase) => {
       const item = document.createElement("div");
-        const strong = document.createElement("strong");
-        const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
+      const active = this._phaseHistoryVisible[phase] === true;
+      item.className = `phase-history-summary-item ${phase}${active ? " active" : " inactive"}`;
+      item.dataset.phaseSummary = phase;
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
+      item.setAttribute("aria-pressed", String(active));
+      const strong = document.createElement("strong");
+      const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
       const formattedValue = metric === "voltage"
         ? Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })
         : this._formatNumber(metric === "current" ? Math.abs(Number(value)) : Number(value));
@@ -6756,6 +6765,10 @@ class ElrakningPanel {
       item.append(strong, indicator, phaseLabel);
       return item;
     }));
+    if (!hasActivePoints) {
+      chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
+      return;
+    }
     const width = 960;
     const height = 300;
     const plot = { left: 44, right: 8, top: 12, bottom: 24 };
