@@ -31,6 +31,7 @@ def _load_module():
         "homeassistant.helpers.entity_registry": entity_registry,
     }
     previous = {name: sys.modules.get(name) for name in modules}
+    previous_package = sys.modules.get("custom_components.elrakning")
     sys.modules.update(modules)
     package = types.ModuleType("custom_components.elrakning")
     package.__path__ = [str(Path(__file__).parents[1] / "custom_components" / "elrakning")]
@@ -45,6 +46,10 @@ def _load_module():
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = original
+    if previous_package is None:
+        sys.modules.pop("custom_components.elrakning", None)
+    else:
+        sys.modules["custom_components.elrakning"] = previous_package
     return module
 
 

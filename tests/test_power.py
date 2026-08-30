@@ -11,6 +11,7 @@ def _load_power_module():
     homeassistant = types.ModuleType("homeassistant")
     core = types.ModuleType("homeassistant.core")
     helpers = types.ModuleType("homeassistant.helpers")
+    entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
     storage = types.ModuleType("homeassistant.helpers.storage")
     util = types.ModuleType("homeassistant.util")
     dt_module = types.ModuleType("homeassistant.util.dt")
@@ -33,6 +34,7 @@ def _load_power_module():
 
     storage.Store = Store
     helpers.storage = storage
+    helpers.entity_registry = entity_registry
     util.dt = dt_module
     homeassistant.core = core
     homeassistant.helpers = helpers
@@ -42,10 +44,12 @@ def _load_power_module():
         "homeassistant.core": core,
         "homeassistant.helpers": helpers,
         "homeassistant.helpers.storage": storage,
+        "homeassistant.helpers.entity_registry": entity_registry,
         "homeassistant.util": util,
         "homeassistant.util.dt": dt_module,
     }
     previous = {name: sys.modules.get(name) for name in modules}
+    previous_package = sys.modules.get("custom_components.elrakning")
     sys.modules.update(modules)
     package = types.ModuleType("custom_components.elrakning")
     package.__path__ = [str(Path(__file__).parents[1] / "custom_components" / "elrakning")]
@@ -65,6 +69,10 @@ def _load_power_module():
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = original
+    if previous_package is None:
+        sys.modules.pop("custom_components.elrakning", None)
+    else:
+        sys.modules["custom_components.elrakning"] = previous_package
     return power_module
 
 

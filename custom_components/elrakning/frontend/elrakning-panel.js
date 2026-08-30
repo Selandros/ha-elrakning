@@ -561,6 +561,38 @@ export function phaseHistoryAxisEnd(points = []) {
     .reduce((latest, timestamp) => Math.max(latest, timestamp), null);
 }
 
+/** Convert a browser pointer to the SVG viewBox and plot coordinate systems. */
+export function pointerToPlotCoordinates(svg, event, plot, width, height) {
+  const bounds = svg?.getBoundingClientRect?.();
+  if (!bounds || !bounds.width || !bounds.height) return null;
+  const viewX = ((event.clientX - bounds.left) / bounds.width) * width;
+  const viewY = ((event.clientY - bounds.top) / bounds.height) * height;
+  return {
+    viewX,
+    viewY,
+    plotX: viewX - plot.left,
+    plotY: viewY - plot.top,
+    inside: viewX >= plot.left && viewX <= width - plot.right
+      && viewY >= plot.top && viewY <= height - plot.bottom,
+  };
+}
+
+export function isPointerInsidePlot(svg, event, plot, width, height) {
+  return pointerToPlotCoordinates(svg, event, plot, width, height)?.inside === true;
+}
+
+const DEBUG_SENSITIVE_KEY = /(token|password|secret|cookie|authorization|customer[_-]?id|account[_-]?id|point[_-]?of[_-]?delivery|installation[_-]?identifier|premise[_-]?id|session[_-]?id)/i;
+
+export function sanitizeDebugData(value, key = "") {
+  if (DEBUG_SENSITIVE_KEY.test(key)) return "[redacted]";
+  if (Array.isArray(value)) return value.map((item) => sanitizeDebugData(item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [
+    childKey,
+    sanitizeDebugData(childValue, childKey),
+  ]));
+}
+
 export function buildCanonicalPhasePoints(points, dayStart, axisEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const axisEndMs = new Date(axisEnd).getTime();
@@ -1545,18 +1577,6 @@ export function renderSharedTooltip(tooltip, { title = "", fields = [] }) {
   }
 }
 
-async function copyChartRawData(copy, target, rawData) {
-  if (typeof copy !== "function" || rawData == null) return;
-  try {
-    await copy(JSON.stringify(rawData, null, 2));
-    target.textContent = "Kopierat";
-  } catch {
-    target.textContent = "Kunde inte kopiera";
-  }
-  window.clearTimeout(target._copyFeedbackTimer);
-  target._copyFeedbackTimer = window.setTimeout(() => { target.textContent = ""; }, 1500);
-}
-
 const tooltipNumber = (value, maximumFractionDigits = 2) => Number(value).toLocaleString("sv-SE", {
   maximumFractionDigits,
 });
@@ -1715,9 +1735,6 @@ class ElrakningPanel {
             <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span></div>
             <span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
-            <span class="invoice-estimate-comparison" data-invoice-estimate-comparison hidden></span>
-            <div class="invoice-estimate-bar" data-invoice-estimate-bar hidden aria-label="Jämförelse med föregående månad"><span data-invoice-estimate-fill></span><i data-invoice-estimate-marker aria-hidden="true"></i></div>
-            <div class="invoice-estimate-scale" data-invoice-estimate-scale hidden><span>0</span><span data-invoice-estimate-scale-value></span></div>
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="invoice" hidden>Visa data</button></div>
           </article>
         </section>
@@ -1797,6 +1814,7 @@ class ElrakningPanel {
               <h2 id="daily-energy-title" class="visually-hidden">Dagens energi</h2>
             </div>
             <div class="daily-energy-grid" data-daily-energy-grid></div>
+            <button type="button" class="card-source-action" data-card-source="energy" hidden>Visa data</button>
           </section>
 
           <section class="card soc-card" data-soc-card hidden aria-labelledby="soc-title">
@@ -1804,6 +1822,7 @@ class ElrakningPanel {
               <h2 id="soc-title" class="visually-hidden">Batteri SOC</h2>
             </div>
             <div class="soc-chart" data-soc-chart></div>
+            <button type="button" class="card-source-action" data-card-source="soc" hidden>Visa data</button>
           </section>
         </div>
 
@@ -1811,10 +1830,12 @@ class ElrakningPanel {
           <article class="card battery-history-card" data-power-card="battery-history" hidden aria-labelledby="battery-history-title">
             <h2 id="battery-history-title" class="visually-hidden">Batterihistorik</h2>
             <div class="battery-history-chart" data-battery-history-chart hidden></div>
+            <button type="button" class="card-source-action" data-card-source="battery-history" hidden>Visa data</button>
           </article>
           <article class="card solar-history-card" data-power-card="solar-history" hidden aria-labelledby="solar-history-title">
             <h2 id="solar-history-title" class="visually-hidden">Solhistorik</h2>
             <div class="solar-history-chart" data-solar-history-chart hidden></div>
+            <button type="button" class="card-source-action" data-card-source="solar-history" hidden>Visa data</button>
           </article>
         </div>
 
@@ -1831,6 +1852,11 @@ class ElrakningPanel {
             <div class="phase-history-summary" data-phase-history-summary></div>
             <div class="phase-history-chart" data-phase-history-chart></div>
             <button type="button" data-phase-history-copy hidden>Visa data</button>
+          </article>
+          <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
+            <div class="card-heading"><h2 id="cost-title">Kostnad</h2><span class="status" data-cost-period></span></div>
+            <div class="cost-summary" data-cost-summary></div>
+            <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>
         </div>
 
@@ -2926,8 +2952,38 @@ class ElrakningPanel {
         }
 
         .phase-history-row {
-          grid-template-columns: 1fr;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           margin-top: 16px;
+        }
+
+        .cost-card {
+          min-width: 0;
+        }
+
+        .cost-summary {
+          display: grid;
+          gap: 8px 14px;
+          grid-template-columns: minmax(0, 1fr) auto;
+          margin-top: 16px;
+        }
+
+        .cost-summary span {
+          color: var(--secondary-text-color);
+        }
+
+        .cost-summary strong {
+          font-weight: 500;
+          text-align: right;
+        }
+
+        .card-source-action {
+          margin-top: 16px;
+        }
+
+        @media (max-width: 700px) {
+          .phase-history-row {
+            grid-template-columns: 1fr;
+          }
         }
 
         .phase-history-card {
@@ -3087,7 +3143,7 @@ class ElrakningPanel {
         }
 
         .live-power-tile.invoice-estimate-card {
-          grid-template-rows: auto auto auto auto 5px auto auto;
+          grid-template-rows: auto auto auto minmax(0, auto);
           min-height: 0;
         }
 
@@ -3104,49 +3160,6 @@ class ElrakningPanel {
 
         .invoice-estimate-card .live-power-value {
           grid-row: 3;
-        }
-
-        .invoice-estimate-comparison {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          line-height: 1.2;
-          min-height: 15px;
-        }
-
-        .invoice-estimate-bar {
-          background: var(--divider-color);
-          border-radius: 999px;
-          height: 5px;
-          overflow: visible;
-          position: relative;
-        }
-
-        .invoice-estimate-bar span {
-          background: #77C2A1;
-          border-radius: inherit;
-          display: block;
-          height: 100%;
-        }
-
-        .invoice-estimate-bar i {
-          background: var(--secondary-text-color);
-          border-radius: 1px;
-          height: 11px;
-          position: absolute;
-          top: -3px;
-          width: 1px;
-        }
-
-        .invoice-estimate-scale {
-          color: var(--secondary-text-color);
-          display: flex;
-          font-size: 10px;
-          justify-content: space-between;
-          line-height: 1;
-        }
-
-        .invoice-estimate-card .live-power-copy-feedback {
-          grid-row: 7;
         }
 
         .provider-invoice-cost span {
@@ -4565,12 +4578,17 @@ class ElrakningPanel {
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
+    const cardSources = this.host.querySelectorAll("[data-card-source]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
+    cardSources.forEach((button) => {
+      const card = button.closest(".card");
+      button.hidden = !this._debugEnabled || Boolean(card?.hidden);
+    });
     this._updateLivePowerCardInteractivity();
   }
 
@@ -5348,13 +5366,6 @@ class ElrakningPanel {
       const group = event.target.closest?.("[data-battery-history-index]");
       if (group) show(event, Number(group.dataset.batteryHistoryIndex));
     });
-    svg.addEventListener("pointerdown", (event) => {
-      const group = event.target.closest?.("[data-battery-history-index]");
-      if (!group) return;
-      const index = Number(group.dataset.batteryHistoryIndex);
-      show(event, index);
-      if (this._debugEnabled) void copyChartRawData(this._copyText.bind(this), tooltip, days[index]);
-    });
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
   }
@@ -5398,7 +5409,7 @@ class ElrakningPanel {
     const y = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / range) * plotHeight;
     const groupWidth = plotWidth / days.length;
     const barWidth = Math.min(34, groupWidth * .5);
-    const referenceBarWidth = Math.min(42, groupWidth * .7);
+    const referenceBarWidth = barWidth;
     const groupX = (index) => plot.left + groupWidth * index + groupWidth / 2;
     const grid = [0, range / 2, range].map((level) => `<line class="solar-history-gridline" x1="${plot.left}" y1="${y(level)}" x2="${width - plot.right}" y2="${y(level)}" />`).join("");
     const bars = days.map((day, index) => {
@@ -5444,20 +5455,6 @@ class ElrakningPanel {
     svg.addEventListener("pointermove", (event) => {
       const group = event.target.closest?.("[data-solar-history-index]");
       if (group) show(event, Number(group.dataset.solarHistoryIndex));
-    });
-    svg.addEventListener("pointerdown", (event) => {
-      const group = event.target.closest?.("[data-solar-history-index]");
-      if (!group) return;
-      const index = Number(group.dataset.solarHistoryIndex);
-      show(event, index);
-      if (this._debugEnabled) {
-        void copyChartRawData(this._copyText.bind(this), tooltip, {
-          ...days[index],
-          solar_forecast: this._powerHistory?.solar_forecast || null,
-          weather: this._powerHistory?.solar_weather || null,
-          sun: this._powerHistory?.solar_sun || null,
-        });
-      }
     });
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
@@ -5542,10 +5539,12 @@ class ElrakningPanel {
       hover.replaceChildren();
     };
     const update = (event) => {
-      const rect = svg.getBoundingClientRect();
-      const svgX = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * width : plot.left;
-      const clampedSvgX = Math.max(plot.left, Math.min(width - plot.right, svgX));
-      const plotRatio = plotWidth > 0 ? (clampedSvgX - plot.left) / plotWidth : 0;
+      const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
+      if (!pointer?.inside) {
+        clear();
+        return null;
+      }
+      const plotRatio = plotWidth > 0 ? (pointer.viewX - plot.left) / plotWidth : 0;
       const timestamp = xStart + plotRatio * xDuration;
       const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
       const pointX = x(point.timestamp);
@@ -5557,18 +5556,9 @@ class ElrakningPanel {
       tooltip.hidden = false;
       hover.innerHTML = `<circle class="chart-hover-marker chart-hover-marker-soc" fill="${chartColor("soc")}" cx="${pointX}" cy="${pointY}" r="4" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+      return point;
     };
     svg.addEventListener("pointermove", update);
-    svg.addEventListener("pointerdown", (event) => {
-      update(event);
-      if (this._debugEnabled) {
-        const rect = svg.getBoundingClientRect();
-        const svgX = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * width : plot.left;
-        const timestamp = xStart + Math.max(0, Math.min(plotWidth, svgX - plot.left)) / plotWidth * xDuration;
-        const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
-        void copyChartRawData(this._copyText.bind(this), tooltip, point);
-      }
-    });
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
   }
@@ -5737,7 +5727,7 @@ class ElrakningPanel {
     heading.textContent = title;
     provider.textContent = sourceLabel ? `Källa: ${sourceLabel}` : "";
     provider.hidden = !sourceLabel;
-    text.textContent = JSON.stringify(data, null, 2);
+    text.textContent = JSON.stringify(sanitizeDebugData(data), null, 2);
     copy.disabled = false;
     copy.textContent = "Kopiera";
     dialog.hidden = false;
@@ -6107,6 +6097,7 @@ class ElrakningPanel {
     const text = this.host.querySelector("[data-provider-source-text]");
     const heading = dialog?.querySelector("h2");
     const liveSources = [...this.host.querySelectorAll("[data-live-power-source]")];
+    const cardSources = [...this.host.querySelectorAll("[data-card-source]")];
     if (!open || !eonOpen || !dialog || !close || !copy || !provider || !text || !heading) return;
     const dismiss = () => {
       dialog.hidden = true;
@@ -6120,6 +6111,7 @@ class ElrakningPanel {
       const isEon = event.currentTarget === eonOpen;
       const liveSource = event.currentTarget.closest?.("[data-live-power-tile]");
       const liveSourceName = event.currentTarget.dataset.livePowerSource;
+      const cardSource = event.currentTarget.dataset.cardSource;
       dialog.hidden = false;
       heading.textContent = "Source data";
       text.textContent = "Hämtar Source data …";
@@ -6131,15 +6123,24 @@ class ElrakningPanel {
           ? liveSource._livePowerRaw || {}
           : isEon
           ? await this.hass.callWS({ type: "elrakning/grid/source_data" })
+          : cardSource
+          ? {
+            source: cardSource,
+            power_state: this._powerState,
+            meter_state: this._meterState,
+            power_history: this._powerHistory,
+            meter_power_history: this._meterPowerHistory,
+          }
           : await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
         const providerName = liveSource ? liveSourceName : source.provider_name || source.facility?.provider_name;
         if (typeof providerName === "string" && providerName.trim()) {
           provider.textContent = `Källa: ${providerName.trim()}`;
           provider.hidden = false;
         }
+        const safeSource = sanitizeDebugData(source);
         text.textContent = liveSource || isEon
-          ? JSON.stringify(source, null, 2)
-          : JSON.stringify({ facility: source.facility, contracts: source.contracts, invoices: source.invoices.items, consumption: { total: source.consumption.total, items: source.consumption.items } }, null, 2);
+          ? JSON.stringify(safeSource, null, 2)
+          : JSON.stringify({ facility: safeSource.facility, contracts: safeSource.contracts, invoices: safeSource.invoices.items, consumption: { total: safeSource.consumption.total, items: safeSource.consumption.items } }, null, 2);
         copy.disabled = false;
       } catch {
         text.textContent = "Source data kunde inte hämtas.";
@@ -6148,6 +6149,7 @@ class ElrakningPanel {
     open.addEventListener("click", loadSource);
     eonOpen.addEventListener("click", loadSource);
     liveSources.forEach((button) => button.addEventListener("click", loadSource));
+    cardSources.forEach((button) => button.addEventListener("click", loadSource));
     copy.addEventListener("click", async () => {
       try {
         await this._copyText(text.textContent);
@@ -6257,13 +6259,7 @@ class ElrakningPanel {
     const card = this.host.querySelector("[data-invoice-estimate-card]");
     const month = this.host.querySelector("[data-invoice-estimate-month]");
     const total = this.host.querySelector("[data-invoice-estimate-total]");
-    const comparisonText = this.host.querySelector("[data-invoice-estimate-comparison]");
-    const comparisonBar = this.host.querySelector("[data-invoice-estimate-bar]");
-    const comparisonFill = this.host.querySelector("[data-invoice-estimate-fill]");
-    const comparisonMarker = this.host.querySelector("[data-invoice-estimate-marker]");
-    const comparisonScale = this.host.querySelector("[data-invoice-estimate-scale]");
-    const comparisonScaleValue = this.host.querySelector("[data-invoice-estimate-scale-value]");
-    if (!card || !month || !total || !comparisonText || !comparisonBar || !comparisonFill || !comparisonMarker || !comparisonScale || !comparisonScaleValue) return;
+    if (!card || !month || !total) return;
     const billingHistory = this._billingHistory;
     const estimate = buildInvoiceEstimate(
       billingHistory?.price_periods,
@@ -6275,9 +6271,6 @@ class ElrakningPanel {
     card.hidden = !configured || !billingHistory;
     if (!configured || !billingHistory) {
       this._invoiceEstimateRaw = null;
-      comparisonText.hidden = true;
-      comparisonBar.hidden = true;
-      comparisonScale.hidden = true;
       this._renderInvoiceCardCosts();
       return;
     }
@@ -6285,9 +6278,6 @@ class ElrakningPanel {
     if (!estimate) {
       total.textContent = "–";
       this._invoiceEstimateRaw = null;
-      comparisonText.hidden = true;
-      comparisonBar.hidden = true;
-      comparisonScale.hidden = true;
       this._renderInvoiceCardCosts();
       return;
     }
@@ -6302,26 +6292,6 @@ class ElrakningPanel {
       estimate.month,
     );
     const comparison = buildInvoiceComparison(estimate, previousActual);
-    const previousLabel = previousActual.month ? this._formatInvoiceMonth(previousActual.month).split(" ")[0] : "föregående månad";
-    if (comparison.available) {
-      const difference = Number(comparison.difference_sek);
-      const direction = difference < 0 ? "lägre" : difference > 0 ? "högre" : "samma som";
-      const amount = this._formatSek(Math.abs(difference));
-      const percent = comparison.difference_percent == null ? "" : ` · ${difference < 0 ? "−" : difference > 0 ? "+" : ""}${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
-      comparisonText.textContent = `${amount} ${direction} än ${previousLabel}${percent}`;
-      comparisonText.hidden = false;
-      comparisonBar.hidden = false;
-      comparisonScale.hidden = false;
-      comparisonFill.style.width = `${comparison.fill_percent}%`;
-      comparisonFill.style.backgroundColor = chartColor(difference <= 0 ? "solar" : "import");
-      comparisonMarker.style.left = `${comparison.previous_marker_percent}%`;
-      comparisonScaleValue.textContent = this._formatSek(comparison.scale_max_sek);
-    } else {
-      comparisonText.textContent = `Ingen komplett jämförelse för ${previousLabel}`;
-      comparisonText.hidden = false;
-      comparisonBar.hidden = true;
-      comparisonScale.hidden = true;
-    }
     this._invoiceEstimateRaw = {
       ...estimate,
       current_estimate: estimate,
@@ -6342,6 +6312,30 @@ class ElrakningPanel {
       if (output) output.textContent = available ? this._formatSek(Number(value)) : "";
       element.hidden = !available;
     }
+    this._renderCostCard();
+  }
+
+  _renderCostCard() {
+    const card = this.host.querySelector("[data-cost-card]");
+    const period = this.host.querySelector("[data-cost-period]");
+    const summary = this.host.querySelector("[data-cost-summary]");
+    if (!card || !period || !summary) return;
+    const estimate = this._invoiceEstimateRaw;
+    const total = Number(estimate?.estimated_month_total_sek);
+    const rows = [
+      ["Estimerad månad", Number.isFinite(total) ? this._formatSek(total) : null],
+      ["Kostnad hittills", Number.isFinite(Number(estimate?.total_so_far_sek)) ? this._formatSek(Number(estimate.total_so_far_sek)) : null],
+      ["Importerad energi", Number.isFinite(Number(estimate?.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
+    ].filter(([, value]) => value);
+    card.hidden = !rows.length;
+    period.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
+    summary.replaceChildren(...rows.flatMap(([label, value]) => {
+      const name = document.createElement("span");
+      name.textContent = label;
+      const output = document.createElement("strong");
+      output.textContent = value;
+      return [name, output];
+    }));
   }
 
   _formatInvoiceMonth(value) {
@@ -6886,15 +6880,19 @@ class ElrakningPanel {
     ]));
     const axisEnd = phaseHistoryAxisEnd(Object.values(phasePoints).flat()) || rawAxisEnd;
     const timeRange = Math.max(1, axisEnd - axisStart);
+    const fuse = Number(this._meterState?.facility?.fuse_ampere);
     const renderedPhaseHistory = { [metric]: phasePoints };
     this._phaseRenderedHistory = renderedPhaseHistory;
     if (!Object.values(phasePoints).some((points) => points.length)) {
       chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
+      this._phaseRenderSignature = "empty";
       return;
     }
+    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints });
+    if (renderSignature === this._phaseRenderSignature && chart.querySelector(".phase-history-svg")) return;
+    this._phaseRenderSignature = renderSignature;
     const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
     let minValue = metric === "current" ? 0 : Math.min(...values);
-    const fuse = Number(this._meterState?.facility?.fuse_ampere);
     const observedMax = values.length ? Math.max(...values.map((value) => metric === "current" ? Math.abs(value) : value)) : 0;
     let maxValue = metric === "current"
       ? Math.max(Number.isFinite(fuse) ? fuse : 0, observedMax * 1.08)
@@ -6967,8 +6965,13 @@ class ElrakningPanel {
     const hover = svg.querySelector(".phase-history-hover");
     const nearest = (timestamp) => Object.fromEntries(Object.entries(phasePoints).map(([phase, points]) => [phase, points.reduce((best, point) => !best || Math.abs(new Date(point.timestamp) - timestamp) < Math.abs(new Date(best.timestamp) - timestamp) ? point : best, null)]));
     const update = (event) => {
-      const bounds = svg.getBoundingClientRect();
-      const timestamp = new Date(axisStart + Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))) * timeRange);
+      const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
+      if (!pointer?.inside) {
+        clear();
+        return;
+      }
+      const ratio = (pointer.viewX - plot.left) / Math.max(1, width - plot.left - plot.right);
+      const timestamp = new Date(axisStart + ratio * timeRange);
       const selected = nearest(timestamp);
       const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, color: phaseColors[phase], formatted: `${metric === "voltage" ? Number(point.value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }) : this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
       renderSharedTooltip(tooltip, { title: timestamp.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }), fields });
@@ -8131,30 +8134,6 @@ class ElrakningPanel {
     svg.addEventListener("mouseleave", () => {
       clearHoverMarkers();
       tooltip.hidden = true;
-    });
-    let lastChartDebugCopyAt = 0;
-    const copyChartDebugText = async () => {
-      if (!this._debugEnabled) return;
-      const now = performance.now();
-      if (now - lastChartDebugCopyAt < 500) return;
-      lastChartDebugCopyAt = now;
-      const copyText = this._chartDebugCopyText;
-      void this._recordDiagnostic("price", "INFO", "chart_debug_copy_clicked", "Price chart debug bar clicked");
-      void this._recordDiagnostic("price", "INFO", "chart_debug_copy_text_length", `Chart debug copy text length: ${copyText.length}`);
-      if (!copyText) return;
-      try {
-        await this._copyText(copyText);
-        void this._recordDiagnostic("price", "INFO", "chart_debug_copy_success", "Price chart debug text copied");
-      } catch {
-        // Copy failures are intentionally not logged beyond the requested diagnostics.
-      }
-    };
-    svg.addEventListener("click", (event) => {
-      if (!this._debugEnabled || !hasVisibleTooltipLayer || !insidePlot(event.clientX, event.clientY)) return;
-      const hit = periodAt(event.clientX);
-      if (!hit) return;
-      show(hit.period, event, hit.tooltipTimestamp);
-      void copyChartDebugText();
     });
     chart.addEventListener("touchstart", (event) => {
       const touch = event.touches[0];

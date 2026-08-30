@@ -10,6 +10,9 @@ PKG = "custom_components.elrakning.elnat"
 
 
 def _load_manager():
+    previous_root_package = sys.modules.get("custom_components")
+    previous_package = sys.modules.get("custom_components.elrakning")
+    previous_const = sys.modules.get("custom_components.elrakning.const")
     homeassistant = types.ModuleType("homeassistant")
     helpers = types.ModuleType("homeassistant.helpers")
     event = types.ModuleType("homeassistant.helpers.event")
@@ -52,6 +55,18 @@ def _load_manager():
         module = importlib.util.module_from_spec(spec)
         sys.modules[full_name] = module
         spec.loader.exec_module(module)
+    if previous_root_package is None:
+        sys.modules.pop("custom_components", None)
+    else:
+        sys.modules["custom_components"] = previous_root_package
+    if previous_package is None:
+        sys.modules.pop("custom_components.elrakning", None)
+    else:
+        sys.modules["custom_components.elrakning"] = previous_package
+    if previous_const is None:
+        sys.modules.pop("custom_components.elrakning.const", None)
+    else:
+        sys.modules["custom_components.elrakning.const"] = previous_const
     return sys.modules[f"{PKG}.eon_manager"]
 
 
