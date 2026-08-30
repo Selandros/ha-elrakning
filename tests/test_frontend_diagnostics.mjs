@@ -900,6 +900,7 @@ assert.match(panelSource, /data-live-power-tile="battery"[\s\S]*data-invoice-est
 assert.match(panelSource, /class="live-power-title">Estimerad faktura/);
 assert.match(panelSource, /class="live-power-value" data-invoice-estimate-total/);
 assert.match(panelSource, /data-invoice-estimate-total/);
+assert.match(panelSource, /_formatInvoiceMonth\(estimate\.month\)\.split\(" "\)\[0\]/);
 assert.match(panelSource, /provider-invoice-cost/);
 assert.match(panelSource, /data-provider-invoice-cost="elhandel"/);
 assert.match(panelSource, /data-provider-invoice-cost="elnet"/);

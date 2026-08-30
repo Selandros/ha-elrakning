@@ -5316,7 +5316,7 @@ class ElrakningPanel {
       this._renderInvoiceCardCosts();
       return;
     }
-    month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
+    month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month).split(" ")[0] : "";
     if (!estimate) {
       total.textContent = "–";
       this._invoiceEstimateRaw = null;
