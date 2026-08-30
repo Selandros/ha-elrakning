@@ -2701,6 +2701,7 @@ class ElrakningPanel {
         .soc-card {
           --soc-color: var(--el-solar-color);
           display: block;
+          min-block-size: 0;
           min-height: 0;
           min-width: 0;
         }
@@ -2720,6 +2721,7 @@ class ElrakningPanel {
 
         .soc-chart {
           margin: 0;
+          min-block-size: 0;
           min-height: 0;
           position: relative;
           width: 100%;
@@ -3312,7 +3314,7 @@ class ElrakningPanel {
           container-type: inline-size;
           display: grid;
           align-content: start;
-          grid-template-rows: auto auto auto 5px auto 12px minmax(0, auto);
+          grid-template-rows: auto auto auto 5px auto minmax(0, auto);
           row-gap: 4px;
           min-width: 0;
           padding: 12px 14px;
@@ -3375,6 +3377,10 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: 10px;
           margin-top: 0;
+        }
+
+        .live-power-grid-fuse-status-spacer {
+          display: none;
         }
 
         .live-power-bar {
@@ -3440,6 +3446,20 @@ class ElrakningPanel {
 
           .invoice-estimate-card {
             grid-column: 1 / -1;
+          }
+        }
+
+        @container (min-width: 761px) {
+          .soc-card {
+            contain: size;
+            overflow: hidden;
+          }
+        }
+
+        @container (max-width: 760px) {
+          .soc-card {
+            contain: none;
+            overflow: hidden;
           }
         }
 
