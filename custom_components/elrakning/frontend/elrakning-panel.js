@@ -3059,12 +3059,17 @@ class ElrakningPanel {
         }
 
         .phase-history-summary div {
+          align-items: center;
           color: var(--secondary-text-color);
           cursor: pointer;
-          font-size: var(--price-card-text-size);
+          display: inline-flex;
+          font-size: 14px;
+          gap: 4px;
+          line-height: 18px;
           opacity: 0.48;
-          padding: 4px 2px;
+          padding: 2px 4px;
           transition: opacity 120ms ease;
+          white-space: nowrap;
         }
 
         .phase-history-summary div.active {
@@ -3086,14 +3091,15 @@ class ElrakningPanel {
           border-radius: 50%;
           display: inline-block;
           height: 6px;
-          margin-right: 3px;
+          margin-right: 0;
           width: 6px;
         }
 
         .phase-history-summary strong {
           color: var(--primary-text-color);
-          font-size: var(--price-card-text-size);
+          font-size: 14px;
           font-weight: 500;
+          line-height: 18px;
         }
 
         .phase-history-chart {
@@ -6994,7 +7000,7 @@ class ElrakningPanel {
         const phaseLabel = document.createElement("span");
         phaseLabel.className = `phase-history-phase-label ${phase}`;
         phaseLabel.textContent = phase.toUpperCase();
-        item.append(strong, indicator, phaseLabel);
+        item.append(indicator, phaseLabel, strong);
         summary.append(item);
       }
       const active = this._phaseHistoryVisible[phase] === true;
