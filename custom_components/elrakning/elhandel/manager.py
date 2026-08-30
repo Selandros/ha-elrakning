@@ -46,6 +46,10 @@ MAIN_CARD_DEFAULTS = {
     "consumption": False,
     "battery": False,
 }
+PRICE_COMPARISON_DEFAULTS = {
+    "electricity": True,
+    "grid": False,
+}
 
 
 class ElhandelManager:
@@ -163,6 +167,39 @@ class ElhandelManager:
         stored = await self.chart_preferences_store.async_load()
         users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
         users[user_id] = {**(users.get(user_id) if isinstance(users.get(user_id), dict) else {}), "chart_layers": current}
+        await self.chart_preferences_store.async_save({"users": users})
+        return current
+
+    async def async_get_price_comparison(self, user_id: str) -> dict[str, bool]:
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) else {}
+        user_state = users.get(user_id, {}) if isinstance(users, dict) else {}
+        saved = user_state.get("price_comparison", {}) if isinstance(user_state, dict) else {}
+        result = {
+            key: saved[key] if isinstance(saved, dict) and isinstance(saved.get(key), bool) else default
+            for key, default in PRICE_COMPARISON_DEFAULTS.items()
+        }
+        if not isinstance(users, dict):
+            users = {}
+        if not isinstance(users.get(user_id), dict) or users[user_id].get("price_comparison") != result:
+            users[user_id] = {
+                **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
+                "price_comparison": result,
+            }
+            await self.chart_preferences_store.async_save({"users": users})
+        return result
+
+    async def async_set_price_comparison(self, user_id: str, updates: dict[str, bool]) -> dict[str, bool]:
+        current = await self.async_get_price_comparison(user_id)
+        for key, value in updates.items():
+            if key in PRICE_COMPARISON_DEFAULTS and isinstance(value, bool):
+                current[key] = value
+        stored = await self.chart_preferences_store.async_load()
+        users = stored.get("users", {}) if isinstance(stored, dict) and isinstance(stored.get("users"), dict) else {}
+        users[user_id] = {
+            **(users.get(user_id) if isinstance(users.get(user_id), dict) else {}),
+            "price_comparison": current,
+        }
         await self.chart_preferences_store.async_save({"users": users})
         return current
 

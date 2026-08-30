@@ -18,7 +18,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data, grid_variable_cost_ex_vat
-from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, ElhandelManager
+from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
@@ -695,11 +695,13 @@ async def websocket_chart_layers(hass, connection, msg):
     chart_layers = await manager.async_get_chart_layers(connection.user.id)
     configuration_cards_visible = await manager.async_get_configuration_cards_visible(connection.user.id)
     main_cards = await manager.async_get_main_cards(connection.user.id)
+    price_comparison = await manager.async_get_price_comparison(connection.user.id)
     connection.send_result(msg["id"], {
         "success": True,
         "chart_layers": chart_layers,
         "configuration_cards_visible": configuration_cards_visible,
         "main_cards": main_cards,
+        "price_comparison": price_comparison,
     })
 
 
@@ -712,6 +714,9 @@ async def websocket_chart_layers(hass, connection, msg):
         vol.Optional("configuration_cards_visible"): bool,
         vol.Optional("main_cards", default={}): {
             vol.Optional(key): bool for key in MAIN_CARD_DEFAULTS
+        },
+        vol.Optional("price_comparison", default={}): {
+            vol.Optional(key): bool for key in PRICE_COMPARISON_DEFAULTS
         },
     }
 )
@@ -732,11 +737,15 @@ async def websocket_chart_layers_set(hass, connection, msg):
     main_cards = await manager.async_get_main_cards(connection.user.id)
     if "main_cards" in msg:
         main_cards = await manager.async_set_main_cards(connection.user.id, msg["main_cards"])
+    price_comparison = await manager.async_get_price_comparison(connection.user.id)
+    if "price_comparison" in msg:
+        price_comparison = await manager.async_set_price_comparison(connection.user.id, msg["price_comparison"])
     connection.send_result(msg["id"], {
         "success": True,
         "chart_layers": chart_layers,
         "configuration_cards_visible": configuration_cards_visible,
         "main_cards": main_cards,
+        "price_comparison": price_comparison,
     })
 
 

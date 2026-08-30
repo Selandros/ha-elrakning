@@ -3452,6 +3452,13 @@ class ElrakningPanel {
     }
   }
 
+  _applyPriceComparisonState(preferences) {
+    if (!preferences || typeof preferences !== "object") return;
+    for (const key of Object.keys(this._priceComparisonVisible)) {
+      if (typeof preferences[key] === "boolean") this._priceComparisonVisible[key] = preferences[key];
+    }
+  }
+
   _syncChartLayerButtons() {
     const layers = this._chartLayerState();
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
@@ -3473,9 +3480,11 @@ class ElrakningPanel {
     try {
       const response = await this.hass.callWS({ type: "elrakning/ui_preferences/get" });
       this._applyChartLayerState(response.chart_layers);
+      this._applyPriceComparisonState(response.price_comparison);
       this._applyConfigurationCardsVisibility(response.configuration_cards_visible, response.main_cards);
       this._chartPreferencesReady = true;
       this._syncChartLayerButtons();
+      this._syncPriceComparisonControls();
       this.renderPriceChart();
     } catch {
       // Keep the first-use defaults for this session when preference loading fails.
@@ -3488,6 +3497,7 @@ class ElrakningPanel {
       await this.hass.callWS({
         type: "elrakning/ui_preferences/set",
         chart_layers: this._chartLayerState(),
+        price_comparison: this._priceComparisonVisible,
         configuration_cards_visible: this._configurationCardsVisible,
         main_cards: this._mainCards,
       });
@@ -3555,10 +3565,10 @@ class ElrakningPanel {
       input.addEventListener("change", () => {
         const layer = control.dataset.priceLayer;
         if (!(layer in this._priceComparisonVisible) || input.disabled) return;
-        this._priceComparisonVisible[layer] = !this._priceComparisonVisible[layer];
-        input.checked = this._priceComparisonVisible[layer];
+        this._priceComparisonVisible[layer] = input.checked;
         this.updatePriceSummary();
         this.renderPriceChart();
+        this._persistChartPreferences();
       });
     }
   }
@@ -6041,7 +6051,7 @@ class ElrakningPanel {
       const electricity = Number(period.electricity_cost_ex_vat);
       if (Number.isFinite(electricity)) subtotal += electricity;
     }
-    if (this._priceComparisonVisible.grid) {
+    if (this._priceComparisonVisible.grid && this._hasGridPriceData()) {
       const grid = Number(period.grid_cost_ex_vat);
       if (Number.isFinite(grid)) subtotal += grid;
     }
@@ -6059,11 +6069,18 @@ class ElrakningPanel {
     if (!control || !input) return;
     const available = this._hasGridPriceData();
     input.disabled = !available;
+    input.checked = this._priceComparisonVisible.grid;
     control.title = available ? "Visa elnätskostnad i prisjämförelsen" : "Elnätspris saknas";
     control.classList.toggle("is-disabled", !available);
-    if (!available) {
-      this._priceComparisonVisible.grid = false;
-      input.checked = false;
+  }
+
+  _syncPriceComparisonControls() {
+    for (const control of this.host.querySelectorAll("[data-price-layer]")) {
+      const layer = control.dataset.priceLayer;
+      const input = control.querySelector("[data-price-toggle]");
+      if (input && typeof this._priceComparisonVisible[layer] === "boolean") {
+        input.checked = this._priceComparisonVisible[layer];
+      }
     }
   }
 
@@ -6560,7 +6577,7 @@ class ElrakningPanel {
     const add = (label, value, formatted, className = "") => {
       if (tooltipValueIsPresent(value)) fields.push({ label, value, formatted, className });
     };
-    const gridVisible = this._priceComparisonVisible.grid && this._eonGridPrice;
+    const gridVisible = this._priceComparisonVisible.grid && this._eonGridPrice && this._hasGridPriceData();
     if (layers.spot && Number.isFinite(comparisonPrice)) {
       const label = "Spotpris";
       const value = gridVisible && !this._priceComparisonVisible.electricity

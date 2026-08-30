@@ -304,6 +304,27 @@ class _Hass:
 
 
 class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_price_comparison_defaults_and_persists_per_user(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        first = await manager.async_get_price_comparison("user-a")
+        self.assertEqual(first, {"electricity": True, "grid": False})
+        updated = await manager.async_set_price_comparison("user-a", {"electricity": False, "grid": True})
+        self.assertEqual(updated, {"electricity": False, "grid": True})
+        self.assertEqual(await manager.async_get_price_comparison("user-a"), updated)
+        self.assertEqual(
+            await manager.async_get_price_comparison("user-b"),
+            {"electricity": True, "grid": False},
+        )
+
+    async def test_price_comparison_preserves_saved_grid_choice_when_data_is_unavailable(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store()
+
+        await manager.async_set_price_comparison("user-a", {"grid": True})
+        self.assertTrue((await manager.async_get_price_comparison("user-a"))["grid"])
+
     async def test_chart_layers_are_initialized_per_user_and_preserve_existing_values(self):
         manager = object.__new__(ElhandelManager)
         manager.chart_preferences_store = _Store()
