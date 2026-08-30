@@ -413,6 +413,103 @@ export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Dat
   return energyKwh;
 }
 
+export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixedFee = null, now = new Date()) {
+  const current = new Date(now);
+  const nowMs = current.getTime();
+  if (!Array.isArray(periods) || !periods.length || !Array.isArray(meterPoints)) return null;
+  const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
+  const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+  const gridGross = Number(gridPrice?.variable_total_ore_per_kwh_gross);
+  const points = meterPoints
+    .map((point) => ({ timestamp: new Date(point.timestamp).getTime(), importKw: Number(point.import_kw) }))
+    .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.importKw))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const integrate = (startMs, endMs) => {
+    const limit = Math.min(endMs, nowMs);
+    if (limit <= startMs || points.length < 2) return null;
+    let total = 0;
+    let covered = false;
+    for (let index = 1; index < points.length; index += 1) {
+      const left = points[index - 1];
+      const right = points[index];
+      const overlapStart = Math.max(startMs, left.timestamp);
+      const overlapEnd = Math.min(limit, right.timestamp);
+      if (overlapEnd <= overlapStart || right.timestamp <= left.timestamp) continue;
+      const valueAt = (timestamp) => left.importKw + (right.importKw - left.importKw) * ((timestamp - left.timestamp) / (right.timestamp - left.timestamp));
+      total += (valueAt(overlapStart) + valueAt(overlapEnd)) / 2 * ((overlapEnd - overlapStart) / 3600000);
+      covered = true;
+    }
+    return covered ? total : null;
+  };
+  const rows = [];
+  let missingPricePeriods = 0;
+  let missingEnergyPeriods = 0;
+  for (const period of periods) {
+    const startMs = new Date(period.start).getTime();
+    const endMs = new Date(period.end).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= monthStart.getTime() || startMs >= nowMs) continue;
+    const importKwh = integrate(Math.max(startMs, monthStart.getTime()), Math.min(endMs, nowMs));
+    const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+    if (!Number.isFinite(tradeOre) || !Number.isFinite(gridGross)) {
+      missingPricePeriods += 1;
+      continue;
+    }
+    if (importKwh === null) {
+      missingEnergyPeriods += 1;
+      continue;
+    }
+    rows.push({
+      start: period.start,
+      end: period.end,
+      import_kwh: importKwh,
+      trade_price_ore_per_kwh_gross: tradeOre,
+      grid_price_ore_per_kwh_gross: gridGross,
+      trade_cost_sek: importKwh * tradeOre / 100,
+      grid_cost_sek: importKwh * gridGross / 100,
+    });
+  }
+  const importedKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
+  const tradeVariableSek = rows.reduce((sum, row) => sum + row.trade_cost_sek, 0);
+  const gridVariableSek = rows.reduce((sum, row) => sum + row.grid_cost_sek, 0);
+  const coveredStart = rows.length ? Math.min(...rows.map((row) => new Date(row.start).getTime())) : null;
+  const coveredEnd = rows.length ? Math.max(...rows.map((row) => Math.min(new Date(row.end).getTime(), nowMs))) : null;
+  const elapsedMs = Math.max(0, nowMs - monthStart.getTime());
+  const monthMs = nextMonth.getTime() - monthStart.getTime();
+  const elapsedDays = Math.max(1, elapsedMs / 86400000);
+  const remainingDays = Math.max(0, (nextMonth.getTime() - nowMs) / 86400000);
+  const dailyImportKwh = importedKwh > 0 ? importedKwh / elapsedDays : 0;
+  const tradeWeighted = importedKwh > 0
+    ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / importedKwh
+    : null;
+  const gridWeighted = importedKwh > 0 ? gridGross : null;
+  const fixedTrade = Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
+  const gridFixed = Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
+  const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
+  const accruedTradeFixed = fixedTrade === null ? null : fixedTrade * Math.min(1, elapsedMs / monthMs);
+  const variableSoFarSek = tradeVariableSek + gridVariableSek;
+  const fixedSoFarSek = (accruedTradeFixed || 0) + (accruedGridFixed || 0);
+  const forecastImportKwh = importedKwh + dailyImportKwh * remainingDays;
+  const forecastVariableSek = forecastImportKwh * ((tradeWeighted || 0) + (gridWeighted || 0)) / 100;
+  const forecastFixedSek = (fixedTrade || 0) + (gridFixed || 0);
+  return {
+    month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
+    imported_kwh_so_far: importedKwh,
+    trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek + (accruedTradeFixed || 0) },
+    grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek + (accruedGridFixed || 0) },
+    total_so_far_sek: variableSoFarSek + fixedSoFarSek,
+    estimated_month_total_sek: forecastVariableSek + forecastFixedSek,
+    forecast_method: "actual imported energy and volume-weighted observed gross prices; remaining energy uses observed daily average",
+    forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 ? "complete_available_data" : "partial_data",
+    data_coverage: { period_count: rows.length, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, first_period: coveredStart ? new Date(coveredStart).toISOString() : null, last_period: coveredEnd ? new Date(coveredEnd).toISOString() : null },
+    trade_weighted_average_ore_per_kwh: tradeWeighted,
+    grid_weighted_average_ore_per_kwh: gridWeighted,
+    total_weighted_average_ore_per_kwh: tradeWeighted === null || gridWeighted === null ? null : tradeWeighted + gridWeighted,
+    completeness: { trade_variable: rows.length > 0, trade_fixed: fixedTrade !== null, grid_variable: rows.length > 0 && Number.isFinite(gridGross), grid_fixed: gridFixed !== null, export_credit: false },
+    export_energy_kwh: null,
+    rows,
+  };
+}
+
 export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capacityKwh, now = new Date(), dayCount = 7) {
   const current = new Date(now);
   const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
@@ -895,6 +992,7 @@ class ElrakningPanel {
     };
     this._priceComparisonVisible = { electricity: true, grid: false };
     this._providerConfigured = false;
+    this._electricityProviderState = null;
     this.priceData = {
       source: "nord_pool",
       mode: "spot_price",
@@ -1052,6 +1150,15 @@ class ElrakningPanel {
             <div class="solar-history-chart" data-solar-history-chart hidden></div>
           </article>
         </div>
+
+        <section class="card invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
+          <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
+          <div class="invoice-estimate-heading"><strong>Estimerad faktura</strong><span data-invoice-estimate-month></span></div>
+          <div class="invoice-estimate-grid" data-invoice-estimate-grid></div>
+          <p class="invoice-estimate-status" data-invoice-estimate-status></p>
+          <button type="button" data-invoice-estimate-copy>Kopiera raw-data</button>
+          <span class="invoice-estimate-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
+        </section>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
           <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
@@ -2160,6 +2267,46 @@ class ElrakningPanel {
           margin-top: 12px;
         }
 
+        .invoice-estimate-card {
+          display: grid;
+          gap: 12px;
+        }
+
+        .invoice-estimate-heading {
+          align-items: baseline;
+          display: flex;
+          gap: 10px;
+          justify-content: space-between;
+        }
+
+        .invoice-estimate-heading > span,
+        .invoice-estimate-status,
+        .invoice-estimate-copy-feedback {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          margin: 0;
+        }
+
+        .invoice-estimate-grid {
+          display: grid;
+          gap: 5px 18px;
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        .invoice-estimate-grid strong {
+          font-weight: 500;
+        }
+
+        .invoice-estimate-grid .total {
+          border-top: 1px solid var(--divider-color);
+          margin-top: 4px;
+          padding-top: 7px;
+        }
+
+        .invoice-estimate-card button {
+          justify-self: start;
+        }
+
         .retained-history {
           border-top: 1px solid var(--divider-color);
           margin-top: 16px;
@@ -3192,6 +3339,7 @@ class ElrakningPanel {
     this._bindLivePowerCards();
         this._bindDiagnostics();
     this._bindMainInvoiceParser();
+    this._bindInvoiceEstimate();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
     this._setupSocCardHeightObserver();
@@ -5062,6 +5210,69 @@ class ElrakningPanel {
     summary.hidden = rows.length === 0;
   }
 
+  _renderInvoiceEstimateCard() {
+    const card = this.host.querySelector("[data-invoice-estimate-card]");
+    const grid = this.host.querySelector("[data-invoice-estimate-grid]");
+    const month = this.host.querySelector("[data-invoice-estimate-month]");
+    const status = this.host.querySelector("[data-invoice-estimate-status]");
+    if (!card || !grid || !month || !status) return;
+    const estimate = buildInvoiceEstimate(
+      this.priceData?.periods,
+      this._meterPowerHistory?.points,
+      this._eonGridPrice,
+      this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
+    );
+    const configured = this._meterState?.configured === true;
+    card.hidden = !configured || !this.priceData?.periods?.length;
+    if (!configured || !this.priceData?.periods?.length) return;
+    month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
+    if (!estimate) {
+      grid.replaceChildren();
+      status.textContent = "Kostnadsunderlag saknas.";
+      this._invoiceEstimateRaw = null;
+      return;
+    }
+    const rows = [
+      ["Elhandel", estimate.trade.total_so_far_sek, ""],
+      ["Elnät", estimate.grid.total_so_far_sek, ""],
+      ["Hittills", estimate.total_so_far_sek, "total"],
+      ["Prognos månad", estimate.estimated_month_total_sek, "total"],
+      ["Import hittills", estimate.imported_kwh_so_far, "kWh"],
+    ];
+    grid.replaceChildren(...rows.flatMap(([labelText, value, className]) => {
+      const label = document.createElement("strong");
+      label.className = className;
+      label.textContent = labelText;
+      const output = document.createElement("span");
+      output.className = className;
+      output.textContent = value === null || !Number.isFinite(Number(value))
+        ? "–"
+        : className === "kWh" ? `${this._formatNumber(Number(value))} kWh` : this._formatSek(Number(value));
+      return [label, output];
+    }));
+    const coverage = estimate.data_coverage;
+    status.textContent = coverage.missing_price_periods || coverage.missing_energy_periods
+      ? `Delvis underlag · ${estimate.forecast_method}`
+      : estimate.completeness.trade_fixed ? estimate.forecast_method : `Estimat exkl. elhandelns fasta avgift · ${estimate.forecast_method}`;
+    this._invoiceEstimateRaw = estimate;
+  }
+
+  _bindInvoiceEstimate() {
+    const copy = this.host.querySelector("[data-invoice-estimate-copy]");
+    const feedback = this.host.querySelector("[data-invoice-estimate-copy-feedback]");
+    if (!copy || !feedback) return;
+    copy.addEventListener("click", async () => {
+      if (!this._invoiceEstimateRaw) return;
+      try {
+        await this._copyText(JSON.stringify(this._invoiceEstimateRaw, null, 2));
+        feedback.textContent = "Kopierat";
+        window.setTimeout(() => { feedback.textContent = ""; }, 1500);
+      } catch {
+        feedback.textContent = "Kunde inte kopiera";
+      }
+    });
+  }
+
   _formatInvoiceMonth(value) {
     if (typeof value !== "string") return "–";
     const match = value.match(/^(\d{4})-(\d{2})/);
@@ -5449,6 +5660,7 @@ class ElrakningPanel {
     this._updatePriceComparisonControls();
     this.updatePriceSummary();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    this._renderInvoiceEstimateCard();
   }
 
   async loadProviderState() {
@@ -5548,6 +5760,7 @@ class ElrakningPanel {
     summary.hidden = !configured || rows.length === 0;
     this._updatePriceComparisonControls();
     if (this.host.querySelector(".price-chart") && this.priceData.periods.length) this.renderPriceChart();
+    this._renderInvoiceEstimateCard();
   }
 
   _bindEonGridDialog() {
@@ -5598,6 +5811,7 @@ class ElrakningPanel {
   }
 
   _applyProviderState(state) {
+    this._electricityProviderState = state;
     const configured = state?.configured === true;
     this._providerConfigured = configured;
     const retainedHistory = this.host.querySelector("[data-retained-history]");
@@ -5660,6 +5874,7 @@ class ElrakningPanel {
     if (source) source.hidden = !this._debugEnabled || state?.configured !== true;
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
+    this._renderInvoiceEstimateCard();
   }
 
   async loadMeterState(loadHistory = false) {
@@ -5755,6 +5970,7 @@ class ElrakningPanel {
     points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
     this._meterPowerHistory = { date: currentDate, points };
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    this._renderInvoiceEstimateCard();
   }
 
   _periodCustomerPrice(period) {

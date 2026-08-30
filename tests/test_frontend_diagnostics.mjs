@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceEstimate, buildLivePowerTiles, buildMonotoneCubicSegments, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, nearestMeterPoint, normalizeMeterValue, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -101,6 +101,35 @@ assert.equal(integratePowerHistoryKwh(powerPoints([1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([5, 5, 5, 5, 5, 5, 5]), integrationStart, integrationEnd, new Date("2026-08-23T00:30:00")) - 2.5) < 1e-12);
 assert.ok(Math.abs(integratePowerHistoryKwh(powerPoints([0, 1 / 3, 2 / 3, 1, 4 / 3, 5 / 3, 2, 7 / 3, 8 / 3, 3, 10 / 3, 11 / 3, 4]), integrationStart, integrationEnd, new Date("2026-08-23T01:00:00")) - 2) < 1e-12);
 assert.equal(integratePowerHistoryKwh(powerPoints([0.05, 0.05]), integrationStart, integrationEnd, new Date("2026-08-23T00:05:00")), 0.004166666666666667);
+const invoiceEstimate = buildInvoiceEstimate(
+  [
+    { start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 },
+    { start: "2026-08-01T00:15:00Z", end: "2026-08-01T00:30:00Z", trade_customer_price_ore_per_kwh: 40 },
+  ],
+  [
+    { timestamp: "2026-08-01T00:00:00Z", import_kw: 2 },
+    { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 },
+    { timestamp: "2026-08-01T00:30:00Z", import_kw: 4 },
+  ],
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  null,
+  new Date("2026-08-01T00:30:00Z"),
+);
+assert.ok(Math.abs(invoiceEstimate.imported_kwh_so_far - 1.25) < 1e-12);
+assert.ok(Math.abs(invoiceEstimate.trade.variable_cost_sek - 0.4) < 1e-12);
+assert.ok(Math.abs(invoiceEstimate.grid.variable_cost_sek - 1.25) < 1e-12);
+assert.equal(invoiceEstimate.grid.fixed_fee_sek, 226.25);
+assert.equal(invoiceEstimate.trade_weighted_average_ore_per_kwh, 32);
+assert.equal(invoiceEstimate.grid_weighted_average_ore_per_kwh, 100);
+assert.equal(invoiceEstimate.completeness.export_credit, false);
+const incompleteInvoiceEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z" }],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  null,
+  new Date("2026-08-01T00:15:00Z"),
+);
+assert.equal(incompleteInvoiceEstimate.data_coverage.missing_price_periods, 1);
 const dailyHistoryPoints = (day, value, count) => Array.from({ length: count }, (_, index) => ({
   timestamp: new Date(day.getTime() + index * 5 * 60 * 1000).toISOString(),
   value_kw: value,
@@ -828,6 +857,11 @@ assert.match(panelSource, /data-chart-layer="import"/);
 assert.match(panelSource, /data-chart-layer="export"/);
 assert.match(panelSource, /data-price-layer="electricity"/);
 assert.match(panelSource, /data-price-layer="grid"/);
+assert.match(panelSource, /data-invoice-estimate-card/);
+assert.match(panelSource, /Estimerad faktura/);
+assert.match(panelSource, /buildInvoiceEstimate\(/);
+assert.match(panelSource, /trade_weighted_average_ore_per_kwh/);
+assert.match(panelSource, /export_credit: false/);
 assert.match(panelSource, /class="price-filter-toggle"/);
 assert.match(panelSource, /data-price-toggle/);
 assert.match(panelSource, /price-filter-track/);
