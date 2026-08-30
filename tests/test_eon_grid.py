@@ -140,6 +140,7 @@ def test_normalize_grouped_contracts_reads_verified_contracts_by_type_shape():
     }], {"installation-1"})
     contract = result[0]
     assert contract["agreement"]["status"] == "future"
+    assert contract["agreement"]["source_status"] == "FUTURE"
     assert contract["agreement"]["type"] == "ELECTRICITY_CONS_GRID"
     assert contract["facility"] == {"fuse_ampere": 16.0, "price_area": "SE 2", "grid_area": "Elnätsområde Nord"}
     assert contract["tariff"]["subscription_fee_sek_per_month"] == 226.25
@@ -156,8 +157,15 @@ def test_normalize_grouped_contracts_reads_verified_contracts_by_type_shape():
         "energy_tax_ore_per_kwh_gross": 45.0,
         "variable_total_ore_per_kwh_gross": 142.0,
         "yearly_estimated_sek": 6567.0,
+        "contract_source_status": "FUTURE",
+        "preview_applied": True,
     }
     assert len(contract["tariff"]["entries"]) == 5
+
+
+def test_future_tariff_can_be_selected_for_pricing_without_changing_status():
+    tariff = {"grid_price": {"variable_total_ore_per_kwh_gross": 142}}
+    assert models.pricing_tariff_for_agreement(tariff, "future") == tariff
 
 
 def test_normalize_grouped_contracts_ignores_other_types_and_installations():

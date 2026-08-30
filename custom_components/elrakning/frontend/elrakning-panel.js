@@ -5496,7 +5496,7 @@ class ElrakningPanel {
         : outage.status === "no_known_outage"
           ? "Ingen känd driftstörning"
           : agreement.status === "future"
-            ? "Kommande avtal"
+            ? "Konfigurerad"
             : agreement.status === "active"
               ? "Konfigurerad"
               : "Ej aktivt"
@@ -5505,7 +5505,6 @@ class ElrakningPanel {
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     const rows = [];
-    if (agreement.status === "future") rows.push(["Avtal", "Kommande avtal"]);
     if (agreement.name) rows.push(["Avtal", agreement.name]);
     if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
     if (facility.address?.street) rows.push(["Adress", facility.address.street]);
@@ -6193,6 +6192,15 @@ class ElrakningPanel {
         subtotal_ex_vat: Number(period.subtotal_ex_vat) * 100,
         vat: Number(period.vat) * 100,
         customer_price: Number(period.customer_price) * 100,
+        trade_customer_price_ore_per_kwh: Number(period.trade_customer_price_ore_per_kwh),
+        grid_provider: period.grid_provider || null,
+        grid_contract_source_status: period.grid_contract_source_status || null,
+        grid_contract_preview_applied: period.grid_contract_preview_applied === true,
+        grid_vat_included: period.grid_vat_included === true,
+        grid_transfer_ore_per_kwh: Number(period.grid_transfer_ore_per_kwh),
+        grid_energy_tax_ore_per_kwh: Number(period.grid_energy_tax_ore_per_kwh),
+        grid_variable_ore_per_kwh: Number(period.grid_variable_ore_per_kwh),
+        total_customer_price_ore_per_kwh: Number(period.total_customer_price_ore_per_kwh),
         ...(meterPointAt(new Date(period.start).getTime()) ? {
           import_kw: meterPointAt(new Date(period.start).getTime()).import_kw,
           export_kw: meterPointAt(new Date(period.start).getTime()).export_kw,

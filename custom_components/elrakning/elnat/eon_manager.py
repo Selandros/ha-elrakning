@@ -21,6 +21,7 @@ from .eon_models import (
     normalize_user_profile,
     parse_monthly_consumption,
     parse_monthly_transfer,
+    pricing_tariff_for_agreement,
 )
 
 
@@ -305,8 +306,11 @@ class EonGridManager:
             "type": "ELECTRICITY_CONS_GRID",
         }
         tariff = selected.get("tariff") if selected else None
+        pricing_tariff = pricing_tariff_for_agreement(
+            tariff, agreement.get("status")
+        )
         amount = consumption.get("consumption_kwh") if consumption.get("status") == "ok" else None
-        cost = calculate_eon_cost(amount, tariff) if agreement.get("status") == "active" else None
+        cost = calculate_eon_cost(amount, pricing_tariff)
         return {
             "agreement": agreement,
             "facility": {
@@ -320,7 +324,7 @@ class EonGridManager:
                 "fuse_ampere": (selected or {}).get("facility", {}).get("fuse_ampere"),
             },
             "tariff": tariff,
-            "grid_price": (tariff or {}).get("grid_price"),
+            "grid_price": (pricing_tariff or {}).get("grid_price"),
             "consumption": consumption,
             "cost": cost,
             "outage": normalize_outage(outage_payload) if outage_payload is not None else None,

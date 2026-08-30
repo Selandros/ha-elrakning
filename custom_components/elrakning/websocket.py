@@ -940,6 +940,21 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     grid_state = grid_manager.public_state() if grid_manager else None
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None
     grid_cost_ex_vat = grid_variable_cost_ex_vat(grid_price)
+    grid_variable_gross = (
+        grid_price.get("variable_total_ore_per_kwh_gross")
+        if isinstance(grid_price, dict)
+        else None
+    )
+    grid_source_status = (
+        grid_price.get("contract_source_status")
+        if isinstance(grid_price, dict)
+        else None
+    )
+    grid_preview_applied = (
+        grid_price.get("preview_applied") is True
+        if isinstance(grid_price, dict)
+        else False
+    )
     result = {
         "error": data.error,
         "area": data.area,
@@ -963,6 +978,19 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
                 "vat": period.vat,
                 "customer_price": period.customer_price,
                 "grid_cost_ex_vat": grid_cost_ex_vat,
+                "trade_customer_price_ore_per_kwh": period.customer_price * 100,
+                "grid_provider": "eon" if grid_price else None,
+                "grid_contract_source_status": grid_source_status,
+                "grid_contract_preview_applied": grid_preview_applied,
+                "grid_vat_included": grid_price.get("vat_included") if isinstance(grid_price, dict) else None,
+                "grid_transfer_ore_per_kwh": grid_price.get("transfer_ore_per_kwh_gross") if isinstance(grid_price, dict) else None,
+                "grid_energy_tax_ore_per_kwh": grid_price.get("energy_tax_ore_per_kwh_gross") if isinstance(grid_price, dict) else None,
+                "grid_variable_ore_per_kwh": grid_variable_gross,
+                "total_customer_price_ore_per_kwh": (
+                    period.customer_price * 100 + grid_variable_gross
+                    if grid_variable_gross is not None
+                    else None
+                ),
             }
             for period in customer_price_data.periods
         ],

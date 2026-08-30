@@ -6,6 +6,9 @@ from datetime import date, datetime
 from typing import Any, Mapping
 
 
+EON_GRID_PRICING_PREVIEW = True
+
+
 def normalize_user_profile(payload: Any, customer_id: str) -> dict[str, Any]:
     """Normalize the verified E.ON profile shape without exposing identifiers."""
     if not isinstance(payload, Mapping) or payload.get("customerIdentifier") != customer_id:
@@ -106,6 +109,7 @@ def normalize_grouped_contracts(payload: Any, installation_ids: set[str]) -> lis
                     "installation_identifier": installation_id,
                     "agreement": {
                         "status": agreement_status(contract.get("status"), contract.get("startDate"), contract.get("endDate")),
+                        "source_status": contract.get("status"),
                         "type": grouped.get("type"),
                         "name": contract.get("name"),
                         "start_date": contract.get("startDate"),
@@ -176,8 +180,19 @@ def normalize_grouped_tariff(contract: Mapping[str, Any]) -> dict[str, Any]:
             else None
         ),
         "yearly_estimated_sek": result["estimated_yearly_cost_sek"],
+        "contract_source_status": contract.get("status"),
+        "preview_applied": EON_GRID_PRICING_PREVIEW and contract.get("status") == "FUTURE",
     }
     return result
+
+
+def pricing_tariff_for_agreement(tariff: Any, agreement_status_value: Any) -> dict[str, Any] | None:
+    """Select the tariff used for pricing without changing source agreement status."""
+    if not isinstance(tariff, Mapping):
+        return None
+    if EON_GRID_PRICING_PREVIEW or agreement_status_value == "active":
+        return dict(tariff)
+    return None
 
 
 def normalize_price_area(value: Any) -> str | None:
