@@ -2279,8 +2279,26 @@ class ElrakningPanel {
           margin-top: 12px;
         }
 
-        .invoice-estimate-card {
+        .live-power-tile.invoice-estimate-card {
+          grid-template-rows: 18px 15px 30px 12px;
           min-height: 0;
+        }
+
+        .invoice-estimate-card .live-power-heading {
+          grid-row: 1;
+        }
+
+        .invoice-estimate-month {
+          grid-row: 2;
+          justify-self: end;
+        }
+
+        .invoice-estimate-card .live-power-value {
+          grid-row: 3;
+        }
+
+        .invoice-estimate-card .live-power-copy-feedback {
+          grid-row: 4;
         }
 
         .provider-invoice-cost span {
@@ -2410,7 +2428,8 @@ class ElrakningPanel {
           box-sizing: border-box;
           container-type: inline-size;
           display: grid;
-          grid-template-rows: minmax(18px, auto) 30px minmax(15px, auto) 5px 14px minmax(12px, auto) minmax(12px, auto);
+          align-content: start;
+          grid-template-rows: 18px 30px 15px 5px 14px 12px 12px;
           row-gap: 4px;
           min-width: 0;
           padding: 12px 14px;
@@ -2437,6 +2456,7 @@ class ElrakningPanel {
         .live-power-title {
           color: var(--secondary-text-color);
           font-size: 13px;
+          white-space: nowrap;
         }
 
         .live-power-grid-meta {
@@ -2457,6 +2477,9 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: 12px;
           margin-top: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .live-power-grid-fuse-status {
