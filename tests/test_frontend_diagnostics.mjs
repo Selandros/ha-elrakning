@@ -845,9 +845,12 @@ assert.equal((eonPanelSource.match(/data-live-power-source=/g) || []).length, 5)
 assert.match(eonPanelSource, /Visa data/);
 assert.doesNotMatch(eonPanelSource, /Visa mätardata/);
 assert.match(eonPanelSource, /_livePowerRaw/);
-assert.match(eonPanelSource, /JSON\.stringify\(raw, null, 2\)/);
-assert.match(eonPanelSource, /feedback\.textContent = "Kopierat"/);
 assert.match(eonPanelSource, /_updateLivePowerCardInteractivity/);
+assert.doesNotMatch(eonPanelSource, /_copyLivePowerTile/);
+assert.doesNotMatch(eonPanelSource, /debug-copy-enabled/);
+assert.match(eonPanelSource, /\.live-power-debug-footer\.visible \{/);
+assert.match(eonPanelSource, /JSON\.stringify\(safeSource, null, 2\)/);
+assert.match(eonPanelSource, /liveSource \|\| isEon \|\| cardSource/);
 assert.match(eonPanelSource, /data-live-power-grid-meta/);
 assert.match(eonPanelSource, /data-live-power-grid-fuse-status/);
 assert.match(eonPanelSource, /fill\.style\.backgroundColor = chartColor\(tile\.colorKey\)/);
@@ -863,9 +866,12 @@ assert.match(eonPanelSource, /daily_max_phase_current_a/);
 assert.match(eonPanelSource, /daily_max_fuse_utilization_percent/);
 assert.doesNotMatch(eonPanelSource, /Maxfas \$\{this\._formatNumber\(tile\.maxPhaseCurrentA\)/);
 assert.match(eonPanelSource, /facility\?\.fuse_ampere/);
-assert.match(eonPanelSource, /if \(enabled && !tile\._livePowerCopyEnabled\)/);
-assert.match(eonPanelSource, /else if \(!enabled && tile\._livePowerCopyEnabled\)/);
-assert.match(eonPanelSource, /debug-copy-enabled/);
+const liveCardInteractivitySource = eonPanelSource.slice(
+  eonPanelSource.indexOf("  _updateLivePowerCardInteractivity()"),
+  eonPanelSource.indexOf("  _renderDailyEnergyCard()"),
+);
+assert.match(liveCardInteractivitySource, /\.live-power-debug-footer/);
+assert.doesNotMatch(liveCardInteractivitySource, /addEventListener|_copyLivePowerTile|tabIndex|setAttribute\("role"/);
 assert.doesNotMatch(eonPanelSource, /live-power-icon/);
 assert.doesNotMatch(eonPanelSource, /live-power-tooltip/);
 assert.doesNotMatch(eonPanelSource, /_bindLivePowerTooltips/);

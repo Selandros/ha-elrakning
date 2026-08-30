@@ -3503,12 +3503,8 @@ class ElrakningPanel {
           min-width: 0;
         }
 
-        .live-power-tile.debug-copy-enabled .live-power-debug-footer.visible {
+        .live-power-debug-footer.visible {
           display: flex;
-        }
-
-        .live-power-tile.debug-copy-enabled {
-          cursor: pointer;
         }
 
         .live-power-action {
@@ -5322,63 +5318,14 @@ class ElrakningPanel {
     }
   }
 
-  async _copyLivePowerTile(tile) {
-    const raw = tile?._livePowerRaw;
-    const feedback = tile?.querySelector("[data-live-power-copy-feedback]");
-    if (!raw || !feedback) return;
-    try {
-      await this._copyText(JSON.stringify(raw, null, 2));
-      feedback.textContent = "Kopierat";
-      window.clearTimeout(tile._livePowerFeedbackTimer);
-      tile._livePowerFeedbackTimer = window.setTimeout(() => { feedback.textContent = ""; }, 1400);
-    } catch {
-      feedback.textContent = "Kunde inte kopiera";
-    }
-  }
-
   _bindLivePowerCards() {
     this._updateLivePowerCardInteractivity();
     this._renderLivePowerRow();
   }
 
   _updateLivePowerCardInteractivity() {
-    const enabled = this._debugEnabled;
     for (const tile of this.host.querySelectorAll("[data-live-power-tile]")) {
-      if (tile.matches("[data-invoice-estimate-card]")) continue;
-      if (enabled && !tile._livePowerCopyEnabled) {
-        const copy = () => { void this._copyLivePowerTile(tile); };
-        const clickHandler = (event) => {
-          if (event.target.closest("[data-meter-source], [data-live-power-source]")) return;
-          copy();
-        };
-        const keydownHandler = (event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          copy();
-        };
-        tile.addEventListener("click", clickHandler);
-        tile.addEventListener("keydown", keydownHandler);
-        tile._livePowerCopyEnabled = true;
-        tile._livePowerCopyClickHandler = clickHandler;
-        tile._livePowerCopyKeydownHandler = keydownHandler;
-        tile.tabIndex = 0;
-        tile.setAttribute("role", "button");
-        tile.classList.add("debug-copy-enabled");
-        tile.querySelector(".live-power-debug-footer")?.classList.add("visible");
-      } else if (!enabled && tile._livePowerCopyEnabled) {
-        tile.removeEventListener("click", tile._livePowerCopyClickHandler);
-        tile.removeEventListener("keydown", tile._livePowerCopyKeydownHandler);
-        window.clearTimeout(tile._livePowerFeedbackTimer);
-        const feedback = tile.querySelector("[data-live-power-copy-feedback]");
-        if (feedback) feedback.textContent = "";
-        delete tile._livePowerCopyEnabled;
-        delete tile._livePowerCopyClickHandler;
-        delete tile._livePowerCopyKeydownHandler;
-        tile.removeAttribute("tabindex");
-        tile.removeAttribute("role");
-        tile.classList.remove("debug-copy-enabled");
-        tile.querySelector(".live-power-debug-footer")?.classList.remove("visible");
-      }
+      tile.querySelector(".live-power-debug-footer")?.classList.toggle("visible", this._debugEnabled);
     }
   }
 
