@@ -923,41 +923,37 @@ class ElrakningPanel {
 
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <span class="live-power-icon" aria-hidden="true">⌂</span>
-            <span class="live-power-title">Hus</span>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
-            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
-            <div class="soc-tooltip live-power-tooltip" hidden></div>
+            <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
-            <span class="live-power-icon" aria-hidden="true">☀</span>
-            <span class="live-power-title">Sol</span>
+            <div class="live-power-heading"><span class="live-power-title">Sol</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
-            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
-            <div class="soc-tooltip live-power-tooltip" hidden></div>
+            <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <span class="live-power-icon" aria-hidden="true">⇄</span>
-            <span class="live-power-title">Nät</span>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
-            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
-            <div class="soc-tooltip live-power-tooltip" hidden></div>
+            <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
-            <span class="live-power-icon" aria-hidden="true">▣</span>
-            <span class="live-power-title">Batteri</span>
+            <div class="live-power-heading"><span class="live-power-title">Batteri</span><span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
-            <span class="live-power-max" data-live-power-max>Max idag 0,00 kW</span>
-            <div class="soc-tooltip live-power-tooltip" hidden></div>
+            <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
+            <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
         </section>
 
@@ -2262,19 +2258,21 @@ class ElrakningPanel {
           box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
           box-sizing: border-box;
           container-type: inline-size;
-          display: grid;
-          grid-template-columns: auto 1fr;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
           min-width: 0;
           padding: 12px 14px;
           position: relative;
         }
 
-        .live-power-icon {
-          color: var(--secondary-text-color);
-          grid-row: span 2;
-          line-height: 1;
-          margin-right: 8px;
-          padding-top: 2px;
+        .live-power-heading {
+          align-items: baseline;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: space-between;
+          min-width: 0;
         }
 
         .live-power-title,
@@ -2294,20 +2292,20 @@ class ElrakningPanel {
           font-size: clamp(18px, 3.2cqw, 26px);
           font-weight: 500;
           line-height: 1.15;
+          margin-top: 12px;
         }
 
         .live-power-status {
           color: var(--secondary-text-color);
           font-size: 12px;
-          grid-column: 2;
+          margin-top: 2px;
         }
 
         .live-power-bar {
           background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
           border-radius: 999px;
-          grid-column: 2;
           height: 5px;
-          margin-top: 8px;
+          margin-top: 14px;
           overflow: hidden;
         }
 
@@ -2323,13 +2321,28 @@ class ElrakningPanel {
         .live-power-max {
           color: var(--secondary-text-color);
           font-size: 10px;
-          grid-column: 2;
-          margin-top: 4px;
+          flex: 0 1 auto;
+          margin-left: auto;
+          text-align: right;
+        }
+
+        .live-power-scale {
+          color: var(--secondary-text-color);
+          display: flex;
+          font-size: 10px;
+          justify-content: space-between;
+          margin-top: 5px;
+        }
+
+        .live-power-copy-feedback {
+          color: var(--secondary-text-color);
+          font-size: 10px;
+          min-height: 1.2em;
+          text-align: right;
         }
 
         .live-power-action {
           font-size: 11px;
-          grid-column: 2;
           margin: 5px 0 0;
           padding: 4px 7px;
           width: max-content;
@@ -2350,8 +2363,8 @@ class ElrakningPanel {
             padding: 10px;
           }
 
-          .live-power-icon {
-            margin-right: 5px;
+          .live-power-heading {
+            gap: 5px;
           }
         }
 
@@ -3164,7 +3177,7 @@ class ElrakningPanel {
     this._bindMainCardToggles();
     this._bindProviderSourceDialog();
     this._bindMeterSourceDialog();
-    this._bindLivePowerTooltips();
+    this._bindLivePowerCards();
         this._bindDiagnostics();
     this._bindMainInvoiceParser();
     this._bindChartLegend();
@@ -3966,26 +3979,6 @@ class ElrakningPanel {
       if (Number.isFinite(currentTiles[key].value)) this._livePowerMaxima[key] = Math.max(this._livePowerMaxima[key], Math.abs(currentTiles[key].value));
     }
     const tiles = buildLivePowerTiles(this._powerState || {}, this._meterState || {}, this._livePowerMaxima);
-    const withMeta = (key, fields) => [
-      ...fields,
-      { label: "Max idag", value: tiles[key].maxToday, formatted: `${this._formatNumber(tiles[key].maxToday)} kW` },
-      { label: "Dagskala", value: tiles[key].scaleMax, formatted: `${this._formatNumber(tiles[key].scaleMax)} kW` },
-      { label: "Bar", value: tiles[key].fillPercent, formatted: `${this._formatNumber(tiles[key].fillPercent)} %` },
-    ];
-    const fieldSets = {
-      house: withMeta("house", [{ label: "Hus just nu", value: tiles.house.value, formatted: tiles.house.value === null ? "—" : `${this._formatNumber(tiles.house.value)} kW` }]),
-      solar: withMeta("solar", [{ label: "Sol just nu", value: tiles.solar.value, formatted: tiles.solar.value === null ? "—" : `${this._formatNumber(tiles.solar.value)} kW` }]),
-      grid: withMeta("grid", [
-        { label: "Nät just nu", value: Number.isFinite(Number(this._meterState?.power_kw)) ? Number(this._meterState.power_kw) : null, formatted: Number.isFinite(tiles.grid.value) ? `${this._formatNumber(tiles.grid.value)} kW` : "—" },
-        { label: "Riktning", value: tiles.grid.direction, formatted: tiles.grid.status },
-        { label: "Visat värde", value: tiles.grid.value, formatted: Number.isFinite(tiles.grid.value) ? `${this._formatNumber(tiles.grid.value)} kW` : "—" },
-      ]),
-      battery: withMeta("battery", [
-        { label: "Laddning", value: tiles.battery.charging, formatted: Number.isFinite(tiles.battery.charging) ? `${this._formatNumber(tiles.battery.charging)} kW` : "—" },
-        { label: "Urladdning", value: tiles.battery.discharging, formatted: Number.isFinite(tiles.battery.discharging) ? `${this._formatNumber(tiles.battery.discharging)} kW` : "—" },
-        { label: "Status", value: tiles.battery.status, formatted: tiles.battery.status },
-      ]),
-    };
     for (const [key, tile] of Object.entries(tiles)) {
       const element = row.querySelector(`[data-live-power-tile="${key}"]`);
       if (!element) continue;
@@ -3997,31 +3990,47 @@ class ElrakningPanel {
       if (status) status.textContent = tile.status;
       if (fill) fill.style.width = `${tile.fillPercent}%`;
       if (max) max.textContent = `Max idag ${this._formatNumber(tile.maxToday)} kW`;
+      const scale = element.querySelector("[data-live-power-scale]");
+      if (scale) scale.textContent = `${this._formatNumber(tile.scaleMax)} kW`;
       element.dataset.livePowerDirection = tile.direction || "idle";
-      element._livePowerFields = fieldSets[key];
+      element._livePowerRaw = {
+        current_kw: tile.value,
+        max_today_kw: tile.maxToday,
+        scale_max_kw: tile.scaleMax,
+        fill_percent: tile.fillPercent,
+        status: tile.status,
+      };
     }
   }
 
-  _bindLivePowerTooltips() {
+  async _copyLivePowerTile(tile) {
+    const raw = tile?._livePowerRaw;
+    const feedback = tile?.querySelector("[data-live-power-copy-feedback]");
+    if (!raw || !feedback) return;
+    try {
+      await this._copyText(JSON.stringify(raw, null, 2));
+      feedback.textContent = "Kopierat";
+      window.clearTimeout(tile._livePowerFeedbackTimer);
+      tile._livePowerFeedbackTimer = window.setTimeout(() => { feedback.textContent = ""; }, 1400);
+    } catch {
+      feedback.textContent = "Kunde inte kopiera";
+    }
+  }
+
+  _bindLivePowerCards() {
     for (const tile of this.host.querySelectorAll("[data-live-power-tile]")) {
-      const tooltip = tile.querySelector(".live-power-tooltip");
-      if (!tooltip) continue;
-      const show = (event) => {
-        const fields = Array.isArray(tile._livePowerFields) ? tile._livePowerFields : [];
-        renderSharedTooltip(tooltip, {
-          title: tile.querySelector(".live-power-title")?.textContent || "",
-          fields,
-          copy: (text) => this._copyText(text),
-        });
-        tooltip.hidden = false;
-        positionChartTooltip(tile, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
-      };
-      const clear = () => { tooltip.hidden = true; };
-      tile.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") show(event); });
-      tile.addEventListener("pointermove", (event) => { if (event.pointerType !== "touch" && !tooltip.hidden) show(event); });
-      tile.addEventListener("pointerdown", show);
-      tile.addEventListener("pointerleave", clear);
-      tile.addEventListener("pointercancel", clear);
+      const copy = () => { void this._copyLivePowerTile(tile); };
+      tile.addEventListener("click", (event) => {
+        if (event.target.closest("[data-meter-source]")) return;
+        copy();
+      });
+      tile.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        copy();
+      });
+      tile.tabIndex = 0;
+      tile.setAttribute("role", "button");
     }
     this._renderLivePowerRow();
   }

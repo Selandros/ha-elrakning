@@ -212,6 +212,8 @@ assert.equal(liveTiles.grid.value, 2.43);
 assert.equal(liveTiles.grid.status, "Importerar");
 assert.equal(liveTiles.battery.status, "Vilar");
 assert.equal(liveTiles.battery.fillPercent, 0);
+assert.equal(buildLivePowerTiles({}, {}).solar.scaleMax, 1);
+assert.equal(buildLivePowerTiles({ solar_kw: 5.24 }, {}).solar.scaleMax, 5.24);
 const maxima = buildDailyObservedMaxima({ series: {
   solar: { points: [{ timestamp: "2026-08-30T10:00:00+02:00", value_kw: 4.2 }] },
   consumption: { points: [{ timestamp: "2026-08-30T11:00:00+02:00", value_kw: 2.1 }] },
@@ -224,6 +226,16 @@ assert.equal(buildLivePowerTiles({}, { power_kw: 0.05 }).grid.status, "Ingen öv
 assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 0 }).battery.status, "Laddar");
 assert.equal(buildLivePowerTiles({ charging_kw: 0, discharging_kw: 3.1 }).battery.status, "Urladdar");
 assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 3.1 }).battery.status, "Inkonsekvent data");
+assert.match(eonPanelSource, /data-live-power-scale/);
+assert.match(eonPanelSource, /data-live-power-copy-feedback/);
+assert.match(eonPanelSource, /_livePowerRaw/);
+assert.match(eonPanelSource, /JSON\.stringify\(raw, null, 2\)/);
+assert.match(eonPanelSource, /feedback\.textContent = "Kopierat"/);
+assert.doesNotMatch(eonPanelSource, /live-power-icon/);
+assert.doesNotMatch(eonPanelSource, /live-power-tooltip/);
+assert.doesNotMatch(eonPanelSource, /_bindLivePowerTooltips/);
+assert.match(eonPanelSource, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)/);
+assert.match(eonPanelSource, /@media \(max-width: 760px\)[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)/);
 const solarOverReference = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
   { "2026-08-22": 1 },
