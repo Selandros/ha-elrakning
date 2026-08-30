@@ -1712,7 +1712,7 @@ class ElrakningPanel {
 
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1730,7 +1730,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-eon-grid-configure hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1907,6 +1907,7 @@ class ElrakningPanel {
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
               <p class="provider-invoice-cost" data-provider-invoice-cost="elnet" hidden><span>Kostnad denna månad</span><strong></strong></p>
+              <button type="button" class="configuration-control" data-eon-grid-card-configure>Konfigurera</button>
               <button type="button" data-eon-grid-source hidden>Visa data</button>
           </article>
 
@@ -4698,7 +4699,7 @@ class ElrakningPanel {
   }
 
   _bindMeterDialog() {
-    const open = this.host.querySelector("[data-meter-configure]");
+    const opens = this.host.querySelectorAll("[data-meter-configure]");
     const dialog = this.host.querySelector("[data-meter-dialog]");
     const cancel = this.host.querySelector("[data-meter-cancel]");
     const save = this.host.querySelector("[data-meter-save]");
@@ -4708,7 +4709,10 @@ class ElrakningPanel {
     const selectorsElement = this.host.querySelector("[data-meter-selectors]");
     const consumptionSelectorElement = this.host.querySelector("[data-meter-consumption-selector]");
     const invertToggle = this.host.querySelector("[data-meter-invert-power]");
-    if (!open || !dialog || !cancel || !save || !result || !selectorsElement || !consumptionSelectorElement || !invertToggle) return;
+    const title = this.host.querySelector("#meter-title");
+    const loadSection = this.host.querySelector(".meter-load-section");
+    if (!opens.length || !dialog || !cancel || !save || !result || !selectorsElement || !consumptionSelectorElement || !invertToggle) return;
+    let mode = "meter";
     const fields = [
       ["Effekt", "power_entity"],
       ["Import idag", "energy_import_entity"],
@@ -4719,6 +4723,15 @@ class ElrakningPanel {
       invertToggle.checked = false;
       selectorsElement.replaceChildren();
       consumptionSelectorElement.replaceChildren();
+    };
+    const applyMode = () => {
+      const isHouseLoad = mode === "house_load";
+      if (title) title.textContent = isHouseLoad ? "Husets last" : "Elmätare";
+      invertToggle.closest("label")?.toggleAttribute("hidden", isHouseLoad);
+      selectorsElement.hidden = isHouseLoad;
+      if (loadSection) loadSection.hidden = !isHouseLoad;
+      clear?.toggleAttribute("hidden", isHouseLoad);
+      clearLast?.toggleAttribute("hidden", !isHouseLoad);
     };
     const selectorConfig = (field) => {
       if (field !== "energy_import_entity" && field !== "energy_export_entity") return { domain: "sensor" };
@@ -4767,20 +4780,23 @@ class ElrakningPanel {
         capacity_entity: current.capacity_entity || "",
       };
     };
-    open.addEventListener("click", async () => {
+    const openDialog = async (event) => {
+      mode = event.currentTarget.dataset.meterConfigure || "meter";
+      applyMode();
       dialog.hidden = false;
       save.disabled = true;
       result.textContent = "Hämtar sparad konfiguration …";
       try {
-        const [meterResponse, powerResponse] = await Promise.all([
-          this.hass.callWS({ type: "elrakning/meter_state" }),
-          this.hass.callWS({ type: "elrakning/power_state" }),
-        ]);
-        this._applyMeterState(meterResponse);
-        this._applyPowerState(powerResponse);
-        renderSelectors(meterResponse);
-        renderConsumptionSelector(powerResponse);
-        invertToggle.checked = meterResponse.invert_power === true;
+        if (mode === "house_load") {
+          const powerResponse = await this.hass.callWS({ type: "elrakning/power_state" });
+          this._applyPowerState(powerResponse);
+          renderConsumptionSelector(powerResponse);
+        } else {
+          const meterResponse = await this.hass.callWS({ type: "elrakning/meter_state" });
+          this._applyMeterState(meterResponse);
+          renderSelectors(meterResponse);
+          invertToggle.checked = meterResponse.invert_power === true;
+        }
         result.textContent = "Välj de entiteter som ska användas.";
         save.disabled = false;
       } catch {
@@ -4788,16 +4804,33 @@ class ElrakningPanel {
         consumptionSelectorElement.replaceChildren();
         result.textContent = "Mätar- eller lastkonfigurationen kunde inte hämtas.";
       }
-    });
+    };
+    opens.forEach((open) => open.addEventListener("click", openDialog));
     save.addEventListener("click", async () => {
+      if (mode === "house_load") {
+        const powerMapping = currentPowerMapping();
+        powerMapping.consumption_entity = consumptionSelectorElement.querySelector('[data-meter-field="consumption_entity"]')?.value || "";
+        save.disabled = true;
+        result.textContent = "Sparar …";
+        try {
+          const response = await this.hass.callWS({ type: "elrakning/power_save", ...powerMapping });
+          if (!response?.success) throw new Error(response?.error || "power_save_failed");
+          this._applyPowerState(response);
+          await this.loadPowerHistory();
+          close();
+        } catch (error) {
+          const details = this._websocketErrorDetails(error);
+          save.disabled = false;
+          result.textContent = `Husets last kunde inte sparas: ${details.code}: ${details.message}`;
+        }
+        return;
+      }
       await this._recordMeterDiagnostic("INFO", "meter_save_clicked", "Meter save button clicked");
       const mapping = Object.fromEntries(fields.map(([, field]) => {
         const value = selectorsElement.querySelector(`[data-meter-field="${field}"]`)?.value;
         return [field, typeof value === "string" && value ? value : ""];
       }));
       mapping.invert_power = invertToggle.checked;
-      const powerMapping = currentPowerMapping();
-      powerMapping.consumption_entity = consumptionSelectorElement.querySelector('[data-meter-field="consumption_entity"]')?.value || "";
       const payload = {
         type: "elrakning/meter_save",
         ...mapping,
@@ -4818,11 +4851,7 @@ class ElrakningPanel {
         }
         this._applyMeterState(response);
         this.loadBillingHistory();
-        const powerResponse = await this.hass.callWS({ type: "elrakning/power_save", ...powerMapping });
-        if (!powerResponse?.success) throw new Error(powerResponse?.error || "power_save_failed");
-        this._applyPowerState(powerResponse);
         await this.loadMeterPowerHistory();
-        await this.loadPowerHistory();
         close();
       } catch (error) {
         const details = this._websocketErrorDetails(error);
@@ -4833,6 +4862,7 @@ class ElrakningPanel {
     });
     cancel.addEventListener("click", close);
     clear?.addEventListener("click", async () => {
+      if (mode !== "meter") return;
       if (!window.confirm("Är du säker? Alla valda mätare tas bort.")) return;
       try {
         const response = await this.hass.callWS({ type: "elrakning/meter_store_clear" });
@@ -4848,6 +4878,7 @@ class ElrakningPanel {
       }
     });
     clearLast?.addEventListener("click", async () => {
+      if (mode !== "house_load") return;
       if (!window.confirm("Är du säker? Husets last rensas.")) return;
       const mapping = currentPowerMapping();
       mapping.consumption_entity = "";
@@ -7349,7 +7380,7 @@ class ElrakningPanel {
   }
 
   _bindEonGridDialog() {
-    const open = this.host.querySelector("[data-eon-grid-configure]");
+    const opens = this.host.querySelectorAll("[data-eon-grid-configure], [data-eon-grid-card-configure]");
     const dialog = this.host.querySelector("[data-eon-grid-dialog]");
     const appAccount = this.host.querySelector("[data-eon-grid-app-account]");
     const appPassword = this.host.querySelector("[data-eon-grid-app-password]");
@@ -7358,7 +7389,7 @@ class ElrakningPanel {
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
     const providerSelect = this.host.querySelector("[data-grid-provider]");
-    if (!open || !dialog || !appAccount || !appPassword || !result || !appSave || !cancel || !remove || !providerSelect) return;
+    if (!opens.length || !dialog || !appAccount || !appPassword || !result || !appSave || !cancel || !remove || !providerSelect) return;
     this._renderGridProviderOptions(providerSelect);
     const close = () => {
       dialog.hidden = true;
@@ -7366,11 +7397,12 @@ class ElrakningPanel {
       appPassword.value = "";
       result.textContent = "";
     };
-    open.addEventListener("click", async () => {
+    const openDialog = async () => {
       dialog.hidden = false;
       if (!this._gridProviders?.length) await this.loadGridProviders();
       appAccount.focus();
-    });
+    };
+    opens.forEach((open) => open.addEventListener("click", openDialog));
     cancel.addEventListener("click", close);
     remove.addEventListener("click", async () => {
       remove.disabled = true;
