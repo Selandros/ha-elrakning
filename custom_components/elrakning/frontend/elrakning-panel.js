@@ -554,6 +554,13 @@ export function phaseHistoryAvailable(history = {}, meterState = {}) {
   return hasHistory || hasSources || hasLive;
 }
 
+export function phaseHistoryAxisEnd(points = []) {
+  return (Array.isArray(points) ? points : [])
+    .map((point) => new Date(point?.timestamp).getTime())
+    .filter(Number.isFinite)
+    .reduce((latest, timestamp) => Math.max(latest, timestamp), null);
+}
+
 export function buildLiveSourceEntity(states, entityId, role) {
   const state = entityId && states?.[entityId];
   return {
@@ -2984,6 +2991,7 @@ class ElrakningPanel {
 
         .phase-history-chart {
           min-height: 180px;
+          overflow-anchor: none;
           position: relative;
         }
 
@@ -6798,29 +6806,32 @@ class ElrakningPanel {
     const labels = { current: ["Ström", "A"], voltage: ["Spänning", "V"], active_power: ["Effekt", "kW"] };
     const [label, unit] = labels[metric];
     const live = metric === "current" ? this._meterState?.phase_current_a : metric === "voltage" ? this._meterState?.phase_voltage_v : this._meterState?.phase_active_power_kw;
-    summary.replaceChildren(...["l1", "l2", "l3"].map((phase) => {
-      const item = document.createElement("div");
+    for (const phase of ["l1", "l2", "l3"]) {
+      let item = summary.querySelector(`[data-phase-summary="${phase}"]`);
+      if (!item) {
+        item = document.createElement("div");
+        item.dataset.phaseSummary = phase;
+        item.tabIndex = 0;
+        item.setAttribute("role", "button");
+        const strong = document.createElement("strong");
+        const indicator = document.createElement("i");
+        indicator.className = `phase-history-phase-indicator ${phase}`;
+        const phaseLabel = document.createElement("span");
+        phaseLabel.className = `phase-history-phase-label ${phase}`;
+        phaseLabel.textContent = phase.toUpperCase();
+        item.append(strong, indicator, phaseLabel);
+        summary.append(item);
+      }
       const active = this._phaseHistoryVisible[phase] === true;
       item.className = `phase-history-summary-item ${phase}${active ? " active" : " inactive"}`;
-      item.dataset.phaseSummary = phase;
-      item.tabIndex = 0;
-      item.setAttribute("role", "button");
       item.setAttribute("aria-pressed", String(active));
-      const strong = document.createElement("strong");
       const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
       const formattedValue = metric === "voltage"
         ? Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })
         : this._formatNumber(metric === "current" ? Math.abs(Number(value)) : Number(value));
-      strong.textContent = Number.isFinite(Number(value)) ? `${formattedValue} ${unit}` : "—";
-      const phaseLabel = document.createElement("span");
-      phaseLabel.className = `phase-history-phase-label ${phase}`;
-      phaseLabel.textContent = phase.toUpperCase();
-      const indicator = document.createElement("i");
-      indicator.className = `phase-history-phase-indicator ${phase}`;
-      indicator.style.backgroundColor = PHASE_COLOR_MAP[phase];
-      item.append(strong, indicator, phaseLabel);
-      return item;
-    }));
+      item.querySelector("strong").textContent = Number.isFinite(Number(value)) ? `${formattedValue} ${unit}` : "—";
+      item.querySelector(".phase-history-phase-indicator").style.backgroundColor = PHASE_COLOR_MAP[phase];
+    }
     if (!hasActivePoints) {
       chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
       return;
@@ -6831,14 +6842,14 @@ class ElrakningPanel {
     const allPoints = Object.values(phasePoints).flat();
     const timestamps = allPoints.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
     const minTime = Math.min(...timestamps);
-    const maxTime = Math.max(...timestamps);
+    const maxTime = phaseHistoryAxisEnd(allPoints);
     const firstDate = new Date(minTime);
     const dayStart = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate()).getTime();
     const dayEndDate = new Date(dayStart);
     dayEndDate.setDate(dayEndDate.getDate() + 1);
     const useDayAxis = maxTime <= dayEndDate.getTime();
     const axisStart = useDayAxis ? dayStart : minTime;
-    const axisEnd = useDayAxis ? dayEndDate.getTime() : maxTime;
+    const axisEnd = maxTime;
     const timeRange = Math.max(1, axisEnd - axisStart);
     const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
     let minValue = metric === "current" ? 0 : Math.min(...values);
@@ -6879,10 +6890,23 @@ class ElrakningPanel {
       const d = points.map((point, index) => `${index ? "L" : "M"} ${x(point.timestamp)} ${y(Number(point.value))}`).join(" ");
       return d ? `<path class="phase-history-line" stroke="${phaseColors[phase]}" d="${d}" />` : "";
     }).join("");
-    chart.innerHTML = `<svg class="phase-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${label} per fas">${grid}${threshold}${zero}${lines}${timeAxis}<g class="phase-history-hover" aria-hidden="true"></g></svg><div class="soc-tooltip" hidden></div>`;
-    const svg = chart.querySelector(".phase-history-svg");
-    const tooltip = chart.querySelector(".soc-tooltip");
-    const hover = chart.querySelector(".phase-history-hover");
+    const svgMarkup = `${grid}${threshold}${zero}${lines}${timeAxis}<g class="phase-history-hover" aria-hidden="true"></g>`;
+    let svg = chart.querySelector(".phase-history-svg");
+    let tooltip = chart.querySelector(".soc-tooltip");
+    if (!svg || !tooltip) {
+      chart.replaceChildren();
+      svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.classList.add("phase-history-svg");
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", `${label} per fas`);
+      tooltip = document.createElement("div");
+      tooltip.className = "soc-tooltip";
+      tooltip.hidden = true;
+      chart.append(svg, tooltip);
+    }
+    svg.innerHTML = svgMarkup;
+    const hover = svg.querySelector(".phase-history-hover");
     const nearest = (timestamp) => Object.fromEntries(Object.entries(phasePoints).map(([phase, points]) => [phase, points.reduce((best, point) => !best || Math.abs(new Date(point.timestamp) - timestamp) < Math.abs(new Date(best.timestamp) - timestamp) ? point : best, null)]));
     const update = (event) => {
       const bounds = svg.getBoundingClientRect();
@@ -6895,8 +6919,11 @@ class ElrakningPanel {
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     const clear = () => { tooltip.hidden = true; hover.replaceChildren(); };
-    svg.addEventListener("pointermove", update);
-    svg.addEventListener("pointerleave", clear);
+    if (svg.dataset.phaseHistoryBound !== "true") {
+      svg.addEventListener("pointermove", update);
+      svg.addEventListener("pointerleave", clear);
+      svg.dataset.phaseHistoryBound = "true";
+    }
   }
 
   async loadBillingHistory() {

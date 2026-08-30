@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -23,6 +23,10 @@ assert.match(eonPanelSource, /mergeDailyPhaseMaxima/);
 assert.match(eonPanelSource, /mergePhaseHistory/);
 assert.match(eonPanelSource, /createMeterPowerHistoryState/);
 assert.match(eonPanelSource, /mergeMeterPowerHistoryPoint/);
+assert.match(eonPanelSource, /overflow-anchor: none/);
+assert.doesNotMatch(eonPanelSource.slice(eonPanelSource.indexOf("  _renderPhaseHistoryCard()"), eonPanelSource.indexOf("  async loadBillingHistory()")), /scrollIntoView|focus\(/);
+assert.doesNotMatch(eonPanelSource.slice(eonPanelSource.indexOf("  _renderPhaseHistoryCard()"), eonPanelSource.indexOf("  async loadBillingHistory()")), /summary\.replaceChildren/);
+assert.match(eonPanelSource, /svg\.dataset\.phaseHistoryBound/);
 assert.match(eonPanelSource, /history_cache/);
 assert.match(eonPanelSource, /recorder_history/);
 assert.match(eonPanelSource, /last_live_merge_at/);
@@ -672,6 +676,8 @@ assert.deepEqual(phaseHistoryPointCounts(mergedPhaseHistory), {
 assert.equal(phaseHistoryAvailable(mergedPhaseHistory, {}), true);
 assert.equal(phaseHistoryAvailable({}, { phase_source_entities: { current: { l1: "sensor.phase_l1" } } }), true);
 assert.equal(phaseHistoryAvailable({}, {}), false);
+assert.equal(phaseHistoryAxisEnd([{ timestamp: "2026-08-30T17:50:00Z" }, { timestamp: "2026-08-30T15:00:00Z" }]), Date.parse("2026-08-30T17:50:00Z"));
+assert.equal(phaseHistoryAxisEnd([]), null);
 assert.match(eonPanelSource, /cardAvailable = phaseHistoryAvailable/);
 assert.match(eonPanelSource, /Välj minst en fas/);
 assert.doesNotMatch(eonPanelSource, /card\.hidden = !hasActivePoints/);
