@@ -1858,15 +1858,15 @@ class ElrakningPanel {
 
         <div class="daily-energy-row phase-history-row">
           <article class="card phase-history-card" data-phase-history-card hidden aria-labelledby="phase-history-title">
-            <div class="phase-history-heading">
-              <h2 id="phase-history-title">Faser</h2>
+            <div class="phase-history-heading" aria-label="Faser">
+              <h2 id="phase-history-title" class="visually-hidden">Faser</h2>
+              <div class="phase-history-summary" data-phase-history-summary></div>
               <div class="phase-history-metric-selector" role="group" aria-label="Fasmätning">
                 <button type="button" data-phase-metric="current" aria-pressed="true">Ström</button>
                 <button type="button" data-phase-metric="voltage" aria-pressed="false">Spänning</button>
                 <button type="button" data-phase-metric="active_power" aria-pressed="false">Effekt</button>
               </div>
             </div>
-            <div class="phase-history-summary" data-phase-history-summary></div>
             <div class="phase-history-chart" data-phase-history-chart></div>
             <button type="button" data-phase-history-copy hidden>Visa data</button>
           </article>
@@ -3019,6 +3019,7 @@ class ElrakningPanel {
           display: flex;
           gap: 16px;
           justify-content: space-between;
+          flex-wrap: wrap;
         }
 
         .phase-history-heading h2 {
@@ -3030,6 +3031,7 @@ class ElrakningPanel {
           display: flex;
           flex-wrap: wrap;
           gap: 6px;
+          margin-left: auto;
         }
 
         .phase-history-metric-selector button {
@@ -3049,17 +3051,19 @@ class ElrakningPanel {
         }
 
         .phase-history-summary {
-          display: grid;
+          align-items: center;
+          display: flex;
           gap: 8px;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          margin: 16px 0 8px;
+          flex-wrap: wrap;
+          margin: 0;
         }
 
         .phase-history-summary div {
           color: var(--secondary-text-color);
           cursor: pointer;
+          font-size: var(--price-card-text-size);
           opacity: 0.48;
-          text-align: center;
+          padding: 4px 2px;
           transition: opacity 120ms ease;
         }
 
@@ -3087,10 +3091,7 @@ class ElrakningPanel {
         }
 
         .phase-history-summary strong {
-          color: var(--primary-text-color);
-          display: block;
-          font-size: 18px;
-          font-weight: 500;
+          display: none;
         }
 
         .phase-history-chart {
@@ -5731,7 +5732,10 @@ class ElrakningPanel {
       this._applyPowerState(eventData.state);
       for (const entry of eventData.points || []) this._appendPowerPoint(entry.series, entry.point);
       this._refreshPowerEnergyState();
-      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+      if (this.host.querySelector(".price-chart")
+        && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
+        this.renderPriceChart();
+      }
     }
   }
 
@@ -7544,7 +7548,10 @@ class ElrakningPanel {
       point,
       this._meterState?.power_entity,
     );
-    if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    if (this.host.querySelector(".price-chart")
+      && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
+      this.renderPriceChart();
+    }
   }
 
   _periodCustomerPrice(period) {
@@ -7721,6 +7728,49 @@ class ElrakningPanel {
     }));
   }
 
+  _getPriceChartLiveSignature() {
+    const periods = this.priceData?.periods || [];
+    if (!periods.length) return JSON.stringify({ periods: 0 });
+    const firstTimestamp = new Date(periods[0].start).getTime();
+    if (!Number.isFinite(firstTimestamp)) return JSON.stringify({ periods: periods.length });
+    const dayStart = new Date(firstTimestamp);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayStartMs = dayStart.getTime();
+    const slotMs = 5 * 60 * 1000;
+    const historyTimestamps = [
+      ...(Array.isArray(this._meterPowerHistory?.points) ? this._meterPowerHistory.points : []),
+      ...Object.values(this._powerHistory?.series || {}).flatMap((series) => Array.isArray(series?.points) ? series.points : []),
+    ].map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
+    const anchorTimestamp = historyTimestamps.length ? Math.max(...historyTimestamps) : Date.now();
+    const slotTimestamp = Math.floor(anchorTimestamp / slotMs) * slotMs;
+    const pointSignature = (points, valueKeys) => {
+      const selected = nearestMeterPoint(points, slotTimestamp, slotMs / 2);
+      if (!selected) return null;
+      return {
+        timestamp: selected.timestamp || null,
+        values: valueKeys.map((key) => normalizeMeterValue(selected[key])),
+      };
+    };
+    const meterPoints = Array.isArray(this._meterPowerHistory?.points) ? this._meterPowerHistory.points : [];
+    const power = {};
+    for (const key of ["solar", "consumption", "charging", "discharging"]) {
+      const points = Array.isArray(this._powerHistory?.series?.[key]?.points)
+        ? this._powerHistory.series[key].points
+        : [];
+      power[key] = pointSignature(points.map((point) => ({
+        timestamp: point.timestamp,
+        import_kw: point.value_kw,
+      })), ["import_kw"]);
+    }
+    return JSON.stringify({
+      date: new Date(dayStartMs).toISOString().slice(0, 10),
+      periods: periods.length,
+      slot: slotTimestamp,
+      meter: pointSignature(meterPoints, ["import_kw", "export_kw"]),
+      power,
+    });
+  }
+
   buildMeterDisplaySegments(points, key) {
     return this.buildThresholdClippedSegments(points, key);
   }
@@ -7834,6 +7884,7 @@ class ElrakningPanel {
     if (!chart) return;
 
     if (!this.priceData.periods.length) {
+      this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       const legend = this.host.querySelector("[data-meter-legend]");
       if (legend) legend.hidden = true;
       const message = this.priceData.error === "missing_integration"
@@ -8063,6 +8114,7 @@ class ElrakningPanel {
       ${hourLabels}
     </svg><div class="chart-tooltip" hidden></div>`;
     this.bindChartTooltips();
+    this._priceChartLiveSignature = this._getPriceChartLiveSignature();
     this.autoScrollToNow(chart, x(now), this.priceSnapshot?.date, currentPeriod);
   }
 
