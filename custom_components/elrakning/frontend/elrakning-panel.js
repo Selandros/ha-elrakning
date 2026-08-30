@@ -12,6 +12,9 @@ export const CHART_COLORS = Object.freeze({
   soc: "#77C2A1",
   socEstimated: "#5F9F82",
   neutral: "#8590A6",
+  phaseL1: "#77C2A1",
+  phaseL2: "#72AAF6",
+  phaseL3: "#F0A06A",
 });
 
 export function chartColor(key) {
@@ -1024,6 +1027,7 @@ class ElrakningPanel {
       discharging: true,
     };
     this._priceComparisonVisible = { electricity: true, grid: false };
+    this._phaseHistoryMetric = "current";
     this._providerConfigured = false;
     this._electricityProviderState = null;
     this._billingHistory = null;
@@ -1192,6 +1196,23 @@ class ElrakningPanel {
           <article class="card solar-history-card" data-power-card="solar-history" hidden aria-labelledby="solar-history-title">
             <h2 id="solar-history-title" class="visually-hidden">Solhistorik</h2>
             <div class="solar-history-chart" data-solar-history-chart hidden></div>
+          </article>
+        </div>
+
+        <div class="daily-energy-row phase-history-row">
+          <article class="card phase-history-card" data-phase-history-card hidden aria-labelledby="phase-history-title">
+            <div class="phase-history-heading">
+              <h2 id="phase-history-title">Faser</h2>
+              <div class="phase-history-metric-selector" role="group" aria-label="Fasmätning">
+                <button type="button" data-phase-metric="current" aria-pressed="true">Ström</button>
+                <button type="button" data-phase-metric="voltage" aria-pressed="false">Spänning</button>
+                <button type="button" data-phase-metric="active_power" aria-pressed="false">Effekt</button>
+              </div>
+            </div>
+            <div class="phase-history-summary" data-phase-history-summary></div>
+            <div class="phase-history-chart" data-phase-history-chart></div>
+            <button type="button" data-phase-history-copy hidden>Visa data</button>
+            <span class="phase-history-copy-feedback" data-phase-history-copy-feedback aria-live="polite"></span>
           </article>
         </div>
 
@@ -2329,6 +2350,105 @@ class ElrakningPanel {
           height: 100%;
         }
 
+        .phase-history-row {
+          grid-template-columns: 1fr;
+          margin-top: 16px;
+        }
+
+        .phase-history-card {
+          min-width: 0;
+        }
+
+        .phase-history-heading {
+          align-items: center;
+          display: flex;
+          gap: 16px;
+          justify-content: space-between;
+        }
+
+        .phase-history-heading h2 {
+          font-size: inherit;
+          margin: 0;
+        }
+
+        .phase-history-metric-selector {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .phase-history-metric-selector button {
+          background: transparent;
+          border: 1px solid var(--divider-color);
+          border-radius: 999px;
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          font: inherit;
+          padding: 4px 9px;
+        }
+
+        .phase-history-metric-selector button.active {
+          background: var(--primary-background-color);
+          color: var(--primary-text-color);
+        }
+
+        .phase-history-summary {
+          display: grid;
+          gap: 8px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin: 16px 0 8px;
+        }
+
+        .phase-history-summary div {
+          color: var(--secondary-text-color);
+          text-align: center;
+        }
+
+        .phase-history-summary strong {
+          color: var(--primary-text-color);
+          display: block;
+          font-size: 18px;
+          font-weight: 500;
+        }
+
+        .phase-history-chart {
+          min-height: 180px;
+          position: relative;
+        }
+
+        .phase-history-svg {
+          display: block;
+          height: auto;
+          width: 100%;
+        }
+
+        .phase-history-gridline {
+          stroke: var(--divider-color);
+          stroke-width: 1;
+        }
+
+        .phase-history-axis-label {
+          fill: var(--secondary-text-color);
+          font-size: 10px;
+        }
+
+        .phase-history-line {
+          fill: none;
+          stroke-width: 2;
+        }
+
+        .phase-history-empty {
+          color: var(--secondary-text-color);
+          padding: 32px 0;
+          text-align: center;
+        }
+
+        .phase-history-copy-feedback {
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          margin-left: 8px;
+        }
+
         .source-provider {
           color: var(--secondary-text-color);
           font-size: 14px;
@@ -3450,6 +3570,7 @@ class ElrakningPanel {
     this._bindProviderSourceDialog();
     this._bindMeterSourceDialog();
     this._bindLivePowerCards();
+    this._bindPhaseHistoryCard();
         this._bindDiagnostics();
     this._bindMainInvoiceParser();
     this._bindInvoiceEstimate();
@@ -3563,6 +3684,18 @@ class ElrakningPanel {
     }
   }
 
+  _applyPhaseHistoryPreference(preference) {
+    if (["current", "voltage", "active_power"].includes(preference)) this._phaseHistoryMetric = preference;
+  }
+
+  _syncPhaseHistoryMetricButtons() {
+    for (const button of this.host.querySelectorAll("[data-phase-metric]")) {
+      const active = button.dataset.phaseMetric === this._phaseHistoryMetric;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+
   _syncChartLayerButtons() {
     const layers = this._chartLayerState();
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
@@ -3585,10 +3718,12 @@ class ElrakningPanel {
       const response = await this.hass.callWS({ type: "elrakning/ui_preferences/get" });
       this._applyChartLayerState(response.chart_layers);
       this._applyPriceComparisonState(response.price_comparison);
+      this._applyPhaseHistoryPreference(response.phase_history_metric);
       this._applyConfigurationCardsVisibility(response.configuration_cards_visible, response.main_cards);
       this._chartPreferencesReady = true;
       this._syncChartLayerButtons();
       this._syncPriceComparisonControls();
+      this._syncPhaseHistoryMetricButtons();
       this.renderPriceChart();
     } catch {
       // Keep the first-use defaults for this session when preference loading fails.
@@ -3602,6 +3737,7 @@ class ElrakningPanel {
         type: "elrakning/ui_preferences/set",
         chart_layers: this._chartLayerState(),
         price_comparison: this._priceComparisonVisible,
+        phase_history_metric: this._phaseHistoryMetric,
         configuration_cards_visible: this._configurationCardsVisible,
         main_cards: this._mainCards,
       });
@@ -3755,11 +3891,13 @@ class ElrakningPanel {
     const meterSource = this.host.querySelector("[data-meter-source]");
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
+    const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
+    if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
     this._updateLivePowerCardInteractivity();
     this._updateInvoiceEstimateInteractivity();
   }
@@ -5902,6 +6040,127 @@ class ElrakningPanel {
     this._renderInvoiceEstimateCard();
   }
 
+  _bindPhaseHistoryCard() {
+    for (const button of this.host.querySelectorAll("[data-phase-metric]")) {
+      button.addEventListener("click", () => {
+        this._phaseHistoryMetric = button.dataset.phaseMetric;
+        for (const item of this.host.querySelectorAll("[data-phase-metric]")) {
+          const active = item.dataset.phaseMetric === this._phaseHistoryMetric;
+          item.classList.toggle("active", active);
+          item.setAttribute("aria-pressed", String(active));
+        }
+        this._persistChartPreferences();
+        this._renderPhaseHistoryCard();
+      });
+    }
+    this._syncPhaseHistoryMetricButtons();
+    const copy = this.host.querySelector("[data-phase-history-copy]");
+    const feedback = this.host.querySelector("[data-phase-history-copy-feedback]");
+    copy?.addEventListener("click", async () => {
+      if (!this._debugEnabled || !this._meterPowerHistory?.phase_history) return;
+      try {
+        await this._copyText(JSON.stringify({
+          metric: this._phaseHistoryMetric,
+          phase_source_entities: this._meterPowerHistory.phase_source_entities || {},
+          phase_discovery_method: this._meterPowerHistory.phase_discovery_method || null,
+          phase_history: this._meterPowerHistory.phase_history,
+        }, null, 2));
+        if (feedback) {
+          feedback.textContent = "Kopierat";
+          window.setTimeout(() => { feedback.textContent = ""; }, 1400);
+        }
+      } catch {
+        if (feedback) feedback.textContent = "Kunde inte kopiera";
+      }
+    });
+  }
+
+  _renderPhaseHistoryCard() {
+    const card = this.host.querySelector("[data-phase-history-card]");
+    const chart = this.host.querySelector("[data-phase-history-chart]");
+    const summary = this.host.querySelector("[data-phase-history-summary]");
+    if (!card || !chart || !summary) return;
+    const history = this._meterPowerHistory?.phase_history || {};
+    const metric = this._phaseHistoryMetric;
+    const source = history[metric] || {};
+    const phasePoints = Object.fromEntries(["l1", "l2", "l3"].map((phase) => [
+      phase,
+      Array.isArray(source[phase]?.points) ? source[phase].points.filter((point) => Number.isFinite(Number(point.value))) : [],
+    ]));
+    const hasPoints = Object.values(phasePoints).some((points) => points.length);
+    card.hidden = !hasPoints;
+    const copy = this.host.querySelector("[data-phase-history-copy]");
+    if (copy) copy.hidden = !this._debugEnabled || !hasPoints;
+    if (!hasPoints) {
+      summary.replaceChildren();
+      chart.replaceChildren();
+      return;
+    }
+    const labels = { current: ["Ström", "A"], voltage: ["Spänning", "V"], active_power: ["Effekt", "kW"] };
+    const [label, unit] = labels[metric];
+    const live = metric === "current" ? this._meterState?.phase_current_a : metric === "voltage" ? this._meterState?.phase_voltage_v : this._meterState?.phase_active_power_kw;
+    summary.replaceChildren(...["l1", "l2", "l3"].map((phase) => {
+      const item = document.createElement("div");
+      const strong = document.createElement("strong");
+      const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
+      strong.textContent = Number.isFinite(Number(value)) ? `${this._formatNumber(metric === "current" ? Math.abs(Number(value)) : Number(value))} ${unit}` : "—";
+      item.append(strong, document.createTextNode(phase.toUpperCase()));
+      return item;
+    }));
+    const width = 960;
+    const height = 300;
+    const plot = { left: 44, right: 8, top: 12, bottom: 24 };
+    const allPoints = Object.values(phasePoints).flat();
+    const timestamps = allPoints.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
+    const minTime = Math.min(...timestamps);
+    const maxTime = Math.max(...timestamps);
+    const timeRange = Math.max(1, maxTime - minTime);
+    const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
+    let minValue = metric === "current" ? 0 : Math.min(...values);
+    const fuse = Number(this._meterState?.facility?.fuse_ampere);
+    let maxValue = metric === "current" ? Math.max(Number.isFinite(fuse) ? fuse : 0, ...values) : Math.max(...values);
+    if (metric === "active_power") {
+      minValue = Math.min(0, minValue);
+      maxValue = Math.max(0, maxValue);
+    }
+    const margin = Math.max(1, (maxValue - minValue) * 0.08);
+    if (metric !== "current") {
+      minValue -= margin;
+      maxValue += margin;
+    }
+    if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue) { minValue = 0; maxValue = 1; }
+    const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - minTime) / timeRange) * (width - plot.left - plot.right);
+    const y = (value) => plot.top + (maxValue - value) / (maxValue - minValue) * (height - plot.top - plot.bottom);
+    const phaseColors = { l1: chartColor("phaseL1"), l2: chartColor("phaseL2"), l3: chartColor("phaseL3") };
+    const grid = [0, 0.5, 1].map((ratio) => {
+      const value = maxValue - ratio * (maxValue - minValue);
+      return `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="phase-history-axis-label" x="4" y="${y(value) + 3}">${this._formatNumber(value)} ${unit}</text>`;
+    }).join("");
+    const zero = metric === "active_power" ? `<line class="phase-history-gridline" x1="${plot.left}" y1="${y(0)}" x2="${width - plot.right}" y2="${y(0)}" />` : "";
+    const lines = Object.entries(phasePoints).map(([phase, points]) => {
+      const d = points.map((point, index) => `${index ? "L" : "M"} ${x(point.timestamp)} ${y(Number(point.value))}`).join(" ");
+      return d ? `<path class="phase-history-line" stroke="${phaseColors[phase]}" d="${d}" />` : "";
+    }).join("");
+    chart.innerHTML = `<svg class="phase-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${label} per fas">${grid}${zero}${lines}<g class="phase-history-hover" aria-hidden="true"></g></svg><div class="soc-tooltip" hidden></div>`;
+    const svg = chart.querySelector(".phase-history-svg");
+    const tooltip = chart.querySelector(".soc-tooltip");
+    const hover = chart.querySelector(".phase-history-hover");
+    const nearest = (timestamp) => Object.fromEntries(Object.entries(phasePoints).map(([phase, points]) => [phase, points.reduce((best, point) => !best || Math.abs(new Date(point.timestamp) - timestamp) < Math.abs(new Date(best.timestamp) - timestamp) ? point : best, null)]));
+    const update = (event) => {
+      const bounds = svg.getBoundingClientRect();
+      const timestamp = new Date(minTime + Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))) * timeRange);
+      const selected = nearest(timestamp);
+      const fields = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => ({ label: phase.toUpperCase(), value: point.value, formatted: `${this._formatNumber(metric === "current" ? Math.abs(Number(point.value)) : Number(point.value))} ${unit}` }));
+      renderSharedTooltip(tooltip, { title: timestamp.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }), fields });
+      tooltip.hidden = false;
+      hover.innerHTML = Object.entries(selected).filter(([, point]) => point).map(([phase, point]) => `<circle class="chart-hover-marker" fill="${phaseColors[phase]}" cx="${x(point.timestamp)}" cy="${y(Number(point.value))}" r="4" />`).join("");
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+    };
+    const clear = () => { tooltip.hidden = true; hover.replaceChildren(); };
+    svg.addEventListener("pointermove", update);
+    svg.addEventListener("pointerleave", clear);
+  }
+
   async loadBillingHistory() {
     if (!this.hass?.callWS) return;
     try {
@@ -6188,6 +6447,7 @@ class ElrakningPanel {
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
     this._renderEonGridPhaseSummary();
+    this._renderPhaseHistoryCard();
     this._renderInvoiceEstimateCard();
   }
 
@@ -6255,6 +6515,9 @@ class ElrakningPanel {
         date: response?.date || null,
         points: Array.isArray(response?.points) ? response.points : [],
         phase_current_history: response?.phase_current_history || {},
+        phase_history: response?.phase_history || {},
+        phase_source_entities: response?.phase_source_entities || this._meterState?.phase_source_entities || {},
+        phase_discovery_method: response?.phase_discovery_method || this._meterState?.phase_discovery_method || null,
         daily_phase_max: response?.daily_phase_max || {},
         daily_max_phase_current_a: Number.isFinite(Number(response?.daily_max_phase_current_a)) ? Number(response.daily_max_phase_current_a) : null,
         phase_current_source_entities: response?.phase_current_source_entities || this._meterState?.phase_current_source_entities || {},
@@ -6267,6 +6530,7 @@ class ElrakningPanel {
         : null;
       this._rebuildLivePowerMaxima();
       if (this._eonGridState?.configured === true) this._applyEonGridState(this._eonGridState);
+      this._renderPhaseHistoryCard();
       this._meterHistorySummary = response.history || {
         entity_id: response?.entity_id || entityId,
         success: true,
@@ -6296,8 +6560,26 @@ class ElrakningPanel {
   _appendMeterPowerPoint(point) {
     if (point?.phase_current_a) {
       this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());
+      const timestamp = point.timestamp || new Date().toISOString();
+      const phaseHistory = { ...(this._meterPowerHistory.phase_history || {}) };
+      for (const [metric, values] of [["current", point.phase_current_a], ["voltage", point.phase_voltage_v], ["active_power", point.phase_active_power_kw]]) {
+        if (!values || typeof values !== "object") continue;
+        phaseHistory[metric] = { ...(phaseHistory[metric] || {}) };
+        for (const phase of ["l1", "l2", "l3"]) {
+          const raw = values[phase];
+          const value = raw == null ? NaN : Number(raw);
+          if (!Number.isFinite(value)) continue;
+          const points = Array.isArray(phaseHistory[metric][phase]?.points) ? [...phaseHistory[metric][phase].points] : [];
+          const nextPoint = { timestamp, value: metric === "current" ? Math.abs(value) : value };
+          const index = points.findIndex((item) => item.timestamp === timestamp);
+          if (index >= 0) points[index] = nextPoint; else points.push(nextPoint);
+          phaseHistory[metric][phase] = { ...(phaseHistory[metric][phase] || {}), points: points.slice(-2000) };
+        }
+      }
+      this._meterPowerHistory.phase_history = phaseHistory;
       this._renderEonGridPhaseSummary();
       this._renderLivePowerRow();
+      this._renderPhaseHistoryCard();
     }
     if (!point?.timestamp) return;
     if (point.entity_id && point.entity_id !== this._meterState?.power_entity) return;

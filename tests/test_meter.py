@@ -109,6 +109,12 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
             types.SimpleNamespace(entity_id="sensor.current_l2", state="9.8", attributes={"device_class": "current", "unit_of_measurement": "A"}),
             types.SimpleNamespace(entity_id="sensor.current_l3", state="8.4", attributes={"device_class": "current", "unit_of_measurement": "A"}),
             types.SimpleNamespace(entity_id="sensor.total_current", state="20", attributes={"device_class": "current", "unit_of_measurement": "A"}),
+            types.SimpleNamespace(entity_id="sensor.phase_l1_voltage", state="234", attributes={"device_class": "voltage", "unit_of_measurement": "V"}),
+            types.SimpleNamespace(entity_id="sensor.phase_l2_voltage", state="235", attributes={"device_class": "voltage", "unit_of_measurement": "V"}),
+            types.SimpleNamespace(entity_id="sensor.phase_l3_voltage", state="233", attributes={"device_class": "voltage", "unit_of_measurement": "V"}),
+            types.SimpleNamespace(entity_id="sensor.phase_l1_power", state="1200", attributes={"device_class": "power", "unit_of_measurement": "W"}),
+            types.SimpleNamespace(entity_id="sensor.phase_l2_power", state="800", attributes={"device_class": "power", "unit_of_measurement": "W"}),
+            types.SimpleNamespace(entity_id="sensor.phase_l3_power", state="-400", attributes={"device_class": "power", "unit_of_measurement": "W"}),
         ]
         hass = _hass("sensor.power")
         states = {state.entity_id: state for state in phase_states}
@@ -133,6 +139,9 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
                     "l3": "sensor.current_l3",
                 },
             )
+            discovered = manager._discover_phase_entities()
+            self.assertEqual(discovered["voltage"], {"l1": "sensor.phase_l1_voltage", "l2": "sensor.phase_l2_voltage", "l3": "sensor.phase_l3_voltage"})
+            self.assertEqual(discovered["active_power"], {"l1": "sensor.phase_l1_power", "l2": "sensor.phase_l2_power", "l3": "sensor.phase_l3_power"})
         finally:
             meter.er.async_get = original_registry
 

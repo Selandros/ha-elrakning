@@ -128,6 +128,36 @@ def _current_ampere(state: State | Any) -> float | None:
     return value if value == value and value not in (float("inf"), float("-inf")) else None
 
 
+def _finite_state_value(state: State | Any) -> float | None:
+    try:
+        value = float(getattr(state, "state", state))
+    except (TypeError, ValueError):
+        return None
+    return value if value == value and value not in (float("inf"), float("-inf")) else None
+
+
+def _phase_voltage(state: State | Any) -> float | None:
+    attributes = getattr(state, "attributes", {})
+    if str(attributes.get("device_class", "")).lower() != "voltage":
+        return None
+    if _text(attributes.get("unit_of_measurement")).lower() != "v":
+        return None
+    return _finite_state_value(state)
+
+
+def _phase_active_power_kw(state: State | Any) -> float | None:
+    attributes = getattr(state, "attributes", {})
+    if str(attributes.get("device_class", "")).lower() != "power":
+        return None
+    unit = _text(attributes.get("unit_of_measurement")).lower()
+    if unit not in {"w", "kw", "mw"}:
+        return None
+    value = _finite_state_value(state)
+    if value is None:
+        return None
+    return value / 1000 if unit == "w" else value * 1000 if unit == "mw" else value
+
+
 class MeterManager:
     """Persist a user-selected generic meter mapping and read its states."""
 
@@ -138,8 +168,9 @@ class MeterManager:
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
         self.mapping[METER_INVERT_FIELD] = False
         self._history_summary: dict[str, Any] | None = None
-        self._history_inflight: dict[tuple[str, str, bool, tuple[tuple[str, str], ...]], asyncio.Task] = {}
+        self._history_inflight: dict[tuple[str, str, bool, tuple[tuple[str, str, str], ...]], asyncio.Task] = {}
         self._phase_current_entities: dict[str, str] = {}
+        self._phase_source_entities: dict[str, dict[str, str]] = {"current": {}, "voltage": {}, "active_power": {}}
         self._phase_current_discovery_method = "device_registry_and_phase_metadata"
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
@@ -147,16 +178,27 @@ class MeterManager:
         """Publish normalized live power without polling."""
         entity_id = event.data.get("entity_id")
         phase_entity = entity_id in self._phase_current_entities.values()
-        if entity_id != self.mapping.get("power_entity") and not phase_entity:
+        phase_kind = next((kind for kind, entities in self._phase_source_entities.items() if entity_id in entities.values()), None)
+        if entity_id != self.mapping.get("power_entity") and phase_kind is None and not phase_entity:
             return
-        if phase_entity:
+        if phase_entity or phase_kind is not None:
+            validators = {"current": _current_ampere, "voltage": _phase_voltage, "active_power": _phase_active_power_kw}
             phase_values = {
-                phase: _current_ampere(self.hass.states.get(phase_entity_id))
-                for phase, phase_entity_id in self._phase_current_entities.items()
+                kind: {
+                    phase: validators[kind](self.hass.states.get(phase_entity_id))
+                    for phase, phase_entity_id in entities.items()
+                }
+                for kind, entities in self._phase_source_entities.items()
             }
             self.hass.bus.async_fire(
                 METER_POWER_UPDATE_EVENT,
-                {"entity_id": entity_id, "phase_current_a": phase_values},
+                {
+                    "entity_id": entity_id,
+                    "timestamp": getattr(event.data.get("new_state"), "last_updated", None).isoformat() if getattr(event.data.get("new_state"), "last_updated", None) else None,
+                    "phase_current_a": phase_values["current"],
+                    "phase_voltage_v": phase_values["voltage"],
+                    "phase_active_power_kw": phase_values["active_power"],
+                },
             )
             return
         point = normalize_power_state(event.data.get("new_state"), bool(self.mapping.get(METER_INVERT_FIELD)))
@@ -242,18 +284,32 @@ class MeterManager:
             "energy_import_valid": None,
             "energy_export_valid": None,
         })
-        phase_entities = self._discover_phase_current_entities()
+        phase_sources = self._discover_phase_entities()
+        self._phase_source_entities = phase_sources
+        phase_entities = phase_sources["current"]
         self._phase_current_entities = phase_entities
         phase_values = {
             phase: _current_ampere(self.hass.states.get(entity_id))
             for phase, entity_id in phase_entities.items()
         }
+        phase_voltage_values = {
+            phase: _phase_voltage(self.hass.states.get(entity_id))
+            for phase, entity_id in phase_sources["voltage"].items()
+        }
+        phase_power_values = {
+            phase: _phase_active_power_kw(self.hass.states.get(entity_id))
+            for phase, entity_id in phase_sources["active_power"].items()
+        }
         result.update({
             "phase_current_a": {phase: phase_values.get(phase) for phase in ("l1", "l2", "l3")},
+            "phase_voltage_v": {phase: phase_voltage_values.get(phase) for phase in ("l1", "l2", "l3")},
+            "phase_active_power_kw": {phase: phase_power_values.get(phase) for phase in ("l1", "l2", "l3")},
             "phase_current_entities": dict(phase_entities),
             "phase_current_source_entities": dict(phase_entities),
             "phase_current_discovery_method": self._phase_current_discovery_method,
             "phase_current_available": any(value is not None for value in phase_values.values()),
+            "phase_source_entities": {kind: dict(entities) for kind, entities in phase_sources.items()},
+            "phase_discovery_method": self._phase_current_discovery_method,
         })
         for field, output, divisor in (
             ("power_entity", "power_kw", 1000),
@@ -281,8 +337,12 @@ class MeterManager:
 
     def _discover_phase_current_entities(self) -> dict[str, str]:
         """Discover phase-current sensors associated with the selected meter device."""
+        return self._discover_phase_entities()["current"]
+
+    def _discover_phase_entities(self) -> dict[str, dict[str, str]]:
+        """Discover phase sensors associated with the selected meter device."""
         if not hasattr(self.hass.states, "async_all"):
-            return {}
+            return {"current": {}, "voltage": {}, "active_power": {}}
         try:
             states = self.hass.states.async_all()
         except TypeError:
@@ -292,7 +352,8 @@ class MeterManager:
         power_entity = self.mapping.get("power_entity")
         power_entry = registry.async_get(power_entity) if registry is not None and power_entity else None
         device_id = getattr(power_entry, "device_id", None)
-        candidates: list[tuple[str, Any, Any]] = []
+        candidates: dict[str, list[tuple[str, str, Any]]] = {"current": [], "voltage": [], "active_power": []}
+        validators = {"current": _current_ampere, "voltage": _phase_voltage, "active_power": _phase_active_power_kw}
         for entity_id, state in state_by_entity.items():
             entry = registry.async_get(entity_id) if registry is not None else None
             if device_id and getattr(entry, "device_id", None) != device_id:
@@ -305,11 +366,15 @@ class MeterManager:
                 getattr(state, "attributes", {}).get("phase_name"),
                 getattr(state, "attributes", {}).get("channel"),
             ])
-            if phase and _current_ampere(state) is not None:
-                candidates.append((phase, entity_id, entry))
-        result: dict[str, str] = {}
-        for phase, entity_id, _entry in candidates:
-            result.setdefault(phase, entity_id)
+            if not phase:
+                continue
+            for kind, validator in validators.items():
+                if validator(state) is not None:
+                    candidates[kind].append((phase, entity_id, entry))
+        result = {kind: {} for kind in candidates}
+        for kind, items in candidates.items():
+            for phase, entity_id, _entry in items:
+                result[kind].setdefault(phase, entity_id)
         return result
 
     async def async_source(self) -> dict[str, Any]:
@@ -349,15 +414,17 @@ class MeterManager:
             await self._diagnostic("INFO", "meter_history_request_success", "Meter history loaded · 0 points")
             return {"success": True, "entity_id": None, "date": date, "points": [], "history": summary}
         invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
-        phase_entities = dict(self._phase_current_entities or self._discover_phase_current_entities())
-        phase_key = tuple(sorted(phase_entities.items()))
+        phase_entities = self._discover_phase_entities()
+        self._phase_source_entities = phase_entities
+        self._phase_current_entities = phase_entities["current"]
+        phase_key = tuple(sorted((kind, phase, entity_id) for kind, entities in phase_entities.items() for phase, entity_id in entities.items()))
         key = (entity_id, date, invert_power, phase_key)
         task = self._history_inflight.get(key)
         if task is None:
             task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date, invert_power, phase_entities))
             self._history_inflight[key] = task
 
-            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool, tuple[tuple[str, str], ...]] = key) -> None:
+            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool, tuple[tuple[str, str, str], ...]] = key) -> None:
                 if self._history_inflight.get(request_key) is completed:
                     self._history_inflight.pop(request_key, None)
 
@@ -436,14 +503,15 @@ class MeterManager:
         end,
         date: str,
         invert_power: bool = False,
-        phase_entities: dict[str, str] | None = None,
+        phase_entities: dict[str, dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Run one Recorder history operation shared by identical callers."""
         try:
             from homeassistant.components.recorder import get_instance, history
 
             recorder = get_instance(self.hass)
-            requested_entities = [entity_id, *(phase_entities or {}).values()]
+            sources = phase_entities or {"current": {}, "voltage": {}, "active_power": {}}
+            requested_entities = list(dict.fromkeys([entity_id, *(entity for entities in sources.values() for entity in entities.values())]))
             history_by_entity = await recorder.async_add_executor_job(
                 partial(
                     history.get_significant_states,
@@ -481,7 +549,20 @@ class MeterManager:
             default=None,
         )
         phase_current_history = {}
-        for phase, phase_entity_id in (phase_entities or {}).items():
+        phase_history = {"current": {}, "voltage": {}, "active_power": {}}
+        validators = {"current": _current_ampere, "voltage": _phase_voltage, "active_power": _phase_active_power_kw}
+        for kind, entities in (phase_entities or {}).items():
+            validator = validators[kind]
+            for phase, phase_entity_id in entities.items():
+                phase_history[kind][phase] = {
+                    "entity_id": phase_entity_id,
+                    "points": [
+                        {"timestamp": state.last_updated.isoformat(), "value": abs(value) if kind == "current" else value, **({"raw_value": value} if kind == "current" else {})}
+                        for state in history_by_entity.get(phase_entity_id, [])
+                        if (value := validator(state)) is not None and getattr(state, "last_updated", None) is not None
+                    ],
+                }
+        for phase, phase_entity_id in (phase_entities or {}).get("current", {}).items():
             phase_values = []
             for state in history_by_entity.get(phase_entity_id, []):
                 value = _current_ampere(state)
@@ -515,7 +596,9 @@ class MeterManager:
             "last_timestamp": points[-1]["timestamp"] if points else None,
             "max_abs_kw": round(max_abs_kw, 3) if max_abs_kw is not None else None,
             METER_INVERT_FIELD: invert_power,
-            "phase_current_source_entities": dict(phase_entities or {}),
+            "phase_current_source_entities": dict((phase_entities or {}).get("current", {})),
+            "phase_source_entities": {kind: dict(entities) for kind, entities in (phase_entities or {}).items()},
+            "phase_discovery_method": self._phase_current_discovery_method,
             "phase_current_discovery_method": self._phase_current_discovery_method,
             "daily_max_phase_current_a": daily_max_phase_current_a,
             "daily_phase_max": daily_phase_max,
@@ -537,8 +620,11 @@ class MeterManager:
             "points": points,
             "history": summary,
             "phase_current_history": phase_current_history,
+            "phase_history": phase_history,
             "daily_max_phase_current_a": daily_max_phase_current_a,
             "daily_phase_max": daily_phase_max,
-            "phase_current_source_entities": dict(phase_entities or {}),
+            "phase_current_source_entities": dict((phase_entities or {}).get("current", {})),
+            "phase_source_entities": {kind: dict(entities) for kind, entities in (phase_entities or {}).items()},
+            "phase_discovery_method": self._phase_current_discovery_method,
             "phase_current_discovery_method": self._phase_current_discovery_method,
         }
