@@ -487,6 +487,17 @@ export function phaseHistoryPointCounts(history = {}) {
   ]));
 }
 
+export function phaseHistoryAvailable(history = {}, meterState = {}) {
+  const hasHistory = ["current", "voltage", "active_power"].some((metric) =>
+    ["l1", "l2", "l3"].some((phase) => Array.isArray(history?.[metric]?.[phase]?.points)),
+  );
+  const sourceGroups = Object.values(meterState?.phase_source_entities || {});
+  const hasSources = sourceGroups.some((group) => group && typeof group === "object" && Object.values(group).some(Boolean));
+  const liveGroups = [meterState?.phase_current_a, meterState?.phase_voltage_v, meterState?.phase_active_power_kw];
+  const hasLive = liveGroups.some((group) => group && typeof group === "object" && Object.values(group).some((value) => Number.isFinite(Number(value))));
+  return hasHistory || hasSources || hasLive;
+}
+
 export function buildLiveSourceEntity(states, entityId, role) {
   const state = entityId && states?.[entityId];
   return {
@@ -6715,13 +6726,14 @@ class ElrakningPanel {
       phase,
       this._phaseHistoryVisible[phase] && Array.isArray(source[phase]?.points) ? source[phase].points.filter((point) => Number.isFinite(Number(point.value))) : [],
     ]));
-    const hasPoints = Object.values(phasePoints).some((points) => points.length);
-    card.hidden = !hasPoints;
+    const cardAvailable = phaseHistoryAvailable(history, this._meterState || {});
+    const hasActivePoints = Object.values(phasePoints).some((points) => points.length);
+    card.hidden = !cardAvailable;
     const copy = this.host.querySelector("[data-phase-history-copy]");
-    if (copy) copy.hidden = !this._debugEnabled || !hasPoints;
-    if (!hasPoints) {
+    if (copy) copy.hidden = !this._debugEnabled || !cardAvailable;
+    if (!hasActivePoints) {
       summary.replaceChildren();
-      chart.replaceChildren();
+      chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
       return;
     }
     const labels = { current: ["Ström", "A"], voltage: ["Spänning", "V"], active_power: ["Effekt", "kW"] };
