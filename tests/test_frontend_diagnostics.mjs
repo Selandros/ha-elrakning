@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, integratePowerHistoryKwh, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -27,6 +27,8 @@ assert.match(eonPanelSource, /overflow-anchor: none/);
 assert.doesNotMatch(eonPanelSource.slice(eonPanelSource.indexOf("  _renderPhaseHistoryCard()"), eonPanelSource.indexOf("  async loadBillingHistory()")), /scrollIntoView|focus\(/);
 assert.doesNotMatch(eonPanelSource.slice(eonPanelSource.indexOf("  _renderPhaseHistoryCard()"), eonPanelSource.indexOf("  async loadBillingHistory()")), /summary\.replaceChildren/);
 assert.match(eonPanelSource, /svg\.dataset\.phaseHistoryBound/);
+assert.match(eonPanelSource, /buildCanonicalPhasePoints/);
+assert.match(eonPanelSource, /bucket_size_minutes: 5/);
 assert.match(eonPanelSource, /history_cache/);
 assert.match(eonPanelSource, /recorder_history/);
 assert.match(eonPanelSource, /last_live_merge_at/);
@@ -678,6 +680,21 @@ assert.equal(phaseHistoryAvailable({}, { phase_source_entities: { current: { l1:
 assert.equal(phaseHistoryAvailable({}, {}), false);
 assert.equal(phaseHistoryAxisEnd([{ timestamp: "2026-08-30T17:50:00Z" }, { timestamp: "2026-08-30T15:00:00Z" }]), Date.parse("2026-08-30T17:50:00Z"));
 assert.equal(phaseHistoryAxisEnd([]), null);
+const phaseRawSamples = (offset = 0) => Array.from({ length: 720 }, (_, index) => ({
+  timestamp: new Date(Date.parse("2026-08-30T00:00:00Z") + (index * 5 + offset) * 1000).toISOString(),
+  value: index === 361 ? 99 : index / 100,
+}));
+const renderedPhaseSamples = buildCanonicalPhasePoints(phaseRawSamples(), "2026-08-30T00:00:00Z", "2026-08-30T00:59:55Z");
+const renderedVoltageSamples = buildCanonicalPhasePoints(phaseRawSamples(1), "2026-08-30T00:00:00Z", "2026-08-30T00:59:55Z");
+const renderedPowerSamples = buildCanonicalPhasePoints(phaseRawSamples(2), "2026-08-30T00:00:00Z", "2026-08-30T00:59:55Z");
+assert.equal(phaseRawSamples().length, 720);
+assert.equal(renderedPhaseSamples.length, 12);
+assert.equal(renderedVoltageSamples.length, renderedPhaseSamples.length);
+assert.equal(renderedPowerSamples.length, renderedPhaseSamples.length);
+assert.deepEqual(renderedPhaseSamples.map((point) => point.timestamp), renderedVoltageSamples.map((point) => point.timestamp));
+assert.deepEqual(renderedPhaseSamples.map((point) => point.timestamp), renderedPowerSamples.map((point) => point.timestamp));
+assert.equal(phaseHistoryAxisEnd(renderedPhaseSamples), Date.parse("2026-08-30T00:55:00Z"));
+assert.equal(Math.max(...phaseRawSamples().map((point) => point.value)), 99);
 assert.match(eonPanelSource, /cardAvailable = phaseHistoryAvailable/);
 assert.match(eonPanelSource, /Välj minst en fas/);
 assert.doesNotMatch(eonPanelSource, /card\.hidden = !hasActivePoints/);

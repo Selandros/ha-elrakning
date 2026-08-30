@@ -561,6 +561,30 @@ export function phaseHistoryAxisEnd(points = []) {
     .reduce((latest, timestamp) => Math.max(latest, timestamp), null);
 }
 
+export function buildCanonicalPhasePoints(points, dayStart, axisEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
+  const dayStartMs = new Date(dayStart).getTime();
+  const axisEndMs = new Date(axisEnd).getTime();
+  if (!Number.isFinite(dayStartMs) || !Number.isFinite(axisEndMs) || axisEndMs < dayStartMs) return [];
+  const lastSlot = dayStartMs + Math.floor((axisEndMs - dayStartMs) / slotMs) * slotMs;
+  const canonical = [];
+  let previousSelected = false;
+  for (let slotTimestamp = dayStartMs; slotTimestamp <= lastSlot; slotTimestamp += slotMs) {
+    const selected = nearestMeterPoint(points, slotTimestamp, maxDistanceMs);
+    const value = selected == null ? null : normalizeMeterValue(selected.value);
+    const hasSample = selected != null && Number.isFinite(value);
+    if (hasSample) {
+      canonical.push({
+        timestamp: slotTimestamp,
+        raw_timestamp: selected.timestamp,
+        value,
+        gap_before: !previousSelected,
+      });
+    }
+    previousSelected = hasSample;
+  }
+  return canonical;
+}
+
 export function buildLiveSourceEntity(states, entityId, role) {
   const state = entityId && states?.[entityId];
   return {
@@ -6776,6 +6800,13 @@ class ElrakningPanel {
             last_live_timestamp: this._meterPowerHistory.last_live_timestamp || null,
           },
           recorder_history: phaseHistory,
+          sampling: {
+            bucket_size_minutes: 5,
+            method: "nearest_sample_per_five_minute_slot",
+            raw_point_count: Object.values(phaseHistory[this._phaseHistoryMetric] || {}).reduce((count, series) => count + (Array.isArray(series?.points) ? series.points.length : 0), 0),
+            rendered_point_count: Object.values(this._phaseRenderedHistory?.[this._phaseHistoryMetric] || {}).reduce((count, points) => count + (Array.isArray(points) ? points.length : 0), 0),
+          },
+          rendered_phase_history: this._phaseRenderedHistory?.[this._phaseHistoryMetric] || {},
           live_values: {
             current: this._meterState?.phase_current_a || {},
             voltage: this._meterState?.phase_voltage_v || {},
@@ -6794,12 +6825,12 @@ class ElrakningPanel {
     const history = this._meterPowerHistory?.phase_history || {};
     const metric = this._phaseHistoryMetric;
     const source = history[metric] || {};
-    const phasePoints = Object.fromEntries(["l1", "l2", "l3"].map((phase) => [
+    const rawPhasePoints = Object.fromEntries(["l1", "l2", "l3"].map((phase) => [
       phase,
       this._phaseHistoryVisible[phase] && Array.isArray(source[phase]?.points) ? source[phase].points.filter((point) => Number.isFinite(Number(point.value))) : [],
     ]));
     const cardAvailable = phaseHistoryAvailable(history, this._meterState || {});
-    const hasActivePoints = Object.values(phasePoints).some((points) => points.length);
+    const hasActivePoints = Object.values(rawPhasePoints).some((points) => points.length);
     card.hidden = !cardAvailable;
     const copy = this.host.querySelector("[data-phase-history-copy]");
     if (copy) copy.hidden = !this._debugEnabled || !cardAvailable;
@@ -6825,7 +6856,7 @@ class ElrakningPanel {
       const active = this._phaseHistoryVisible[phase] === true;
       item.className = `phase-history-summary-item ${phase}${active ? " active" : " inactive"}`;
       item.setAttribute("aria-pressed", String(active));
-      const value = live?.[phase] != null ? Number(live[phase]) : phasePoints[phase].at(-1)?.value;
+      const value = live?.[phase] != null ? Number(live[phase]) : rawPhasePoints[phase].at(-1)?.value;
       const formattedValue = metric === "voltage"
         ? Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })
         : this._formatNumber(metric === "current" ? Math.abs(Number(value)) : Number(value));
@@ -6839,18 +6870,28 @@ class ElrakningPanel {
     const width = 960;
     const height = 300;
     const plot = { left: 44, right: 8, top: 12, bottom: 24 };
-    const allPoints = Object.values(phasePoints).flat();
+    const allPoints = Object.values(rawPhasePoints).flat();
     const timestamps = allPoints.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
     const minTime = Math.min(...timestamps);
-    const maxTime = phaseHistoryAxisEnd(allPoints);
+    const rawAxisEnd = phaseHistoryAxisEnd(allPoints);
     const firstDate = new Date(minTime);
     const dayStart = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate()).getTime();
     const dayEndDate = new Date(dayStart);
     dayEndDate.setDate(dayEndDate.getDate() + 1);
-    const useDayAxis = maxTime <= dayEndDate.getTime();
+    const useDayAxis = rawAxisEnd <= dayEndDate.getTime();
     const axisStart = useDayAxis ? dayStart : minTime;
-    const axisEnd = maxTime;
+    const phasePoints = Object.fromEntries(Object.entries(rawPhasePoints).map(([phase, points]) => [
+      phase,
+      buildCanonicalPhasePoints(points, axisStart, rawAxisEnd),
+    ]));
+    const axisEnd = phaseHistoryAxisEnd(Object.values(phasePoints).flat()) || rawAxisEnd;
     const timeRange = Math.max(1, axisEnd - axisStart);
+    const renderedPhaseHistory = { [metric]: phasePoints };
+    this._phaseRenderedHistory = renderedPhaseHistory;
+    if (!Object.values(phasePoints).some((points) => points.length)) {
+      chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
+      return;
+    }
     const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
     let minValue = metric === "current" ? 0 : Math.min(...values);
     const fuse = Number(this._meterState?.facility?.fuse_ampere);
@@ -6887,8 +6928,25 @@ class ElrakningPanel {
       return `<text class="phase-history-time-label" x="${x(timestamp)}" y="${height - 5}" text-anchor="middle">${labelText}</text>`;
     }).join("");
     const lines = Object.entries(phasePoints).map(([phase, points]) => {
-      const d = points.map((point, index) => `${index ? "L" : "M"} ${x(point.timestamp)} ${y(Number(point.value))}`).join(" ");
-      return d ? `<path class="phase-history-line" stroke="${phaseColors[phase]}" d="${d}" />` : "";
+      const segments = [];
+      let segment = [];
+      for (const point of points) {
+        const previous = segment.at(-1);
+        if (previous && new Date(point.timestamp).getTime() - new Date(previous.timestamp).getTime() > 5 * 60 * 1000) {
+          if (segment.length > 1) segments.push(segment);
+          segment = [];
+        }
+        segment.push(point);
+      }
+      if (segment.length > 1) segments.push(segment);
+      const real = segments.map((items) => {
+        const d = items.map((point, index) => `${index ? "L" : "M"} ${x(point.timestamp)} ${y(Number(point.value))}`).join(" ");
+        return `<path class="phase-history-line" stroke="${phaseColors[phase]}" d="${d}" />`;
+      }).join("");
+      const interpolated = buildContinuousGapPairs(points, "value").map(([from, to]) => (
+        `<path class="phase-history-line chart-interpolated-line" stroke="${phaseColors[phase]}" d="M ${x(from.timestamp)} ${y(Number(from.value))} L ${x(to.timestamp)} ${y(Number(to.value))}" />`
+      )).join("");
+      return `${real}${interpolated}`;
     }).join("");
     const svgMarkup = `${grid}${threshold}${zero}${lines}${timeAxis}<g class="phase-history-hover" aria-hidden="true"></g>`;
     let svg = chart.querySelector(".phase-history-svg");
