@@ -338,6 +338,8 @@ assert.match(eonPanelSource, /grid-template-rows: 18px 30px 15px 5px 14px 12px 1
 assert.match(eonPanelSource, /data-live-power-scale[\s\S]*data-live-power-grid-fuse-status/);
 assert.match(eonPanelSource, /maxPhaseCurrentA/);
 assert.match(eonPanelSource, /fuseUtilizationPercent/);
+assert.match(eonPanelSource, /maxPhaseCurrentA\) && Number\.isFinite\(tile\.fuseAmpere\)[\s\S]*\/ \$\{this\._formatNumber\(tile\.fuseAmpere\)\} A/);
+assert.doesNotMatch(eonPanelSource, /`Maxfas \$\{this\._formatNumber\(tile\.maxPhaseCurrentA\)/);
 assert.match(eonPanelSource, /facility\?\.fuse_ampere/);
 assert.match(eonPanelSource, /if \(enabled && !tile\._livePowerCopyEnabled\)/);
 assert.match(eonPanelSource, /else if \(!enabled && tile\._livePowerCopyEnabled\)/);

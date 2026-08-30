@@ -4218,17 +4218,16 @@ class ElrakningPanel {
       if (key === "grid") {
         const gridMeta = element.querySelector("[data-live-power-grid-meta]");
         if (gridMeta) {
-          const meta = Number.isFinite(tile.fuseAmpere) ? `${this._formatNumber(tile.fuseAmpere)} A` : "";
+          const meta = Number.isFinite(tile.maxPhaseCurrentA) && Number.isFinite(tile.fuseAmpere)
+            ? `${this._formatNumber(tile.maxPhaseCurrentA)} / ${this._formatNumber(tile.fuseAmpere)} A`
+            : Number.isFinite(tile.fuseAmpere) ? `${this._formatNumber(tile.fuseAmpere)} A` : "";
           gridMeta.textContent = meta;
           gridMeta.hidden = !meta;
         }
         const fuseStatus = element.querySelector("[data-live-power-grid-fuse-status]");
         if (fuseStatus) {
-          const fuseText = Number.isFinite(tile.maxPhaseCurrentA) && Number.isFinite(tile.fuseUtilizationPercent)
-            ? `Maxfas ${this._formatNumber(tile.maxPhaseCurrentA)} A · ${this._formatNumber(tile.fuseUtilizationPercent)} %`
-            : "";
-          fuseStatus.textContent = fuseText;
-          fuseStatus.hidden = !fuseText;
+          fuseStatus.textContent = "";
+          fuseStatus.hidden = true;
         }
       }
       element.dataset.livePowerDirection = tile.direction || "idle";
