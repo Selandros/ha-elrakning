@@ -340,6 +340,16 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
         ? { value: normalized, status: "Importerar", direction: "import" }
         : { value: Math.abs(normalized), status: "Exporterar", direction: "export" };
   }
+  const fuseAmpere = Number(meterState.facility?.fuse_ampere ?? meterState.fuse_ampere);
+  const phaseValues = meterState.phase_current_a && typeof meterState.phase_current_a === "object"
+    ? Object.fromEntries(["l1", "l2", "l3"].map((phase) => [phase, Number(meterState.phase_current_a[phase])]))
+    : {};
+  const validPhaseValues = Object.values(phaseValues).filter(Number.isFinite);
+  const maxPhaseCurrentA = validPhaseValues.length ? Math.max(...validPhaseValues) : null;
+  const fuseUtilizationPercent = Number.isFinite(maxPhaseCurrentA) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
+    ? maxPhaseCurrentA / fuseAmpere * 100
+    : null;
+  grid = { ...grid, fuseAmpere: Number.isFinite(fuseAmpere) ? fuseAmpere : null, phaseCurrentA: phaseValues, maxPhaseCurrentA, fuseUtilizationPercent };
   const charging = finiteMagnitude(powerState.charging_kw);
   const discharging = finiteMagnitude(powerState.discharging_kw);
   const chargingActive = charging !== null && charging > POWER_DISPLAY_THRESHOLD_KW;
@@ -1051,9 +1061,10 @@ class ElrakningPanel {
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
+            <span class="live-power-grid-fuse-status" data-live-power-grid-fuse-status hidden></span>
             <button type="button" class="live-power-action" data-meter-source hidden>Visa mätardata</button>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
@@ -2456,6 +2467,13 @@ class ElrakningPanel {
           font-size: 13px;
         }
 
+        .live-power-grid-meta {
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          margin-left: auto;
+          white-space: nowrap;
+        }
+
         .live-power-value {
           font-size: clamp(18px, 3.2cqw, 26px);
           font-weight: 500;
@@ -2467,6 +2485,12 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: 12px;
           margin-top: 2px;
+        }
+
+        .live-power-grid-fuse-status {
+          color: var(--secondary-text-color);
+          font-size: 10px;
+          margin-top: 3px;
         }
 
         .live-power-bar {
@@ -4156,11 +4180,15 @@ class ElrakningPanel {
     if (this._livePowerMaxima.date !== date) {
       this._livePowerMaxima = { date, house: 0, solar: 0, grid: 0, battery: 0 };
     }
-    const currentTiles = buildLivePowerTiles(this._powerState || {}, this._meterState || {});
+    const meterState = {
+      ...(this._meterState || {}),
+      facility: this._eonGridState?.facility || this._meterState?.facility,
+    };
+    const currentTiles = buildLivePowerTiles(this._powerState || {}, meterState);
     for (const key of ["house", "solar", "grid", "battery"]) {
       if (Number.isFinite(currentTiles[key].value)) this._livePowerMaxima[key] = Math.max(this._livePowerMaxima[key], Math.abs(currentTiles[key].value));
     }
-    const tiles = buildLivePowerTiles(this._powerState || {}, this._meterState || {}, this._livePowerMaxima);
+    const tiles = buildLivePowerTiles(this._powerState || {}, meterState, this._livePowerMaxima);
     for (const [key, tile] of Object.entries(tiles)) {
       const element = row.querySelector(`[data-live-power-tile="${key}"]`);
       if (!element) continue;
@@ -4172,6 +4200,22 @@ class ElrakningPanel {
       if (fill) fill.style.width = `${tile.fillPercent}%`;
       const scale = element.querySelector("[data-live-power-scale]");
       if (scale) scale.textContent = `${this._formatNumber(tile.scaleMax)} kW`;
+      if (key === "grid") {
+        const gridMeta = element.querySelector("[data-live-power-grid-meta]");
+        if (gridMeta) {
+          const meta = Number.isFinite(tile.fuseAmpere) ? `${this._formatNumber(tile.fuseAmpere)} A` : "";
+          gridMeta.textContent = meta;
+          gridMeta.hidden = !meta;
+        }
+        const fuseStatus = element.querySelector("[data-live-power-grid-fuse-status]");
+        if (fuseStatus) {
+          const fuseText = Number.isFinite(tile.maxPhaseCurrentA) && Number.isFinite(tile.fuseUtilizationPercent)
+            ? `Maxfas ${this._formatNumber(tile.maxPhaseCurrentA)} A · ${this._formatNumber(tile.fuseUtilizationPercent)} %`
+            : "";
+          fuseStatus.textContent = fuseText;
+          fuseStatus.hidden = !fuseText;
+        }
+      }
       element.dataset.livePowerDirection = tile.direction || "idle";
       element._livePowerRaw = {
         current_kw: tile.value,
@@ -4179,6 +4223,15 @@ class ElrakningPanel {
         scale_max_kw: tile.scaleMax,
         fill_percent: tile.fillPercent,
         status: tile.status,
+        ...(key === "grid" ? {
+          direction: tile.direction,
+          fuse_ampere: tile.fuseAmpere,
+          phase_current_a: tile.phaseCurrentA,
+          max_phase_current_a: tile.maxPhaseCurrentA,
+          fuse_utilization_percent: tile.fuseUtilizationPercent,
+          phase_current_available: Number.isFinite(tile.maxPhaseCurrentA),
+          phase_current_source: Number.isFinite(tile.maxPhaseCurrentA) ? "home_assistant" : null,
+        } : {}),
       };
     }
   }
@@ -5545,7 +5598,8 @@ class ElrakningPanel {
         (event) => {
           const entityId = event.data?.entity_id;
           const mapping = this._meterState || {};
-          if ([mapping.power_entity, mapping.energy_import_entity, mapping.energy_export_entity].includes(entityId)) {
+          const phaseEntities = Object.values(mapping.phase_current_entities || {});
+          if ([mapping.power_entity, mapping.energy_import_entity, mapping.energy_export_entity, ...phaseEntities].includes(entityId)) {
             this.loadMeterState();
           }
           const powerMapping = this._powerState || {};

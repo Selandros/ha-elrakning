@@ -248,6 +248,20 @@ assert.equal(liveTiles.solar.value, 6.94);
 assert.equal(liveTiles.solar.status, "Producerar");
 assert.equal(liveTiles.grid.value, 2.43);
 assert.equal(liveTiles.grid.status, "Importerar");
+const gridTilesWithPhases = buildLivePowerTiles(
+  {},
+  { power_kw: 2.85, phase_current_a: { l1: 7.2, l2: 9.8, l3: 8.4 } },
+  {},
+);
+assert.equal(gridTilesWithPhases.grid.maxPhaseCurrentA, 9.8);
+assert.equal(gridTilesWithPhases.grid.fuseUtilizationPercent, null);
+const gridTilesWithFuse = buildLivePowerTiles(
+  {},
+  { power_kw: 2.85, phase_current_a: { l1: 7.2, l2: 9.8, l3: 8.4 }, facility: { fuse_ampere: 16 } },
+  {},
+);
+assert.equal(gridTilesWithFuse.grid.fuseAmpere, 16);
+assert.ok(Math.abs(gridTilesWithFuse.grid.fuseUtilizationPercent - 61.25) < 1e-12);
 assert.equal(liveTiles.battery.status, "Vilar");
 assert.equal(liveTiles.battery.fillPercent, 0);
 assert.equal(buildLivePowerTiles({}, {}).solar.scaleMax, 1);
@@ -272,6 +286,11 @@ assert.match(eonPanelSource, /_livePowerRaw/);
 assert.match(eonPanelSource, /JSON\.stringify\(raw, null, 2\)/);
 assert.match(eonPanelSource, /feedback\.textContent = "Kopierat"/);
 assert.match(eonPanelSource, /_updateLivePowerCardInteractivity/);
+assert.match(eonPanelSource, /data-live-power-grid-meta/);
+assert.match(eonPanelSource, /data-live-power-grid-fuse-status/);
+assert.match(eonPanelSource, /maxPhaseCurrentA/);
+assert.match(eonPanelSource, /fuseUtilizationPercent/);
+assert.match(eonPanelSource, /facility\?\.fuse_ampere/);
 assert.match(eonPanelSource, /if \(enabled && !tile\._livePowerCopyEnabled\)/);
 assert.match(eonPanelSource, /else if \(!enabled && tile\._livePowerCopyEnabled\)/);
 assert.match(eonPanelSource, /debug-copy-enabled/);
@@ -1344,7 +1363,8 @@ assert.doesNotMatch(panelSource, /tooltip_click_received/);
 assert.doesNotMatch(panelSource, /tooltip_copy_text_length/);
 assert.match(panelSource, /await this\.loadMeterPowerHistory\(\);\n        await this\.loadPowerHistory\(\);\n        close\(\);/);
 assert.match(panelSource, /this\.loadMeterState\(loadHistory\)/);
-assert.match(panelSource, /\[mapping\.power_entity, mapping\.energy_import_entity, mapping\.energy_export_entity\]\.includes\(entityId\)\) \{\s*this\.loadMeterState\(\);/);
+assert.match(panelSource, /phaseEntities = Object\.values\(mapping\.phase_current_entities \|\| \{\}\)/);
+assert.match(panelSource, /\[mapping\.power_entity, mapping\.energy_import_entity, mapping\.energy_export_entity, \.\.\.phaseEntities\]\.includes\(entityId\)/);
 assert.match(panelSource, /async loadMeterState\(loadHistory = false\)/);
 assert.match(panelSource, /if \(loadHistory\) await this\.loadMeterPowerHistory\(\);/);
 assert.doesNotMatch(panelSource, /meter_history_request_started/);

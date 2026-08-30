@@ -97,6 +97,45 @@ def _hass(*entity_ids):
 
 
 class MeterTests(unittest.IsolatedAsyncioTestCase):
+    def test_phase_current_discovery_uses_current_unit_and_phase_metadata(self):
+        class Entry:
+            def __init__(self, device_id, unique_id):
+                self.device_id = device_id
+                self.unique_id = unique_id
+                self.original_name = None
+
+        phase_states = [
+            types.SimpleNamespace(entity_id="sensor.current_l1", state="7.2", attributes={"device_class": "current", "unit_of_measurement": "A"}),
+            types.SimpleNamespace(entity_id="sensor.current_l2", state="9.8", attributes={"device_class": "current", "unit_of_measurement": "A"}),
+            types.SimpleNamespace(entity_id="sensor.current_l3", state="8.4", attributes={"device_class": "current", "unit_of_measurement": "A"}),
+            types.SimpleNamespace(entity_id="sensor.total_current", state="20", attributes={"device_class": "current", "unit_of_measurement": "A"}),
+        ]
+        hass = _hass("sensor.power")
+        states = {state.entity_id: state for state in phase_states}
+        states["sensor.power"] = hass.states.get("sensor.power")
+        hass.states.async_all = lambda *args: list(states.values())
+        hass.states.get = states.get
+
+        class Registry:
+            def async_get(self, entity_id):
+                return Entry("meter-device", entity_id)
+
+        original_registry = meter.er.async_get
+        meter.er.async_get = lambda _hass: Registry()
+        try:
+            manager = meter.MeterManager(hass)
+            manager.mapping["power_entity"] = "sensor.power"
+            self.assertEqual(
+                manager._discover_phase_current_entities(),
+                {
+                    "l1": "sensor.current_l1",
+                    "l2": "sensor.current_l2",
+                    "l3": "sensor.current_l3",
+                },
+            )
+        finally:
+            meter.er.async_get = original_registry
+
     async def test_power_units_are_accepted(self):
         for unit in ("W", "kW"):
             hass = _hass("sensor.power")
