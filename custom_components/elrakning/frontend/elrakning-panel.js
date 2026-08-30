@@ -1081,8 +1081,7 @@ class ElrakningPanel {
           <article class="card invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
             <div class="invoice-estimate-heading"><strong>Estimerad faktura</strong><span data-invoice-estimate-month></span></div>
-            <div class="invoice-estimate-grid" data-invoice-estimate-grid></div>
-            <p class="invoice-estimate-status" data-invoice-estimate-status></p>
+            <div class="invoice-estimate-main"><output data-invoice-estimate-total>–</output><span>Prognos för månaden</span></div>
             <span class="invoice-estimate-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
           </article>
         </section>
@@ -1192,6 +1191,7 @@ class ElrakningPanel {
             </div>
             <p class="provider" data-provider-name="elhandel" hidden></p>
             <div class="provider-summary" data-provider-summary hidden></div>
+            <p class="provider-invoice-cost" data-provider-invoice-cost="elhandel" hidden><span>Kostnad denna månad</span><strong></strong></p>
             <div class="retained-history" data-retained-history hidden>
               <h3>Sparad historik</h3>
               <div data-retained-history-list></div>
@@ -1210,6 +1210,7 @@ class ElrakningPanel {
               </div>
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
+              <p class="provider-invoice-cost" data-provider-invoice-cost="elnet" hidden><span>Kostnad denna månad</span><strong></strong></p>
               <button type="button" class="configuration-control" data-eon-grid-configure>Konfigurera</button>
               <button type="button" data-eon-grid-source hidden>Vad har vi för data?</button>
           </article>
@@ -2312,51 +2313,32 @@ class ElrakningPanel {
           margin: 0;
         }
 
-        .invoice-estimate-grid {
+        .invoice-estimate-main {
           display: grid;
-          gap: 10px 18px;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 3px;
         }
 
-        .invoice-estimate-kpi {
-          display: grid;
-          gap: 2px;
-          min-width: 0;
-        }
-
-        .invoice-estimate-kpi strong {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          font-weight: 400;
-        }
-
-        .invoice-estimate-kpi output {
-          font-size: 14px;
-          min-width: 0;
-          white-space: nowrap;
-        }
-
-        .invoice-estimate-kpi-primary {
-          grid-column: 1 / -1;
-        }
-
-        .invoice-estimate-kpi-primary output {
+        .invoice-estimate-main output {
           font-size: clamp(28px, 6cqw, 40px);
           font-weight: 500;
           line-height: 1;
         }
 
-        .invoice-estimate-kpi-secondary {
-          grid-column: 1 / -1;
-        }
-
-        .invoice-estimate-kpi-secondary output {
-          font-size: 18px;
-          font-weight: 500;
-        }
-
-        .invoice-estimate-kpi-secondary strong {
+        .invoice-estimate-main span,
+        .provider-invoice-cost span {
+          color: var(--secondary-text-color);
           font-size: 12px;
+        }
+
+        .provider-invoice-cost {
+          display: grid;
+          gap: 2px;
+          margin: 12px 0 0;
+        }
+
+        .provider-invoice-cost strong {
+          font-size: 17px;
+          font-weight: 500;
         }
 
         .invoice-estimate-copy-feedback {
@@ -5356,14 +5338,14 @@ class ElrakningPanel {
       return [left, right];
     }));
     summary.hidden = rows.length === 0;
+    this._renderInvoiceCardCosts();
   }
 
   _renderInvoiceEstimateCard() {
     const card = this.host.querySelector("[data-invoice-estimate-card]");
-    const grid = this.host.querySelector("[data-invoice-estimate-grid]");
     const month = this.host.querySelector("[data-invoice-estimate-month]");
-    const status = this.host.querySelector("[data-invoice-estimate-status]");
-    if (!card || !grid || !month || !status) return;
+    const total = this.host.querySelector("[data-invoice-estimate-total]");
+    if (!card || !month || !total) return;
     const billingHistory = this._billingHistory;
     const estimate = buildInvoiceEstimate(
       billingHistory?.price_periods,
@@ -5373,39 +5355,35 @@ class ElrakningPanel {
     );
     const configured = this._meterState?.configured === true;
     card.hidden = !configured || !billingHistory;
-    if (!configured || !billingHistory) return;
-    month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
-    if (!estimate) {
-      grid.replaceChildren();
-      status.textContent = "Kostnadsunderlag saknas.";
+    if (!configured || !billingHistory) {
       this._invoiceEstimateRaw = null;
+      this._renderInvoiceCardCosts();
       return;
     }
-    const formatSekOrDash = (value) => value == null || !Number.isFinite(Number(value)) ? "–" : this._formatSek(Number(value));
-    const formatKwhOrDash = (value) => value == null || !Number.isFinite(Number(value)) ? "–" : `${this._formatNumber(Number(value))} kWh`;
-    const kpis = [
-      ["Prognos månad", formatSekOrDash(estimate.estimated_month_total_sek), "invoice-estimate-kpi-primary"],
-      ["Hittills", formatSekOrDash(estimate.total_so_far_sek), "invoice-estimate-kpi-secondary"],
-      ["Elhandel", formatSekOrDash(estimate.trade.total_so_far_sek), ""],
-      ["Elnät", formatSekOrDash(estimate.grid.total_so_far_sek), ""],
-      ["Import", formatKwhOrDash(estimate.imported_kwh_so_far), ""],
-    ];
-    grid.replaceChildren(...kpis.map(([labelText, value, className]) => {
-      const item = document.createElement("div");
-      item.className = `invoice-estimate-kpi ${className}`.trim();
-      const label = document.createElement("strong");
-      label.textContent = labelText;
-      const output = document.createElement("output");
-      output.textContent = value;
-      item.append(label, output);
-      return item;
-    }));
-    const coverage = estimate.data_coverage;
-    status.textContent = coverage.missing_price_periods || coverage.missing_energy_periods || estimate.forecast_confidence === "partial_data"
-      ? "Delvis underlag"
-      : "";
-    status.hidden = !status.textContent;
+    month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
+    if (!estimate) {
+      total.textContent = "–";
+      this._invoiceEstimateRaw = null;
+      this._renderInvoiceCardCosts();
+      return;
+    }
+    total.textContent = estimate.estimated_month_total_sek == null || !Number.isFinite(Number(estimate.estimated_month_total_sek))
+      ? "–"
+      : this._formatSek(Number(estimate.estimated_month_total_sek));
     this._invoiceEstimateRaw = estimate;
+    this._renderInvoiceCardCosts();
+  }
+
+  _renderInvoiceCardCosts() {
+    const estimate = this._invoiceEstimateRaw;
+    for (const [provider, value] of [["elhandel", estimate?.trade?.total_so_far_sek], ["elnet", estimate?.grid?.total_so_far_sek]]) {
+      const element = this.host.querySelector(`[data-provider-invoice-cost="${provider}"]`);
+      if (!element) continue;
+      const output = element.querySelector("strong");
+      const available = value != null && Number.isFinite(Number(value));
+      if (output) output.textContent = available ? this._formatSek(Number(value)) : "";
+      element.hidden = !available;
+    }
   }
 
   _bindInvoiceEstimate() {
@@ -5944,6 +5922,7 @@ class ElrakningPanel {
       return [left, right];
     }));
     summary.hidden = !configured || rows.length === 0;
+    this._renderInvoiceCardCosts();
     this._updatePriceComparisonControls();
     if (this.host.querySelector(".price-chart") && this.priceData.periods.length) this.renderPriceChart();
     this._renderInvoiceEstimateCard();

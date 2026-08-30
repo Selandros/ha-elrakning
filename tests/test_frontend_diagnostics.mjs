@@ -897,8 +897,11 @@ assert.match(panelSource, /grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/
 assert.match(panelSource, /\.invoice-estimate-card \{[\s\S]*min-height: 0;[\s\S]*padding: 12px 14px;/);
 assert.match(panelSource, /@media \(max-width: 760px\) \{[\s\S]*\.invoice-estimate-card \{[\s\S]*grid-column: 1 \/ -1;/);
 assert.match(panelSource, /data-live-power-tile="battery"[\s\S]*data-invoice-estimate-card/);
-assert.match(panelSource, /invoice-estimate-kpi-primary/);
-assert.match(panelSource, /invoice-estimate-kpi-secondary/);
+assert.match(panelSource, /invoice-estimate-main/);
+assert.match(panelSource, /data-invoice-estimate-total/);
+assert.match(panelSource, /provider-invoice-cost/);
+assert.match(panelSource, /data-provider-invoice-cost="elhandel"/);
+assert.match(panelSource, /data-provider-invoice-cost="elnet"/);
 assert.match(panelSource, /estimated_month_total_sek/);
 assert.match(panelSource, /total_so_far_sek/);
 assert.match(panelSource, /data-invoice-estimate-copy-feedback/);
