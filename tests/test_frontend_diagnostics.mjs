@@ -851,6 +851,7 @@ assert.doesNotMatch(eonPanelSource, /debug-copy-enabled/);
 assert.match(eonPanelSource, /\.live-power-debug-footer\.visible \{/);
 assert.match(eonPanelSource, /JSON\.stringify\(safeSource, null, 2\)/);
 assert.match(eonPanelSource, /liveSource \|\| isEon \|\| cardSource/);
+assert.match(eonPanelSource, /closest\?\.\("\[data-live-power-tile\], \[data-invoice-estimate-card\]"\)/);
 const invoiceRenderSource = eonPanelSource.slice(
   eonPanelSource.indexOf("  _renderInvoiceEstimateCard()"),
   eonPanelSource.indexOf("  _renderInvoiceCardCosts()"),

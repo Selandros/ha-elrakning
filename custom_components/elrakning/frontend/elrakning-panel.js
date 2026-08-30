@@ -6331,7 +6331,7 @@ class ElrakningPanel {
     };
     const loadSource = async (event) => {
       const isEon = event.currentTarget === eonOpen;
-      const liveSource = event.currentTarget.closest?.("[data-live-power-tile]");
+      const liveSource = event.currentTarget.closest?.("[data-live-power-tile], [data-invoice-estimate-card]");
       const liveSourceName = event.currentTarget.dataset.livePowerSource;
       const cardSource = event.currentTarget.dataset.cardSource;
       dialog.hidden = false;
