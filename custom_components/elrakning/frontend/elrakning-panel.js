@@ -402,7 +402,10 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const expectedSoFarKwh = isToday && liveTodayKwh !== null && liveRemainingKwh !== null
       ? liveTodayKwh - liveRemainingKwh
       : null;
-    const utilizationDenominatorKwh = isToday ? expectedSoFarKwh : forecastKwh;
+    const utilizationDenominatorKwh = forecastKwh;
+    const performanceRatio = isToday && expectedSoFarKwh > 0 && actualKwh !== null
+      ? actualKwh / expectedSoFarKwh
+      : null;
     return {
       date: localDate,
       label: dayStart.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" }),
@@ -411,11 +414,16 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
       utilizationPercent: utilizationDenominatorKwh > 0 && actualKwh !== null
         ? actualKwh / utilizationDenominatorKwh * 100
         : null,
+      rawDayForecastKwh: forecastKwh,
+      rawExpectedSoFarKwh: expectedSoFarKwh,
+      actualSoFarKwh: isToday ? actualKwh : null,
+      performanceRatio,
+      performanceDeltaPercent: performanceRatio !== null ? (performanceRatio - 1) * 100 : null,
     };
   });
 }
 
-export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(), weather = null) {
+export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(), weather = null, sun = null) {
   const lines = [];
   if (Number.isFinite(day?.producedKwh)) {
     lines.push(`Producerat: ${day.producedKwh} kWh`);
@@ -433,17 +441,25 @@ export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(
     if (Number.isFinite(day?.forecastKwh)) {
       lines.push(`Dagsprognos: ${day.forecastKwh} kWh`);
     }
+    if (Number.isFinite(day?.performanceDeltaPercent)) {
+      const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
+      lines.push(`Mot prognos hittills: ${sign}${day.performanceDeltaPercent} %`);
+    }
+    const forecastPower = Number(liveForecast?.power_now_kw);
+    if (Number.isFinite(forecastPower)) lines.push(`Forecast nu: ${forecastPower} kW`);
   } else if (Number.isFinite(day?.forecastKwh)) {
     lines.push(`Prognos: ${day.forecastKwh} kWh`);
   }
   if (day?.date === today && weather?.source === "smhi" && weather?.available) {
     const condition = weather.current?.condition;
-    const cloudCoverage = Number(weather.current?.cloud_coverage);
+    const cloudCoverage = Number(weather.current?.cloud_total ?? weather.current?.cloud_coverage);
     if (condition || Number.isFinite(cloudCoverage)) {
-      const details = [condition, Number.isFinite(cloudCoverage) ? `${cloudCoverage} % moln` : ""].filter(Boolean).join(", ");
+      const details = [condition, Number.isFinite(cloudCoverage) ? `Total molntäckning: ${cloudCoverage} %` : ""].filter(Boolean).join(", ");
       lines.push(`SMHI: ${details}`);
     }
   }
+  const sunElevation = Number(sun?.elevation);
+  if (day?.date === today && Number.isFinite(sunElevation)) lines.push(`Solhöjd: ${sunElevation}°`);
   return lines;
 }
 
@@ -681,7 +697,7 @@ class ElrakningPanel {
     this._meterHistorySummary = null;
     this._meterHistoryRequestToken = 0;
     this._powerState = null;
-    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] } };
+    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._powerHistoryRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
@@ -3838,7 +3854,7 @@ class ElrakningPanel {
       hoveredDay?.classList.remove("hovered");
       group.classList.add("hovered");
       hoveredDay = group;
-      tooltip.innerHTML = buildSolarHistoryTooltipLines(day, this._powerHistory?.solar_forecast, new Date(), this._powerHistory?.solar_weather)
+      tooltip.innerHTML = buildSolarHistoryTooltipLines(day, this._powerHistory?.solar_forecast, new Date(), this._powerHistory?.solar_weather, this._powerHistory?.solar_sun)
         .map((line) => `<span>${line.replace(/([0-9]+(?:\.[0-9]+)?) kWh$/, (value) => `${this._formatNumber(Number.parseFloat(value))} kWh`)}</span>`)
         .join("");
       tooltip.hidden = false;
@@ -3995,12 +4011,13 @@ class ElrakningPanel {
         solar_forecast: response?.solar_forecast || { available: false },
         solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
+        solar_sun: response?.solar_sun || { available: false },
       };
       this._refreshPowerEnergyState();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
-      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] } };
+      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
       this._refreshPowerEnergyState();
     }
   }

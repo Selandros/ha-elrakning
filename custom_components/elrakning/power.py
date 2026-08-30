@@ -89,6 +89,27 @@ def _finite_number(value: Any) -> float | None:
     return number if number == number and number not in (float("inf"), float("-inf")) else None
 
 
+def _integrate_solar_points(points: list[dict[str, Any]], start, end) -> float | None:
+    """Integrate known solar power samples without extrapolating beyond the last sample."""
+    samples = []
+    for point in points:
+        timestamp = dt_util.parse_datetime(point.get("timestamp"))
+        value = _finite_number(point.get("value_kw"))
+        if timestamp is not None and value is not None:
+            samples.append((dt_util.as_local(timestamp), value))
+    samples.sort(key=lambda item: item[0])
+    if len(samples) < 2:
+        return 0.0 if samples else None
+    total = 0.0
+    for (left_time, left_value), (right_time, right_value) in zip(samples, samples[1:]):
+        segment_start = max(left_time, start)
+        segment_end = min(right_time, end)
+        if segment_end <= segment_start:
+            continue
+        total += (left_value + right_value) / 2 * (segment_end - segment_start).total_seconds() / 3600
+    return total
+
+
 def _normalize_solar_array_metadata(metadata: Any, selected: list[str]) -> dict[str, dict[str, Any]]:
     """Keep optional PV metadata aligned with the selected solar entities."""
     if not isinstance(metadata, dict):
@@ -402,10 +423,18 @@ class PowerManager:
             "soc": {"points": self._points_for_entity(soc_entity, raw)},
         }
         result = {"success": True, "date": date, "series": series}
-        result["solar_analysis"] = self._solar_analysis(series["solar"]["points"], start, now=dt_util.now())
+        hass_data = getattr(self.hass, "data", {})
+        forecast = hass_data.get("elrakning", {}).get("solar_forecast_manager") if isinstance(hass_data, dict) else None
+        weather_manager = hass_data.get("elrakning", {}).get("solar_weather_manager") if isinstance(hass_data, dict) else None
+        forecast_facts = forecast.public_state() if forecast else {"available": False}
+        weather_context = weather_manager.public_state() if weather_manager else {"available": False, "hourly_forecast": []}
+        result["solar_analysis"] = self._solar_analysis(
+            series["solar"]["points"], start, now=dt_util.now(),
+            forecast=forecast_facts, weather=weather_context,
+        )
         return result
 
-    def _solar_analysis(self, actual_points: list[dict[str, Any]], start, now) -> dict[str, Any]:
+    def _solar_analysis(self, actual_points: list[dict[str, Any]], start, now, forecast=None, weather=None) -> dict[str, Any]:
         """Build daily clear-sky geometry facts from the shared solar history."""
         metadata = self.mapping.get(SOLAR_ARRAY_METADATA_KEY, {})
         entities = self.mapping.get("solar_entities", [])
@@ -461,7 +490,74 @@ class PowerManager:
                     previous = power
                     cursor = dt_util.as_local(cursor.astimezone(timezone.utc) + timedelta(minutes=5))
             days.append({"date": day.isoformat(), "reference_energy_kwh": reference})
-        return {"available": True, "sun_available": True, "days": days}
+        return {
+            "available": True,
+            "sun_available": True,
+            "days": days,
+            "intraday": self._solar_intraday_analysis(actual_points, local_now, forecast or {}, weather or {}, observer),
+        }
+
+    def _solar_intraday_analysis(self, actual_points, local_now, forecast, weather, observer):
+        """Calculate observations and daylight-filtered weather context only."""
+        day_start = datetime.combine(local_now.date(), time.min, tzinfo=local_now.tzinfo)
+        today_points = [
+            point for point in actual_points
+            if (timestamp := dt_util.parse_datetime(point.get("timestamp"))) is not None
+            and dt_util.as_local(timestamp).date() == local_now.date()
+            and _finite_number(point.get("value_kw")) is not None
+        ]
+        actual_so_far = _integrate_solar_points(today_points, day_start, local_now)
+        raw_day_forecast = _finite_number(forecast.get("today_kwh"))
+        remaining = _finite_number(forecast.get("remaining_today_kwh"))
+        expected_so_far = raw_day_forecast - remaining if raw_day_forecast is not None and remaining is not None else None
+        performance_ratio = actual_so_far / expected_so_far if expected_so_far is not None and expected_so_far >= 1 and actual_so_far is not None else None
+        power_now = _finite_number(forecast.get("power_now_kw"))
+        actual_power_now = _finite_number(today_points[-1].get("value_kw")) if today_points else None
+        power_ratio = actual_power_now / power_now if power_now is not None and power_now >= 0.1 and actual_power_now is not None else None
+        sun_state = self.hass.states.get("sun.sun")
+        sun_attributes = getattr(sun_state, "attributes", {}) if sun_state else {}
+        elevation_now = _finite_number(sun_attributes.get("elevation"))
+        hourly = weather.get("hourly_forecast") if isinstance(weather, dict) else []
+        daylight_cloud = []
+        next_three_hours = local_now + timedelta(hours=3)
+        for item in hourly if isinstance(hourly, list) else []:
+            timestamp = dt_util.parse_datetime(item.get("datetime")) if isinstance(item, dict) else None
+            cloud = _finite_number(item.get("cloud_total", item.get("cloud_coverage"))) if isinstance(item, dict) else None
+            if timestamp is None or cloud is None:
+                continue
+            timestamp = dt_util.as_local(timestamp)
+            if timestamp <= local_now:
+                continue
+            try:
+                sun_elevation = elevation(observer, timestamp)
+            except Exception:
+                continue
+            if sun_elevation > 0:
+                daylight_cloud.append({"timestamp": timestamp, "cloud": cloud, "weight": max(sun_elevation, 0.1)})
+
+        def weighted_cloud(items):
+            if not items:
+                return None
+            return sum(item["cloud"] * item["weight"] for item in items) / sum(item["weight"] for item in items)
+
+        weighted_next = weighted_cloud([item for item in daylight_cloud if item["timestamp"] <= next_three_hours])
+        weighted_remaining = weighted_cloud(daylight_cloud)
+        return {
+            "actual_so_far_kwh": actual_so_far,
+            "raw_day_forecast_kwh": raw_day_forecast,
+            "raw_expected_so_far_kwh": expected_so_far,
+            "performance_ratio": performance_ratio,
+            "performance_delta_percent": (performance_ratio - 1) * 100 if performance_ratio is not None else None,
+            "actual_power_now_kw": actual_power_now,
+            "forecast_power_now_kw": power_now,
+            "power_performance_ratio": power_ratio,
+            "sun_elevation_now": elevation_now,
+            "cloud_now": _finite_number((weather.get("current") or {}).get("cloud_total", (weather.get("current") or {}).get("cloud_coverage"))),
+            "production_weighted_cloud_next_3h": weighted_next,
+            "production_weighted_cloud_remaining": weighted_remaining,
+            "cloud_weighting_method": "solar_elevation" if weighted_remaining is not None else "unavailable",
+            "daylight_hour_count": len(daylight_cloud),
+        }
 
     @staticmethod
     def _battery_history_points(direction: str, mapping: dict[str, Any], raw: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

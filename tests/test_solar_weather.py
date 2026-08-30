@@ -126,6 +126,29 @@ class SolarWeatherTests(unittest.TestCase):
         self.assertAlmostEqual(observation["bias"], 7.58 / 5.98)
         self.assertEqual(solar_weather.build_intraday_observation(1, 0)["bias"], None)
 
+    def test_sensor_roles_use_translation_key_and_are_exposed_separately(self):
+        hass = _hass({}, registry_entries=[
+            types.SimpleNamespace(entity_id="weather.smhi_home", config_entry_id="smhi-1"),
+            types.SimpleNamespace(entity_id="sensor.cloud_total", domain="sensor", config_entry_id="smhi-1", translation_key="total_cloud"),
+            types.SimpleNamespace(entity_id="sensor.cloud_low", domain="sensor", config_entry_id="smhi-1", translation_key="low_cloud"),
+        ])
+        manager = solar_weather.SolarWeatherManager(hass)
+        asyncio.run(manager.async_load())
+        roles = manager.public_state()["discovery"]["sensor_roles"]
+        self.assertEqual(roles["cloud_total"], "sensor.cloud_total")
+        self.assertEqual(roles["cloud_low"], "sensor.cloud_low")
+
+    def test_sun_context_reads_available_attributes_without_requiring_sun(self):
+        hass = types.SimpleNamespace(states=types.SimpleNamespace(get=lambda entity_id: (
+            types.SimpleNamespace(state="above_horizon", attributes={"elevation": 36.7, "azimuth": 180, "rising": False})
+            if entity_id == "sun.sun" else None
+        )))
+        context = solar_weather.build_sun_context(hass)
+        self.assertTrue(context["available"])
+        self.assertEqual(context["elevation"], 36.7)
+        self.assertEqual(context["azimuth"], 180)
+        self.assertFalse(context["rising"])
+
 
 if __name__ == "__main__":
     unittest.main()

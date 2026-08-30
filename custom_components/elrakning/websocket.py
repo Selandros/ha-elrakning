@@ -28,6 +28,7 @@ from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
 from .power import PowerManager
 from .solar_forecast import SolarForecastManager
+from .solar_weather import build_sun_context
 
 COMMAND = f"{DOMAIN}/price_data"
 GREENELY_TEST_COMMAND = f"{DOMAIN}/greenely_test"
@@ -911,6 +912,7 @@ async def websocket_power_history(hass, connection, msg):
     result["solar_forecast_baselines"] = forecast.get("baselines", {})
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
     result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
+    result["solar_sun"] = build_sun_context(hass)
     connection.send_result(msg["id"], result)
 
 
