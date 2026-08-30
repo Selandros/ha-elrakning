@@ -11,6 +11,7 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from homeassistant.helpers.storage import Store
 
 from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
+from ..diagnostics import sanitize_source_data
 from .eon_auth import EonAppSession, EonAuthError, EonSession
 from .eon_client import EonAppClient, EonClient
 from .eon_models import (
@@ -551,14 +552,15 @@ def _redact_source_data(value: Any) -> Any:
         "premiseid", "installationids", "allaccountids", "session", "id", "password",
         "token", "secret", "cookie", "authorization",
     )
+    # Keep the provider-local wrapper for compatibility and apply the shared policy last.
     if isinstance(value, dict):
         result = {}
         for key, item in value.items():
             key_text = str(key).lower()
             result[key] = "[redacted]" if any(word in key_text for word in sensitive) else _redact_source_data(item)
-        return result
+        return sanitize_source_data(result)
     if isinstance(value, list):
-        return [_redact_source_data(item) for item in value]
+        return sanitize_source_data([_redact_source_data(item) for item in value])
     return value
 
 

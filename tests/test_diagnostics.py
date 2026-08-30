@@ -8,6 +8,7 @@ module = module_from_spec(spec)
 spec.loader.exec_module(module)
 append = module.append_diagnostic
 sanitize = module.sanitize_diagnostic_text
+sanitize_source = module.sanitize_source_data
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -26,6 +27,20 @@ class DiagnosticsTests(unittest.TestCase):
         logs = []
         append(logs, "NOPE", "source", "source_failed", "failed")
         self.assertEqual(logs[0]["level"], "INFO")
+
+    def test_source_data_redacts_sensitive_nested_keys(self):
+        result = sanitize_source({
+            "customer_id": "customer-placeholder",
+            "locations": [{
+                "installation": {"id": "installation-placeholder"},
+                "address": {"city": "Exampletown"},
+            }],
+            "price": 12.5,
+        })
+        self.assertEqual(result["customer_id"], "[redacted]")
+        self.assertEqual(result["locations"][0]["installation"]["id"], "[redacted]")
+        self.assertEqual(result["locations"][0]["address"], "[redacted]")
+        self.assertEqual(result["price"], 12.5)
 
     def test_clear_is_empty_and_sensitive_messages_are_redacted(self):
         logs = []

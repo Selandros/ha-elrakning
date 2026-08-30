@@ -533,12 +533,12 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
             results = await asyncio.gather(first, second, third)
             self.assertTrue(all(result["success"] for result in results))
             self.assertEqual(calls, 1)
-            self.assertEqual(diagnostics.count("meter_history_request_success"), 1)
+            self.assertEqual(diagnostics.count("meter_history_request_success"), 0)
             await asyncio.sleep(0)
             later = await manager.async_power_history()
             self.assertTrue(later["success"])
             self.assertEqual(calls, 2)
-            self.assertEqual(diagnostics.count("meter_history_request_success"), 2)
+            self.assertEqual(diagnostics.count("meter_history_request_success"), 0)
         finally:
             for name, original in previous.items():
                 if original is None:

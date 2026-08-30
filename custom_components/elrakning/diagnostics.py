@@ -7,7 +7,18 @@ from datetime import datetime, timezone
 from typing import Any
 
 MAX_DIAGNOSTICS = 500
-SENSITIVE = re.compile(r"(password|jwt|token|authorization|cookie|secret|pdf[_-]?url|ocr|personnummer|personal[_-]?number|ssn|credential)", re.IGNORECASE)
+SENSITIVE = re.compile(r"(password|jwt|token|authorization|cookie|secret|pdf[_-]?url|ocr|personnummer|personal[_-]?number|ssn|credential|email|invoice[_-]?mail|first[_-]?name|last[_-]?name|address|street|postal[_-]?code|postcode|city|ip(?:[_-]?address)?|meter[_-]?id|user[_-]?id|customer[_-]?id|facility[_-]?id|site[_-]?id|bill[_-]?location[_-]?id|account[_-]?id|contract[_-]?id|invoice[_-]?key|point[_-]?of[_-]?delivery|pod|installation[_-]?(?:id|identifier)|premise[_-]?id|(^|[_-])name$|(^|[_-])ids?$)", re.IGNORECASE)
+
+
+def sanitize_source_data(value: Any, key: str = "") -> Any:
+    """Recursively redact secrets, personal data, and stable source identifiers."""
+    if SENSITIVE.search(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {str(name): sanitize_source_data(item, str(name)) for name, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize_source_data(item) for item in value]
+    return value
 
 
 def sanitize_diagnostic_text(value: Any) -> str:

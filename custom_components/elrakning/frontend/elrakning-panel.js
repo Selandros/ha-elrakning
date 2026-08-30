@@ -3,7 +3,7 @@ export const CHART_COLORS = Object.freeze({
   priceNormal: "#B9A05D",
   priceExpensive: "#E4687D",
   solar: "#77C2A1",
-  solarForecast: "#77C2A1",
+  solarForecast: "#4F8F72",
   consumption: "#E87570",
   import: "#F0A06A",
   export: "#72AAF6",
@@ -581,7 +581,7 @@ export function isPointerInsidePlot(svg, event, plot, width, height) {
   return pointerToPlotCoordinates(svg, event, plot, width, height)?.inside === true;
 }
 
-const DEBUG_SENSITIVE_KEY = /(token|password|secret|cookie|authorization|customer[_-]?id|account[_-]?id|point[_-]?of[_-]?delivery|installation[_-]?identifier|premise[_-]?id|session[_-]?id)/i;
+const DEBUG_SENSITIVE_KEY = /(token|password|secret|cookie|authorization|customer[_-]?id|account[_-]?id|point[_-]?of[_-]?delivery|installation[_-]?(?:id|identifier)|premise[_-]?id|session[_-]?id|email|first[_-]?name|last[_-]?name|address|street|postal[_-]?code|postcode|city|ip(?:[_-]?address)?|meter[_-]?id|facility[_-]?id|site[_-]?id|bill[_-]?location[_-]?id|contract[_-]?id|invoice[_-]?key|user[_-]?id|pod)/i;
 
 export function sanitizeDebugData(value, key = "") {
   if (DEBUG_SENSITIVE_KEY.test(key)) return "[redacted]";
@@ -591,6 +591,17 @@ export function sanitizeDebugData(value, key = "") {
     childKey,
     sanitizeDebugData(childValue, childKey),
   ]));
+}
+
+export function resolveFuseAmpere(meterState, gridState) {
+  const candidates = [
+    meterState?.facility?.fuse_ampere,
+    meterState?.fuse_ampere,
+    gridState?.facility?.fuse_ampere,
+    gridState?.fuse_ampere,
+  ];
+  const value = candidates.map(Number).find((candidate) => Number.isFinite(candidate) && candidate > 0);
+  return value ?? null;
 }
 
 export function buildCanonicalPhasePoints(points, dayStart, axisEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
@@ -760,6 +771,10 @@ export function buildLivePowerProvenance(key, tile, powerState = {}, meterState 
     history_max_kw: Number.isFinite(historyMax) ? historyMax : null,
     live_max_after_bootstrap_kw: Number.isFinite(Number(liveMaxima[key])) ? Number(liveMaxima[key]) : null,
     result_kw: tile?.maxToday ?? null,
+    max_source: "raw_history_plus_live_daily_max",
+    presentation_max_matches_history: !Number.isFinite(historyMax) || !Number.isFinite(Number(tile?.maxToday))
+      ? null
+      : Math.abs(historyMax - Number(tile.maxToday)) < 1e-9,
   };
   return {
     display: { current_kw: tile?.value ?? null, status: tile?.status ?? null },
@@ -1667,6 +1682,7 @@ class ElrakningPanel {
     this._providerConfigured = false;
     this._electricityProviderState = null;
     this._billingHistory = null;
+    this._costSelectedMonth = null;
     this.priceData = {
       source: "nord_pool",
       mode: "spot_price",
@@ -1695,7 +1711,7 @@ class ElrakningPanel {
 
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1704,7 +1720,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="house" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
-            <div class="live-power-heading"><span class="live-power-title">Sol</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Sol</span><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1713,7 +1729,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-eon-grid-configure hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1722,7 +1738,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="grid" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
-            <div class="live-power-heading"><span class="live-power-title">Batteri</span></div>
+            <div class="live-power-heading"><span class="live-power-title">Batteri</span><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -1855,6 +1871,7 @@ class ElrakningPanel {
           </article>
           <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
             <div class="card-heading"><h2 id="cost-title">Kostnad</h2><span class="status" data-cost-period></span></div>
+            <div class="cost-navigation"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><span data-cost-selected-period></span><button type="button" data-cost-next aria-label="Nästa månad">›</button></div>
             <div class="cost-summary" data-cost-summary></div>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>
@@ -1889,28 +1906,7 @@ class ElrakningPanel {
               <p class="provider" data-provider-name="elnet" hidden></p>
               <div class="provider-summary" data-eon-grid-summary hidden></div>
               <p class="provider-invoice-cost" data-provider-invoice-cost="elnet" hidden><span>Kostnad denna månad</span><strong></strong></p>
-              <button type="button" class="configuration-control" data-eon-grid-configure>Konfigurera</button>
               <button type="button" data-eon-grid-source hidden>Vad har vi för data?</button>
-          </article>
-
-          <article class="card" data-provider-card="elmatare" data-config-card-key="elmatare">
-            <div class="card-heading">
-              <h2>Elmätare</h2>
-              <span class="status" data-meter-status>Ej konfigurerad</span>
-              <label class="main-card-toggle" data-main-card-toggle="elmatare" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label>
-            </div>
-            <p class="provider" data-provider-name="elmatare" hidden></p>
-            <button type="button" class="configuration-control" data-meter-configure>Konfigurera</button>
-          </article>
-
-          <article class="card power-card" data-power-card="solar" data-config-card-key="solar">
-            <div class="card-heading"><h2>Sol</h2><span class="status" data-power-status="solar">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="solar" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
-            <button type="button" class="configuration-control" data-power-configure="solar">Konfigurera</button>
-          </article>
-
-          <article class="card power-card" data-power-card="battery" data-config-card-key="battery">
-            <div class="card-heading"><h2>Batteri</h2><span class="status" data-power-status="battery">Ej konfigurerad</span><label class="main-card-toggle" data-main-card-toggle="battery" aria-label="Main"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></div>
-            <button type="button" class="configuration-control" data-power-configure="battery">Konfigurera</button>
           </article>
 
         </section>
@@ -2010,7 +2006,7 @@ class ElrakningPanel {
           <p class="provider-result" data-eon-grid-result aria-live="polite"></p>
           <div class="provider-actions">
             <button type="button" data-eon-grid-cancel>Avbryt</button>
-            <button type="button" data-eon-grid-remove hidden>Ta bort E.ON</button>
+            <button type="button" data-eon-grid-remove hidden>Ta bort elnätsavtal</button>
           </div>
         </div>
       </div>
@@ -2533,7 +2529,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-row {
-          align-items: stretch;
+          align-items: start;
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2558,6 +2554,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-grid {
+          align-items: start;
           display: grid;
           gap: 24px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2695,8 +2692,7 @@ class ElrakningPanel {
 
         .soc-card {
           --soc-color: var(--el-solar-color);
-          display: flex;
-          flex-direction: column;
+          display: block;
           min-height: 0;
           min-width: 0;
         }
@@ -2715,7 +2711,6 @@ class ElrakningPanel {
         }
 
         .soc-chart {
-          flex: 1;
           margin: 0;
           min-height: 0;
           position: relative;
@@ -2965,6 +2960,29 @@ class ElrakningPanel {
           gap: 8px 14px;
           grid-template-columns: minmax(0, 1fr) auto;
           margin-top: 16px;
+        }
+
+        .cost-navigation {
+          align-items: center;
+          display: flex;
+          gap: 12px;
+          justify-content: space-between;
+          margin-top: 14px;
+        }
+
+        .cost-navigation button {
+          background: transparent;
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          color: var(--primary-text-color);
+          font: inherit;
+          line-height: 1;
+          padding: 4px 9px;
+        }
+
+        .cost-navigation span {
+          color: var(--secondary-text-color);
+          font-size: 13px;
         }
 
         .cost-summary span {
@@ -3271,6 +3289,7 @@ class ElrakningPanel {
 
 
         .live-power-row {
+          align-items: start;
           display: grid;
           gap: 12px;
           grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3300,6 +3319,12 @@ class ElrakningPanel {
           gap: 8px;
           justify-content: space-between;
           min-width: 0;
+        }
+
+        .live-power-configure {
+          font-size: 11px;
+          margin: 0 0 0 auto;
+          padding: 3px 6px;
         }
 
         .live-power-title,
@@ -3440,6 +3465,7 @@ class ElrakningPanel {
         }
 
         .grid {
+          align-items: start;
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -4115,7 +4141,6 @@ class ElrakningPanel {
           box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
           box-sizing: border-box;
           isolation: isolate;
-          min-height: 170px;
           overflow: hidden;
           padding: 20px;
           position: relative;
@@ -4241,9 +4266,9 @@ class ElrakningPanel {
     this._bindPhaseHistoryCard();
         this._bindDiagnostics();
     this._bindMainInvoiceParser();
+    this._bindCostCard();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
-    this._setupSocCardHeightObserver();
     this.renderPriceChart();
   }
 
@@ -4261,26 +4286,6 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
     this._priceHeaderLayoutObserver.observe(heading);
     updateLayoutState();
-  }
-
-  _syncSocCardHeight() {
-    const energyCard = this.host.querySelector("[data-daily-energy]");
-    const socCard = this.host.querySelector("[data-soc-card]");
-    if (!energyCard || !socCard) return;
-    if (energyCard.hidden || socCard.hidden) {
-      socCard.style.height = "";
-      return;
-    }
-    const height = energyCard.getBoundingClientRect().height;
-    if (Number.isFinite(height) && height > 0) socCard.style.height = `${height}px`;
-  }
-
-  _setupSocCardHeightObserver() {
-    const energyCard = this.host.querySelector("[data-daily-energy]");
-    if (!energyCard || !("ResizeObserver" in window)) return;
-    this._socCardHeightObserver = new ResizeObserver(() => this._syncSocCardHeight());
-    this._socCardHeightObserver.observe(energyCard);
-    this._syncSocCardHeight();
   }
 
   _chartLayerState() {
@@ -4427,8 +4432,8 @@ class ElrakningPanel {
         configuration_cards_visible: this._configurationCardsVisible,
         main_cards: this._mainCards,
       });
-    } catch (error) {
-      console.warn("Elrakning chart preference persistence failed", error);
+    } catch {
+      // Keep the UI responsive when preference persistence is unavailable.
     }
   }
 
@@ -5024,7 +5029,6 @@ class ElrakningPanel {
     this._renderSocChart();
     this._renderBatteryHistoryCard();
     this._renderSolarHistoryCard();
-    this._syncSocCardHeight();
   }
 
   _calculatePowerEnergy(seriesKey) {
@@ -6126,6 +6130,7 @@ class ElrakningPanel {
           : cardSource
           ? {
             source: cardSource,
+            invoice_estimate: cardSource === "cost" ? this._invoiceEstimateRaw : undefined,
             power_state: this._powerState,
             meter_state: this._meterState,
             power_history: this._powerHistory,
@@ -6271,6 +6276,7 @@ class ElrakningPanel {
     card.hidden = !configured || !billingHistory;
     if (!configured || !billingHistory) {
       this._invoiceEstimateRaw = null;
+      card._livePowerRaw = null;
       this._renderInvoiceCardCosts();
       return;
     }
@@ -6278,6 +6284,7 @@ class ElrakningPanel {
     if (!estimate) {
       total.textContent = "–";
       this._invoiceEstimateRaw = null;
+      card._livePowerRaw = null;
       this._renderInvoiceCardCosts();
       return;
     }
@@ -6291,6 +6298,7 @@ class ElrakningPanel {
       },
       estimate.month,
     );
+    if (!this._costSelectedMonth || this._costSelectedMonth > estimate.month) this._costSelectedMonth = estimate.month;
     const comparison = buildInvoiceComparison(estimate, previousActual);
     this._invoiceEstimateRaw = {
       ...estimate,
@@ -6299,6 +6307,7 @@ class ElrakningPanel {
       comparison,
       provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: this._eonGridPrice || billingHistory.grid_price }),
     };
+    card._livePowerRaw = this._invoiceEstimateRaw;
     this._renderInvoiceCardCosts();
   }
 
@@ -6319,16 +6328,38 @@ class ElrakningPanel {
     const card = this.host.querySelector("[data-cost-card]");
     const period = this.host.querySelector("[data-cost-period]");
     const summary = this.host.querySelector("[data-cost-summary]");
+    const selectedPeriod = this.host.querySelector("[data-cost-selected-period]");
+    const previousButton = this.host.querySelector("[data-cost-previous]");
+    const nextButton = this.host.querySelector("[data-cost-next]");
     if (!card || !period || !summary) return;
     const estimate = this._invoiceEstimateRaw;
-    const total = Number(estimate?.estimated_month_total_sek);
-    const rows = [
-      ["Estimerad månad", Number.isFinite(total) ? this._formatSek(total) : null],
+    const currentMonth = estimate?.month || null;
+    const selectedMonth = this._costSelectedMonth || currentMonth;
+    const previous = estimate?.previous_month_actual;
+    const showingCurrent = selectedMonth === currentMonth;
+    const rows = showingCurrent ? [
+      ["Status", estimate?.forecast_confidence === "partial_data" ? "Delvis underlag" : "Estimerad"],
+      ["Estimerad månad", Number.isFinite(Number(estimate?.estimated_month_total_sek)) ? this._formatSek(Number(estimate.estimated_month_total_sek)) : null],
       ["Kostnad hittills", Number.isFinite(Number(estimate?.total_so_far_sek)) ? this._formatSek(Number(estimate.total_so_far_sek)) : null],
+      ["Prognos återstående", Number.isFinite(Number(estimate?.forecast_remaining_total_sek)) ? this._formatSek(Number(estimate.forecast_remaining_total_sek)) : null],
+      ["Elhandel", Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? this._formatSek(Number(estimate.trade.total_so_far_sek)) : null],
+      ["Elnät", Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? this._formatSek(Number(estimate.grid.total_so_far_sek)) : null],
+      ["Fast kostnad", Number.isFinite(Number(estimate?.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate?.grid?.accrued_fixed_fee_sek)) ? this._formatSek((Number(estimate?.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate?.grid?.accrued_fixed_fee_sek) || 0)) : null],
+      ["Rörlig kostnad", Number.isFinite(Number(estimate?.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate?.grid?.variable_cost_sek)) ? this._formatSek((Number(estimate?.trade?.variable_cost_sek) || 0) + (Number(estimate?.grid?.variable_cost_sek) || 0)) : null],
       ["Importerad energi", Number.isFinite(Number(estimate?.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
-    ].filter(([, value]) => value);
-    card.hidden = !rows.length;
-    period.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month) : "";
+      ["Prognostiserad import", Number.isFinite(Number(estimate?.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
+      ["Genomsnittligt totalpris", Number.isFinite(Number(estimate?.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
+    ] : previous?.month === selectedMonth ? [
+      ["Status", previous.coverage === "complete" ? "Fakturerad" : "Delvis underlag"],
+      ["Elhandel", Number.isFinite(Number(previous.trade?.comparison_value_sek)) ? this._formatSek(Number(previous.trade.comparison_value_sek)) : null],
+      ["Elnät", Number.isFinite(Number(previous.grid?.comparison_value_sek)) ? this._formatSek(Number(previous.grid.comparison_value_sek)) : null],
+      ["Total", Number.isFinite(Number(previous.total_sek)) ? this._formatSek(Number(previous.total_sek)) : null],
+    ] : [["Status", "Data saknas"]];
+    card.hidden = !estimate || !rows.length;
+    period.textContent = selectedMonth ? this._formatInvoiceMonth(selectedMonth) : "";
+    if (selectedPeriod) selectedPeriod.textContent = period.textContent;
+    if (previousButton) previousButton.disabled = !selectedMonth;
+    if (nextButton) nextButton.disabled = !selectedMonth || selectedMonth >= currentMonth;
     summary.replaceChildren(...rows.flatMap(([label, value]) => {
       const name = document.createElement("span");
       name.textContent = label;
@@ -6336,6 +6367,28 @@ class ElrakningPanel {
       output.textContent = value;
       return [name, output];
     }));
+  }
+
+  _bindCostCard() {
+    const previous = this.host.querySelector("[data-cost-previous]");
+    const next = this.host.querySelector("[data-cost-next]");
+    if (previous) previous.addEventListener("click", () => {
+      const current = this._costSelectedMonth || this._invoiceEstimateRaw?.month;
+      if (!current) return;
+      this._costSelectedMonth = previousCalendarMonth(current);
+      this._renderCostCard();
+    });
+    if (next) next.addEventListener("click", () => {
+      const current = this._costSelectedMonth || this._invoiceEstimateRaw?.month;
+      if (!current) return;
+      const [year, month] = current.split("-").map(Number);
+      const nextMonth = new Date(Date.UTC(year, month, 1));
+      const nextValue = `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, "0")}`;
+      if (nextValue <= (this._invoiceEstimateRaw?.month || nextValue)) {
+        this._costSelectedMonth = nextValue;
+        this._renderCostCard();
+      }
+    });
   }
 
   _formatInvoiceMonth(value) {
@@ -6880,7 +6933,7 @@ class ElrakningPanel {
     ]));
     const axisEnd = phaseHistoryAxisEnd(Object.values(phasePoints).flat()) || rawAxisEnd;
     const timeRange = Math.max(1, axisEnd - axisStart);
-    const fuse = Number(this._meterState?.facility?.fuse_ampere);
+    const fuse = resolveFuseAmpere(this._meterState, this._eonGridState);
     const renderedPhaseHistory = { [metric]: phasePoints };
     this._phaseRenderedHistory = renderedPhaseHistory;
     if (!Object.values(phasePoints).some((points) => points.length)) {
@@ -7061,7 +7114,7 @@ class ElrakningPanel {
     const dailyFuseUtilizationPercent = Number.isFinite(Number(state?.daily_max_fuse_utilization_percent))
       ? Number(state.daily_max_fuse_utilization_percent)
       : this._meterPowerHistory?.daily_max_fuse_utilization_percent;
-    const fuseAmpere = Number(facility.fuse_ampere);
+    const fuseAmpere = resolveFuseAmpere(this._meterState, state);
     const dailyMaxPhaseBase = state?.daily_max_phase || this._meterPowerHistory?.daily_max_phase || buildDailyMaxPhase(
       state?.daily_phase_max || this._meterPowerHistory?.daily_phase_max,
       fuseAmpere,
@@ -7268,7 +7321,7 @@ class ElrakningPanel {
         0,
       ) || null,
     };
-    const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+    const fuseAmpere = resolveFuseAmpere(this._meterState, this._eonGridState);
     this._meterPowerHistory.daily_max_phase = buildDailyMaxPhase(dailyPhaseMax, fuseAmpere);
     const dailyMax = this._meterPowerHistory.daily_max_phase_current_a;
     this._meterPowerHistory.daily_max_fuse_utilization_percent = Number.isFinite(dailyMax) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
@@ -7315,7 +7368,7 @@ class ElrakningPanel {
         if (this.host.querySelector(".price-chart")) this.renderPriceChart();
         return;
       }
-      const fuseAmpere = Number(this._eonGridState?.facility?.fuse_ampere ?? this._meterState?.facility?.fuse_ampere ?? this._meterState?.fuse_ampere);
+      const fuseAmpere = resolveFuseAmpere(this._meterState, this._eonGridState);
       const responseDate = response?.date || null;
       const existingDate = this._meterPowerHistory?.date || null;
       const samePeriod = !existingDate || !responseDate || existingDate === responseDate;
@@ -8182,7 +8235,6 @@ class ElrakningPanel {
 }
 
 export function mountElrakningPanel(host, { version }) {
-  console.info(`[Elräkning] frontend ${version} loaded`);
   const panel = new ElrakningPanel(host, version);
   panel.render();
   return panel;

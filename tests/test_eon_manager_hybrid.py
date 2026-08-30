@@ -48,6 +48,13 @@ def _load_manager():
     for name in ("custom_components", "custom_components.elrakning", PKG):
         package = sys.modules.setdefault(name, types.ModuleType(name))
         package.__path__ = []
+    diagnostics_name = "custom_components.elrakning.diagnostics"
+    diagnostics_spec = importlib.util.spec_from_file_location(
+        diagnostics_name, ROOT / "custom_components/elrakning/diagnostics.py"
+    )
+    diagnostics_module = importlib.util.module_from_spec(diagnostics_spec)
+    sys.modules[diagnostics_name] = diagnostics_module
+    diagnostics_spec.loader.exec_module(diagnostics_module)
     for module_name in ("eon_auth", "eon_client", "eon_models", "eon_manager"):
         full_name = f"{PKG}.{module_name}"
         path = ROOT / "custom_components/elrakning/elnat" / f"{module_name}.py"

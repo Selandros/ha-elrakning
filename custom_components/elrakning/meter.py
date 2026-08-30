@@ -420,7 +420,6 @@ class MeterManager:
                 METER_INVERT_FIELD: bool(self.mapping.get(METER_INVERT_FIELD)),
             }
             self._history_summary = summary
-            await self._diagnostic("INFO", "meter_history_request_success", "Meter history loaded · 0 points")
             return {"success": True, "entity_id": None, "date": date, "points": [], "history": summary}
         invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
         phase_entities = self._discover_phase_entities()
@@ -647,15 +646,6 @@ class MeterManager:
             "daily_max_phase": daily_max_phase,
         }
         self._history_summary = summary
-        await self._diagnostic(
-            "INFO",
-            "meter_history_request_success",
-            "Meter history loaded · "
-            f"Entity: {entity_id} · Points: {len(points)} · "
-            f"First: {summary['first_timestamp'] or 'none'} · "
-            f"Last: {summary['last_timestamp'] or 'none'} · "
-            f"Max: {summary['max_abs_kw'] if summary['max_abs_kw'] is not None else 'none'} kW",
-        )
         return {
             "success": True,
             "entity_id": entity_id,
