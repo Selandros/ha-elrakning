@@ -1078,6 +1078,13 @@ class ElrakningPanel {
             <div class="live-power-scale"><span>0</span><span data-live-power-scale>1,00 kW</span></div>
             <span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span>
           </article>
+          <article class="card invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
+            <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
+            <div class="invoice-estimate-heading"><strong>Estimerad faktura</strong><span data-invoice-estimate-month></span></div>
+            <div class="invoice-estimate-grid" data-invoice-estimate-grid></div>
+            <p class="invoice-estimate-status" data-invoice-estimate-status></p>
+            <span class="invoice-estimate-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
+          </article>
         </section>
 
         <section class="price-section" aria-labelledby="price-title">
@@ -1175,14 +1182,6 @@ class ElrakningPanel {
             <div class="solar-history-chart" data-solar-history-chart hidden></div>
           </article>
         </div>
-
-        <section class="card invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
-          <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
-          <div class="invoice-estimate-heading"><strong>Estimerad faktura</strong><span data-invoice-estimate-month></span></div>
-          <div class="invoice-estimate-grid" data-invoice-estimate-grid></div>
-          <p class="invoice-estimate-status" data-invoice-estimate-status></p>
-          <span class="invoice-estimate-copy-feedback" data-invoice-estimate-copy-feedback aria-live="polite"></span>
-        </section>
 
         <section class="grid" data-configuration-cards aria-label="Elräkningens konfigurationskort">
           <article class="card" data-provider-card="elhandel" data-config-card-key="elhandel">
@@ -2294,6 +2293,8 @@ class ElrakningPanel {
         .invoice-estimate-card {
           display: grid;
           gap: 10px;
+          min-height: 0;
+          padding: 12px 14px;
         }
 
         .invoice-estimate-heading {
@@ -2471,7 +2472,7 @@ class ElrakningPanel {
         .live-power-row {
           display: grid;
           gap: 12px;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           margin-bottom: 16px;
         }
 
@@ -2584,6 +2585,10 @@ class ElrakningPanel {
         @media (max-width: 760px) {
           .live-power-row {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .invoice-estimate-card {
+            grid-column: 1 / -1;
           }
         }
 
