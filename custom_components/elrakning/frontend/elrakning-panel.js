@@ -3011,6 +3011,11 @@ class ElrakningPanel {
           margin-top: 16px;
         }
 
+        .soc-card .card-source-action {
+          justify-self: start;
+          width: max-content;
+        }
+
         .phase-history-card {
           min-width: 0;
         }

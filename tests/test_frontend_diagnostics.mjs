@@ -1328,6 +1328,7 @@ assert.match(panelSource, /\.grid \{\n\s+align-items: stretch;/);
 assert.match(panelSource, /\.soc-card \{[\s\S]*display: block;/);
 assert.match(panelSource, /\.soc-card \{[\s\S]*min-block-size: 0;/);
 assert.match(panelSource, /@media \(min-width: 761px\) \{[\s\S]*\.soc-card \{[\s\S]*contain: size;[\s\S]*display: grid;[\s\S]*grid-template-rows: minmax\(0, 1fr\) auto;[\s\S]*overflow: hidden;/);
+assert.match(panelSource, /\.soc-card \.card-source-action \{[\s\S]*justify-self: start;[\s\S]*width: max-content;/);
 assert.match(panelSource, /@media \(min-width: 761px\) \{[\s\S]*\.soc-card \.soc-chart \{[\s\S]*height: auto;/);
 assert.match(panelSource, /@media \(min-width: 761px\) \{[\s\S]*\.soc-card \.soc-chart \{[\s\S]*box-sizing: border-box;[\s\S]*padding-block: 4px;/);
 assert.match(panelSource, /@media \(max-width: 760px\) \{[\s\S]*\.soc-card \{[\s\S]*contain: none;[\s\S]*display: block;[\s\S]*overflow: hidden;/);
