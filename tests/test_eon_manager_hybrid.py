@@ -268,6 +268,33 @@ def test_source_redaction_removes_identifiers_and_credentials():
     assert redacted["safe"] == "kept"
 
 
+def test_source_redaction_preserves_semantic_contract_and_price_fields_nested():
+    redacted = manager_module._redact_source_data({
+        "grid_price": {"grid_variable_ore_per_kwh": 142},
+        "provider_name": "E.ON",
+        "contract_status": "FUTURE",
+        "contract_source_status": "FUTURE",
+        "invoice_total": 123.45,
+        "invoice_status": "issued",
+        "billing_period": "2026-08",
+        "tariff": {"transfer_price": 97, "energy_tax": 45, "fuse_ampere": 16},
+        "outage": {"status": "no_known_outage"},
+        "future": "FUTURE",
+        "nested": [{"customerId": "customer-placeholder", "installationId": "installation-placeholder"}],
+    })
+    assert redacted["grid_price"]["grid_variable_ore_per_kwh"] == 142
+    assert redacted["provider_name"] == "E.ON"
+    assert redacted["contract_status"] == "FUTURE"
+    assert redacted["contract_source_status"] == "FUTURE"
+    assert redacted["invoice_total"] == 123.45
+    assert redacted["invoice_status"] == "issued"
+    assert redacted["billing_period"] == "2026-08"
+    assert redacted["tariff"] == {"transfer_price": 97, "energy_tax": 45, "fuse_ampere": 16}
+    assert redacted["outage"]["status"] == "no_known_outage"
+    assert redacted["future"] == "FUTURE"
+    assert redacted["nested"][0] == {"customerId": "[redacted]", "installationId": "[redacted]"}
+
+
 def test_web_api_request_uses_bearer_without_explicit_web_cookies():
     calls = []
 

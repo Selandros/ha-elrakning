@@ -546,25 +546,7 @@ class EonGridManager:
 
 def _redact_source_data(value: Any) -> Any:
     """Redact credentials and customer-account identifiers from raw source data."""
-    sensitive = (
-        "accountid", "customeridentifier", "customerid", "contractaccountidentifier",
-        "installationidentifier", "pointofdeliverynumber", "podid", "devicenumber",
-        "premiseid", "installationids", "allaccountids", "session", "id", "password",
-        "token", "secret", "cookie", "authorization", "credential", "email", "name",
-        "firstname", "lastname", "address", "street", "postal", "city", "ip",
-        "meter", "facility", "site", "bill", "contract", "invoice", "userid",
-        "user", "installation", "premise", "pod",
-    )
-    # Keep the provider-local wrapper for compatibility and apply the shared policy last.
-    if isinstance(value, dict):
-        result = {}
-        for key, item in value.items():
-            key_text = str(key).lower()
-            result[key] = "[redacted]" if any(word in key_text for word in sensitive) else _redact_source_data(item)
-        return sanitize_source_data(result)
-    if isinstance(value, list):
-        return sanitize_source_data([_redact_source_data(item) for item in value])
-    return value
+    return sanitize_source_data(value)
 
 
 def _grouped_contract_installation_ids(payload: Any) -> tuple[list[str], list[str]]:
