@@ -3449,7 +3449,7 @@ class ElrakningPanel {
           }
         }
 
-        @container (min-width: 761px) {
+        @media (min-width: 761px) {
           .soc-card {
             contain: size;
             display: grid;
@@ -3464,7 +3464,7 @@ class ElrakningPanel {
           }
         }
 
-        @container (max-width: 760px) {
+        @media (max-width: 760px) {
           .soc-card {
             contain: none;
             display: block;
