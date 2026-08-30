@@ -34,6 +34,7 @@ assert _SPEC and _SPEC.loader
 sys.modules[_SPEC.name] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
 build_customer_price_data = _MODULE.build_customer_price_data
+grid_variable_cost_ex_vat = _MODULE.grid_variable_cost_ex_vat
 ProviderData = _MODULE.ProviderData
 
 
@@ -106,3 +107,15 @@ class CustomerPriceTests(unittest.TestCase):
         self.assertIsNone(data.provider)
         self.assertIsNone(data.electricity_cost_ex_vat)
         self.assertAlmostEqual(data.periods[0].customer_price, 0.374125)
+
+    def test_grid_rate_uses_gross_variable_components_only(self) -> None:
+        self.assertAlmostEqual(grid_variable_cost_ex_vat({
+            "vat_included": True,
+            "variable_total_ore_per_kwh_gross": 142,
+            "fixed_monthly_sek": 226.25,
+            "yearly_estimated_sek": 6567,
+        }), 1.136)
+        self.assertIsNone(grid_variable_cost_ex_vat({
+            "vat_included": False,
+            "variable_total_ore_per_kwh_gross": 142,
+        }))

@@ -5424,6 +5424,7 @@ class ElrakningPanel {
       periods: Array.isArray(this.priceSnapshot.periods) ? this.priceSnapshot.periods : [],
       error: this.priceSnapshot.error || null,
     };
+    this._eonGridPrice = this.priceSnapshot.adjustments?.grid_price || null;
     this._updatePriceComparisonControls();
     this.updatePriceSummary();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
@@ -5473,6 +5474,7 @@ class ElrakningPanel {
 
   _applyEonGridState(state) {
     this._eonGridState = state;
+    this._eonGridPrice = state?.grid_price || state?.tariff?.grid_price || null;
     const configured = state?.configured === true;
     const status = this.host.querySelector("[data-eon-grid-status]");
     const provider = this.host.querySelector('[data-provider-name="elnet"]');
@@ -5524,6 +5526,8 @@ class ElrakningPanel {
       return [left, right];
     }));
     summary.hidden = !configured || rows.length === 0;
+    this._updatePriceComparisonControls();
+    if (this.host.querySelector(".price-chart") && this.priceData.periods.length) this.renderPriceChart();
   }
 
   _bindEonGridDialog() {
@@ -6259,6 +6263,16 @@ class ElrakningPanel {
     };
     if (layers.spot && Number.isFinite(comparisonPrice)) {
       add("Spotpris", comparisonPrice, this.formatPrice(comparisonPrice));
+    }
+    if (this._priceComparisonVisible.grid && this._eonGridPrice) {
+      const gridPrice = this._eonGridPrice;
+      add("Överföring", gridPrice.transfer_ore_per_kwh_gross, `${this._formatNumber(gridPrice.transfer_ore_per_kwh_gross)} öre/kWh`);
+      add("Energiskatt", gridPrice.energy_tax_ore_per_kwh_gross, `${this._formatNumber(gridPrice.energy_tax_ore_per_kwh_gross)} öre/kWh`);
+      add("Rörligt totalt", gridPrice.variable_total_ore_per_kwh_gross, `${this._formatNumber(gridPrice.variable_total_ore_per_kwh_gross)} öre/kWh`);
+      add("Abonnemang", gridPrice.fixed_monthly_sek, `${this._formatSek(gridPrice.fixed_monthly_sek)}/mån`);
+      add("Beräknad årskostnad", gridPrice.yearly_estimated_sek, this._formatSek(gridPrice.yearly_estimated_sek));
+      add("Moms", gridPrice.vat_included ? "inkluderad" : "okänd", gridPrice.vat_included ? "inkluderad" : "okänd");
+      add("Källa", gridPrice.source, gridPrice.source);
     }
     if (layers.import && isVisiblePowerValue(details?.import_kw)) {
       add("Import", details.import_kw, `${this._formatNumber(details.import_kw)} kW`, "tooltip-meter-import");

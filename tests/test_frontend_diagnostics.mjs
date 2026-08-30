@@ -833,6 +833,12 @@ assert.match(panelSource, /chart-legend-swatch\.average \{[\s\S]*background: var
 assert.match(panelSource, /if \(layer === "average"\) \{[\s\S]*this\._averageLineVisible = !this\._averageLineVisible/);
 assert.match(panelSource, /this\._priceComparisonVisible/);
 assert.match(panelSource, /_comparisonPrice/);
+assert.match(panelSource, /grid_cost_ex_vat/);
+assert.match(panelSource, /grid_price/);
+assert.match(panelSource, /variable_total_ore_per_kwh_gross/);
+assert.match(panelSource, /Abonnemang.*_formatSek/);
+assert.match(panelSource, /Beräknad årskostnad.*_formatSek/);
+assert.match(panelSource, /Moms.*inkluderad/);
 assert.doesNotMatch(panelSource, /chart-price-layer/);
 assert.match(panelSource, /const prices = periods\.map\(\(period\) => this\._periodCustomerPrice\(period\)\)/);
 assert.match(panelSource, /const comparisonPrice = this\._comparisonPrice\(period\)/);

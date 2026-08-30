@@ -17,7 +17,7 @@ from .const import (
     SUPPORTED_ELECTRICITY_PROVIDERS,
 )
 from .coordinator import ElrakningCoordinator, PriceData
-from .customer_price import build_customer_price_data
+from .customer_price import build_customer_price_data, grid_variable_cost_ex_vat
 from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
@@ -936,6 +936,10 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     manager = _elhandel_manager(hass)
     provider_state = manager.public_state() if manager else None
     customer_price_data = build_customer_price_data(data.periods, provider_state)
+    grid_manager = _grid_manager(hass)
+    grid_state = grid_manager.public_state() if grid_manager else None
+    grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None
+    grid_cost_ex_vat = grid_variable_cost_ex_vat(grid_price)
     result = {
         "error": data.error,
         "area": data.area,
@@ -945,6 +949,8 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
         "adjustments": {
             "provider": customer_price_data.provider,
             "electricity_cost_ex_vat": customer_price_data.electricity_cost_ex_vat,
+            "grid_cost_ex_vat": grid_cost_ex_vat,
+            "grid_price": grid_price,
         },
         "periods": [
             {
@@ -956,6 +962,7 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
                 "subtotal_ex_vat": period.subtotal_ex_vat,
                 "vat": period.vat,
                 "customer_price": period.customer_price,
+                "grid_cost_ex_vat": grid_cost_ex_vat,
             }
             for period in customer_price_data.periods
         ],

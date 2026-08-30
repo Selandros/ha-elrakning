@@ -146,6 +146,17 @@ def test_normalize_grouped_contracts_reads_verified_contracts_by_type_shape():
     assert contract["tariff"]["transfer_fee_ore_per_kwh"] == 97.0
     assert contract["tariff"]["energy_tax_ore_per_kwh"] == 45.0
     assert contract["tariff"]["estimated_yearly_cost_sek"] == 6567.0
+    assert contract["tariff"]["grid_price"] == {
+        "vat_included": True,
+        "price_basis": "gross",
+        "source": "grouped_contracts",
+        "source_subtitle": "Samtliga priser är inklusive moms.",
+        "fixed_monthly_sek": 226.25,
+        "transfer_ore_per_kwh_gross": 97.0,
+        "energy_tax_ore_per_kwh_gross": 45.0,
+        "variable_total_ore_per_kwh_gross": 142.0,
+        "yearly_estimated_sek": 6567.0,
+    }
     assert len(contract["tariff"]["entries"]) == 5
 
 

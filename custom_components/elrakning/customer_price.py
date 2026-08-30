@@ -13,6 +13,18 @@ from .elhandel.provider_registry import provider_data_from_state
 VAT_MULTIPLIER = 1.25
 
 
+def grid_variable_cost_ex_vat(grid_price: dict[str, Any] | None) -> float | None:
+    """Convert a verified gross grid variable rate to the price graph basis."""
+    if not isinstance(grid_price, dict) or grid_price.get("vat_included") is not True:
+        return None
+    value = grid_price.get("variable_total_ore_per_kwh_gross")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value / 100 / VAT_MULTIPLIER if isfinite(value) else None
+
+
 @dataclass(frozen=True)
 class CustomerPricePeriod:
     """One customer-price period in SEK/kWh."""

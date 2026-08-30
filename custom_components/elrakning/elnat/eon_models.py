@@ -159,6 +159,24 @@ def normalize_grouped_tariff(contract: Mapping[str, Any]) -> dict[str, Any]:
             result["energy_tax_ore_per_kwh"] = _number_from(entry["value"])
         elif entry["label"] == "Beräknad årskostnad" and units == ("KR", "NONE"):
             result["estimated_yearly_cost_sek"] = _number_from(entry["value"])
+    transfer = result["transfer_fee_ore_per_kwh"]
+    energy_tax = result["energy_tax_ore_per_kwh"]
+    gross = result["subtitle"] == "Samtliga priser är inklusive moms."
+    result["grid_price"] = {
+        "vat_included": gross,
+        "price_basis": "gross" if gross else "unknown",
+        "source": "grouped_contracts",
+        "source_subtitle": result["subtitle"],
+        "fixed_monthly_sek": result["subscription_fee_sek_per_month"],
+        "transfer_ore_per_kwh_gross": transfer,
+        "energy_tax_ore_per_kwh_gross": energy_tax,
+        "variable_total_ore_per_kwh_gross": (
+            transfer + energy_tax
+            if transfer is not None and energy_tax is not None
+            else None
+        ),
+        "yearly_estimated_sek": result["estimated_yearly_cost_sek"],
+    }
     return result
 
 
