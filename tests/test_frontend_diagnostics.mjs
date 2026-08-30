@@ -1293,8 +1293,9 @@ assert.match(panelSource, /\.live-power-grid-fuse-status-spacer \{\n\s+display: 
 assert.match(panelSource, /\.grid \{\n\s+align-items: stretch;/);
 assert.match(panelSource, /\.soc-card \{[\s\S]*display: block;/);
 assert.match(panelSource, /\.soc-card \{[\s\S]*min-block-size: 0;/);
-assert.match(panelSource, /@container \(min-width: 761px\) \{[\s\S]*\.soc-card \{[\s\S]*contain: size;[\s\S]*overflow: hidden;/);
-assert.match(panelSource, /@container \(max-width: 760px\) \{[\s\S]*\.soc-card \{[\s\S]*contain: none;[\s\S]*overflow: hidden;/);
+assert.match(panelSource, /@container \(min-width: 761px\) \{[\s\S]*\.soc-card \{[\s\S]*contain: size;[\s\S]*display: grid;[\s\S]*grid-template-rows: minmax\(0, 1fr\) auto;[\s\S]*overflow: hidden;/);
+assert.match(panelSource, /@container \(min-width: 761px\) \{[\s\S]*\.soc-card \.soc-chart \{[\s\S]*height: auto;/);
+assert.match(panelSource, /@container \(max-width: 760px\) \{[\s\S]*\.soc-card \{[\s\S]*contain: none;[\s\S]*display: block;[\s\S]*overflow: hidden;/);
 assert.doesNotMatch(panelSource, /@media \(max-width: 700px\) \{[\s\S]*\.daily-energy-row \{\n\s+grid-template-columns: 1fr;/);
 assert.match(panelSource, /\.daily-energy-card \{[\s\S]*min-width: 0;/);
 assert.match(panelSource, /\.card\.daily-energy-card \{\n\s+min-height: 0;\n\s+\}/);

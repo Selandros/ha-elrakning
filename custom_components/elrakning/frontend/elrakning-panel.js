@@ -3452,14 +3452,25 @@ class ElrakningPanel {
         @container (min-width: 761px) {
           .soc-card {
             contain: size;
+            display: grid;
+            grid-template-rows: minmax(0, 1fr) auto;
             overflow: hidden;
+          }
+
+          .soc-card .soc-chart {
+            height: auto;
           }
         }
 
         @container (max-width: 760px) {
           .soc-card {
             contain: none;
+            display: block;
             overflow: hidden;
+          }
+
+          .soc-card .soc-chart {
+            height: auto;
           }
         }
 
