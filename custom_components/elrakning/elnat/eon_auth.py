@@ -176,6 +176,7 @@ class EonAppSession:
 
     async def request_json(self, method: str, url: str, **kwargs: Any) -> Any:
         """Call a middlelayer endpoint with the verified app auth scheme."""
+        diagnostic_status = kwargs.pop("_diagnostic_status", False)
         if not self._access_token or self._expires_at <= time.monotonic() + 30:
             raise EonAuthError("reauth_required")
         headers = dict(kwargs.pop("headers", {}))
@@ -183,10 +184,15 @@ class EonAppSession:
         try:
             async with self._session.request(method, url, headers=headers, **kwargs) as response:
                 if response.status in (401, 403):
+                    if diagnostic_status:
+                        return {"status": response.status, "payload": None}
                     raise EonAuthError("reauth_required")
                 if response.status >= 400:
+                    if diagnostic_status:
+                        return {"status": response.status, "payload": None}
                     raise EonAuthError("api_error")
-                return await response.json(content_type=None)
+                payload = await response.json(content_type=None)
+                return {"status": response.status, "payload": payload} if diagnostic_status else payload
         except EonAuthError:
             raise
         except (ClientError, TimeoutError, TypeError, ValueError) as err:

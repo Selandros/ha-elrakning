@@ -160,6 +160,40 @@ class EonGridManager:
             response["status"] = "api_error"
         return response
 
+    async def async_grouped_contracts_probe(self) -> dict[str, Any]:
+        """Inspect the app contract endpoint without changing normalized grid state."""
+        config = self._config()
+        if config.get("auth") != "app":
+            raise EonAuthError("reauth_required")
+        session = await self._get_app_session(config)
+        client = EonAppClient(session)
+        await client.async_get_contract_accounts()
+        raw_locations = await client.async_get_locations()
+        private_ids, sme_ids = _grouped_contract_installation_ids(raw_locations)
+        request_info = {
+            "host": "api.mobile-apps.eon.se",
+            "path": "/middlelayer/contracts/grouped",
+            "private_installation_count": len(private_ids),
+            "sme_installation_count": len(sme_ids),
+        }
+        if not private_ids and not sme_ids:
+            return {
+                "status": "api_error",
+                "http_status": None,
+                "request": request_info,
+                "error": "installation_ids_missing",
+            }
+        result = await client.async_get_grouped_contracts(private_ids, sme_ids)
+        http_status = result.get("status")
+        response = {"http_status": http_status, "request": request_info}
+        if http_status == 200:
+            response.update({"status": "ok", "payload": _redact_source_data(result.get("payload"))})
+        elif http_status in (401, 403):
+            response["status"] = f"denied_{http_status}"
+        else:
+            response["status"] = "api_error"
+        return response
+
     async def async_refresh(self) -> dict[str, Any]:
         config = self._config()
         if not self.configured:
@@ -489,3 +523,27 @@ def _redact_source_data(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_source_data(item) for item in value]
     return value
+
+
+def _grouped_contract_installation_ids(payload: Any) -> tuple[list[str], list[str]]:
+    """Collect only explicitly classified private or SME installation IDs."""
+    private_ids: list[str] = []
+    sme_ids: list[str] = []
+    if not isinstance(payload, list):
+        return private_ids, sme_ids
+    for location in payload:
+        if not isinstance(location, dict) or not isinstance(location.get("installations"), list):
+            continue
+        for installation in location["installations"]:
+            if not isinstance(installation, dict):
+                continue
+            if installation.get("productType") != "ELECTRICITY" or installation.get("serviceType") != "GRID":
+                continue
+            identifier = installation.get("id")
+            if not isinstance(identifier, str) or not identifier.strip():
+                continue
+            if installation.get("isSme") is False:
+                private_ids.append(identifier)
+            elif installation.get("isSme") is True:
+                sme_ids.append(identifier)
+    return private_ids, sme_ids

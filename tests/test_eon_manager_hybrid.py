@@ -406,3 +406,82 @@ def test_common_api_probe_uses_existing_app_session_and_redacts_result():
     assert method == "GET"
     assert url.endswith("/rest/v2/user")
     assert kwargs["params"] == {"readMeterChange": "true", "customerId": "synthetic-customer"}
+
+
+def test_grouped_contracts_probe_uses_explicit_installation_groups_without_state_mutation():
+    class Session:
+        pass
+
+    class Client:
+        calls = []
+
+        def __init__(self, session):
+            assert session is app_session
+
+        async def async_get_contract_accounts(self):
+            self.calls.append("accounts")
+            return {"allAccountIds": ["synthetic-account"]}
+
+        async def async_get_locations(self):
+            self.calls.append("locations")
+            return [{"installations": [
+                {"id": "private-installation", "productType": "ELECTRICITY", "serviceType": "GRID", "isSme": False},
+                {"id": "sme-installation", "productType": "ELECTRICITY", "serviceType": "GRID", "isSme": True},
+                {"id": "unclassified-installation", "productType": "ELECTRICITY", "serviceType": "GRID"},
+            ]}]
+
+        async def async_get_grouped_contracts(self, private_ids, sme_ids):
+            self.calls.append((private_ids, sme_ids))
+            return {"status": 200, "payload": {"ElectricityElna": {"contracts": [{"id": "sensitive"}], "prices": {"entries": [{"name": "Transfer", "price": {"value": 97, "numberUnit": "öre"}}]}}}}
+
+    manager = object.__new__(manager_module.EonGridManager)
+    manager._config = lambda: {"auth": "app", "account_id": "synthetic-account", "password": "synthetic-password"}
+    manager._app_session = Session()
+    app_session = manager._app_session
+    manager._get_app_session = lambda config: _async_return(app_session)
+    before = {"unchanged": True}
+    manager.state = before
+    original = manager_module.EonAppClient
+    manager_module.EonAppClient = Client
+    try:
+        result = asyncio.run(manager.async_grouped_contracts_probe())
+    finally:
+        manager_module.EonAppClient = original
+    assert result["status"] == "ok"
+    assert result["http_status"] == 200
+    assert result["request"]["private_installation_count"] == 1
+    assert result["request"]["sme_installation_count"] == 1
+    assert Client.calls == ["accounts", "locations", (["private-installation"], ["sme-installation"])]
+    assert result["payload"]["ElectricityElna"]["contracts"][0]["id"] == "[redacted]"
+    assert manager.state is before
+
+
+def test_grouped_contracts_probe_does_not_send_empty_installation_groups():
+    class Client:
+        def __init__(self, session):
+            pass
+
+        async def async_get_contract_accounts(self):
+            return {}
+
+        async def async_get_locations(self):
+            return [{"installations": [{"id": "unknown", "productType": "ELECTRICITY", "serviceType": "GRID"}]}]
+
+        async def async_get_grouped_contracts(self, private_ids, sme_ids):
+            raise AssertionError("empty installation groups were sent")
+
+    manager = object.__new__(manager_module.EonGridManager)
+    manager._config = lambda: {"auth": "app"}
+    manager._get_app_session = lambda config: _async_return(object())
+    original = manager_module.EonAppClient
+    manager_module.EonAppClient = Client
+    try:
+        result = asyncio.run(manager.async_grouped_contracts_probe())
+    finally:
+        manager_module.EonAppClient = original
+    assert result["status"] == "api_error"
+    assert result["error"] == "installation_ids_missing"
+
+
+async def _async_return(value):
+    return value

@@ -88,6 +88,9 @@ class GridManager:
     async def async_common_api_probe(self) -> dict[str, Any]:
         return await self.provider.async_common_api_probe()
 
+    async def async_grouped_contracts_probe(self) -> dict[str, Any]:
+        return await self.provider.async_grouped_contracts_probe()
+
     async def async_remove(self) -> dict[str, Any]:
         return await self.provider.async_remove()
 

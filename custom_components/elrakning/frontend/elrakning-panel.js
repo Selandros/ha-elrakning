@@ -978,6 +978,7 @@ class ElrakningPanel {
               <label>Lösenord<input type="password" data-eon-grid-app-password autocomplete="current-password"></label>
               <button type="button" data-eon-grid-app-save>Logga in</button>
               <button type="button" data-eon-grid-common-api-probe hidden>Testa Common API</button>
+              <button type="button" data-eon-grid-grouped-contracts-probe hidden>Testa kontrakts-API</button>
             </section>
             <section class="eon-auth-method" aria-labelledby="eon-web-title">
               <h3 id="eon-web-title">Mitt E.ON / Webb</h3>
@@ -3120,11 +3121,13 @@ class ElrakningPanel {
     const source = this.host.querySelector("[data-provider-source]");
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const eonCommonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
+    const groupedContractsProbe = this.host.querySelector("[data-eon-grid-grouped-contracts-probe]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (eonCommonApiProbe) eonCommonApiProbe.hidden = !this._isEonCommonApiProbeVisible();
+    if (groupedContractsProbe) groupedContractsProbe.hidden = !this._isEonCommonApiProbeVisible();
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
   }
@@ -5030,6 +5033,7 @@ class ElrakningPanel {
     const remove = this.host.querySelector("[data-eon-grid-remove]");
     const sourceButton = this.host.querySelector("[data-eon-grid-source]");
     const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
+    const groupedContractsProbe = this.host.querySelector("[data-eon-grid-grouped-contracts-probe]");
     const webStatus = this.host.querySelector("[data-eon-grid-web-status]");
     if (!status || !provider || !summary) return;
     const agreement = state?.agreement || {};
@@ -5091,9 +5095,10 @@ class ElrakningPanel {
     const result = this.host.querySelector("[data-eon-grid-result]");
     const appSave = this.host.querySelector("[data-eon-grid-app-save]");
     const commonApiProbe = this.host.querySelector("[data-eon-grid-common-api-probe]");
+    const groupedContractsProbe = this.host.querySelector("[data-eon-grid-grouped-contracts-probe]");
     const cancel = this.host.querySelector("[data-eon-grid-cancel]");
     const remove = this.host.querySelector("[data-eon-grid-remove]");
-    if (!open || !dialog || !appAccount || !appPassword || !webConnect || !result || !appSave || !cancel || !remove || !commonApiProbe) return;
+    if (!open || !dialog || !appAccount || !appPassword || !webConnect || !result || !appSave || !cancel || !remove || !commonApiProbe || !groupedContractsProbe) return;
     const close = () => {
       dialog.hidden = true;
       appAccount.value = "";
@@ -5129,6 +5134,30 @@ class ElrakningPanel {
         else result.textContent = "Common API svarade med ett API-fel.";
       } catch { result.textContent = "Common API-probet kunde inte genomföras."; }
       finally { commonApiProbe.disabled = false; }
+    });
+    groupedContractsProbe.addEventListener("click", async () => {
+      groupedContractsProbe.disabled = true;
+      result.textContent = "Testar kontrakts-API …";
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/grid/grouped_contracts_probe" });
+        if (response.status === "ok") {
+          const sourceDialog = this.host.querySelector("[data-provider-source-dialog]");
+          const sourceProvider = this.host.querySelector("[data-provider-source-provider]");
+          const sourceText = this.host.querySelector("[data-provider-source-text]");
+          const sourceCopy = this.host.querySelector("[data-provider-source-copy]");
+          if (sourceDialog && sourceProvider && sourceText && sourceCopy) {
+            sourceProvider.textContent = "Källa: E.ON kontrakts-API";
+            sourceProvider.hidden = false;
+            sourceText.textContent = JSON.stringify(response.payload, null, 2);
+            sourceCopy.disabled = false;
+            sourceDialog.hidden = false;
+          }
+          result.textContent = "Kontrakts-API svarade 200.";
+        } else if (response.status === "denied_401") result.textContent = "Kontrakts-API nekade: 401.";
+        else if (response.status === "denied_403") result.textContent = "Kontrakts-API nekade: 403.";
+        else result.textContent = "Kontrakts-API svarade med ett API-fel.";
+      } catch { result.textContent = "Kontrakts-API-probet kunde inte genomföras."; }
+      finally { groupedContractsProbe.disabled = false; }
     });
     appSave.addEventListener("click", async () => {
       if (!appAccount.value.trim() || !appPassword.value) return;
