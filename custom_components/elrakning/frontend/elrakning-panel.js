@@ -892,10 +892,9 @@ function tooltipValueIsPresent(value) {
     && !(typeof value === "number" && !Number.isFinite(value));
 }
 
-export function renderSharedTooltip(tooltip, { title = "", fields = [], rawData = null, copyData = null, copy }) {
+export function renderSharedTooltip(tooltip, { title = "", fields = [] }) {
   if (!tooltip) return;
   const validFields = fields.filter((field) => tooltipValueIsPresent(field?.value));
-  const feedback = tooltip.querySelector(".tooltip-copy-feedback");
   tooltip.replaceChildren();
   if (title) {
     const heading = document.createElement("strong");
@@ -908,42 +907,18 @@ export function renderSharedTooltip(tooltip, { title = "", fields = [], rawData 
     row.textContent = `${field.label}: ${field.formatted ?? field.value}`;
     tooltip.append(row);
   }
-  if (feedback) tooltip.append(feedback);
-  const rawFields = validFields.map((field) => `${field.label}: ${field.rawValue ?? field.value}`);
-  tooltip.dataset.copyText = copyData || [title, ...rawFields].filter(Boolean).join("\n");
-  tooltip.dataset.rawData = rawData ? JSON.stringify(rawData) : "";
-  bindSharedTooltipCopy(tooltip, copy);
 }
 
-function bindSharedTooltipCopy(tooltip, copy) {
-  if (tooltip.dataset.copyBound === "true") return;
-  tooltip.dataset.copyBound = "true";
-  const getFeedback = () => {
-    let feedback = tooltip.querySelector(".tooltip-copy-feedback");
-    if (!feedback) {
-      feedback = document.createElement("span");
-      feedback.className = "tooltip-copy-feedback";
-      feedback.hidden = true;
-      tooltip.append(feedback);
-    }
-    return feedback;
-  };
-  tooltip.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    if (typeof copy !== "function" || !tooltip.dataset.copyText) return;
-    try {
-      await copy(tooltip.dataset.copyText);
-      const feedback = getFeedback();
-      feedback.textContent = "Kopierat";
-      feedback.hidden = false;
-      window.setTimeout(() => { feedback.hidden = true; }, 1500);
-    } catch {
-      const feedback = getFeedback();
-      feedback.textContent = "Kunde inte kopiera";
-      feedback.hidden = false;
-      window.setTimeout(() => { feedback.hidden = true; }, 1500);
-    }
-  });
+async function copyChartRawData(copy, target, rawData) {
+  if (typeof copy !== "function" || rawData == null) return;
+  try {
+    await copy(JSON.stringify(rawData, null, 2));
+    target.textContent = "Kopierat";
+  } catch {
+    target.textContent = "Kunde inte kopiera";
+  }
+  window.clearTimeout(target._copyFeedbackTimer);
+  target._copyFeedbackTimer = window.setTimeout(() => { target.textContent = ""; }, 1500);
 }
 
 const tooltipNumber = (value, maximumFractionDigits = 2) => Number(value).toLocaleString("sv-SE", {
@@ -967,34 +942,12 @@ export function buildSolarHistoryTooltipFields(day, liveForecast, now = new Date
       const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
       add("Mot prognos hittills", day.performanceDeltaPercent, `${sign}${tooltipNumber(day.performanceDeltaPercent, 1)} %`);
     }
-    const forecastFields = [
-      ["Forecast idag", "today_kwh", "kWh"], ["Forecast kvar idag", "remaining_today_kwh", "kWh"],
-      ["Forecast denna timme", "this_hour_kwh", "kWh"], ["Forecast nästa timme", "next_hour_kwh", "kWh"],
-      ["Forecast effekt nu", "power_now_kw", "kW"], ["Forecast effekt nästa timme", "power_next_hour_kw", "kW"],
-      ["Topp tid idag", "peak_time_today", ""], ["Forecast imorgon", "tomorrow_kwh", "kWh"],
-    ];
-    for (const [label, key, unit] of forecastFields) {
-      const value = liveForecast?.[key];
-      const numeric = unit && unit !== "" ? Number(value) : value;
-      if (unit && tooltipValueIsPresent(value) && Number.isFinite(numeric)) add(label, numeric, `${tooltipNumber(numeric)} ${unit}`);
-      else if (!unit) add(label, value);
-    }
-    const current = weather?.current || {};
-    add("SMHI", current.condition);
-    for (const [label, key] of [["Total molntäckning", "cloud_total"], ["Låga moln", "cloud_low"], ["Mellanhöga moln", "cloud_medium"], ["Höga moln", "cloud_high"], ["Temperatur", "temperature"], ["Nederbörd", "precipitation"], ["Nederbördssannolikhet", "precipitation_probability"]]) {
-      const value = Number(current[key]);
-      if (tooltipValueIsPresent(current[key]) && Number.isFinite(value)) add(`SMHI ${label}`, value, `${tooltipNumber(value, 1)}${key === "temperature" ? " °C" : key.includes("cloud") || key.includes("probability") ? " %" : ""}`);
-    }
-    for (const [label, key, suffix] of [["Solhöjd", "elevation", "°"], ["Solens azimut", "azimuth", "°"]]) {
-      const value = Number(sun?.[key]);
-      if (tooltipValueIsPresent(sun?.[key]) && Number.isFinite(value)) add(label, value, `${tooltipNumber(value, 1)}${suffix}`);
-    }
-    add("Stigande sol", typeof sun?.rising === "boolean" ? sun.rising : null, sun?.rising ? "Ja" : "Nej");
-    add("Dagsljus", typeof sun?.daylight === "boolean" ? sun.daylight : null, sun?.daylight ? "Ja" : "Nej");
-    add("Soluppgång", sun?.sunrise);
-    add("Solnedgång", sun?.sunset);
   } else if (Number.isFinite(day?.forecastKwh)) {
     add("Prognos", day.forecastKwh, `${tooltipNumber(day.forecastKwh)} kWh`);
+    if (Number.isFinite(day?.performanceDeltaPercent)) {
+      const sign = day.performanceDeltaPercent >= 0 ? "+" : "";
+      add("Mot prognos", day.performanceDeltaPercent, `${sign}${tooltipNumber(day.performanceDeltaPercent, 1)} %`);
+    }
   }
   return fields;
 }
@@ -2174,7 +2127,7 @@ class ElrakningPanel {
           font-size: var(--price-card-text-size);
           line-height: 1.25;
           padding: 6px 8px;
-          pointer-events: auto;
+          pointer-events: none;
           position: absolute;
           white-space: nowrap;
           z-index: 2;
@@ -4460,8 +4413,6 @@ class ElrakningPanel {
           { label: "Laddat", value: day.chargingKwh, formatted: formatEnergy(day.chargingKwh), rawValue: day.chargingKwh },
           { label: "Urladdat", value: day.dischargingKwh, formatted: formatEnergy(day.dischargingKwh), rawValue: day.dischargingKwh },
         ],
-        rawData: day,
-        copy: (text) => this._copyText(text),
       });
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
@@ -4472,7 +4423,10 @@ class ElrakningPanel {
     });
     svg.addEventListener("pointerdown", (event) => {
       const group = event.target.closest?.("[data-battery-history-index]");
-      if (group) show(event, Number(group.dataset.batteryHistoryIndex));
+      if (!group) return;
+      const index = Number(group.dataset.batteryHistoryIndex);
+      show(event, index);
+      if (this._debugEnabled) void copyChartRawData(this._copyText.bind(this), tooltip, days[index]);
     });
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
@@ -4556,8 +4510,6 @@ class ElrakningPanel {
           this._powerHistory?.solar_weather,
           this._powerHistory?.solar_sun,
         ),
-        rawData: day,
-        copy: (text) => this._copyText(text),
       });
       tooltip.hidden = false;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
@@ -4568,7 +4520,17 @@ class ElrakningPanel {
     });
     svg.addEventListener("pointerdown", (event) => {
       const group = event.target.closest?.("[data-solar-history-index]");
-      if (group) show(event, Number(group.dataset.solarHistoryIndex));
+      if (!group) return;
+      const index = Number(group.dataset.solarHistoryIndex);
+      show(event, index);
+      if (this._debugEnabled) {
+        void copyChartRawData(this._copyText.bind(this), tooltip, {
+          ...days[index],
+          solar_forecast: this._powerHistory?.solar_forecast || null,
+          weather: this._powerHistory?.solar_weather || null,
+          sun: this._powerHistory?.solar_sun || null,
+        });
+      }
     });
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
@@ -4664,15 +4626,22 @@ class ElrakningPanel {
       renderSharedTooltip(tooltip, {
         title: new Date(point.timestamp).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }),
         fields: [{ label: "Laddnivå", value: point.value, formatted: `${this._formatNumber(point.value)} %` }],
-        rawData: point,
-        copy: (text) => this._copyText(text),
       });
       tooltip.hidden = false;
       hover.innerHTML = `<circle class="chart-hover-marker chart-hover-marker-soc" fill="${chartColor("soc")}" cx="${pointX}" cy="${pointY}" r="4" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointermove", update);
-    svg.addEventListener("pointerdown", update);
+    svg.addEventListener("pointerdown", (event) => {
+      update(event);
+      if (this._debugEnabled) {
+        const rect = svg.getBoundingClientRect();
+        const svgX = rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * width : plot.left;
+        const timestamp = xStart + Math.max(0, Math.min(plotWidth, svgX - plot.left)) / plotWidth * xDuration;
+        const point = points.reduce((nearest, candidate) => Math.abs(candidate.timestamp - timestamp) < Math.abs(nearest.timestamp - timestamp) ? candidate : nearest, points[0]);
+        void copyChartRawData(this._copyText.bind(this), tooltip, point);
+      }
+    });
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointercancel", clear);
   }
@@ -6801,14 +6770,9 @@ class ElrakningPanel {
         renderSharedTooltip(tooltip, {
           title: time,
           fields: tooltipFields,
-          copy: (text) => this._copyText(text),
         });
       }
       this._chartDebugCopyText = tooltipText;
-      if (details) {
-        tooltip.dataset.copyText = tooltipText;
-        bindSharedTooltipCopy(tooltip, (text) => this._copyText(text));
-      }
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
       const hoverGeometry = this._chartHoverGeometry;
       if (hoverMarkers && hoverGeometry) {

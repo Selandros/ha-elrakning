@@ -233,9 +233,9 @@ const solarTooltipFields = buildSolarHistoryTooltipFields(
   { source: "smhi", available: true, current: { condition: "partlycloudy", cloud_total: 88, temperature: 20.1 } },
   { elevation: 36.7, azimuth: 181.2, rising: true, daylight: true },
 );
-assert.ok(solarTooltipFields.some((field) => field.label === "Forecast effekt nu" && field.rawValue === 1.842));
-assert.ok(solarTooltipFields.some((field) => field.label === "SMHI Total molntäckning" && field.formatted === "88 %"));
-assert.ok(!solarTooltipFields.some((field) => field.label === "Forecast nästa timme"));
+assert.ok(solarTooltipFields.some((field) => field.label === "Prognos hittills" && field.rawValue === 10.14));
+assert.ok(!solarTooltipFields.some((field) => field.label.startsWith("Forecast") || field.label.startsWith("SMHI") || field.label === "Solhöjd"));
+assert.ok(solarTooltipFields.length <= 4);
 assert.ok(solarTooltipFields.some((field) => field.label === "Mot prognos hittills" && field.formatted === "+68,3 %"));
 const liveTiles = buildLivePowerTiles(
   { consumption_kw: 0.63, solar_kw: 6.94, charging_kw: 0, discharging_kw: 0 },
@@ -767,6 +767,11 @@ assert.doesNotMatch(panelSource, /battery-history-hover/);
 assert.match(panelSource, /battery-history-day\.hovered \.battery-history-bar/);
 assert.match(panelSource, /group\.classList\.add\("hovered"\)/);
 assert.match(panelSource, /hoveredDay\?\.classList\.remove\("hovered"\)/);
+assert.match(panelSource, /\.soc-tooltip \{[\s\S]*pointer-events: none;/);
+assert.doesNotMatch(panelSource, /function bindSharedTooltipCopy/);
+assert.doesNotMatch(panelSource, /bindSharedTooltipCopy\(/);
+assert.match(panelSource, /if \(this\._debugEnabled\) void copyChartRawData/);
+assert.match(panelSource, /if \(this\._debugEnabled\) \{[\s\S]*copyChartRawData/);
 assert.doesNotMatch(panelSource, /battery: batteryIsConfigured \? \[\["Laddning"[\s\S]*Laddat idag/);
 assert.match(panelSource, /series\?\.\[seriesKey\]\?\.points/);
 assert.match(panelSource, /data-daily-energy/);
