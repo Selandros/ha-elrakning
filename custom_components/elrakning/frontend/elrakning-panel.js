@@ -5429,6 +5429,111 @@ class ElrakningPanel {
     grid.innerHTML = markup.join("");
   }
 
+  _buildCardSourceData(cardSource) {
+    const power = this._powerState || {};
+    const meter = this._meterState || {};
+    const powerHistory = this._powerHistory || {};
+    const meterHistory = this._meterPowerHistory || {};
+    const sourceEntities = {
+      solar: Array.isArray(power.solar_entities) ? [...power.solar_entities] : [],
+      consumption: power.consumption_entity || null,
+      charging: power.charging_entity || null,
+      discharging: power.discharging_entity || null,
+      soc: power.soc_entity || null,
+      capacity: power.capacity_entity || null,
+      meter_power: meter.power_entity || null,
+      meter_import: meter.energy_import_entity || null,
+      meter_export: meter.energy_export_entity || null,
+    };
+    if (cardSource === "energy") {
+      const exportKwh = meter.energy_export_valid !== false && Number.isFinite(meter.energy_export_kwh) ? meter.energy_export_kwh : null;
+      const importKwh = meter.energy_import_valid !== false && Number.isFinite(meter.energy_import_kwh) ? meter.energy_import_kwh : null;
+      const solarBalance = buildEnergyBalance(power.solar_energy_kwh, exportKwh);
+      const consumptionBalance = buildEnergyBalance(power.consumption_energy_kwh, importKwh);
+      return {
+        card: "energy",
+        source_entities: sourceEntities,
+        raw: {
+          power_history: { solar: powerHistory.series?.solar || null, consumption: powerHistory.series?.consumption || null },
+          meter_state: { energy_import_kwh: meter.energy_import_kwh, energy_export_kwh: meter.energy_export_kwh, energy_import_valid: meter.energy_import_valid, energy_export_valid: meter.energy_export_valid },
+        },
+        normalized: {
+          solar_energy_today_kwh: power.solar_energy_kwh,
+          house_consumption_today_kwh: power.consumption_energy_kwh,
+          grid_import_today_kwh: importKwh,
+          grid_export_today_kwh: exportKwh,
+        },
+        derived: {
+          solar_local_kwh: solarBalance.local,
+          solar_export_kwh: solarBalance.external,
+          solar_local_percent: solarBalance.localPercent,
+          solar_export_percent: solarBalance.externalPercent,
+          consumption_local_kwh: consumptionBalance.local,
+          consumption_import_kwh: consumptionBalance.external,
+          consumption_local_percent: consumptionBalance.localPercent,
+          consumption_import_percent: consumptionBalance.externalPercent,
+        },
+        timestamps: { history_date: powerHistory.date, meter_history_date: meterHistory.date },
+      };
+    }
+    if (cardSource === "soc") {
+      const points = Array.isArray(powerHistory.series?.soc?.points) ? powerHistory.series.soc.points : [];
+      const lastPoint = points.at(-1) || null;
+      return {
+        card: "soc",
+        source_entities: sourceEntities,
+        raw: { current_state: power.soc_percent, history_points: points },
+        normalized: { current_percent: Number.isFinite(power.soc_percent) ? power.soc_percent : lastPoint?.value_percent, canonical_points: points },
+        derived: { estimated_segments: [], gap_count: points.filter((point) => point?.gap_before).length },
+        provenance: { history_date: powerHistory.date, source: power.soc_entity ? "home_assistant" : null },
+      };
+    }
+    if (cardSource === "battery-history") {
+      const days = buildBatteryDailyHistory(
+        powerHistory.series?.charging?.points,
+        powerHistory.series?.discharging?.points,
+        Number(power.capacity_kwh),
+      );
+      return {
+        card: "battery-history",
+        source_entities: sourceEntities,
+        raw: {
+          charging_points: powerHistory.series?.charging?.points || [],
+          discharging_points: powerHistory.series?.discharging?.points || [],
+          soc_points: powerHistory.series?.soc?.points || [],
+          capacity_kwh: power.capacity_kwh,
+        },
+        normalized: { days },
+        derived: { daily_buckets: days },
+        provenance: { history_date: powerHistory.date },
+      };
+    }
+    if (cardSource === "solar-history") {
+      const days = buildSolarDailyHistory(
+        powerHistory.series?.solar?.points,
+        powerHistory.solar_forecast_baselines,
+        new Date(),
+        7,
+        powerHistory.solar_forecast,
+      );
+      return {
+        card: "solar-history",
+        source_entities: sourceEntities,
+        raw: {
+          production_points: powerHistory.series?.solar?.points || [],
+          forecast_baselines: powerHistory.solar_forecast_baselines || {},
+          live_forecast: powerHistory.solar_forecast || null,
+          weather: powerHistory.solar_weather || null,
+          sun: powerHistory.solar_sun || null,
+        },
+        normalized: { days },
+        derived: { daily_buckets: days },
+        provenance: { history_date: powerHistory.date, source: sourceEntities.solar.length ? "home_assistant" : null },
+      };
+    }
+    return null;
+  }
+
   _renderBatteryHistoryCard() {
     const card = this.host.querySelector('[data-power-card="battery-history"]');
     const chart = this.host.querySelector("[data-battery-history-chart]");
@@ -6267,14 +6372,16 @@ class ElrakningPanel {
           : isEon
           ? await this.hass.callWS({ type: "elrakning/grid/source_data" })
           : cardSource
-          ? {
-            source: cardSource,
-            invoice_estimate: cardSource === "cost" ? this._invoiceEstimateRaw : undefined,
-            power_state: this._powerState,
-            meter_state: this._meterState,
-            power_history: this._powerHistory,
-            meter_power_history: this._meterPowerHistory,
-          }
+          ? cardSource === "cost"
+            ? {
+              source: cardSource,
+              invoice_estimate: this._invoiceEstimateRaw,
+              power_state: this._powerState,
+              meter_state: this._meterState,
+              power_history: this._powerHistory,
+              meter_power_history: this._meterPowerHistory,
+            }
+            : this._buildCardSourceData(cardSource)
           : await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
         const providerName = liveSource ? liveSourceName : source.provider_name || source.facility?.provider_name;
         if (typeof providerName === "string" && providerName.trim()) {
@@ -6282,7 +6389,7 @@ class ElrakningPanel {
           provider.hidden = false;
         }
         const safeSource = sanitizeDebugData(source);
-        text.textContent = liveSource || isEon
+        text.textContent = liveSource || isEon || cardSource
           ? JSON.stringify(safeSource, null, 2)
           : JSON.stringify({ facility: safeSource.facility, contracts: safeSource.contracts, invoices: safeSource.invoices.items, consumption: { total: safeSource.consumption.total, items: safeSource.consumption.items } }, null, 2);
         copy.disabled = false;
