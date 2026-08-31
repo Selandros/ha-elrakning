@@ -3279,11 +3279,44 @@ class ElrakningPanel {
           width: 100%;
         }
 
-        .cost-chart-axis-label,
-        .cost-chart-x-label {
-          fill: var(--secondary-text-color);
-          font-size: 12px;
-          opacity: .78;
+        .cost-chart-plot {
+          position: relative;
+        }
+
+        .chart-axis-overlay {
+          inset: 0;
+          pointer-events: none;
+          position: absolute;
+          z-index: 1;
+        }
+
+        .chart-axis-overlay-label {
+          color: var(--chart-axis-color);
+          font-size: var(--chart-axis-font-size);
+          font-weight: var(--chart-axis-font-weight);
+          line-height: var(--chart-axis-line-height);
+          opacity: var(--chart-axis-opacity);
+          position: absolute;
+          white-space: nowrap;
+        }
+
+        .chart-axis-overlay-y-left {
+          left: 0;
+          text-align: center;
+          transform: translateY(-50%);
+          width: 5%;
+        }
+
+        .chart-axis-overlay-y-right {
+          right: 0;
+          text-align: right;
+          transform: translateY(-50%);
+          width: 8%;
+        }
+
+        .chart-axis-overlay-x {
+          bottom: 0;
+          transform: translateX(-50%);
         }
 
         .cost-chart-gridline { stroke: var(--divider-color); stroke-width: 1; opacity: .45; }
@@ -4129,12 +4162,17 @@ class ElrakningPanel {
 
         .price-chart {
           container-type: inline-size;
+          container-name: price-chart;
           min-height: 0;
           overflow-x: hidden;
           position: relative;
           touch-action: pan-y;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior-x: contain;
+        }
+
+        @container price-chart (max-width: 520px) {
+          .chart-axis-overlay-x-cull { display: none; }
         }
 
         .aggregated-chart-bar.dimmed,
@@ -7681,10 +7719,10 @@ class ElrakningPanel {
     const path = (points) => points.length < 2 ? "" : points.map((point, index) => `${index ? "L" : "M"} ${x(point.day)} ${y(point.value)}`).join(" ");
     const grid = [0, .5, 1].map((ratio) => {
       const value = max * ratio;
-      return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="cost-chart-axis-label" x="4" y="${y(value) + 4}">${this._formatNumber(value)} kr</text>`;
+      return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" />`;
     }).join("");
-    const xLabels = [1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<text class="cost-chart-x-label" text-anchor="middle" x="${x(day)}" y="${height - 6}">${day}</text>`).join("");
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimatedPast)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}${xLabels}<rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg><div class="soc-tooltip" hidden></div>`;
+    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" style="left:${(x(day) / width) * 100}%">${day}</span>`).join("")}</div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><div class="cost-chart-plot"><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimatedPast)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}<rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".soc-tooltip");
     const nearest = (day) => [...actual, ...estimatedPast, ...forecastFuture, ...series.previous].reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
@@ -9270,9 +9308,9 @@ class ElrakningPanel {
       const color = key === "price" ? chartColor("priceNormal") : chartColor(colorKey);
       return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
     }).join("")).join("");
-    const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" /><text class="chart-meter-label" x="8" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(energyMax * ratio)} kWh</text><text class="chart-meter-label" text-anchor="end" x="${width - 4}" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(priceMax * ratio)} öre/kWh</text>`).join("");
-    const labels = data.map((item, index) => `<text class="chart-label" data-group-index="${index}" text-anchor="middle" x="${x(index)}" y="${height - 10}">${item.label}</text>`).join("");
-    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}${labels}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg><div class="chart-tooltip" hidden></div>`;
+    const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" />`).join("");
+    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(energyMax * ratio)} kWh</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(priceMax * ratio)} öre/kWh</span>`).join("")}${data.map((item, index) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-group-index="${index}" style="left:${(x(index) / width) * 100}%">${item.label}</span>`).join("")}</div>`;
+    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg>${axisOverlay}<div class="chart-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".chart-tooltip");
     const groupNodes = [...svg.querySelectorAll("[data-group-index]")];
@@ -9468,8 +9506,7 @@ class ElrakningPanel {
         && points.some((point) => isVisiblePowerValue(point.value_kw)));
     const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
     const meterGrid = meterVisible
-      ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />
-         <text class="chart-meter-label" text-anchor="start" x="8" y="${meterY(level) + 4}">${this._formatNumber(level)} kW</text>`).join("")
+      ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />`).join("")
       : "";
     const meterPointAt = (timestamp) => meterPoints.reduce((latest, point) => (
       new Date(point.timestamp).getTime() <= timestamp ? point : latest
@@ -9522,8 +9559,10 @@ class ElrakningPanel {
     const hourLabels = Array.from({ length: 24 }, (_, hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
-      return `<text class="chart-label" text-anchor="middle" x="${x(hourDate)}" y="${height - 8}">${String(hour).padStart(2, "0")}</text>`;
+      const cull = hour % 3 !== 0;
+      return `<span class="chart-axis-overlay-label chart-axis-overlay-x${cull ? " chart-axis-overlay-x-cull" : ""}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
     }).join("");
+    const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}</div>`;
     const legend = this.host.querySelector("[data-meter-legend]");
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
     this._chartHoverGeometry = {
@@ -9545,6 +9584,8 @@ class ElrakningPanel {
       for (const [key, markup] of Object.entries(dynamicChartMarkup)) {
         existingSvg.querySelector(`[data-price-dynamic="${key}"]`).innerHTML = markup;
       }
+      const overlay = chart.querySelector(".chart-axis-overlay");
+      if (overlay) overlay.outerHTML = axisOverlayMarkup;
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       return;
     }
@@ -9557,7 +9598,7 @@ class ElrakningPanel {
       ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
       ${hourLabels}
-    </svg><div class="chart-tooltip" hidden></div>`;
+    </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;
     this.bindChartTooltips();
     this._priceChartLiveSignature = this._getPriceChartLiveSignature();
     this.autoScrollToNow(chart, x(now), this.priceSnapshot?.date, currentPeriod);
