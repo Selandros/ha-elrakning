@@ -620,12 +620,14 @@ export function buildPhaseChartGeometry(containerWidth = 960, { metric = "curren
   return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact, axisLabelGutter: plotLeft };
 }
 
-export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = false } = {}) {
+export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = false, containerWidth = width } = {}) {
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
+  const renderedWidth = Math.max(320, Number(containerWidth) || chartWidth);
+  const xAxisRailHeight = Math.round(16 * chartWidth / renderedWidth);
   const plot = dualAxis
-    ? { left: 40, right: 64, top: 30, bottom: 24 }
-    : { left: 40, right: 8, top: 42, bottom: 24 };
+    ? { left: 40, right: 64, top: 30, bottom: xAxisRailHeight }
+    : { left: 40, right: 8, top: 42, bottom: xAxisRailHeight };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
@@ -9305,7 +9307,7 @@ class ElrakningPanel {
     this._updateAggregatedPriceSummary(data);
     const width = 960;
     const height = 350;
-    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true });
+    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true, containerWidth: chart.clientWidth || width });
     const { plot, plotWidth, plotHeight } = geometry;
     const priceValues = data.map((item) => item.price).filter(Number.isFinite);
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
@@ -9406,7 +9408,7 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 350;
-    const geometry = buildPriceChartGeometry(width, height);
+    const geometry = buildPriceChartGeometry(width, height, { containerWidth: chart.clientWidth || width });
     const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
