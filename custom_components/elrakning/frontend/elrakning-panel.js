@@ -4176,8 +4176,7 @@ class ElrakningPanel {
         }
 
         .period-picker-control,
-        .period-picker-modes,
-        .period-picker-actions {
+        .period-picker-modes {
           align-items: center;
           display: flex;
           flex: 0 1 auto;
@@ -4199,7 +4198,8 @@ class ElrakningPanel {
 
         .period-picker-modes { margin-top: 0; }
 
-        .period-picker button {
+        .period-picker-control button,
+        .period-picker-modes button {
           background: transparent;
           border: 0;
           border-radius: 6px;
@@ -4213,11 +4213,42 @@ class ElrakningPanel {
           padding: clamp(2px, .7cqw, 4px) clamp(3px, 1.1cqw, 8px);
         }
 
-        .period-picker button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
-        @media (hover: hover) and (pointer: fine) {
-          .period-picker button:hover:not(.selected) { background: var(--primary-background-color); color: var(--primary-text-color); }
+        .period-picker-popover button,
+        .period-picker-dialog button {
+          background: transparent;
+          border: 0;
+          border-radius: 6px;
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          font: inherit;
+          margin: 0;
+          min-width: 0;
+          padding: 4px 8px;
         }
-        .period-picker button:active:not(.selected) { background: var(--primary-background-color); color: var(--primary-text-color); }
+
+        .period-picker-control button:focus-visible,
+        .period-picker-modes button:focus-visible,
+        .period-picker-popover button:focus-visible,
+        .period-picker-dialog button:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: -2px;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .period-picker-control button:hover:not(.selected):not(.active),
+          .period-picker-modes button:hover:not(.selected):not(.active),
+          .period-picker-popover button:hover:not(.selected):not(.active),
+          .period-picker-dialog button:hover:not(.selected):not(.active) {
+            background: var(--primary-background-color);
+            color: var(--primary-text-color);
+          }
+        }
+        .period-picker-control button:active:not(.selected):not(.active),
+        .period-picker-modes button:active:not(.selected):not(.active),
+        .period-picker-popover button:active:not(.selected):not(.active),
+        .period-picker-dialog button:active:not(.selected):not(.active) {
+          background: var(--primary-background-color);
+          color: var(--primary-text-color);
+        }
         .period-picker-arrow {
           font-size: clamp(14px, 2.5cqw, 18px) !important;
           line-height: 1;
@@ -4260,7 +4291,8 @@ class ElrakningPanel {
         }
 
         .period-picker-popover-header,
-        .period-picker-actions { justify-content: space-between; }
+        .period-picker-popover .period-picker-actions,
+        .period-picker-dialog .period-picker-actions { justify-content: space-between; }
         .period-picker-popover-header strong { color: var(--primary-text-color); font-size: 13px; }
         .period-picker-weekdays,
         .period-picker-day-grid,
@@ -4272,8 +4304,17 @@ class ElrakningPanel {
         .period-picker-month-grid,
         .period-picker-year-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .period-picker-choice { min-height: 32px !important; }
-        .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
-        .period-picker-actions button:last-child { color: var(--primary-text-color); font-weight: 600; }
+        .period-picker-popover .period-picker-actions,
+        .period-picker-dialog .period-picker-actions {
+          align-items: center;
+          display: flex;
+          gap: 4px;
+          white-space: nowrap;
+        }
+        .period-picker-popover .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
+        .period-picker-dialog .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
+        .period-picker-popover .period-picker-actions button:last-child,
+        .period-picker-dialog .period-picker-actions button:last-child { color: var(--primary-text-color); font-weight: 600; }
 
         @media (max-width: 600px) {
           .period-picker-dialog {
