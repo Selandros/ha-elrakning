@@ -103,6 +103,8 @@ assert.match(pickerSource, /!event\.composedPath\(\)\.includes\(root\) && !event
 assert.match(pickerSource, /dialog\.getBoundingClientRect\(\)/);
 assert.match(pickerSource, /event\.clientX < rect\.left[\s\S]*event\.clientY > rect\.bottom/);
 assert.match(pickerSource, /event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)[\s\S]*close\(\)/);
+assert.match(pickerPanelSource, /_updatePeriodPickerDraftSelection\(\)[\s\S]*classList\.toggle\("selected"/);
+assert.match(pickerSource, /draftSelectionChanged[\s\S]*_updatePeriodPickerDraftSelection\(\)[\s\S]*return;/);
 assert.match(pickerPanelSource, /\.period-picker-day-grid button,[\s\S]*\.period-picker-choice \{[\s\S]*min-height: 36px/);
 assert.doesNotMatch(pickerSource, /scrollIntoView\(|positionPicker|setPickerPosition/);
 const costSeries = buildCostAnalysisSeries({

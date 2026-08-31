@@ -4948,6 +4948,26 @@ class ElrakningPanel {
     return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 600px)").matches;
   }
 
+  _updatePeriodPickerDraftSelection() {
+    const root = this.host.querySelector("[data-period-picker]");
+    const dialog = root?.querySelector("[data-period-picker-dialog]");
+    const popover = root?.querySelector("[data-period-picker-popover]");
+    const surface = this._isMobilePeriodPicker() && dialog?.open ? dialog : popover;
+    if (!surface) return;
+    const state = this._periodPickerState;
+    surface.querySelectorAll(".period-picker-day").forEach((button) => {
+      button.classList.toggle("selected", Number(button.dataset.periodPickerDate) === state.draft.getTime());
+    });
+    surface.querySelectorAll(".period-picker-choice").forEach((button) => {
+      const month = button.dataset.periodPickerMonth;
+      const year = button.dataset.periodPickerYear;
+      const selected = month !== undefined
+        ? state.draft.getFullYear() === state.cursor.getFullYear() && state.draft.getMonth() === Number(month)
+        : year !== undefined && state.draft.getFullYear() === Number(year);
+      button.classList.toggle("selected", selected);
+    });
+  }
+
   _renderPeriodPicker() {
     const state = this._periodPickerState;
     const root = this.host.querySelector("[data-period-picker]");
@@ -5049,12 +5069,22 @@ class ElrakningPanel {
         }
       }
       event.stopPropagation();
+      let draftSelectionChanged = false;
       const dateButton = event.target.closest?.("[data-period-picker-date]");
-      if (dateButton) this._periodPickerState.draft = new Date(Number(dateButton.dataset.periodPickerDate));
+      if (dateButton) {
+        this._periodPickerState.draft = new Date(Number(dateButton.dataset.periodPickerDate));
+        draftSelectionChanged = true;
+      }
       const monthButton = event.target.closest?.("[data-period-picker-month]");
-      if (monthButton) this._periodPickerState.draft = new Date(this._periodPickerState.cursor.getFullYear(), Number(monthButton.dataset.periodPickerMonth), 1);
+      if (monthButton) {
+        this._periodPickerState.draft = new Date(this._periodPickerState.cursor.getFullYear(), Number(monthButton.dataset.periodPickerMonth), 1);
+        draftSelectionChanged = true;
+      }
       const yearButton = event.target.closest?.("[data-period-picker-year]");
-      if (yearButton) this._periodPickerState.draft = new Date(Number(yearButton.dataset.periodPickerYear), this._periodPickerState.draft.getMonth(), 1);
+      if (yearButton) {
+        this._periodPickerState.draft = new Date(Number(yearButton.dataset.periodPickerYear), this._periodPickerState.draft.getMonth(), 1);
+        draftSelectionChanged = true;
+      }
       const calendarNav = event.target.closest?.("[data-period-picker-calendar-nav]");
       if (calendarNav) {
         const direction = calendarNav.dataset.periodPickerCalendarNav === "next" ? 1 : -1;
@@ -5071,6 +5101,10 @@ class ElrakningPanel {
         this._periodPickerState.open = false;
         this.updatePriceSummary();
         this.renderPriceChart();
+      }
+      if (draftSelectionChanged) {
+        this._updatePeriodPickerDraftSelection();
+        return;
       }
       this._renderPeriodPicker();
     };
