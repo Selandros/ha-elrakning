@@ -3157,6 +3157,10 @@ class ElrakningPanel {
           margin-top: 14px;
         }
 
+        .cost-navigation[hidden] {
+          display: none !important;
+        }
+
         .cost-navigation button {
           background: transparent;
           border: 1px solid var(--divider-color);
