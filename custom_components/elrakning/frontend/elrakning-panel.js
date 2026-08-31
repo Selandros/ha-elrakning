@@ -4190,8 +4190,11 @@ class ElrakningPanel {
           padding: 4px 8px;
         }
 
-        .period-picker button:hover,
-        .period-picker button:focus-visible { background: var(--primary-background-color); color: var(--primary-text-color); }
+        .period-picker button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
+        @media (hover: hover) and (pointer: fine) {
+          .period-picker button:hover:not(.selected) { background: var(--primary-background-color); color: var(--primary-text-color); }
+        }
+        .period-picker button:active:not(.selected) { background: var(--primary-background-color); color: var(--primary-text-color); }
         .period-picker-arrow { font-size: 18px !important; line-height: 1; min-width: 28px; padding-inline: 4px !important; }
         .period-picker-period { color: var(--primary-text-color) !important; min-width: 102px; }
         .period-picker-modes button { font-size: 12px; }
@@ -4255,6 +4258,16 @@ class ElrakningPanel {
 
           .period-picker-popover {
             display: none;
+          }
+
+          .period-picker-modes,
+          .period-picker-control {
+            gap: 2px;
+          }
+
+          .period-picker button {
+            min-height: 40px;
+            padding-block: 2px;
           }
 
           .period-picker-popover-header {

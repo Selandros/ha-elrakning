@@ -97,6 +97,9 @@ assert.match(pickerPanelSource, /\.period-picker-dialog \{[\s\S]*margin: auto;[\
 assert.match(pickerPanelSource, /\.period-picker-dialog::backdrop \{[\s\S]*background: rgba\(0, 0, 0, \.52\)/);
 assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.period-picker-dialog \{[\s\S]*max-height: calc\(100dvh - 48px\)[\s\S]*overflow-y: auto/);
 assert.match(pickerPanelSource, /_isMobilePeriodPicker\(\)[\s\S]*matchMedia\("\(max-width: 600px\)"\)/);
+assert.match(pickerPanelSource, /@media \(hover: hover\) and \(pointer: fine\) \{[\s\S]*\.period-picker button:hover:not\(\.selected\)/);
+assert.match(pickerPanelSource, /\.period-picker button:active:not\(\.selected\)/);
+assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.period-picker button \{[\s\S]*min-height: 40px[\s\S]*padding-block: 2px/);
 assert.match(pickerPanelSource, /dialog\.showModal\(\)/);
 assert.match(pickerSource, /dialog\.addEventListener\("cancel"/);
 assert.match(pickerSource, /!event\.composedPath\(\)\.includes\(root\) && !event\.composedPath\(\)\.includes\(dialog\)/);
