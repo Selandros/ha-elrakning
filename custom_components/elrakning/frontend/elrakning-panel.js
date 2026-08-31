@@ -5054,6 +5054,7 @@ class ElrakningPanel {
     this._bindPeriodPicker();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
+    this._setupPriceChartResizeObserver();
     this.renderPriceChart();
   }
 
@@ -5071,6 +5072,25 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
     this._priceHeaderLayoutObserver.observe(heading);
     updateLayoutState();
+  }
+
+  _setupPriceChartResizeObserver() {
+    const chart = this.host.querySelector(".price-chart");
+    if (!chart || !("ResizeObserver" in window)) return;
+    let frame = 0;
+    const updateChartGeometry = (entries) => {
+      const width = Number(entries[0]?.contentRect?.width || 0);
+      if (!(width > 0) || Math.abs(width - (this._priceChartRenderedWidth || 0)) < 1) return;
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || 0;
+        if (!(renderedWidth > 0) || Math.abs(renderedWidth - (this._priceChartRenderedWidth || 0)) < 1) return;
+        this.renderPriceChart({ layoutUpdate: true });
+      });
+    };
+    this._priceChartResizeObserver = new ResizeObserver(updateChartGeometry);
+    this._priceChartResizeObserver.observe(chart);
   }
 
   _periodPickerLabel(date = this._periodPickerState.confirmed) {
@@ -8149,6 +8169,8 @@ class ElrakningPanel {
     this._themeResizeObserver = null;
     this._priceHeaderLayoutObserver?.disconnect();
     this._priceHeaderLayoutObserver = null;
+    this._priceChartResizeObserver?.disconnect();
+    this._priceChartResizeObserver = null;
     this._socCardHeightObserver?.disconnect();
     this._socCardHeightObserver = null;
     this._themeBackgroundReady = false;
@@ -9307,7 +9329,9 @@ class ElrakningPanel {
     this._updateAggregatedPriceSummary(data);
     const width = 960;
     const height = 350;
-    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true, containerWidth: chart.getBoundingClientRect().width || chart.clientWidth || width });
+    const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || width;
+    this._priceChartRenderedWidth = renderedWidth;
+    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true, containerWidth: renderedWidth });
     const { plot, plotWidth, plotHeight } = geometry;
     const priceValues = data.map((item) => item.price).filter(Number.isFinite);
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
@@ -9408,7 +9432,9 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 350;
-    const geometry = buildPriceChartGeometry(width, height, { containerWidth: chart.getBoundingClientRect().width || chart.clientWidth || width });
+    const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || width;
+    this._priceChartRenderedWidth = renderedWidth;
+    const geometry = buildPriceChartGeometry(width, height, { containerWidth: renderedWidth });
     const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
