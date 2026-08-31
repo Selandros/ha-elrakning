@@ -45,6 +45,7 @@ const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindP
 assert.doesNotMatch(pickerSource, /callWS|selectedMonth|renderPriceChart\(/);
 assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
+assert.match(pickerPanelSource, /\.price-section \{[\s\S]*overflow: visible/);
 const costSeries = buildCostAnalysisSeries({
   month: "2026-08",
   total_so_far_sek: 356.61,

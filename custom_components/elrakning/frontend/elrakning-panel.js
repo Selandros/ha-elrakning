@@ -3813,7 +3813,7 @@ class ElrakningPanel {
           box-sizing: border-box;
           isolation: isolate;
           margin-bottom: 16px;
-          overflow: hidden;
+          overflow: visible;
           padding: 20px 20px 12px;
           position: relative;
           backdrop-filter: var(--ha-card-backdrop-filter, none);
