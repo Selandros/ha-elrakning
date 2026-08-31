@@ -2263,17 +2263,23 @@ class ElrakningPanel {
           --el-export-color: #72AAF6;
           --el-charging-color: #B76A8F;
           --el-discharging-color: #DF5C8A;
+          --el-text-primary: var(--primary-text-color, #F1F1F5);
+          --el-text-secondary: var(--secondary-text-color, #B7B8C0);
+          --el-divider: var(--divider-color, rgba(255, 255, 255, .12));
+          --el-background: var(--primary-background-color, #202126);
+          --el-card-bg: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color, rgba(25, 25, 30, .72))));
+          --el-accent: var(--primary-color, #8F7CFF);
           --chart-axis-font-size: 10px;
           --chart-axis-font-weight: 400;
           --chart-axis-line-height: 1;
-          --chart-axis-color: var(--secondary-text-color);
+          --chart-axis-color: var(--secondary-text-color, #B7B8C0);
           --chart-axis-opacity: 1;
-          --solar-color: var(--el-solar-color);
-          --consumption-color: var(--el-consumption-color);
-          --grid-import-color: var(--el-import-color);
-          --grid-export-color: var(--el-export-color);
-          --charging-color: var(--el-charging-color);
-          --discharging-color: var(--el-discharging-color);
+          --solar-color: var(--el-solar-color, #77C2A1);
+          --consumption-color: var(--el-consumption-color, #E87570);
+          --grid-import-color: var(--el-import-color, #F0A06A);
+          --grid-export-color: var(--el-export-color, #72AAF6);
+          --charging-color: var(--el-charging-color, #B76A8F);
+          --discharging-color: var(--el-discharging-color, #DF5C8A);
           display: block;
           height: 100%;
           min-height: 0;
@@ -2347,7 +2353,7 @@ class ElrakningPanel {
 
         .header-icon-button:hover {
           background: rgba(255, 255, 255, 0.12);
-          background: color-mix(in srgb, var(--secondary-text-color) 12%, transparent);
+          background: color-mix(in srgb, var(--el-text-secondary) 12%, transparent);
         }
 
         .header-icon-button:focus-visible {
@@ -2390,7 +2396,7 @@ class ElrakningPanel {
         .provider-dialog, .provider-source-dialog {
           align-items: center;
           background: rgba(0, 0, 0, 0.30);
-          background: color-mix(in srgb, var(--primary-background-color) 70%, transparent);
+          background: color-mix(in srgb, var(--el-background) 70%, transparent);
           display: flex;
           inset: 0;
           justify-content: center;
@@ -2402,7 +2408,7 @@ class ElrakningPanel {
         .meter-dialog {
           align-items: center;
           background: rgba(0, 0, 0, 0.30);
-          background: color-mix(in srgb, var(--primary-background-color) 70%, transparent);
+          background: color-mix(in srgb, var(--el-background) 70%, transparent);
           display: flex;
           inset: 0;
           justify-content: center;
@@ -2793,9 +2799,9 @@ class ElrakningPanel {
         }
 
         .daily-energy-card {
-          --daily-energy-local-color: var(--el-solar-color);
-          --daily-energy-export-color: var(--el-export-color);
-          --daily-energy-import-color: var(--el-import-color);
+          --daily-energy-local-color: var(--el-solar-color, #77C2A1);
+          --daily-energy-export-color: var(--el-export-color, #72AAF6);
+          --daily-energy-import-color: var(--el-import-color, #F0A06A);
           min-height: 0;
           min-width: 0;
         }
@@ -2857,22 +2863,22 @@ class ElrakningPanel {
 
         .daily-energy-segment.local {
           background: rgba(119, 194, 161, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-local-color) 70%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-local-color, #77C2A1) 70%, var(--el-card-bg));
         }
 
         .daily-energy-segment.supply {
           background: rgba(119, 194, 161, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-local-color) 70%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-local-color, #77C2A1) 70%, var(--el-card-bg));
         }
 
         .daily-energy-segment.export {
           background: rgba(114, 170, 246, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-export-color) 70%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-export-color, #72AAF6) 70%, var(--el-card-bg));
         }
 
         .daily-energy-segment.import {
           background: rgba(240, 160, 106, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-import-color) 70%, var(--ha-card-background, var(--card-background-color)));
+          background: color-mix(in srgb, var(--daily-energy-import-color, #F0A06A) 70%, var(--el-card-bg));
         }
 
         .daily-energy-percent {
@@ -2938,7 +2944,7 @@ class ElrakningPanel {
         }
 
         .soc-card {
-          --soc-color: var(--el-solar-color);
+          --soc-color: var(--el-solar-color, #77C2A1);
           display: block;
           min-block-size: 0;
           min-height: 0;
@@ -3767,7 +3773,7 @@ class ElrakningPanel {
 
         .live-power-bar {
           background: rgba(255, 255, 255, 0.14);
-          background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
+          background: color-mix(in srgb, var(--el-text-secondary) 14%, transparent);
           border-radius: 999px;
           height: 5px;
           margin-top: 0;
@@ -3892,12 +3898,12 @@ class ElrakningPanel {
         }
 
         .price-section {
-          --solar-color: var(--el-solar-color);
-          --consumption-color: var(--el-consumption-color);
-          --grid-import-color: var(--el-import-color);
-          --grid-export-color: var(--el-export-color);
-          --charging-color: var(--el-charging-color);
-          --discharging-color: var(--el-discharging-color);
+          --solar-color: var(--el-solar-color, #77C2A1);
+          --consumption-color: var(--el-consumption-color, #E87570);
+          --grid-import-color: var(--el-import-color, #F0A06A);
+          --grid-export-color: var(--el-export-color, #72AAF6);
+          --charging-color: var(--el-charging-color, #B76A8F);
+          --discharging-color: var(--el-discharging-color, #DF5C8A);
           container-name: price-card;
           container-type: inline-size;
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
