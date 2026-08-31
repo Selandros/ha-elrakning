@@ -9373,8 +9373,8 @@ class ElrakningPanel {
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
     const priceMax = Math.max(1, ...priceValues);
     const energyMax = Math.max(1, ...energyValues);
-    const leftAxisLabels = [0, .5, 1].map((ratio) => `${this._formatNumber(energyMax * ratio)} kWh`);
-    const rightAxisLabels = [0, .5, 1].map((ratio) => `${this._formatNumber(priceMax * ratio)} öre/kWh`);
+    const leftAxisLabels = [0, .5, 1].map((ratio) => this._formatNumber(energyMax * ratio));
+    const rightAxisLabels = [0, .5, 1].map((ratio) => this._formatNumber(priceMax * ratio));
     const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || width;
     this._priceChartRenderedWidth = renderedWidth;
     const geometry = buildPriceChartGeometry(width, height, {
@@ -9413,7 +9413,7 @@ class ElrakningPanel {
       return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
     }).join("")).join("");
     const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" />`).join("");
-    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(energyMax * ratio)} kWh</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(priceMax * ratio)} öre/kWh</span>`).join("")}${data.map((item, index) => { const labelX = index === 0 ? plot.left : index === data.length - 1 ? width - plot.right : x(index); const edge = index === 0 ? " edge-start" : index === data.length - 1 ? " edge-end" : ""; return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" data-group-index="${index}" style="left:${(labelX / width) * 100}%">${item.label}</span>`; }).join("")}</div>`;
+    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio, index) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${leftAxisLabels[index]}</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${rightAxisLabels[index]}</span>`).join("")}${data.map((item, index) => { const labelX = index === 0 ? plot.left : index === data.length - 1 ? width - plot.right : x(index); const edge = index === 0 ? " edge-start" : index === data.length - 1 ? " edge-end" : ""; return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" data-group-index="${index}" style="left:${(labelX / width) * 100}%">${item.label}</span>`; }).join("")}</div>`;
     chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg>${axisOverlay}<div class="chart-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".chart-tooltip");
