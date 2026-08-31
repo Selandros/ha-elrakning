@@ -983,15 +983,17 @@ assert.equal(buildPhaseChartGeometry(390).compact, true);
 assert.equal(buildPhaseChartGeometry(900).compact, false);
 const hourlyPriceGeometry = buildPriceChartGeometry();
 const dualPriceGeometry = buildPriceChartGeometry(960, 350, { dualAxis: true });
-assert.equal(hourlyPriceGeometry.plotLeft, 60);
+assert.equal(hourlyPriceGeometry.plotLeft, 48);
 assert.equal(hourlyPriceGeometry.plotBottom, hourlyPriceGeometry.xAxisRailHeight);
-assert.equal(dualPriceGeometry.plotLeft, 64);
+assert.equal(dualPriceGeometry.plotLeft, 56);
 assert.equal(dualPriceGeometry.plotRight, 72);
 assert.ok(hourlyPriceGeometry.plotWidth > 0 && dualPriceGeometry.plotWidth > 0);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-start/);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-end/);
 assert.match(eonPanelSource, /buildPriceChartGeometry\(width, height, \{ dualAxis: true \}\)/);
 assert.match(eonPanelSource, /buildPriceChartGeometry\(width, height\)/);
+assert.match(eonPanelSource, /\.chart-axis-overlay-y-left \{[\s\S]*width: 48px/);
+assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.chart-axis-overlay-y-left[\s\S]*width: 44px/);
 const phaseRawSamples = (offset = 0) => Array.from({ length: 720 }, (_, index) => ({
   timestamp: new Date(Date.parse("2026-08-30T00:00:00Z") + (index * 5 + offset) * 1000).toISOString(),
   value: index === 361 ? 99 : index / 100,
