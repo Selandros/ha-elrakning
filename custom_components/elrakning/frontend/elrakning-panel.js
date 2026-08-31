@@ -4096,27 +4096,6 @@ class ElrakningPanel {
         }
 
         @media (max-width: 600px) {
-          .price-section .period-picker button {
-            box-sizing: border-box;
-            flex: 0 0 auto;
-            min-height: 0;
-            min-width: 0;
-            padding: 7px 10px;
-          }
-
-          .price-section .period-picker-arrow {
-            min-width: 0;
-            padding-inline: 9px !important;
-          }
-
-          .price-section .period-picker-period {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            width: auto;
-          }
-
           .price-section .period-picker-popover {
             bottom: calc(100% + 8px);
             left: 50%;
@@ -4185,11 +4164,12 @@ class ElrakningPanel {
           align-items: center;
           display: flex;
           flex-direction: row-reverse;
-          flex-wrap: wrap;
-          gap: 6px 8px;
-          justify-content: flex-start;
+          flex-wrap: nowrap;
+          gap: clamp(3px, 1cqw, 8px);
+          justify-content: flex-end;
           margin-top: 12px;
           max-width: 100%;
+          min-width: 0;
           position: static;
           width: 100%;
           z-index: 3;
@@ -4200,8 +4180,9 @@ class ElrakningPanel {
         .period-picker-actions {
           align-items: center;
           display: flex;
-          flex: 0 0 auto;
-          gap: 4px;
+          flex: 0 1 auto;
+          gap: clamp(1px, .6cqw, 4px);
+          min-width: 0;
           white-space: nowrap;
         }
 
@@ -4222,12 +4203,14 @@ class ElrakningPanel {
           background: transparent;
           border: 0;
           border-radius: 6px;
+          box-sizing: border-box;
           color: var(--secondary-text-color);
           cursor: pointer;
           font: inherit;
           margin: 0;
-          min-height: 28px;
-          padding: 4px 8px;
+          min-height: 0;
+          min-width: 0;
+          padding: clamp(2px, .7cqw, 4px) clamp(3px, 1.1cqw, 8px);
         }
 
         .period-picker button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
@@ -4235,9 +4218,13 @@ class ElrakningPanel {
           .period-picker button:hover:not(.selected) { background: var(--primary-background-color); color: var(--primary-text-color); }
         }
         .period-picker button:active:not(.selected) { background: var(--primary-background-color); color: var(--primary-text-color); }
-        .period-picker-arrow { font-size: 18px !important; line-height: 1; min-width: 28px; padding-inline: 4px !important; }
-        .period-picker-period { color: var(--primary-text-color) !important; min-width: 102px; }
-        .period-picker-modes button { font-size: 12px; }
+        .period-picker-arrow {
+          font-size: clamp(14px, 2.5cqw, 18px) !important;
+          line-height: 1;
+          padding-inline: clamp(1px, .7cqw, 4px) !important;
+        }
+        .period-picker-period { color: var(--primary-text-color) !important; }
+        .period-picker-modes button { font-size: clamp(10px, 1.7cqw, 12px); }
         .period-picker-modes button.active,
         .period-picker-choice.selected,
         .period-picker-day.selected { background: var(--primary-color); color: var(--text-primary-color); }
