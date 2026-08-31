@@ -42,6 +42,16 @@ assert.equal(dailyAggregation[0].energy.solar, 6);
 assert.equal(aggregatePriceAndEnergyByPeriod(aggregatePeriods, aggregateMeter, aggregatePower, "month", new Date("2026-08-30T12:00:00Z"))[0].label, "Aug");
 assert.equal(aggregatePriceAndEnergyByPeriod(aggregatePeriods, aggregateMeter, aggregatePower, "year", new Date("2026-08-30T12:00:00Z"))[0].label, "2026");
 assert.equal(dailyAggregation[0].price_duration_ms, 2 * 60 * 60 * 1000);
+const historicalPeriods = [
+  { start: "2026-08-25T00:00:00Z", end: "2026-08-25T01:00:00Z", price: 100 },
+  { start: "2026-08-25T01:00:00Z", end: "2026-08-25T02:00:00Z", price: 200 },
+  { start: "2026-08-26T00:00:00Z", end: "2026-08-26T01:00:00Z", price: 300 },
+  { start: "2026-08-26T01:00:00Z", end: "2026-08-26T02:00:00Z", price: 500 },
+];
+const historicalDaily = aggregatePriceAndEnergyByPeriod(historicalPeriods, [], {}, "day", new Date("2026-08-25T12:00:00Z"));
+assert.deepEqual(historicalDaily.map((item) => [item.label, item.price]), [["25", 150], ["26", 400]]);
+assert.equal(aggregatePriceAndEnergyByPeriod(historicalPeriods, [], {}, "month", new Date("2026-08-25T12:00:00Z"))[0].price, 275);
+assert.equal(aggregatePriceAndEnergyByPeriod(historicalPeriods, [], {}, "year", new Date("2026-08-25T12:00:00Z"))[0].price, 275);
 assert.deepEqual(buildGridSourceCost({
   imported_kwh_so_far: 55.26,
   grid_transfer_ore_per_kwh_gross: 97,
@@ -118,6 +128,10 @@ assert.match(eonPanelSource, /visible_series/);
 assert.match(eonPanelSource, /priceAggregation/);
 assert.match(eonPanelSource, /duration_weighted_average/);
 assert.match(eonPanelSource, /axes: mode === "hour"/);
+assert.match(eonPanelSource, /this\._billingHistory \? \(this\._billingHistory\.price_periods \|\| \[\]\)/);
+assert.match(eonPanelSource, /this\._billingHistory \? \(this\._billingHistory\.energy_points \|\| \[\]\)/);
+assert.match(eonPanelSource, /billingEnergySource/);
+assert.match(eonPanelSource, /selectedPeriod = groups\.length/);
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
 assert.doesNotMatch(eonPanelSource, /Vad har vi för data\?/);
 assert.doesNotMatch(eonPanelSource, /data-provider-card="(?:elmatare|solar|battery)"/);

@@ -1171,11 +1171,13 @@ export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSerie
   return buckets.map((bucket) => {
     let priceWeighted = 0;
     let priceDuration = 0;
+    let pricePeriodCount = 0;
     for (const period of validPeriods) {
       const duration = Math.max(0, Math.min(bucket.endMs, period.endMs) - Math.max(bucket.startMs, period.startMs));
       if (!duration) continue;
       priceWeighted += period.price * duration;
       priceDuration += duration;
+      pricePeriodCount += 1;
     }
     const energy = {};
     const meterImport = integrate(meter, "import_kw", bucket.startMs, bucket.endMs);
@@ -1190,6 +1192,7 @@ export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSerie
       ...bucket,
       price: priceDuration > 0 ? priceWeighted / priceDuration : null,
       price_duration_ms: priceDuration,
+      price_period_count: pricePeriodCount,
       energy,
     };
   }).filter((bucket) => bucket.price !== null || Object.keys(bucket.energy).length > 0);
@@ -6458,7 +6461,7 @@ class ElrakningPanel {
     const year = selected.getFullYear();
     const month = selected.getMonth();
     const localPeriod = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    const selectedPeriod = mode === "hour"
+    let selectedPeriod = mode === "hour"
       ? `${year}-${String(month + 1).padStart(2, "0")}-${String(selected.getDate()).padStart(2, "0")}`
       : mode === "day" ? localPeriod(selected) : mode === "month" ? String(year) : null;
     const layers = this._effectiveChartLayerState();
@@ -6521,25 +6524,33 @@ class ElrakningPanel {
       priceAggregation = { method: "existing_hourly_price_series", trade_enabled: this._priceComparisonVisible.electricity, grid_enabled: this._priceComparisonVisible.grid, period_count: selectedPeriods.length, valid_period_count: values.length, missing_period_count: selectedPeriods.length - values.length, unit: "ore/kWh" };
       coverage = { period_count: selectedPeriods.length, valid_period_count: values.length };
     } else {
-      const data = aggregatePriceAndEnergyByPeriod(this.priceData.periods, this._meterPowerHistory?.points, this._powerHistory?.series, mode, selected, (period) => this._comparisonPrice(period));
-      groups = data.map((item) => ({ period: item.label, price_average_ore_per_kwh: item.price, buy_kwh: item.energy.import ?? null, sell_kwh: item.energy.export ?? null, solar_kwh: item.energy.solar ?? null, load_kwh: item.energy.consumption ?? null, charging_kwh: item.energy.charging ?? null, discharging_kwh: item.energy.discharging ?? null }));
+      const aggregatedPeriods = this._billingHistory ? (this._billingHistory.price_periods || []) : [];
+      const aggregatedMeterPoints = this._billingHistory ? (this._billingHistory.energy_points || []) : [];
+      const data = aggregatePriceAndEnergyByPeriod(aggregatedPeriods, aggregatedMeterPoints, this._powerHistory?.series, mode, selected, (period) => this._comparisonPrice(period));
+      groups = data.map((item) => ({ period: item.label, price_average_ore_per_kwh: item.price, price_period_count: item.price_period_count, buy_kwh: item.energy.import ?? null, sell_kwh: item.energy.export ?? null, solar_kwh: item.energy.solar ?? null, load_kwh: item.energy.consumption ?? null, charging_kwh: item.energy.charging ?? null, discharging_kwh: item.energy.discharging ?? null }));
       series = {};
       for (const key of visibleSeries.filter((value) => value !== "price")) series[key] = groups.map((group) => ({ period: group.period, value: group[`${key === "buy" ? "buy" : key === "sell" ? "sell" : key}_kwh`] ?? null })).filter((point) => point.value !== null);
       if (layers.spot) series.price = groups.map((group) => ({ period: group.period, value: group.price_average_ore_per_kwh })).filter((point) => point.value !== null);
       const priceValues = data.map((item) => item.price).filter(Number.isFinite);
       const weightedDuration = data.reduce((sum, item) => sum + (Number.isFinite(item.price) ? Number(item.price_duration_ms || 0) : 0), 0);
       const average = weightedDuration ? data.reduce((sum, item) => sum + (Number.isFinite(item.price) ? item.price * Number(item.price_duration_ms || 0) : 0), 0) / weightedDuration : null;
-      display = { current_price_ore_per_kwh: null, average_ore_per_kwh: average, lowest_ore_per_kwh: priceValues.length ? Math.min(...priceValues) : null, highest_ore_per_kwh: priceValues.length ? Math.max(...priceValues) : null };
+      const current = this.priceData.periods.find((period) => new Date(period.start) <= new Date() && new Date() < new Date(period.end));
+      display = { current_price_ore_per_kwh: current ? this._comparisonPrice(current) : null, average_ore_per_kwh: average, lowest_ore_per_kwh: priceValues.length ? Math.min(...priceValues) : null, highest_ore_per_kwh: priceValues.length ? Math.max(...priceValues) : null };
       const rangeStart = mode === "day" ? new Date(year, month, 1).getTime() : new Date(year, 0, 1).getTime();
       const rangeEnd = mode === "day" ? new Date(year, month + 1, 1).getTime() : new Date(year + 1, 0, 1).getTime();
-      const relevantPeriods = this.priceData.periods.filter((period) => mode === "year" || periodInRange(period, rangeStart, rangeEnd));
+      const relevantPeriods = aggregatedPeriods.filter((period) => mode === "year" || periodInRange(period, rangeStart, rangeEnd));
       const validPeriods = relevantPeriods.filter((period) => Number.isFinite(this._comparisonPrice(period)));
       priceAggregation = { method: "duration_weighted_average", trade_enabled: this._priceComparisonVisible.electricity, grid_enabled: this._priceComparisonVisible.grid, period_count: relevantPeriods.length, valid_period_count: validPeriods.length, missing_period_count: relevantPeriods.length - validPeriods.length, unit: "ore/kWh" };
-      coverage = { group_count: groups.length, period: selectedPeriod, available_groups: groups.map((group) => group.period) };
+      selectedPeriod = groups.length ? `${groups[0].period}-${groups.at(-1).period}` : null;
+      coverage = { group_count: groups.length, period: selectedPeriod, price: { groups: groups.filter((group) => group.price_average_ore_per_kwh !== null).map((group) => group.period) }, ...Object.fromEntries([["buy", "buy_kwh"], ["sell", "sell_kwh"], ["solar", "solar_kwh"], ["load", "load_kwh"], ["charging", "charging_kwh"], ["discharging", "discharging_kwh"]].map(([key, field]) => [key, { groups: groups.filter((group) => group[field] !== null).map((group) => group.period) }])), available_groups: groups.map((group) => group.period) };
     }
+    const billingEnergySource = this._billingHistory?.energy_source || {};
+    const billingSourceEntities = Array.isArray(billingEnergySource.source_entities)
+      ? billingEnergySource.source_entities.map((source) => source?.entity_id || source?.source_entity).filter(Boolean)
+      : [billingEnergySource.entity_id || billingEnergySource.source_entity].filter(Boolean);
     const sourceEntities = {
-      buy: [this._meterState?.energy_import_entity].filter(Boolean),
-      sell: [this._meterState?.energy_export_entity].filter(Boolean),
+      buy: billingSourceEntities.length ? billingSourceEntities : [this._meterState?.energy_import_entity].filter(Boolean),
+      sell: billingSourceEntities.length ? billingSourceEntities : [this._meterState?.energy_export_entity].filter(Boolean),
       solar: [this._powerState?.solar_entity].filter(Boolean),
       load: [this._powerState?.consumption_entity].filter(Boolean),
       charging: [this._powerState?.charging_entity].filter(Boolean),
@@ -6554,7 +6565,7 @@ class ElrakningPanel {
       energy: mode === "hour" ? { series, unit: "kW" } : { groups, unit: "kWh" },
       axes: mode === "hour" ? { price: { unit: "öre/kWh", side: "left" }, energy: { unit: "kW", side: "right" } } : { energy: { unit: "kWh", side: "left" }, price: { unit: "öre/kWh", side: "right" } },
       coverage,
-      provenance: Object.fromEntries(Object.entries(sourceEntities).map(([key, entities]) => [key, { method: key === "buy" || key === "sell" ? "canonical_meter_history" : "canonical_power_history", source_entities: entities }])),
+      provenance: Object.fromEntries(Object.entries(sourceEntities).map(([key, entities]) => [key, { method: key === "buy" || key === "sell" ? (this._billingHistory?.integration_method || billingEnergySource.method || "canonical_meter_history") : "canonical_power_history", source_entities: entities }])),
       visible_series: visibleSeries,
     };
   }
@@ -8050,6 +8061,7 @@ class ElrakningPanel {
       this._billingHistory = null;
     }
     this._renderInvoiceEstimateCard();
+    if (this.host.querySelector(".price-chart")) this.renderPriceChart();
   }
 
   async loadProviderState() {
@@ -8806,10 +8818,12 @@ class ElrakningPanel {
     if (!chart || !this.priceData.periods.length) return;
     const mode = this._periodPickerState.mode;
     const selectedDate = this._periodPickerState.confirmed;
+    const aggregatedPeriods = this._billingHistory ? (this._billingHistory.price_periods || []) : [];
+    const aggregatedMeterPoints = this._billingHistory ? (this._billingHistory.energy_points || []) : [];
     const priceForPeriod = (period) => this._comparisonPrice(period);
     const data = aggregatePriceAndEnergyByPeriod(
-      this.priceData.periods,
-      this._meterPowerHistory?.points,
+      aggregatedPeriods,
+      aggregatedMeterPoints,
       this._powerHistory?.series,
       mode,
       selectedDate,
