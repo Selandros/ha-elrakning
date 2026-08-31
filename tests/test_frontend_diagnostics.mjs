@@ -43,6 +43,8 @@ assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrak
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindPeriodPicker()"), pickerPanelSource.indexOf("  _chartLayerState()"));
 assert.doesNotMatch(pickerSource, /callWS|selectedMonth|renderPriceChart\(/);
+assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
+assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
 const costSeries = buildCostAnalysisSeries({
   month: "2026-08",
   total_so_far_sek: 356.61,

@@ -3990,7 +3990,10 @@ class ElrakningPanel {
         }
 
         .period-picker {
+          align-items: center;
           bottom: 10px;
+          display: flex;
+          gap: 6px;
           max-width: calc(100% - 40px);
           position: absolute;
           right: 20px;
@@ -4013,7 +4016,7 @@ class ElrakningPanel {
           padding: 2px;
         }
 
-        .period-picker-modes { margin-top: 4px; }
+        .period-picker-modes { margin-top: 0; }
 
         .period-picker button {
           background: transparent;
@@ -4802,7 +4805,7 @@ class ElrakningPanel {
       this._renderPeriodPicker();
     });
     document.addEventListener("click", (event) => {
-      if (this._periodPickerState.open && !root.contains(event.target)) close();
+      if (this._periodPickerState.open && !event.composedPath().includes(root)) close();
     });
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && this._periodPickerState.open) close();
