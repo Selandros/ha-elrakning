@@ -4128,17 +4128,6 @@ class ElrakningPanel {
           opacity: .9;
         }
 
-        @media (max-width: 600px) {
-          .price-section .period-picker-popover {
-            bottom: calc(100% + 8px);
-            left: 50%;
-            max-width: calc(100vw - 24px);
-            right: auto;
-            transform: translateX(-50%);
-            width: min(320px, calc(100vw - 24px));
-          }
-        }
-
         .chart-bar.cheap {
           fill: #67C98C;
           fill-opacity: .32;
@@ -4251,7 +4240,6 @@ class ElrakningPanel {
           padding: clamp(2px, .7cqw, 4px) clamp(3px, 1.1cqw, 8px);
         }
 
-        .period-picker-popover button,
         .period-picker-dialog button {
           background: transparent;
           border: 0;
@@ -4266,7 +4254,6 @@ class ElrakningPanel {
 
         .period-picker-control button:focus-visible,
         .period-picker-modes button:focus-visible,
-        .period-picker-popover button:focus-visible,
         .period-picker-dialog button:focus-visible {
           outline: 2px solid var(--primary-color);
           outline-offset: -2px;
@@ -4274,7 +4261,6 @@ class ElrakningPanel {
         @media (hover: hover) and (pointer: fine) {
           .period-picker-control button:hover:not(.selected):not(.active),
           .period-picker-modes button:hover:not(.selected):not(.active),
-          .period-picker-popover button:hover:not(.selected):not(.active),
           .period-picker-dialog button:hover:not(.selected):not(.active) {
             background: var(--primary-background-color);
             color: var(--primary-text-color);
@@ -4282,7 +4268,6 @@ class ElrakningPanel {
         }
         .period-picker-control button:active:not(.selected):not(.active),
         .period-picker-modes button:active:not(.selected):not(.active),
-        .period-picker-popover button:active:not(.selected):not(.active),
         .period-picker-dialog button:active:not(.selected):not(.active) {
           background: var(--primary-background-color);
           color: var(--primary-text-color);
@@ -4298,19 +4283,6 @@ class ElrakningPanel {
         .period-picker-choice.selected,
         .period-picker-day.selected { background: var(--primary-color); color: var(--text-primary-color); }
 
-        .period-picker-popover {
-          background: var(--ha-card-background, var(--card-background-color));
-          border: 1px solid var(--divider-color);
-          border-radius: 10px;
-          bottom: calc(100% + 8px);
-          box-shadow: var(--ha-card-box-shadow, 0 8px 24px rgba(0, 0, 0, .25));
-          box-sizing: border-box;
-          padding: 12px;
-          position: absolute;
-          right: 0;
-          width: min(320px, calc(100vw - 32px));
-        }
-
         .period-picker-dialog {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
@@ -4319,9 +4291,11 @@ class ElrakningPanel {
           box-sizing: border-box;
           color: var(--primary-text-color);
           margin: auto;
-          max-width: calc(100vw - 32px);
+          max-height: calc(100dvh - 48px);
+          max-width: calc(100vw - 48px);
+          overflow-y: auto;
           padding: 12px;
-          width: min(320px, calc(100vw - 32px));
+          width: min(520px, calc(100vw - 48px));
         }
 
         .period-picker-dialog::backdrop {
@@ -4329,7 +4303,6 @@ class ElrakningPanel {
         }
 
         .period-picker-popover-header,
-        .period-picker-popover .period-picker-actions,
         .period-picker-dialog .period-picker-actions { justify-content: space-between; }
         .period-picker-popover-header strong { color: var(--primary-text-color); font-size: 13px; }
         .period-picker-weekdays,
@@ -4342,16 +4315,13 @@ class ElrakningPanel {
         .period-picker-month-grid,
         .period-picker-year-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .period-picker-choice { min-height: 32px !important; }
-        .period-picker-popover .period-picker-actions,
         .period-picker-dialog .period-picker-actions {
           align-items: center;
           display: flex;
           gap: 4px;
           white-space: nowrap;
         }
-        .period-picker-popover .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
         .period-picker-dialog .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
-        .period-picker-popover .period-picker-actions button:last-child,
         .period-picker-dialog .period-picker-actions button:last-child { color: var(--primary-text-color); font-weight: 600; }
 
         @media (max-width: 600px) {
@@ -4360,10 +4330,6 @@ class ElrakningPanel {
             overflow-y: auto;
             padding: 10px;
             width: min(320px, calc(100vw - 32px));
-          }
-
-          .period-picker-popover {
-            display: none;
           }
 
           .period-picker-popover-header {
@@ -5061,7 +5027,7 @@ class ElrakningPanel {
     const root = this.host.querySelector("[data-period-picker]");
     const dialog = root?.querySelector("[data-period-picker-dialog]");
     const popover = root?.querySelector("[data-period-picker-popover]");
-    const surface = this._isMobilePeriodPicker() && dialog?.open ? dialog : popover;
+    const surface = dialog?.open ? dialog : popover;
     if (!surface) return;
     const state = this._periodPickerState;
     surface.querySelectorAll(".period-picker-day").forEach((button) => {
@@ -5092,15 +5058,13 @@ class ElrakningPanel {
     });
     const periodButton = root.querySelector("[data-period-picker-open]");
     periodButton?.setAttribute("aria-expanded", String(state.open));
-    const mobile = state.open && this._isMobilePeriodPicker();
-    popover.hidden = !state.open || mobile;
+    popover.hidden = true;
     if (!state.open) {
       if (dialog.open) dialog.close();
       return;
     }
-    if (mobile && !dialog.open) dialog.showModal();
-    const pickerContent = mobile ? dialog : popover;
-    if (!mobile && dialog.open) dialog.close();
+    if (!dialog.open) dialog.showModal();
+    const pickerContent = dialog;
     const cursor = state.cursor;
     if (state.mode === "hour") {
       const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -5167,7 +5131,7 @@ class ElrakningPanel {
     const handlePickerClick = (event) => {
       if (event.__periodPickerHandled) return;
       event.__periodPickerHandled = true;
-      if (dialog.open && this._isMobilePeriodPicker()) {
+      if (dialog.open) {
         const rect = dialog.getBoundingClientRect();
         const outside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
         if (outside) {
