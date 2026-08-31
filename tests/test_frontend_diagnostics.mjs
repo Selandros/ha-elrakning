@@ -86,16 +86,21 @@ const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindP
 assert.match(pickerSource, /renderPriceChart\(\)/);
 assert.doesNotMatch(pickerSource, /callWS|selectedMonth/);
 assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
-assert.match(pickerPanelSource, /root\.addEventListener\("click", \(event\) => event\.stopPropagation\(\)\)/);
+assert.match(pickerPanelSource, /data-period-picker-dialog/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
 assert.match(pickerPanelSource, /\.price-section \{[\s\S]*overflow: visible/);
 assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.price-section \.period-picker \{[\s\S]*flex-direction: column;[\s\S]*position: static;[\s\S]*width: 100%/);
 assert.match(pickerPanelSource, /\.price-section \.period-picker-modes \{[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)[\s\S]*order: 1/);
 assert.match(pickerPanelSource, /\.price-section \.period-picker-control \{[\s\S]*grid-template-columns: 44px minmax\(0, 1fr\) 44px[\s\S]*order: 2/);
 assert.match(pickerPanelSource, /\.price-section \.period-picker button \{[\s\S]*min-height: 44px/);
-assert.match(pickerPanelSource, /\.price-section \.period-picker-popover \{[\s\S]*left: 50%[\s\S]*max-width: calc\(100vw - 24px\)/);
-assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.price-section \.period-picker-popover \{[\s\S]*bottom: calc\(env\(safe-area-inset-bottom, 0px\) \+ 12px\) !important;[\s\S]*position: fixed !important;[\s\S]*width: min\(320px, calc\(100vw - 40px\)\) !important/);
-assert.match(pickerPanelSource, /\.price-section \.period-picker-day-grid button,[\s\S]*\.price-section \.period-picker-choice \{[\s\S]*min-height: 36px/);
+assert.match(pickerPanelSource, /\.period-picker-dialog \{[\s\S]*margin: auto;[\s\S]*max-width: calc\(100vw - 32px\)[\s\S]*width: min\(320px, calc\(100vw - 32px\)/);
+assert.match(pickerPanelSource, /\.period-picker-dialog::backdrop \{[\s\S]*background: rgba\(0, 0, 0, \.52\)/);
+assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.period-picker-dialog \{[\s\S]*max-height: calc\(100dvh - 48px\)[\s\S]*overflow-y: auto/);
+assert.match(pickerPanelSource, /_isMobilePeriodPicker\(\)[\s\S]*matchMedia\("\(max-width: 600px\)"\)/);
+assert.match(pickerPanelSource, /dialog\.showModal\(\)/);
+assert.match(pickerSource, /dialog\.addEventListener\("cancel"/);
+assert.match(pickerSource, /!event\.composedPath\(\)\.includes\(root\) && !event\.composedPath\(\)\.includes\(dialog\)/);
+assert.match(pickerPanelSource, /\.period-picker-day-grid button,[\s\S]*\.period-picker-choice \{[\s\S]*min-height: 36px/);
 assert.doesNotMatch(pickerSource, /scrollIntoView\(|positionPicker|setPickerPosition/);
 const costSeries = buildCostAnalysisSeries({
   month: "2026-08",
