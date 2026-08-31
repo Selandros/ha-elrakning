@@ -990,7 +990,7 @@ const hourlyPriceGeometry = buildPriceChartGeometry();
 const dualPriceGeometry = buildPriceChartGeometry(960, 350, { dualAxis: true });
 assert.equal(hourlyPriceGeometry.plotLeft, 40);
 assert.equal(hourlyPriceGeometry.plotBottom, hourlyPriceGeometry.xAxisRailHeight);
-assert.equal(hourlyPriceGeometry.plotBottom, 28);
+assert.equal(hourlyPriceGeometry.plotBottom, 24);
 assert.equal(dualPriceGeometry.plotLeft, 40);
 assert.equal(dualPriceGeometry.plotRight, 64);
 assert.ok(hourlyPriceGeometry.plotWidth > 0 && dualPriceGeometry.plotWidth > 0);
@@ -1001,6 +1001,9 @@ assert.match(eonPanelSource, /buildPriceChartGeometry\(width, height\)/);
 assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 0[\s\S]*padding-right: 8px[\s\S]*width: 40px/);
 assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 0[\s\S]*padding-left: 8px[\s\S]*width: 64px/);
 assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*width: 40px/);
+assert.match(eonPanelSource, /\.price-analysis \{[\s\S]*margin: 1px 0 0;[\s\S]*min-height: 0;/);
+assert.match(eonPanelSource, /\.price-chart-legend \{[\s\S]*min-height: 18px;[\s\S]*margin-top: 0;/);
+assert.match(eonPanelSource, /\.period-picker \{[\s\S]*margin-top: 10px;/);
 const phaseRawSamples = (offset = 0) => Array.from({ length: 720 }, (_, index) => ({
   timestamp: new Date(Date.parse("2026-08-30T00:00:00Z") + (index * 5 + offset) * 1000).toISOString(),
   value: index === 361 ? 99 : index / 100,
