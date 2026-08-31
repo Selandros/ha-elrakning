@@ -1778,6 +1778,14 @@ class ElrakningPanel {
     this._electricityProviderState = null;
     this._billingHistory = null;
     this._costSelectedMonth = null;
+    const pickerNow = new Date();
+    this._periodPickerState = {
+      mode: "hour",
+      open: false,
+      confirmed: new Date(pickerNow.getFullYear(), pickerNow.getMonth(), pickerNow.getDate()),
+      draft: new Date(pickerNow.getFullYear(), pickerNow.getMonth(), pickerNow.getDate()),
+      cursor: new Date(pickerNow.getFullYear(), pickerNow.getMonth(), 1),
+    };
     this.priceData = {
       source: "nord_pool",
       mode: "spot_price",
@@ -1917,6 +1925,20 @@ class ElrakningPanel {
             </button>
           </div>
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
+          <div class="period-picker" data-period-picker>
+            <div class="period-picker-control">
+              <button type="button" class="period-picker-arrow" data-period-picker-nav="previous" aria-label="Föregående period">‹</button>
+              <button type="button" class="period-picker-period" data-period-picker-open aria-haspopup="dialog" aria-expanded="false"><span data-period-picker-label></span></button>
+              <button type="button" class="period-picker-arrow" data-period-picker-nav="next" aria-label="Nästa period">›</button>
+            </div>
+            <div class="period-picker-modes" role="tablist" aria-label="Tidsupplösning">
+              <button type="button" role="tab" data-period-picker-mode="hour">Timme</button>
+              <button type="button" role="tab" data-period-picker-mode="day">Dag</button>
+              <button type="button" role="tab" data-period-picker-mode="month">Månad</button>
+              <button type="button" role="tab" data-period-picker-mode="year">År</button>
+            </div>
+            <div class="period-picker-popover" data-period-picker-popover hidden></div>
+          </div>
         </section>
 
         <div class="daily-energy-row">
@@ -3936,6 +3958,82 @@ class ElrakningPanel {
           white-space: normal;
         }
 
+        .period-picker {
+          bottom: 10px;
+          max-width: calc(100% - 40px);
+          position: absolute;
+          right: 20px;
+          z-index: 3;
+        }
+
+        .period-picker-control,
+        .period-picker-modes,
+        .period-picker-actions {
+          align-items: center;
+          display: flex;
+          gap: 4px;
+        }
+
+        .period-picker-control,
+        .period-picker-modes {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          padding: 2px;
+        }
+
+        .period-picker-modes { margin-top: 4px; }
+
+        .period-picker button {
+          background: transparent;
+          border: 0;
+          border-radius: 6px;
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          font: inherit;
+          margin: 0;
+          min-height: 28px;
+          padding: 4px 8px;
+        }
+
+        .period-picker button:hover,
+        .period-picker button:focus-visible { background: var(--primary-background-color); color: var(--primary-text-color); }
+        .period-picker-arrow { font-size: 18px !important; line-height: 1; min-width: 28px; padding-inline: 4px !important; }
+        .period-picker-period { color: var(--primary-text-color) !important; min-width: 102px; }
+        .period-picker-modes button { font-size: 12px; }
+        .period-picker-modes button.active,
+        .period-picker-choice.selected,
+        .period-picker-day.selected { background: var(--primary-color); color: var(--text-primary-color); }
+
+        .period-picker-popover {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: 10px;
+          bottom: calc(100% + 8px);
+          box-shadow: var(--ha-card-box-shadow, 0 8px 24px rgba(0, 0, 0, .25));
+          box-sizing: border-box;
+          padding: 12px;
+          position: absolute;
+          right: 0;
+          width: min(320px, calc(100vw - 32px));
+        }
+
+        .period-picker-popover-header,
+        .period-picker-actions { justify-content: space-between; }
+        .period-picker-popover-header strong { color: var(--primary-text-color); font-size: 13px; }
+        .period-picker-weekdays,
+        .period-picker-day-grid,
+        .period-picker-month-grid,
+        .period-picker-year-grid { display: grid; gap: 4px; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 8px; }
+        .period-picker-weekday { color: var(--secondary-text-color); font-size: 11px; text-align: center; }
+        .period-picker-day-grid button { min-height: 30px; padding: 2px; }
+        .period-picker-day.outside { opacity: .35; }
+        .period-picker-month-grid,
+        .period-picker-year-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .period-picker-choice { min-height: 32px !important; }
+        .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
+        .period-picker-actions button:last-child { color: var(--primary-text-color); font-weight: 600; }
+
         .price-analysis-status {
           display: block;
           font-size: var(--price-card-text-size);
@@ -4544,6 +4642,7 @@ class ElrakningPanel {
         this._bindDiagnostics();
     this._bindMainInvoiceParser();
     this._bindCostCard();
+    this._bindPeriodPicker();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
     this.renderPriceChart();
@@ -4563,6 +4662,121 @@ class ElrakningPanel {
     this._priceHeaderLayoutObserver = new ResizeObserver(updateLayoutState);
     this._priceHeaderLayoutObserver.observe(heading);
     updateLayoutState();
+  }
+
+  _periodPickerLabel(date = this._periodPickerState.confirmed) {
+    const value = this._periodPickerState.mode;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return value === "hour" ? `${year}-${month}-${day}` : value === "day" ? `${year}-${month}` : `${year}`;
+  }
+
+  _periodPickerMonthName(date) {
+    return date.toLocaleDateString("sv-SE", { month: "long", year: "numeric" });
+  }
+
+  _renderPeriodPicker() {
+    const state = this._periodPickerState;
+    const root = this.host.querySelector("[data-period-picker]");
+    const label = root?.querySelector("[data-period-picker-label]");
+    const popover = root?.querySelector("[data-period-picker-popover]");
+    if (!root || !label || !popover) return;
+    label.textContent = this._periodPickerLabel();
+    root.querySelectorAll("[data-period-picker-mode]").forEach((button) => {
+      const active = button.dataset.periodPickerMode === state.mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    const periodButton = root.querySelector("[data-period-picker-open]");
+    periodButton?.setAttribute("aria-expanded", String(state.open));
+    popover.hidden = !state.open;
+    if (!state.open) return;
+    const cursor = state.cursor;
+    if (state.mode === "hour") {
+      const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+      const offset = (first.getDay() + 6) % 7;
+      const weekdays = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"].map((name) => `<span class="period-picker-weekday">${name}</span>`).join("");
+      const cells = Array.from({ length: 42 }, (_, index) => {
+        const date = new Date(cursor.getFullYear(), cursor.getMonth(), index - offset + 1);
+        const currentMonth = date.getMonth() === cursor.getMonth();
+        const selected = date.toDateString() === state.draft.toDateString();
+        return `<button type="button" class="period-picker-day${currentMonth ? "" : " outside"}${selected ? " selected" : ""}" data-period-picker-date="${date.getTime()}">${date.getDate()}</button>`;
+      }).join("");
+      popover.innerHTML = `<div class="period-picker-popover-header"><button type="button" data-period-picker-calendar-nav="previous" aria-label="Föregående månad">‹</button><strong>${this._periodPickerMonthName(cursor)}</strong><button type="button" data-period-picker-calendar-nav="next" aria-label="Nästa månad">›</button></div><div class="period-picker-weekdays">${weekdays}</div><div class="period-picker-day-grid">${cells}</div><div class="period-picker-actions"><button type="button" data-period-picker-now>Nu</button><button type="button" data-period-picker-confirm>Bekräfta</button></div>`;
+      return;
+    }
+    if (state.mode === "day") {
+      const months = ["Jan", "Feb", "Mar", "Apr", "Maj", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"].map((name, index) => {
+        const selected = state.draft.getFullYear() === cursor.getFullYear() && state.draft.getMonth() === index;
+        return `<button type="button" class="period-picker-choice${selected ? " selected" : ""}" data-period-picker-month="${index}">${name}</button>`;
+      }).join("");
+      popover.innerHTML = `<div class="period-picker-popover-header"><button type="button" data-period-picker-calendar-nav="previous" aria-label="Föregående år">‹</button><strong>${cursor.getFullYear()}</strong><button type="button" data-period-picker-calendar-nav="next" aria-label="Nästa år">›</button></div><div class="period-picker-month-grid">${months}</div><div class="period-picker-actions"><button type="button" data-period-picker-now>Nu</button><button type="button" data-period-picker-confirm>Bekräfta</button></div>`;
+      return;
+    }
+    const startYear = Math.floor(cursor.getFullYear() / 15) * 15;
+    const years = Array.from({ length: 15 }, (_, index) => startYear + index).map((year) => `<button type="button" class="period-picker-choice${state.draft.getFullYear() === year ? " selected" : ""}" data-period-picker-year="${year}">${year}</button>`).join("");
+    popover.innerHTML = `<div class="period-picker-popover-header"><button type="button" data-period-picker-calendar-nav="previous" aria-label="Föregående årtionde">‹</button><strong>${startYear}–${startYear + 14}</strong><button type="button" data-period-picker-calendar-nav="next" aria-label="Nästa årtionde">›</button></div><div class="period-picker-year-grid">${years}</div><div class="period-picker-actions"><button type="button" data-period-picker-now>Nu</button><button type="button" data-period-picker-confirm>Bekräfta</button></div>`;
+  }
+
+  _bindPeriodPicker() {
+    const root = this.host.querySelector("[data-period-picker]");
+    if (!root) return;
+    const close = () => {
+      this._periodPickerState.open = false;
+      this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);
+      this._renderPeriodPicker();
+    };
+    root.querySelector("[data-period-picker-open]")?.addEventListener("click", () => {
+      this._periodPickerState.open = !this._periodPickerState.open;
+      this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);
+      this._periodPickerState.cursor = new Date(this._periodPickerState.draft.getFullYear(), this._periodPickerState.draft.getMonth(), 1);
+      this._renderPeriodPicker();
+    });
+    root.querySelectorAll("[data-period-picker-mode]").forEach((button) => button.addEventListener("click", () => {
+      this._periodPickerState.mode = button.dataset.periodPickerMode;
+      this._renderPeriodPicker();
+    }));
+    root.querySelectorAll("[data-period-picker-nav]").forEach((button) => button.addEventListener("click", () => {
+      const date = new Date(this._periodPickerState.confirmed);
+      const step = this._periodPickerState.mode === "hour" ? 1 : this._periodPickerState.mode === "day" ? 30 : 365;
+      date.setDate(date.getDate() + (button.dataset.periodPickerNav === "next" ? step : -step));
+      this._periodPickerState.confirmed = date;
+      this._periodPickerState.draft = new Date(date);
+      this._renderPeriodPicker();
+    }));
+    root.addEventListener("click", (event) => {
+      const dateButton = event.target.closest?.("[data-period-picker-date]");
+      if (dateButton) this._periodPickerState.draft = new Date(Number(dateButton.dataset.periodPickerDate));
+      const monthButton = event.target.closest?.("[data-period-picker-month]");
+      if (monthButton) this._periodPickerState.draft = new Date(this._periodPickerState.cursor.getFullYear(), Number(monthButton.dataset.periodPickerMonth), 1);
+      const yearButton = event.target.closest?.("[data-period-picker-year]");
+      if (yearButton) this._periodPickerState.draft = new Date(Number(yearButton.dataset.periodPickerYear), this._periodPickerState.draft.getMonth(), 1);
+      const calendarNav = event.target.closest?.("[data-period-picker-calendar-nav]");
+      if (calendarNav) {
+        const direction = calendarNav.dataset.periodPickerCalendarNav === "next" ? 1 : -1;
+        const months = this._periodPickerState.mode === "hour" ? direction : this._periodPickerState.mode === "day" ? direction * 12 : direction * 15;
+        this._periodPickerState.cursor.setMonth(this._periodPickerState.cursor.getMonth() + months);
+      }
+      if (event.target.closest?.("[data-period-picker-now]")) {
+        const now = new Date();
+        this._periodPickerState.draft = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        this._periodPickerState.cursor = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      if (event.target.closest?.("[data-period-picker-confirm]")) {
+        this._periodPickerState.confirmed = new Date(this._periodPickerState.draft);
+        this._periodPickerState.open = false;
+        // Future global dashboard period integration point.
+      }
+      this._renderPeriodPicker();
+    });
+    document.addEventListener("click", (event) => {
+      if (this._periodPickerState.open && !root.contains(event.target)) close();
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this._periodPickerState.open) close();
+    });
+    this._renderPeriodPicker();
   }
 
   _chartLayerState() {

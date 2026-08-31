@@ -38,6 +38,11 @@ assert.deepEqual(buildGridSourceCost({
   source: "canonical_invoice_estimate.grid",
 });
 assert.deepEqual(buildGridSourceCost(null, { total_sek: 12 }), { total_sek: 12 });
+assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker/);
+assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
+const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindPeriodPicker()"), pickerPanelSource.indexOf("  _chartLayerState()"));
+assert.doesNotMatch(pickerSource, /callWS|selectedMonth|renderPriceChart\(/);
 const costSeries = buildCostAnalysisSeries({
   month: "2026-08",
   total_so_far_sek: 356.61,
