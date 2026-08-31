@@ -85,7 +85,6 @@ const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/f
 const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindPeriodPicker()"), pickerPanelSource.indexOf("  _chartLayerState()"));
 assert.match(pickerSource, /renderPriceChart\(\)/);
 assert.doesNotMatch(pickerSource, /callWS|selectedMonth/);
-assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
 assert.match(pickerPanelSource, /data-period-picker-dialog/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*flex-direction: row-reverse;[\s\S]*flex-wrap: nowrap;[\s\S]*justify-content: flex-end;[\s\S]*position: static;[\s\S]*width: 100%/);
@@ -122,7 +121,6 @@ assert.doesNotMatch(pickerPanelSource, /\.price-section \.period-picker-arrow \{
 assert.doesNotMatch(pickerPanelSource, /\.price-section \.period-picker-period \{[\s\S]*min-width: 0[\s\S]*width: auto/);
 assert.match(pickerPanelSource, /dialog\.showModal\(\)/);
 assert.match(pickerSource, /dialog\.addEventListener\("cancel"/);
-assert.match(pickerSource, /!event\.composedPath\(\)\.includes\(root\) && !event\.composedPath\(\)\.includes\(dialog\)/);
 assert.match(pickerSource, /dialog\.getBoundingClientRect\(\)/);
 assert.match(pickerSource, /event\.clientX < rect\.left[\s\S]*event\.clientY > rect\.bottom/);
 assert.match(pickerSource, /event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)[\s\S]*close\(\)/);

@@ -5187,9 +5187,6 @@ class ElrakningPanel {
       event.preventDefault();
       close();
     });
-    document.addEventListener("click", (event) => {
-      if (this._periodPickerState.open && !event.composedPath().includes(root) && !event.composedPath().includes(dialog)) close();
-    });
     window.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       if (this._soloChartLayer) this._clearSoloChartLayer();
