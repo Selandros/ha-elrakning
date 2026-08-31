@@ -1113,6 +1113,88 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
   };
 }
 
+export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSeries, mode, selectedDate = new Date(), priceForPeriod = (period) => Number(period.price)) {
+  const selected = new Date(selectedDate);
+  const year = selected.getFullYear();
+  const month = selected.getMonth();
+  const validPeriods = (Array.isArray(periods) ? periods : []).map((period) => ({
+    ...period,
+    startMs: new Date(period.start).getTime(),
+    endMs: new Date(period.end).getTime(),
+    price: Number(priceForPeriod(period)),
+  })).filter((period) => Number.isFinite(period.startMs) && Number.isFinite(period.endMs) && period.endMs > period.startMs && Number.isFinite(period.price));
+  const pointsFor = (key) => Array.isArray(powerSeries?.[key]?.points) ? powerSeries[key].points : [];
+  const meter = Array.isArray(meterPoints) ? meterPoints : [];
+  const range = mode === "day"
+    ? { start: new Date(year, month, 1), count: new Date(year, month + 1, 0).getDate(), label: (date) => String(date.getDate()).padStart(2, "0") }
+    : mode === "month"
+      ? { start: new Date(year, 0, 1), count: 12, label: (date) => ["Jan", "Feb", "Mar", "Apr", "Maj", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"][date.getMonth()] }
+      : null;
+  let buckets;
+  if (range) {
+    buckets = Array.from({ length: range.count }, (_, index) => {
+      const start = mode === "day" ? new Date(year, month, index + 1) : new Date(year, index, 1);
+      const end = mode === "day" ? new Date(year, month, index + 2) : new Date(year, index + 1, 1);
+      return { key: index, label: range.label(start), startMs: start.getTime(), endMs: end.getTime() };
+    });
+  } else {
+    const timestamps = [
+      ...validPeriods.flatMap((period) => [period.startMs, period.endMs]),
+      ...meter.map((point) => new Date(point.timestamp).getTime()),
+      ...Object.values(powerSeries || {}).flatMap((series) => (Array.isArray(series?.points) ? series.points : []).map((point) => new Date(point.timestamp).getTime())),
+    ].filter(Number.isFinite);
+    const years = [...new Set(timestamps.map((timestamp) => new Date(timestamp).getFullYear()))].sort((left, right) => left - right);
+    buckets = years.map((bucketYear) => ({ key: bucketYear, label: String(bucketYear), startMs: new Date(bucketYear, 0, 1).getTime(), endMs: new Date(bucketYear + 1, 0, 1).getTime() }));
+  }
+  const integrate = (points, key, startMs, endMs) => {
+    const sorted = (Array.isArray(points) ? points : []).map((point) => ({
+      timestamp: new Date(point.timestamp).getTime(),
+      value: Number(point[key]),
+    })).filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value)).sort((left, right) => left.timestamp - right.timestamp);
+    let total = 0;
+    let covered = false;
+    for (let index = 1; index < sorted.length; index += 1) {
+      const left = sorted[index - 1];
+      const right = sorted[index];
+      if (right.timestamp <= left.timestamp || right.timestamp - left.timestamp > 30 * 60 * 1000) continue;
+      const from = Math.max(startMs, left.timestamp);
+      const to = Math.min(endMs, right.timestamp);
+      if (to <= from) continue;
+      const ratio = (timestamp) => (timestamp - left.timestamp) / (right.timestamp - left.timestamp);
+      const fromValue = left.value + (right.value - left.value) * ratio(from);
+      const toValue = left.value + (right.value - left.value) * ratio(to);
+      total += ((fromValue + toValue) / 2) * ((to - from) / 3600000);
+      covered = true;
+    }
+    return covered ? total : null;
+  };
+  return buckets.map((bucket) => {
+    let priceWeighted = 0;
+    let priceDuration = 0;
+    for (const period of validPeriods) {
+      const duration = Math.max(0, Math.min(bucket.endMs, period.endMs) - Math.max(bucket.startMs, period.startMs));
+      if (!duration) continue;
+      priceWeighted += period.price * duration;
+      priceDuration += duration;
+    }
+    const energy = {};
+    const meterImport = integrate(meter, "import_kw", bucket.startMs, bucket.endMs);
+    const meterExport = integrate(meter, "export_kw", bucket.startMs, bucket.endMs);
+    if (meterImport !== null) energy.import = meterImport;
+    if (meterExport !== null) energy.export = meterExport;
+    for (const key of ["solar", "consumption", "charging", "discharging"]) {
+      const value = integrate(pointsFor(key), "value_kw", bucket.startMs, bucket.endMs);
+      if (value !== null) energy[key] = value;
+    }
+    return {
+      ...bucket,
+      price: priceDuration > 0 ? priceWeighted / priceDuration : null,
+      price_duration_ms: priceDuration,
+      energy,
+    };
+  }).filter((bucket) => bucket.price !== null || Object.keys(bucket.energy).length > 0);
+}
+
 export function previousCalendarMonth(month) {
   if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
   const [year, monthNumber] = month.split("-").map(Number);
@@ -4771,14 +4853,20 @@ class ElrakningPanel {
     root.querySelectorAll("[data-period-picker-mode]").forEach((button) => button.addEventListener("click", () => {
       this._periodPickerState.mode = button.dataset.periodPickerMode;
       this._renderPeriodPicker();
+      this.updatePriceSummary();
+      this.renderPriceChart();
     }));
     root.querySelectorAll("[data-period-picker-nav]").forEach((button) => button.addEventListener("click", () => {
       const date = new Date(this._periodPickerState.confirmed);
-      const step = this._periodPickerState.mode === "hour" ? 1 : this._periodPickerState.mode === "day" ? 30 : 365;
-      date.setDate(date.getDate() + (button.dataset.periodPickerNav === "next" ? step : -step));
+      const direction = button.dataset.periodPickerNav === "next" ? 1 : -1;
+      if (this._periodPickerState.mode === "hour") date.setDate(date.getDate() + direction);
+      else if (this._periodPickerState.mode === "day") date.setMonth(date.getMonth() + direction, 1);
+      else date.setFullYear(date.getFullYear() + direction, date.getMonth(), 1);
       this._periodPickerState.confirmed = date;
       this._periodPickerState.draft = new Date(date);
       this._renderPeriodPicker();
+      this.updatePriceSummary();
+      this.renderPriceChart();
     }));
     root.addEventListener("click", (event) => {
       const dateButton = event.target.closest?.("[data-period-picker-date]");
@@ -4801,7 +4889,8 @@ class ElrakningPanel {
       if (event.target.closest?.("[data-period-picker-confirm]")) {
         this._periodPickerState.confirmed = new Date(this._periodPickerState.draft);
         this._periodPickerState.open = false;
-        // Future global dashboard period integration point.
+        this.updatePriceSummary();
+        this.renderPriceChart();
       }
       this._renderPeriodPicker();
     });
@@ -8571,6 +8660,122 @@ class ElrakningPanel {
   }
 
   renderPriceChart(options = {}) {
+    if (this._periodPickerState?.mode !== "hour") {
+      this._renderAggregatedPriceChart();
+      return;
+    }
+    const averageToggle = this.host.querySelector('[data-meter-legend] [data-chart-layer="average"]');
+    if (averageToggle) averageToggle.hidden = false;
+    this._renderHourlyPriceChart(options);
+  }
+
+  _updateAggregatedPriceSummary(data) {
+    const availablePrices = data.filter((item) => Number.isFinite(item.price));
+    const weightedDuration = availablePrices.reduce((sum, item) => sum + Number(item.price_duration_ms || 0), 0);
+    const average = weightedDuration > 0
+      ? availablePrices.reduce((sum, item) => sum + item.price * Number(item.price_duration_ms || 0), 0) / weightedDuration
+      : null;
+    const lowest = availablePrices.reduce((result, item) => !result || item.price < result ? item.price : result, null);
+    const highest = availablePrices.reduce((result, item) => !result || item.price > result ? item.price : result, null);
+    for (const [key, value] of [["average", average], ["lowest", lowest], ["highest", highest]]) {
+      const element = this.host.querySelector(`[data-price="${key}"]`);
+      if (!element) continue;
+      element.textContent = Number.isFinite(value) ? this.formatPrice(value) : "–";
+      element.classList.remove("cheap", "normal", "expensive");
+      if (key === "lowest" && Number.isFinite(value)) element.classList.add("cheap");
+      if (key === "highest" && Number.isFinite(value)) element.classList.add("expensive");
+      const time = this.host.querySelector(`[data-time="${key}"]`);
+      if (time) time.textContent = "";
+    }
+  }
+
+  _renderAggregatedPriceChart() {
+    const chart = this.host.querySelector(".price-chart");
+    if (!chart || !this.priceData.periods.length) return;
+    const mode = this._periodPickerState.mode;
+    const selectedDate = this._periodPickerState.confirmed;
+    const priceForPeriod = (period) => this._comparisonPrice(period);
+    const data = aggregatePriceAndEnergyByPeriod(
+      this.priceData.periods,
+      this._meterPowerHistory?.points,
+      this._powerHistory?.series,
+      mode,
+      selectedDate,
+      priceForPeriod,
+    );
+    const legend = this.host.querySelector("[data-meter-legend]");
+    if (legend) {
+      legend.hidden = data.length === 0;
+      const averageToggle = legend.querySelector('[data-chart-layer="average"]');
+      if (averageToggle) averageToggle.hidden = true;
+    }
+    if (!data.length) {
+      chart.innerHTML = '<div class="empty-chart"><strong>Ingen data för vald period.</strong></div>';
+      return;
+    }
+    this._updateAggregatedPriceSummary(data);
+    const width = 960;
+    const height = 350;
+    const plot = { left: 48, right: 48, top: 30, bottom: 42 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const priceValues = data.map((item) => item.price).filter(Number.isFinite);
+    const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
+    const priceMax = Math.max(1, ...priceValues);
+    const energyMax = Math.max(1, ...energyValues);
+    const colorBands = priceColorBands(priceValues);
+    const xStep = plotWidth / Math.max(1, data.length);
+    const x = (index) => plot.left + (index + .5) * xStep;
+    const priceY = (value) => plot.top + (1 - value / priceMax) * plotHeight;
+    const energyY = (value) => plot.top + (1 - value / energyMax) * plotHeight;
+    const series = [
+      ["price", "Pris", "priceNormal", priceY, "ore/kWh"],
+      ["import", "Köp", "import", energyY, "kWh"],
+      ["export", "Sälj", "export", energyY, "kWh"],
+      ["solar", "Sol", "solar", energyY, "kWh"],
+      ["consumption", "Last", "consumption", energyY, "kWh"],
+      ["charging", "Laddning", "charging", energyY, "kWh"],
+      ["discharging", "Urladdning", "discharging", energyY, "kWh"],
+    ];
+    const layers = this._effectiveChartLayerState();
+    const barWidth = Math.max(2, Math.min(18, xStep / series.length - 3));
+    const bars = data.map((item, index) => series.map(([key, , colorKey, scale], seriesIndex) => {
+      if (key === "price" && !layers.spot) return "";
+      if (key !== "price" && !layers[key]) return "";
+      const value = key === "price" ? item.price : item.energy[key];
+      if (!Number.isFinite(value)) return "";
+      const yValue = scale(value);
+      const color = key === "price"
+        ? chartColor(priceCategory(value, colorBands) === "cheap" ? "priceCheap" : priceCategory(value, colorBands) === "expensive" ? "priceExpensive" : "priceNormal")
+        : chartColor(colorKey);
+      return `<rect class="aggregated-chart-bar aggregated-chart-${key}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
+    }).join("")).join("");
+    const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" /><text class="chart-meter-label" x="8" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(energyMax * ratio)} kWh</text><text class="chart-meter-label" text-anchor="end" x="${width - 4}" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(priceMax * ratio)} öre/kWh</text>`).join("");
+    const labels = data.map((item, index) => `<text class="chart-label" text-anchor="middle" x="${x(index)}" y="${height - 10}">${item.label}</text>`).join("");
+    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}${labels}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg><div class="chart-tooltip" hidden></div>`;
+    const svg = chart.querySelector("svg");
+    const tooltip = chart.querySelector(".chart-tooltip");
+    const show = (event) => {
+      const bounds = svg.getBoundingClientRect();
+      const viewX = ((event.clientX - bounds.left) / bounds.width) * width;
+      const viewY = ((event.clientY - bounds.top) / bounds.height) * height;
+      if (viewX < plot.left || viewX > width - plot.right || viewY < plot.top || viewY > plot.top + plotHeight) { tooltip.hidden = true; return; }
+      const index = Math.max(0, Math.min(data.length - 1, Math.floor((viewX - plot.left) / xStep)));
+      const item = data[index];
+      const fields = [];
+      if (layers.spot && Number.isFinite(item.price)) fields.push({ label: "Pris", value: item.price, formatted: `${this.formatPrice(item.price)} öre/kWh` });
+      for (const [key, label] of [["import", "Köp"], ["export", "Sälj"], ["solar", "Sol"], ["consumption", "Last"], ["charging", "Laddning"], ["discharging", "Urladdning"]]) {
+        if (layers[key] && Number.isFinite(item.energy[key])) fields.push({ label, value: item.energy[key], formatted: `${this._formatNumber(item.energy[key])} kWh` });
+      }
+      renderSharedTooltip(tooltip, { title: item.label, fields });
+      tooltip.hidden = false;
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+    };
+    svg.addEventListener("mousemove", show);
+    svg.addEventListener("mouseleave", () => { tooltip.hidden = true; });
+  }
+
+  _renderHourlyPriceChart(options = {}) {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
     const liveUpdate = options.liveUpdate === true;

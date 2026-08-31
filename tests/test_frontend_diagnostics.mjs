@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -15,6 +15,33 @@ assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Jul 2026" 
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Feb 2026-mar 2026" }), "Feb 2026-mar 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "2026-07" }), "2026-07");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11" }), null);
+const aggregatePeriods = [
+  { start: "2026-08-30T00:00:00Z", end: "2026-08-30T01:00:00Z", price: 100 },
+  { start: "2026-08-30T01:00:00Z", end: "2026-08-30T02:00:00Z", price: 200 },
+];
+const aggregateMeter = [
+  { timestamp: "2026-08-30T00:00:00Z", import_kw: 1, export_kw: 0 },
+  { timestamp: "2026-08-30T00:30:00Z", import_kw: 3, export_kw: 0 },
+  { timestamp: "2026-08-30T01:00:00Z", import_kw: 3, export_kw: 0 },
+  { timestamp: "2026-08-30T01:30:00Z", import_kw: 1, export_kw: 0 },
+  { timestamp: "2026-08-30T02:00:00Z", import_kw: 1, export_kw: 0 },
+];
+const aggregatePower = { solar: { points: [
+  { timestamp: "2026-08-30T00:00:00Z", value_kw: 2 },
+  { timestamp: "2026-08-30T00:30:00Z", value_kw: 4 },
+  { timestamp: "2026-08-30T01:00:00Z", value_kw: 4 },
+  { timestamp: "2026-08-30T01:30:00Z", value_kw: 2 },
+  { timestamp: "2026-08-30T02:00:00Z", value_kw: 2 },
+] } };
+const dailyAggregation = aggregatePriceAndEnergyByPeriod(aggregatePeriods, aggregateMeter, aggregatePower, "day", new Date("2026-08-30T12:00:00Z"));
+assert.equal(dailyAggregation.length, 1);
+assert.equal(dailyAggregation[0].label, "30");
+assert.equal(dailyAggregation[0].price, 150);
+assert.equal(dailyAggregation[0].energy.import, 4);
+assert.equal(dailyAggregation[0].energy.solar, 6);
+assert.equal(aggregatePriceAndEnergyByPeriod(aggregatePeriods, aggregateMeter, aggregatePower, "month", new Date("2026-08-30T12:00:00Z"))[0].label, "Aug");
+assert.equal(aggregatePriceAndEnergyByPeriod(aggregatePeriods, aggregateMeter, aggregatePower, "year", new Date("2026-08-30T12:00:00Z"))[0].label, "2026");
+assert.equal(dailyAggregation[0].price_duration_ms, 2 * 60 * 60 * 1000);
 assert.deepEqual(buildGridSourceCost({
   imported_kwh_so_far: 55.26,
   grid_transfer_ore_per_kwh_gross: 97,
@@ -42,7 +69,8 @@ assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrak
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindPeriodPicker()"), pickerPanelSource.indexOf("  _chartLayerState()"));
-assert.doesNotMatch(pickerSource, /callWS|selectedMonth|renderPriceChart\(/);
+assert.match(pickerSource, /renderPriceChart\(\)/);
+assert.doesNotMatch(pickerSource, /callWS|selectedMonth/);
 assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
 assert.match(pickerPanelSource, /root\.addEventListener\("click", \(event\) => event\.stopPropagation\(\)\)/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
@@ -124,6 +152,9 @@ assert.match(eonPanelSource, /_getPriceChartLiveSignature\(\)/);
 assert.match(eonPanelSource, /_getPriceChartLiveSignature\(\) !== this\._priceChartLiveSignature/);
 assert.match(eonPanelSource, /slotMs = 5 \* 60 \* 1000/);
 assert.match(eonPanelSource, /renderPriceChart\(\{ liveUpdate: true \}\)/);
+assert.match(eonPanelSource, /_renderAggregatedPriceChart\(\)/);
+assert.match(eonPanelSource, /_renderHourlyPriceChart\(options\)/);
+assert.match(eonPanelSource, /price_duration_ms/);
 assert.match(eonPanelSource, /data-price-dynamic="lines"/);
 assert.match(eonPanelSource, /data-phase-dynamic="lines"/);
 assert.match(eonPanelSource, /this\._phaseInteraction = \{/);
