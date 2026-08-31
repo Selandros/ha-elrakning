@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -978,7 +978,9 @@ assert.deepEqual(selectPhaseTimeTicks([3, 1, 2, 1], 200, 56), [1, 2, 3]);
 const phaseGeometryWidths = [320, 390, 600, 900, 1200].map((width) => buildPhaseChartGeometry(width));
 assert.ok(phaseGeometryWidths.every((geometry) => geometry.plotWidth > 0 && geometry.plotRight < geometry.width));
 assert.ok(phaseGeometryWidths[0].plotWidth < phaseGeometryWidths.at(-1).plotWidth);
-assert.ok(phaseGeometryWidths.every((geometry) => geometry.plotLeft === 12));
+assert.equal(phaseGeometryWidths[0].plotLeft, phaseAxisGutter("current"));
+assert.equal(buildPhaseChartGeometry(390, { metric: "voltage" }).plotLeft, phaseAxisGutter("voltage"));
+assert.equal(buildPhaseChartGeometry(390, { metric: "active_power" }).plotLeft, phaseAxisGutter("active_power"));
 assert.ok(phaseGeometryWidths.every((geometry) => geometry.plotWidth === geometry.width - geometry.plotLeft - geometry.plotRight));
 assert.equal(buildPhaseChartGeometry(390).compact, true);
 assert.equal(buildPhaseChartGeometry(900).compact, false);
@@ -986,18 +988,19 @@ assert.match(eonPanelSource, /\.phase-history-axis-overlay \.phase-history-axis-
 assert.match(eonPanelSource, /\.phase-history-axis-overlay \.phase-history-time-label \{[\s\S]*bottom: 5px/);
 const hourlyPriceGeometry = buildPriceChartGeometry();
 const dualPriceGeometry = buildPriceChartGeometry(960, 350, { dualAxis: true });
-assert.equal(hourlyPriceGeometry.plotLeft, 12);
+assert.equal(hourlyPriceGeometry.plotLeft, 40);
 assert.equal(hourlyPriceGeometry.plotBottom, hourlyPriceGeometry.xAxisRailHeight);
-assert.equal(dualPriceGeometry.plotLeft, 16);
-assert.equal(dualPriceGeometry.plotRight, 16);
+assert.equal(hourlyPriceGeometry.plotBottom, 28);
+assert.equal(dualPriceGeometry.plotLeft, 40);
+assert.equal(dualPriceGeometry.plotRight, 64);
 assert.ok(hourlyPriceGeometry.plotWidth > 0 && dualPriceGeometry.plotWidth > 0);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-start/);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-end/);
 assert.match(eonPanelSource, /buildPriceChartGeometry\(width, height, \{ dualAxis: true \}\)/);
 assert.match(eonPanelSource, /buildPriceChartGeometry\(width, height\)/);
-assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 8px[\s\S]*width: auto/);
-assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 8px[\s\S]*width: auto/);
-assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*left: 4px/);
+assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 0[\s\S]*padding-right: 8px[\s\S]*width: 40px/);
+assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 0[\s\S]*padding-left: 8px[\s\S]*width: 64px/);
+assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*width: 40px/);
 const phaseRawSamples = (offset = 0) => Array.from({ length: 720 }, (_, index) => ({
   timestamp: new Date(Date.parse("2026-08-30T00:00:00Z") + (index * 5 + offset) * 1000).toISOString(),
   value: index === 361 ? 99 : index / 100,

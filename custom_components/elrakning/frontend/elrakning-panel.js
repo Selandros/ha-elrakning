@@ -600,24 +600,32 @@ export function selectPhaseTimeTicks(ticks = [], plotWidth = 0, minimumSpacing =
   return Array.from({ length: maxVisible }, (_, index) => values[Math.round(index * (values.length - 1) / (maxVisible - 1))]);
 }
 
-export function buildPhaseChartGeometry(containerWidth = 960) {
+export function phaseAxisGutter(metric = "current") {
+  return {
+    current: 34,
+    voltage: 48,
+    active_power: 50,
+  }[metric] || 34;
+}
+
+export function buildPhaseChartGeometry(containerWidth = 960, { metric = "current" } = {}) {
   const width = Math.max(320, Math.round(Number(containerWidth) || 960));
   const compact = width <= 600;
-  const plotLeft = compact ? 12 : 12;
+  const plotLeft = phaseAxisGutter(metric);
   const plotRight = compact ? 10 : 12;
   const plotTop = 12;
   const plotWidth = Math.max(1, width - plotLeft - plotRight);
   const height = Math.round(Math.min(300, Math.max(160, plotWidth * (compact ? 0.38 : 0.28))));
   const plotBottom = compact ? 34 : 24;
-  return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact };
+  return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact, axisLabelGutter: plotLeft };
 }
 
 export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = false } = {}) {
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const plot = dualAxis
-    ? { left: 16, right: 16, top: 30, bottom: 42 }
-    : { left: 12, right: 8, top: 42, bottom: 42 };
+    ? { left: 40, right: 64, top: 30, bottom: 28 }
+    : { left: 40, right: 8, top: 42, bottom: 28 };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
@@ -4198,25 +4206,25 @@ class ElrakningPanel {
 
         /* Price axes are integrated into the plot instead of reserving a rail. */
         .price-chart .chart-axis-overlay-y-left {
-          left: 8px;
-          padding-right: 0;
-          text-align: left;
-          width: auto;
+          left: 0;
+          padding-right: 8px;
+          text-align: right;
+          width: 40px;
         }
 
         .price-chart .chart-axis-overlay-y-right {
-          padding-left: 0;
-          right: 8px;
-          width: auto;
+          padding-left: 8px;
+          right: 0;
+          width: 64px;
         }
 
         @container price-chart (max-width: 520px) {
           .chart-axis-overlay-x-cull { display: none; }
           .price-chart .chart-axis-overlay-y-left {
-            left: 4px;
+            width: 40px;
           }
           .price-chart .chart-axis-overlay-y-right {
-            right: 4px;
+            width: 64px;
           }
         }
 
@@ -8315,7 +8323,7 @@ class ElrakningPanel {
       return;
     }
     const renderedWidth = chart.clientWidth || 960;
-    const geometry = buildPhaseChartGeometry(renderedWidth);
+    const geometry = buildPhaseChartGeometry(renderedWidth, { metric });
     const { width, height, compact } = geometry;
     const plot = { left: geometry.plotLeft, right: geometry.plotRight, top: geometry.plotTop, bottom: geometry.plotBottom };
     const allPoints = Object.values(rawPhasePoints).flat();
