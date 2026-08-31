@@ -9307,7 +9307,7 @@ class ElrakningPanel {
     this._updateAggregatedPriceSummary(data);
     const width = 960;
     const height = 350;
-    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true, containerWidth: chart.clientWidth || width });
+    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true, containerWidth: chart.getBoundingClientRect().width || chart.clientWidth || width });
     const { plot, plotWidth, plotHeight } = geometry;
     const priceValues = data.map((item) => item.price).filter(Number.isFinite);
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
@@ -9408,7 +9408,7 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 350;
-    const geometry = buildPriceChartGeometry(width, height, { containerWidth: chart.clientWidth || width });
+    const geometry = buildPriceChartGeometry(width, height, { containerWidth: chart.getBoundingClientRect().width || chart.clientWidth || width });
     const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
