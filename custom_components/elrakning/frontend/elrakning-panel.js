@@ -4227,6 +4227,48 @@ class ElrakningPanel {
         .period-picker-actions { border-top: 1px solid var(--divider-color); margin-top: 10px; padding-top: 10px; }
         .period-picker-actions button:last-child { color: var(--primary-text-color); font-weight: 600; }
 
+        @media (max-width: 600px) {
+          .price-section .period-picker-popover {
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+            box-sizing: border-box;
+            height: auto;
+            left: 50%;
+            max-height: 460px;
+            max-height: min(65vh, 460px);
+            max-height: min(65dvh, 460px);
+            overflow-y: auto;
+            position: fixed;
+            right: auto;
+            top: auto;
+            transform: translateX(-50%);
+            width: min(320px, calc(100vw - 40px));
+            z-index: 5;
+          }
+
+          .price-section .period-picker-popover-header {
+            min-height: 36px;
+          }
+
+          .price-section .period-picker-weekdays,
+          .price-section .period-picker-day-grid,
+          .price-section .period-picker-month-grid,
+          .price-section .period-picker-year-grid {
+            gap: 2px;
+            margin-top: 4px;
+          }
+
+          .price-section .period-picker-day-grid button,
+          .price-section .period-picker-choice {
+            min-height: 36px !important;
+          }
+
+          .price-section .period-picker-actions {
+            min-height: 40px;
+            margin-top: 6px;
+            padding-top: 6px;
+          }
+        }
+
         .price-analysis-status {
           display: block;
           font-size: var(--price-card-text-size);
