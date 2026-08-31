@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { aggregatePriceAndEnergyByPeriod, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -52,6 +52,10 @@ const historicalDaily = aggregatePriceAndEnergyByPeriod(historicalPeriods, [], {
 assert.deepEqual(historicalDaily.map((item) => [item.label, item.price]), [["25", 150], ["26", 400]]);
 assert.equal(aggregatePriceAndEnergyByPeriod(historicalPeriods, [], {}, "month", new Date("2026-08-25T12:00:00Z"))[0].price, 275);
 assert.equal(aggregatePriceAndEnergyByPeriod(historicalPeriods, [], {}, "year", new Date("2026-08-25T12:00:00Z"))[0].price, 275);
+assert.equal(aggregatedPriceGroupIndex(100, 48, 864, 31), 1);
+assert.equal(aggregatedPriceGroupIndex(48, 48, 864, 31), 0);
+assert.equal(aggregatedPriceGroupIndex(912, 48, 864, 31), 30);
+assert.equal(aggregatedPriceGroupIndex(20, 48, 864, 31), -1);
 assert.deepEqual(buildGridSourceCost({
   imported_kwh_so_far: 55.26,
   grid_transfer_ore_per_kwh_gross: 97,
@@ -132,6 +136,10 @@ assert.match(eonPanelSource, /this\._billingHistory \? \(this\._billingHistory\.
 assert.match(eonPanelSource, /this\._billingHistory \? \(this\._billingHistory\.energy_points \|\| \[\]\)/);
 assert.match(eonPanelSource, /billingEnergySource/);
 assert.match(eonPanelSource, /selectedPeriod = groups\.length/);
+assert.match(eonPanelSource, /aggregated-chart-hover-band/);
+assert.match(eonPanelSource, /data-group-index/);
+assert.match(eonPanelSource, /clearGroupHover/);
+assert.match(eonPanelSource, /aggregatedPriceGroupIndex/);
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
 assert.doesNotMatch(eonPanelSource, /Vad har vi för data\?/);
 assert.doesNotMatch(eonPanelSource, /data-provider-card="(?:elmatare|solar|battery)"/);

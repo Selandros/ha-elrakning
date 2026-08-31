@@ -1198,6 +1198,12 @@ export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSerie
   }).filter((bucket) => bucket.price !== null || Object.keys(bucket.energy).length > 0);
 }
 
+export function aggregatedPriceGroupIndex(viewX, plotLeft, plotWidth, groupCount) {
+  if (!Number.isFinite(viewX) || !Number.isFinite(plotLeft) || !Number.isFinite(plotWidth) || !Number.isInteger(groupCount) || groupCount < 1) return -1;
+  if (viewX < plotLeft || viewX > plotLeft + plotWidth) return -1;
+  return Math.max(0, Math.min(groupCount - 1, Math.floor((viewX - plotLeft) / (plotWidth / groupCount))));
+}
+
 export function previousCalendarMonth(month) {
   if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
   const [year, monthNumber] = month.split("-").map(Number);
@@ -4060,6 +4066,26 @@ class ElrakningPanel {
           touch-action: pan-y;
           -webkit-overflow-scrolling: touch;
           overscroll-behavior-x: contain;
+        }
+
+        .aggregated-chart-bar.dimmed,
+        .aggregated-chart-svg .chart-label.dimmed {
+          opacity: .4;
+        }
+
+        .aggregated-chart-bar.hovered {
+          stroke: rgba(255, 255, 255, .38);
+          stroke-width: 1.2;
+          filter: drop-shadow(0 0 2px rgba(255, 255, 255, .16));
+        }
+
+        .aggregated-chart-svg .chart-label.hovered {
+          fill: var(--primary-text-color);
+          font-weight: 600;
+        }
+
+        .aggregated-chart-hover-band {
+          pointer-events: none;
         }
 
         .price-analysis {
@@ -8874,19 +8900,42 @@ class ElrakningPanel {
       const color = key === "price"
         ? chartColor(priceCategory(value, colorBands) === "cheap" ? "priceCheap" : priceCategory(value, colorBands) === "expensive" ? "priceExpensive" : "priceNormal")
         : chartColor(colorKey);
-      return `<rect class="aggregated-chart-bar aggregated-chart-${key}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
+      return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
     }).join("")).join("");
     const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" /><text class="chart-meter-label" x="8" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(energyMax * ratio)} kWh</text><text class="chart-meter-label" text-anchor="end" x="${width - 4}" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(priceMax * ratio)} öre/kWh</text>`).join("");
-    const labels = data.map((item, index) => `<text class="chart-label" text-anchor="middle" x="${x(index)}" y="${height - 10}">${item.label}</text>`).join("");
-    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}${labels}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg><div class="chart-tooltip" hidden></div>`;
+    const labels = data.map((item, index) => `<text class="chart-label" data-group-index="${index}" text-anchor="middle" x="${x(index)}" y="${height - 10}">${item.label}</text>`).join("");
+    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g><rect class="aggregated-chart-hover-band" x="${plot.left}" y="${plot.top}" width="0" height="${plotHeight}" fill="transparent" aria-hidden="true" />${bars}${labels}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg><div class="chart-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".chart-tooltip");
+    const hoverBand = chart.querySelector(".aggregated-chart-hover-band");
+    const groupNodes = [...svg.querySelectorAll("[data-group-index]")];
+    const clearGroupHover = () => {
+      groupNodes.forEach((node) => node.classList.remove("hovered", "dimmed"));
+      if (hoverBand) {
+        hoverBand.setAttribute("x", String(plot.left));
+        hoverBand.setAttribute("width", "0");
+        hoverBand.setAttribute("fill", "transparent");
+      }
+    };
+    const setGroupHover = (index) => {
+      groupNodes.forEach((node) => {
+        const active = Number(node.dataset.groupIndex) === index;
+        node.classList.toggle("hovered", active);
+        node.classList.toggle("dimmed", !active);
+      });
+      if (hoverBand) {
+        hoverBand.setAttribute("x", String(plot.left + index * xStep));
+        hoverBand.setAttribute("width", String(xStep));
+        hoverBand.setAttribute("fill", "rgba(255,255,255,0.035)");
+      }
+    };
     const show = (event) => {
       const bounds = svg.getBoundingClientRect();
       const viewX = ((event.clientX - bounds.left) / bounds.width) * width;
       const viewY = ((event.clientY - bounds.top) / bounds.height) * height;
-      if (viewX < plot.left || viewX > width - plot.right || viewY < plot.top || viewY > plot.top + plotHeight) { tooltip.hidden = true; return; }
-      const index = Math.max(0, Math.min(data.length - 1, Math.floor((viewX - plot.left) / xStep)));
+      const index = aggregatedPriceGroupIndex(viewX, plot.left, plotWidth, data.length);
+      if (index < 0 || viewY < plot.top || viewY > plot.top + plotHeight) { tooltip.hidden = true; clearGroupHover(); return; }
+      setGroupHover(index);
       const item = data[index];
       const fields = [];
       if (layers.spot && Number.isFinite(item.price)) fields.push({ label: "Pris", value: item.price, formatted: `${this.formatPrice(item.price)} öre/kWh` });
@@ -8898,7 +8947,7 @@ class ElrakningPanel {
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("mousemove", show);
-    svg.addEventListener("mouseleave", () => { tooltip.hidden = true; });
+    svg.addEventListener("mouseleave", () => { tooltip.hidden = true; clearGroupHover(); });
   }
 
   _renderHourlyPriceChart(options = {}) {
