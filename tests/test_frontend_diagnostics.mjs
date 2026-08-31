@@ -112,6 +112,12 @@ assert.equal(costEdgeSeries.actual_display.at(-1).value > costEdgeSeries.actual.
 assert.equal(costEdgeSeries.forecast_future.length, 0);
 assert.equal(costEdgeSeries.previous.length, 0);
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+assert.match(eonPanelSource, /data-card-source="price"/);
+assert.match(eonPanelSource, /_buildPriceSourceData\(\)/);
+assert.match(eonPanelSource, /visible_series/);
+assert.match(eonPanelSource, /priceAggregation/);
+assert.match(eonPanelSource, /duration_weighted_average/);
+assert.match(eonPanelSource, /axes: mode === "hour"/);
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
 assert.doesNotMatch(eonPanelSource, /Vad har vi för data\?/);
 assert.doesNotMatch(eonPanelSource, /data-provider-card="(?:elmatare|solar|battery)"/);

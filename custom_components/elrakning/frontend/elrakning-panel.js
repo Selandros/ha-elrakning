@@ -2031,6 +2031,7 @@ class ElrakningPanel {
             </button>
           </div>
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
+          <button type="button" class="card-source-action price-source-action" data-card-source="price" hidden>Visa data</button>
           <div class="period-picker" data-period-picker>
             <div class="period-picker-control">
               <button type="button" class="period-picker-arrow" data-period-picker-nav="previous" aria-label="Föregående period">‹</button>
@@ -5203,6 +5204,7 @@ class ElrakningPanel {
     const source = this.host.querySelector("[data-provider-source]");
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const meterSource = this.host.querySelector("[data-meter-source]");
+    const priceSource = this.host.querySelector('[data-card-source="price"]');
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
@@ -5210,6 +5212,7 @@ class ElrakningPanel {
     if (source) source.hidden = !this._debugEnabled;
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
+    if (priceSource) priceSource.hidden = !this._debugEnabled;
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
@@ -6449,6 +6452,113 @@ class ElrakningPanel {
     dialog.hidden = false;
   }
 
+  _buildPriceSourceData() {
+    const mode = this._periodPickerState?.mode || "hour";
+    const selected = new Date(this._periodPickerState?.confirmed || new Date());
+    const year = selected.getFullYear();
+    const month = selected.getMonth();
+    const localPeriod = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const selectedPeriod = mode === "hour"
+      ? `${year}-${String(month + 1).padStart(2, "0")}-${String(selected.getDate()).padStart(2, "0")}`
+      : mode === "day" ? localPeriod(selected) : mode === "month" ? String(year) : null;
+    const layers = this._effectiveChartLayerState();
+    const visibleSeries = [
+      layers.spot ? "price" : null,
+      mode === "hour" && layers.average ? "average" : null,
+      layers.import ? "buy" : null,
+      layers.export ? "sell" : null,
+      layers.solar ? "solar" : null,
+      layers.consumption ? "load" : null,
+      layers.charging ? "charging" : null,
+      layers.discharging ? "discharging" : null,
+    ].filter(Boolean);
+    const periodInRange = (period, startMs, endMs) => {
+      const startMsValue = new Date(period.start).getTime();
+      const endMsValue = new Date(period.end).getTime();
+      return Number.isFinite(startMsValue) && Number.isFinite(endMsValue) && startMsValue < endMs && endMsValue > startMs;
+    };
+    const priceSeries = [];
+    const selectedPeriods = [];
+    if (mode === "hour") {
+      const start = new Date(year, month, selected.getDate());
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      this.priceData.periods.forEach((period, index) => {
+        if (!periodInRange(period, start.getTime(), end.getTime())) return;
+        selectedPeriods.push(period);
+        priceSeries.push({
+          timestamp: period.start,
+          end: period.end,
+          value: this._chartBarPrices?.[index] ?? this._comparisonPrice(period),
+          category: priceCategory(this._chartBarPrices?.[index] ?? this._comparisonPrice(period), priceColorBands(this._chartBarPrices || [])),
+          details: this._chartTooltipDetails?.get(index) || null,
+        });
+      });
+    }
+    const canonicalPoints = (points, startMs, endMs) => (Array.isArray(points) ? points : []).filter((point) => {
+      const timestamp = new Date(point.timestamp).getTime();
+      return Number.isFinite(timestamp) && timestamp >= startMs && timestamp < endMs;
+    });
+    let series;
+    let groups;
+    let priceAggregation;
+    let coverage;
+    let display;
+    if (mode === "hour") {
+      const current = this.priceData.periods.find((period) => new Date(period.start) <= new Date() && new Date() < new Date(period.end));
+      const values = selectedPeriods.map((period) => this._comparisonPrice(period)).filter(Number.isFinite);
+      series = {
+        price: layers.spot ? priceSeries : [],
+        average: layers.average ? [{ value: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null }] : [],
+        buy: layers.import ? canonicalPoints(this._meterCanonicalPoints.map((point) => ({ ...point, value_kw: point.import_kw })), new Date(year, month, selected.getDate()).getTime(), new Date(year, month, selected.getDate() + 1).getTime()) : [],
+        sell: layers.export ? canonicalPoints(this._meterCanonicalPoints.map((point) => ({ ...point, value_kw: point.export_kw })), new Date(year, month, selected.getDate()).getTime(), new Date(year, month, selected.getDate() + 1).getTime()) : [],
+      };
+      for (const [key, sourceKey] of [["solar", "solar"], ["load", "consumption"], ["charging", "charging"], ["discharging", "discharging"]]) {
+        if (layers[sourceKey]) series[key] = canonicalPoints(this._powerCanonicalPoints?.[sourceKey], new Date(year, month, selected.getDate()).getTime(), new Date(year, month, selected.getDate() + 1).getTime());
+      }
+      const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+      display = { current_price_ore_per_kwh: current ? this._comparisonPrice(current) : null, average_ore_per_kwh: average, lowest_ore_per_kwh: values.length ? Math.min(...values) : null, highest_ore_per_kwh: values.length ? Math.max(...values) : null };
+      priceAggregation = { method: "existing_hourly_price_series", trade_enabled: this._priceComparisonVisible.electricity, grid_enabled: this._priceComparisonVisible.grid, period_count: selectedPeriods.length, valid_period_count: values.length, missing_period_count: selectedPeriods.length - values.length, unit: "ore/kWh" };
+      coverage = { period_count: selectedPeriods.length, valid_period_count: values.length };
+    } else {
+      const data = aggregatePriceAndEnergyByPeriod(this.priceData.periods, this._meterPowerHistory?.points, this._powerHistory?.series, mode, selected, (period) => this._comparisonPrice(period));
+      groups = data.map((item) => ({ period: item.label, price_average_ore_per_kwh: item.price, buy_kwh: item.energy.import ?? null, sell_kwh: item.energy.export ?? null, solar_kwh: item.energy.solar ?? null, load_kwh: item.energy.consumption ?? null, charging_kwh: item.energy.charging ?? null, discharging_kwh: item.energy.discharging ?? null }));
+      series = {};
+      for (const key of visibleSeries.filter((value) => value !== "price")) series[key] = groups.map((group) => ({ period: group.period, value: group[`${key === "buy" ? "buy" : key === "sell" ? "sell" : key}_kwh`] ?? null })).filter((point) => point.value !== null);
+      if (layers.spot) series.price = groups.map((group) => ({ period: group.period, value: group.price_average_ore_per_kwh })).filter((point) => point.value !== null);
+      const priceValues = data.map((item) => item.price).filter(Number.isFinite);
+      const weightedDuration = data.reduce((sum, item) => sum + (Number.isFinite(item.price) ? Number(item.price_duration_ms || 0) : 0), 0);
+      const average = weightedDuration ? data.reduce((sum, item) => sum + (Number.isFinite(item.price) ? item.price * Number(item.price_duration_ms || 0) : 0), 0) / weightedDuration : null;
+      display = { current_price_ore_per_kwh: null, average_ore_per_kwh: average, lowest_ore_per_kwh: priceValues.length ? Math.min(...priceValues) : null, highest_ore_per_kwh: priceValues.length ? Math.max(...priceValues) : null };
+      const rangeStart = mode === "day" ? new Date(year, month, 1).getTime() : new Date(year, 0, 1).getTime();
+      const rangeEnd = mode === "day" ? new Date(year, month + 1, 1).getTime() : new Date(year + 1, 0, 1).getTime();
+      const relevantPeriods = this.priceData.periods.filter((period) => mode === "year" || periodInRange(period, rangeStart, rangeEnd));
+      const validPeriods = relevantPeriods.filter((period) => Number.isFinite(this._comparisonPrice(period)));
+      priceAggregation = { method: "duration_weighted_average", trade_enabled: this._priceComparisonVisible.electricity, grid_enabled: this._priceComparisonVisible.grid, period_count: relevantPeriods.length, valid_period_count: validPeriods.length, missing_period_count: relevantPeriods.length - validPeriods.length, unit: "ore/kWh" };
+      coverage = { group_count: groups.length, period: selectedPeriod, available_groups: groups.map((group) => group.period) };
+    }
+    const sourceEntities = {
+      buy: [this._meterState?.energy_import_entity].filter(Boolean),
+      sell: [this._meterState?.energy_export_entity].filter(Boolean),
+      solar: [this._powerState?.solar_entity].filter(Boolean),
+      load: [this._powerState?.consumption_entity].filter(Boolean),
+      charging: [this._powerState?.charging_entity].filter(Boolean),
+      discharging: [this._powerState?.discharging_entity].filter(Boolean),
+    };
+    return {
+      card: "price",
+      mode,
+      period: selectedPeriod,
+      display,
+      price: { series: series.price || [], aggregation: priceAggregation },
+      energy: mode === "hour" ? { series, unit: "kW" } : { groups, unit: "kWh" },
+      axes: mode === "hour" ? { price: { unit: "öre/kWh", side: "left" }, energy: { unit: "kW", side: "right" } } : { energy: { unit: "kWh", side: "left" }, price: { unit: "öre/kWh", side: "right" } },
+      coverage,
+      provenance: Object.fromEntries(Object.entries(sourceEntities).map(([key, entities]) => [key, { method: key === "buy" || key === "sell" ? "canonical_meter_history" : "canonical_power_history", source_entities: entities }])),
+      visible_series: visibleSeries,
+    };
+  }
+
   _bindMeterSourceDialog() {
     const open = this.host.querySelector("[data-meter-source]");
     if (!open) return;
@@ -6840,7 +6950,9 @@ class ElrakningPanel {
           : isEon
           ? await this.hass.callWS({ type: "elrakning/grid/source_data" })
           : cardSource
-          ? cardSource === "cost"
+          ? cardSource === "price"
+            ? this._buildPriceSourceData()
+            : cardSource === "cost"
             ? {
               source: cardSource,
               invoice_estimate: this._invoiceEstimateRaw,
@@ -6860,7 +6972,7 @@ class ElrakningPanel {
             ),
           };
         }
-        const providerName = liveSource ? liveSourceName : source.provider_name || source.facility?.provider_name;
+        const providerName = liveSource ? liveSourceName : source.provider_name || source.facility?.provider_name || (cardSource === "price" ? "Dagens elpris" : "");
         if (typeof providerName === "string" && providerName.trim()) {
           provider.textContent = `Källa: ${providerName.trim()}`;
           provider.hidden = false;
