@@ -624,8 +624,8 @@ export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = 
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const plot = dualAxis
-    ? { left: 40, right: 64, top: 30, bottom: 24 }
-    : { left: 40, right: 8, top: 42, bottom: 24 };
+    ? { left: 40, right: 64, top: 30, bottom: 16 }
+    : { left: 40, right: 8, top: 42, bottom: 16 };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
