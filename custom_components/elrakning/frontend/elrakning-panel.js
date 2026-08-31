@@ -3380,8 +3380,9 @@ class ElrakningPanel {
         .phase-history-heading {
           align-items: center;
           display: flex;
-          gap: 16px;
-          justify-content: space-between;
+          column-gap: 10px;
+          justify-content: flex-start;
+          row-gap: 6px;
           flex-wrap: wrap;
         }
 
@@ -3392,9 +3393,11 @@ class ElrakningPanel {
 
         .phase-history-metric-selector {
           display: flex;
-          flex-wrap: wrap;
+          flex: 0 0 auto;
+          flex-wrap: nowrap;
           gap: 6px;
           margin-left: auto;
+          min-width: 0;
         }
 
         .phase-history-metric-selector button {
@@ -3416,8 +3419,10 @@ class ElrakningPanel {
         .phase-history-summary {
           align-items: center;
           display: flex;
+          flex: 0 1 auto;
           gap: 8px;
           flex-wrap: wrap;
+          min-width: 0;
           margin: 0;
         }
 
@@ -3562,14 +3567,8 @@ class ElrakningPanel {
         }
 
         @media (max-width: 600px) {
-          .phase-history-heading {
-            display: block;
-          }
-
           .phase-history-metric-selector {
             gap: 4px;
-            justify-content: flex-start;
-            margin: 8px 0 0;
           }
 
           .phase-history-metric-selector button {
@@ -4097,38 +4096,6 @@ class ElrakningPanel {
         }
 
         @media (max-width: 600px) {
-          .price-section .period-picker {
-            align-items: center;
-            bottom: auto;
-            flex-direction: column;
-            gap: 8px;
-            left: auto;
-            max-width: 100%;
-            position: static;
-            right: auto;
-            width: 100%;
-          }
-
-          .price-section .period-picker-modes {
-            box-sizing: border-box;
-            display: flex;
-            gap: 4px;
-            order: 1;
-            padding: 2px;
-            width: fit-content;
-            max-width: 100%;
-          }
-
-          .price-section .period-picker-control {
-            box-sizing: border-box;
-            display: flex;
-            gap: 4px;
-            order: 2;
-            padding: 2px;
-            width: fit-content;
-            max-width: 100%;
-          }
-
           .price-section .period-picker button {
             box-sizing: border-box;
             flex: 0 0 auto;
@@ -4216,39 +4183,16 @@ class ElrakningPanel {
 
         .period-picker {
           align-items: center;
-          bottom: 10px;
           display: flex;
-          gap: 6px;
-          max-width: calc(100% - 40px);
-          position: absolute;
-          right: 20px;
+          flex-direction: row-reverse;
+          flex-wrap: wrap;
+          gap: 6px 8px;
+          justify-content: flex-start;
+          margin-top: 12px;
+          max-width: 100%;
+          position: static;
+          width: 100%;
           z-index: 3;
-        }
-
-        @container price-card (max-width: 900px) {
-          .price-section .period-picker {
-            align-items: center;
-            bottom: auto;
-            flex-direction: column;
-            gap: 8px;
-            left: auto;
-            max-width: 100%;
-            position: static;
-            right: auto;
-            width: 100%;
-          }
-
-          .price-section .period-picker-modes {
-            order: 1;
-            width: fit-content;
-            max-width: 100%;
-          }
-
-          .price-section .period-picker-control {
-            order: 2;
-            width: fit-content;
-            max-width: 100%;
-          }
         }
 
         .period-picker-control,
@@ -4256,8 +4200,13 @@ class ElrakningPanel {
         .period-picker-actions {
           align-items: center;
           display: flex;
+          flex: 0 0 auto;
           gap: 4px;
+          white-space: nowrap;
         }
+
+        .period-picker-control { order: 2; }
+        .period-picker-modes { order: 1; }
 
         .period-picker-control,
         .period-picker-modes {
