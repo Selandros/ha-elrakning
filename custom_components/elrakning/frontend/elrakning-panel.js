@@ -603,7 +603,7 @@ export function selectPhaseTimeTicks(ticks = [], plotWidth = 0, minimumSpacing =
 export function buildPhaseChartGeometry(containerWidth = 960) {
   const width = Math.max(320, Math.round(Number(containerWidth) || 960));
   const compact = width <= 600;
-  const plotLeft = compact ? 58 : 56;
+  const plotLeft = compact ? 12 : 12;
   const plotRight = compact ? 10 : 12;
   const plotTop = 12;
   const plotWidth = Math.max(1, width - plotLeft - plotRight);
