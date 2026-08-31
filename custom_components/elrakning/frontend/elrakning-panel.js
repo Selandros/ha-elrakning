@@ -592,6 +592,14 @@ export function phaseHistoryAxisEnd(points = []) {
     .reduce((latest, timestamp) => Math.max(latest, timestamp), null);
 }
 
+export function selectPhaseTimeTicks(ticks = [], plotWidth = 0, minimumSpacing = 56) {
+  const values = [...new Set((Array.isArray(ticks) ? ticks : []).map(Number).filter(Number.isFinite))].sort((left, right) => left - right);
+  if (values.length <= 2) return values;
+  const maxVisible = Math.max(2, Math.floor(Math.max(1, Number(plotWidth) || 1) / Math.max(1, Number(minimumSpacing) || 1)) + 1);
+  if (values.length <= maxVisible) return values;
+  return Array.from({ length: maxVisible }, (_, index) => values[Math.round(index * (values.length - 1) / (maxVisible - 1))]);
+}
+
 /** Convert a browser pointer to the SVG viewBox and plot coordinate systems. */
 export function pointerToPlotCoordinates(svg, event, plot, width, height) {
   const bounds = svg?.getBoundingClientRect?.();
@@ -3539,6 +3547,36 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: 11px;
           margin-left: 8px;
+        }
+
+        @media (max-width: 600px) {
+          .phase-history-heading {
+            display: block;
+          }
+
+          .phase-history-metric-selector {
+            gap: 4px;
+            justify-content: flex-start;
+            margin: 8px 0 0;
+          }
+
+          .phase-history-metric-selector button {
+            padding: 3px 7px;
+          }
+
+          .phase-history-chart {
+            margin-top: 10px;
+            min-height: 0;
+            padding-bottom: 24px;
+          }
+
+          .phase-history-axis-overlay {
+            bottom: 24px;
+          }
+
+          .phase-history-axis-overlay .phase-history-time-label {
+            bottom: -20px;
+          }
         }
 
         .source-provider {
@@ -8203,9 +8241,11 @@ class ElrakningPanel {
       chart.innerHTML = cardAvailable ? '<div class="phase-history-empty">Välj minst en fas</div>' : "";
       return;
     }
-    const width = 960;
-    const height = 300;
-    const plot = { left: 44, right: 8, top: 12, bottom: 24 };
+    const renderedWidth = chart.clientWidth || 960;
+    const compact = renderedWidth <= 600;
+    const width = compact ? 640 : 960;
+    const height = compact ? 240 : 300;
+    const plot = compact ? { left: 86, right: 12, top: 12, bottom: 38 } : { left: 44, right: 8, top: 12, bottom: 24 };
     const allPoints = Object.values(rawPhasePoints).flat();
     const timestamps = allPoints.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
     const minTime = Math.min(...timestamps);
@@ -8230,7 +8270,7 @@ class ElrakningPanel {
       this._phaseRenderSignature = "empty";
       return;
     }
-    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints });
+    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints, compact, renderedWidth });
     if (renderSignature === this._phaseRenderSignature && chart.querySelector(".phase-history-svg")) return;
     this._phaseRenderSignature = renderSignature;
     const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
@@ -8265,7 +8305,10 @@ class ElrakningPanel {
       : "";
     const zero = metric === "active_power" ? `<line class="phase-history-zero-line" x1="${plot.left}" y1="${y(0)}" x2="${width - plot.right}" y2="${y(0)}" /><text class="phase-history-reference-label" x="${width - plot.right - 4}" y="${y(0) - 4}" text-anchor="end">0 kW</text>` : "";
     const tickCount = useDayAxis ? 8 : 6;
-    const timeTicks = Array.from({ length: tickCount + 1 }, (_, index) => axisStart + timeRange * index / tickCount);
+    const candidateTimeTicks = Array.from({ length: tickCount + 1 }, (_, index) => axisStart + timeRange * index / tickCount);
+    const timeTicks = compact
+      ? selectPhaseTimeTicks(candidateTimeTicks, width - plot.left - plot.right)
+      : candidateTimeTicks;
     const timeAxis = timeTicks.map((timestamp, index) => {
       const date = new Date(timestamp);
       const labelText = useDayAxis ? date.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" });
