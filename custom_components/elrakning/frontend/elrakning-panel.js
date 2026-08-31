@@ -4756,6 +4756,7 @@ class ElrakningPanel {
   _bindPeriodPicker() {
     const root = this.host.querySelector("[data-period-picker]");
     if (!root) return;
+    root.addEventListener("click", (event) => event.stopPropagation());
     const close = () => {
       this._periodPickerState.open = false;
       this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);

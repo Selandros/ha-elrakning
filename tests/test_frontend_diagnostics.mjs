@@ -44,6 +44,7 @@ const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/f
 const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindPeriodPicker()"), pickerPanelSource.indexOf("  _chartLayerState()"));
 assert.doesNotMatch(pickerSource, /callWS|selectedMonth|renderPriceChart\(/);
 assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
+assert.match(pickerPanelSource, /root\.addEventListener\("click", \(event\) => event\.stopPropagation\(\)\)/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
 assert.match(pickerPanelSource, /\.price-section \{[\s\S]*overflow: visible/);
 const costSeries = buildCostAnalysisSeries({
