@@ -4213,6 +4213,32 @@ class ElrakningPanel {
           z-index: 3;
         }
 
+        @container price-card (max-width: 900px) {
+          .price-section .period-picker {
+            align-items: center;
+            bottom: auto;
+            flex-direction: column;
+            gap: 8px;
+            left: auto;
+            max-width: 100%;
+            position: static;
+            right: auto;
+            width: 100%;
+          }
+
+          .price-section .period-picker-modes {
+            order: 1;
+            width: fit-content;
+            max-width: 100%;
+          }
+
+          .price-section .period-picker-control {
+            order: 2;
+            width: fit-content;
+            max-width: 100%;
+          }
+        }
+
         .period-picker-control,
         .period-picker-modes,
         .period-picker-actions {
