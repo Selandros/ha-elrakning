@@ -600,6 +600,18 @@ export function selectPhaseTimeTicks(ticks = [], plotWidth = 0, minimumSpacing =
   return Array.from({ length: maxVisible }, (_, index) => values[Math.round(index * (values.length - 1) / (maxVisible - 1))]);
 }
 
+export function buildPhaseChartGeometry(containerWidth = 960) {
+  const width = Math.max(320, Math.round(Number(containerWidth) || 960));
+  const compact = width <= 600;
+  const plotLeft = compact ? 58 : 56;
+  const plotRight = compact ? 10 : 12;
+  const plotTop = 12;
+  const plotWidth = Math.max(1, width - plotLeft - plotRight);
+  const height = Math.round(Math.min(300, Math.max(160, plotWidth * (compact ? 0.38 : 0.28))));
+  const plotBottom = compact ? 34 : 24;
+  return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact };
+}
+
 /** Convert a browser pointer to the SVG viewBox and plot coordinate systems. */
 export function pointerToPlotCoordinates(svg, event, plot, width, height) {
   const bounds = svg?.getBoundingClientRect?.();
@@ -3455,7 +3467,7 @@ class ElrakningPanel {
 
         .phase-history-chart {
           margin-top: 16px;
-          min-height: 180px;
+          min-height: 0;
           overflow-anchor: none;
           position: relative;
         }
@@ -8268,10 +8280,9 @@ class ElrakningPanel {
       return;
     }
     const renderedWidth = chart.clientWidth || 960;
-    const compact = renderedWidth <= 600;
-    const width = compact ? 640 : 960;
-    const height = compact ? 240 : 300;
-    const plot = compact ? { left: 86, right: 12, top: 12, bottom: 38 } : { left: 44, right: 8, top: 12, bottom: 24 };
+    const geometry = buildPhaseChartGeometry(renderedWidth);
+    const { width, height, compact } = geometry;
+    const plot = { left: geometry.plotLeft, right: geometry.plotRight, top: geometry.plotTop, bottom: geometry.plotBottom };
     const allPoints = Object.values(rawPhasePoints).flat();
     const timestamps = allPoints.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
     const minTime = Math.min(...timestamps);
@@ -8296,7 +8307,7 @@ class ElrakningPanel {
       this._phaseRenderSignature = "empty";
       return;
     }
-    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints, compact, renderedWidth });
+    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints, geometry });
     if (renderSignature === this._phaseRenderSignature && chart.querySelector(".phase-history-svg")) return;
     this._phaseRenderSignature = renderSignature;
     const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
@@ -8332,9 +8343,7 @@ class ElrakningPanel {
     const zero = metric === "active_power" ? `<line class="phase-history-zero-line" x1="${plot.left}" y1="${y(0)}" x2="${width - plot.right}" y2="${y(0)}" /><text class="phase-history-reference-label" x="${width - plot.right - 4}" y="${y(0) - 4}" text-anchor="end">0 kW</text>` : "";
     const tickCount = useDayAxis ? 8 : 6;
     const candidateTimeTicks = Array.from({ length: tickCount + 1 }, (_, index) => axisStart + timeRange * index / tickCount);
-    const timeTicks = compact
-      ? selectPhaseTimeTicks(candidateTimeTicks, width - plot.left - plot.right)
-      : candidateTimeTicks;
+    const timeTicks = selectPhaseTimeTicks(candidateTimeTicks, geometry.plotWidth, compact ? 56 : 90);
     const timeAxis = timeTicks.map((timestamp, index) => {
       const date = new Date(timestamp);
       const labelText = useDayAxis ? date.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString("sv-SE", { day: "2-digit", month: "2-digit" });
