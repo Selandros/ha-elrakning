@@ -5137,13 +5137,6 @@ class ElrakningPanel {
       this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);
       this._renderPeriodPicker();
     };
-    root.querySelector("[data-period-picker-open]")?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this._periodPickerState.open = !this._periodPickerState.open;
-      this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);
-      this._periodPickerState.cursor = new Date(this._periodPickerState.draft.getFullYear(), this._periodPickerState.draft.getMonth(), 1);
-      this._renderPeriodPicker();
-    });
     root.querySelectorAll("[data-period-picker-mode]").forEach((button) => button.addEventListener("click", () => {
       this._periodPickerState.mode = button.dataset.periodPickerMode;
       if (this._soloChartLayer === "average" && this._periodPickerState.mode !== "hour") {
@@ -5168,7 +5161,15 @@ class ElrakningPanel {
     const handlePickerClick = (event) => {
       if (event.__periodPickerHandled) return;
       event.__periodPickerHandled = true;
-      if (event.target.closest?.("[data-period-picker-open]")) return;
+      const periodPickerOpen = event.target.closest?.("[data-period-picker-open]");
+      if (periodPickerOpen) {
+        this._periodPickerState.open = !this._periodPickerState.open;
+        this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);
+        this._periodPickerState.cursor = new Date(this._periodPickerState.draft.getFullYear(), this._periodPickerState.draft.getMonth(), 1);
+        event.stopPropagation();
+        this._renderPeriodPicker();
+        return;
+      }
       if (dialog.open) {
         const rect = dialog.getBoundingClientRect();
         const outside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
