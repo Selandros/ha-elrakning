@@ -1048,6 +1048,47 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   };
 }
 
+export function buildCostAnalysisSeries(estimate, previousActual = null, now = new Date()) {
+  const current = new Date(now);
+  const year = current.getFullYear();
+  const monthIndex = current.getMonth();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const actualPoints = [{ day: 1, value: 0 }];
+  let cumulative = 0;
+  for (const row of Array.isArray(estimate?.rows) ? [...estimate.rows].sort((left, right) => new Date(left.end).getTime() - new Date(right.end).getTime()) : []) {
+    const timestamp = new Date(row.end || row.start).getTime();
+    const value = Number(row.trade_cost_sek) + Number(row.grid_cost_sek);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
+    cumulative += value;
+    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, new Date(timestamp).getDate())), value: cumulative });
+  }
+  if (Number.isFinite(Number(estimate?.total_so_far_sek))) {
+    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, current.getDate())), value: Number(estimate.total_so_far_sek) });
+  }
+  const dedupe = (points) => [...new Map(points.map((point) => [point.day, point])).values()].sort((left, right) => left.day - right.day);
+  const actual = dedupe(actualPoints);
+  const actualLast = actual.at(-1) || { day: 1, value: 0 };
+  const forecastTotal = Number(estimate?.estimated_month_total_sek);
+  const forecast = Number.isFinite(forecastTotal) && forecastTotal >= actualLast.value
+    ? [actualLast, { day: daysInMonth, value: forecastTotal }]
+    : [];
+  const previousCandidates = previousActual?.cumulative_points || previousActual?.chart_points;
+  const previous = Array.isArray(previousCandidates)
+    ? dedupe(previousCandidates.map((point) => ({ day: Number(point.day), value: Number(point.value) })).filter((point) => Number.isFinite(point.day) && Number.isFinite(point.value) && point.day >= 1))
+    : [];
+  return {
+    month: estimate?.month || null,
+    days_in_month: daysInMonth,
+    actual,
+    forecast,
+    previous,
+    actual_latest_day: actualLast.day,
+    forecast_available: forecast.length > 0,
+    previous_available: previous.length > 0,
+    method: "cumulative_rows_then_deterministic_remaining_to_month_end",
+  };
+}
+
 export function previousCalendarMonth(month) {
   if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
   const [year, monthNumber] = month.split("-").map(Number);
@@ -1924,9 +1965,12 @@ class ElrakningPanel {
             <button type="button" data-phase-history-copy hidden>Visa data</button>
           </article>
           <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
-            <div class="card-heading"><h2 id="cost-title">Kostnad</h2><span class="status" data-cost-period></span></div>
-            <div class="cost-navigation"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><span data-cost-selected-period></span><button type="button" data-cost-next aria-label="Nästa månad">›</button></div>
-            <div class="cost-summary" data-cost-summary></div>
+            <div class="card-heading"><div><h2 id="cost-title">Kostnad</h2><span class="cost-period" data-cost-period></span></div><span class="status" data-cost-status></span></div>
+            <div class="cost-navigation" hidden aria-hidden="true"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><span data-cost-selected-period></span><button type="button" data-cost-next aria-label="Nästa månad">›</button></div>
+            <div class="cost-kpis" data-cost-kpis></div>
+            <div class="cost-chart" data-cost-chart aria-live="polite"></div>
+            <div class="cost-comparison" data-cost-comparison></div>
+            <div class="cost-details" data-cost-summary></div>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>
         </div>
@@ -3021,6 +3065,83 @@ class ElrakningPanel {
           min-width: 0;
         }
 
+        .cost-period {
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: var(--card-legend-size);
+          margin-top: 3px;
+        }
+
+        .cost-kpis {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 16px;
+        }
+
+        .cost-kpi,
+        .cost-detail {
+          min-width: 0;
+        }
+
+        .cost-kpi span,
+        .cost-comparison-label,
+        .cost-detail span {
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: var(--card-legend-size);
+        }
+
+        .cost-kpi strong {
+          display: block;
+          font-size: 1.2rem;
+          font-weight: 600;
+          margin-top: 3px;
+        }
+
+        .cost-chart {
+          min-height: 190px;
+          margin-top: 18px;
+          position: relative;
+        }
+
+        .cost-chart-svg {
+          display: block;
+          height: 190px;
+          overflow: visible;
+          width: 100%;
+        }
+
+        .cost-chart-axis-label,
+        .cost-chart-x-label {
+          fill: var(--secondary-text-color);
+          font-size: 12px;
+          opacity: .78;
+        }
+
+        .cost-chart-gridline { stroke: var(--divider-color); stroke-width: 1; opacity: .45; }
+        .cost-chart-actual { fill: none; stroke: var(--primary-color); stroke-width: 2.5; }
+        .cost-chart-forecast { fill: none; stroke: var(--secondary-text-color); stroke-dasharray: 5 4; stroke-width: 2; }
+        .cost-chart-previous { fill: none; stroke: var(--neutral-color, #8590A6); opacity: .55; stroke-width: 1.5; }
+        .cost-chart-marker { fill: var(--primary-color); }
+
+        .cost-comparison {
+          color: var(--primary-text-color);
+          margin-top: 10px;
+          min-height: 1.2em;
+        }
+
+        .cost-comparison-value { font-weight: 600; margin-top: 2px; }
+
+        .cost-details {
+          display: grid;
+          gap: 8px 18px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          margin-top: 18px;
+        }
+
+        .cost-detail strong { font-weight: 500; }
+
         .cost-summary {
           display: grid;
           gap: 8px 14px;
@@ -3058,6 +3179,11 @@ class ElrakningPanel {
         .cost-summary strong {
           font-weight: 500;
           text-align: right;
+        }
+
+        @container (max-width: 600px) {
+          .cost-kpis { gap: 8px; }
+          .cost-kpi strong { font-size: 1rem; }
         }
 
         .card-source-action {
@@ -6556,11 +6682,13 @@ class ElrakningPanel {
     );
     if (!this._costSelectedMonth || this._costSelectedMonth > estimate.month) this._costSelectedMonth = estimate.month;
     const comparison = buildInvoiceComparison(estimate, previousActual);
+    const costAnalysis = buildCostAnalysisSeries(estimate, previousActual);
     this._invoiceEstimateRaw = {
       ...estimate,
       current_estimate: estimate,
       previous_month_actual: previousActual,
       comparison,
+      cost_analysis: costAnalysis,
       provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: this._eonGridPrice || billingHistory.grid_price }),
     };
     card._livePowerRaw = this._invoiceEstimateRaw;
@@ -6586,46 +6714,136 @@ class ElrakningPanel {
   _renderCostCard() {
     const card = this.host.querySelector("[data-cost-card]");
     const period = this.host.querySelector("[data-cost-period]");
+    const status = this.host.querySelector("[data-cost-status]");
+    const kpis = this.host.querySelector("[data-cost-kpis]");
+    const chart = this.host.querySelector("[data-cost-chart]");
+    const comparisonElement = this.host.querySelector("[data-cost-comparison]");
     const summary = this.host.querySelector("[data-cost-summary]");
     const selectedPeriod = this.host.querySelector("[data-cost-selected-period]");
     const previousButton = this.host.querySelector("[data-cost-previous]");
     const nextButton = this.host.querySelector("[data-cost-next]");
-    if (!card || !period || !summary) return;
+    if (!card || !period || !status || !kpis || !chart || !comparisonElement || !summary) return;
     const estimate = this._invoiceEstimateRaw;
     const currentMonth = estimate?.month || null;
     const selectedMonth = this._costSelectedMonth || currentMonth;
     const previous = estimate?.previous_month_actual;
     const showingCurrent = selectedMonth === currentMonth;
-    const rows = showingCurrent ? [
-      ["Status", estimate?.forecast_confidence === "partial_data" ? "Delvis underlag" : "Estimerad"],
-      ["Estimerad månad", Number.isFinite(Number(estimate?.estimated_month_total_sek)) ? this._formatSek(Number(estimate.estimated_month_total_sek)) : null],
-      ["Kostnad hittills", Number.isFinite(Number(estimate?.total_so_far_sek)) ? this._formatSek(Number(estimate.total_so_far_sek)) : null],
-      ["Prognos återstående", Number.isFinite(Number(estimate?.forecast_remaining_total_sek)) ? this._formatSek(Number(estimate.forecast_remaining_total_sek)) : null],
-      ["Elhandel", Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? this._formatSek(Number(estimate.trade.total_so_far_sek)) : null],
-      ["Elnät", Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? this._formatSek(Number(estimate.grid.total_so_far_sek)) : null],
-      ["Fast kostnad", Number.isFinite(Number(estimate?.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate?.grid?.accrued_fixed_fee_sek)) ? this._formatSek((Number(estimate?.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate?.grid?.accrued_fixed_fee_sek) || 0)) : null],
-      ["Rörlig kostnad", Number.isFinite(Number(estimate?.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate?.grid?.variable_cost_sek)) ? this._formatSek((Number(estimate?.trade?.variable_cost_sek) || 0) + (Number(estimate?.grid?.variable_cost_sek) || 0)) : null],
-      ["Importerad energi", Number.isFinite(Number(estimate?.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
-      ["Prognostiserad import", Number.isFinite(Number(estimate?.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
-      ["Genomsnittligt totalpris", Number.isFinite(Number(estimate?.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
-    ] : previous?.month === selectedMonth ? [
-      ["Status", previous.coverage === "complete" ? "Fakturerad" : "Delvis underlag"],
-      ["Elhandel", Number.isFinite(Number(previous.trade?.comparison_value_sek)) ? this._formatSek(Number(previous.trade.comparison_value_sek)) : null],
-      ["Elnät", Number.isFinite(Number(previous.grid?.comparison_value_sek)) ? this._formatSek(Number(previous.grid.comparison_value_sek)) : null],
-      ["Total", Number.isFinite(Number(previous.total_sek)) ? this._formatSek(Number(previous.total_sek)) : null],
-    ] : [["Status", "Data saknas"]];
-    card.hidden = !estimate || !rows.length;
+    card.hidden = !estimate;
     period.textContent = selectedMonth ? this._formatInvoiceMonth(selectedMonth) : "";
     if (selectedPeriod) selectedPeriod.textContent = period.textContent;
     if (previousButton) previousButton.disabled = !selectedMonth;
     if (nextButton) nextButton.disabled = !selectedMonth || selectedMonth >= currentMonth;
-    summary.replaceChildren(...rows.flatMap(([label, value]) => {
+    if (!estimate) {
+      status.textContent = "";
+      kpis.replaceChildren();
+      chart.replaceChildren();
+      comparisonElement.replaceChildren();
+      summary.replaceChildren();
+      return;
+    }
+    const currentRows = showingCurrent ? [
+      ["Estimerad månad", estimate.estimated_month_total_sek],
+      ["Kostnad hittills", estimate.total_so_far_sek],
+      ["Prognos återstående", estimate.forecast_remaining_total_sek],
+    ] : [];
+    status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : previous?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
+    kpis.replaceChildren(...currentRows.map(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "cost-kpi";
       const name = document.createElement("span");
       name.textContent = label;
       const output = document.createElement("strong");
-      output.textContent = value;
-      return [name, output];
+      output.textContent = Number.isFinite(Number(value)) ? this._formatSek(Number(value)) : "–";
+      item.append(name, output);
+      return item;
     }));
+    const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
+    this._renderCostChart(chart, series);
+    const comparison = showingCurrent ? buildInvoiceComparison(estimate, previous) : { available: false };
+    comparisonElement.replaceChildren();
+    if (comparison.available) {
+      const label = document.createElement("span");
+      label.className = "cost-comparison-label";
+      label.textContent = "Mot förra månaden";
+      const value = document.createElement("div");
+      value.className = "cost-comparison-value";
+      const direction = comparison.difference_sek >= 0 ? "Högre" : "Lägre";
+      const percent = comparison.difference_percent == null ? "" : ` · ${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
+      value.textContent = `${direction} ${this._formatSek(Math.abs(comparison.difference_sek))}${percent}`;
+      comparisonElement.append(label, value);
+    } else if (showingCurrent && previous?.coverage !== "complete") {
+      const label = document.createElement("span");
+      label.className = "cost-comparison-label";
+      label.textContent = "Ingen jämförbar föregående period";
+      comparisonElement.append(label);
+    }
+    const rows = showingCurrent ? [
+      ["Elhandel", estimate.trade?.total_so_far_sek],
+      ["Elnät", estimate.grid?.total_so_far_sek],
+      ["Fast kostnad", Number.isFinite(Number(estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
+      ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
+      ["Importerad energi", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
+      ["Prognostiserad import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
+      ["Genomsnittligt totalpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
+    ] : previous?.month === selectedMonth ? [
+      ["Elhandel", previous.trade?.comparison_value_sek],
+      ["Elnät", previous.grid?.comparison_value_sek],
+      ["Total", previous.total_sek],
+    ] : [];
+    summary.replaceChildren(...rows.filter(([, value]) => value != null && (typeof value !== "number" || Number.isFinite(value))).map(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "cost-detail";
+      const name = document.createElement("span");
+      name.textContent = label;
+      const output = document.createElement("strong");
+      output.textContent = typeof value === "string" ? value : this._formatSek(Number(value));
+      item.append(name, output);
+      return item;
+    }));
+  }
+
+  _renderCostChart(chart, series) {
+    if (!chart) return;
+    if (!series.actual.length && !series.forecast.length && !series.previous.length) {
+      chart.replaceChildren();
+      return;
+    }
+    const width = 960;
+    const height = 190;
+    const plot = { left: 48, right: 12, top: 12, bottom: 28 };
+    const all = [...series.actual, ...series.forecast, ...series.previous].filter((point) => Number.isFinite(point.value));
+    const max = Math.max(1, ...all.map((point) => point.value));
+    const x = (day) => plot.left + ((day - 1) / Math.max(1, series.days_in_month - 1)) * (width - plot.left - plot.right);
+    const y = (value) => plot.top + (1 - value / max) * (height - plot.top - plot.bottom);
+    const path = (points) => points.length < 2 ? "" : points.map((point, index) => `${index ? "L" : "M"} ${x(point.day)} ${y(point.value)}`).join(" ");
+    const grid = [0, .5, 1].map((ratio) => {
+      const value = max * ratio;
+      return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="cost-chart-axis-label" x="4" y="${y(value) + 4}">${this._formatNumber(value)} kr</text>`;
+    }).join("");
+    const xLabels = [1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<text class="cost-chart-x-label" text-anchor="middle" x="${x(day)}" y="${height - 6}">${day}</text>`).join("");
+    chart.innerHTML = `<svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-actual" d="${path(series.actual)}" /><path class="cost-chart-forecast" d="${path(series.forecast)}" /><circle class="cost-chart-marker" cx="${x(series.actual.at(-1).day)}" cy="${y(series.actual.at(-1).value)}" r="4" />${xLabels}<rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg><div class="soc-tooltip" hidden></div>`;
+    const svg = chart.querySelector("svg");
+    const tooltip = chart.querySelector(".soc-tooltip");
+    const nearest = (day) => [...series.actual, ...series.forecast, ...series.previous].reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
+    const clear = () => { tooltip.hidden = true; };
+    svg.addEventListener("pointerleave", clear);
+    svg.addEventListener("pointermove", (event) => {
+      const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
+      if (!pointer?.inside) { clear(); return; }
+      const day = 1 + ((pointer.viewX - plot.left) / Math.max(1, width - plot.left - plot.right)) * (series.days_in_month - 1);
+      const point = nearest(day);
+      if (!point) { clear(); return; }
+      const fields = [];
+      const actual = series.actual.find((item) => item.day === point.day);
+      const forecast = series.forecast.find((item) => item.day === point.day);
+      const previous = series.previous.find((item) => item.day === point.day);
+      if (actual) fields.push({ label: "Faktiskt", value: actual.value, formatted: this._formatSek(actual.value) });
+      if (forecast) fields.push({ label: "Prognos", value: forecast.value, formatted: this._formatSek(forecast.value) });
+      if (previous) fields.push({ label: "Förra månaden", value: previous.value, formatted: this._formatSek(previous.value) });
+      renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "") .split(" ")[0]}`, fields });
+      tooltip.hidden = false;
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
+    });
   }
 
   _bindCostCard() {
