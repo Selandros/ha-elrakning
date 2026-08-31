@@ -620,14 +620,52 @@ export function buildPhaseChartGeometry(containerWidth = 960, { metric = "curren
   return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact, axisLabelGutter: plotLeft };
 }
 
-export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = false, containerWidth = width } = {}) {
+export function priceAxisGutter(labels = [], gap = 8) {
+  const widestLabel = (Array.isArray(labels) ? labels : [])
+    .map((label) => String(label ?? "").length * 7)
+    .reduce((max, width) => Math.max(max, width), 0);
+  return Math.max(1, Math.ceil(widestLabel + gap));
+}
+
+function measuredPriceAxisGutter(chart, labels, gap = 8) {
+  if (!chart || typeof document === "undefined") return priceAxisGutter(labels, gap);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return priceAxisGutter(labels, gap);
+  const style = getComputedStyle(chart);
+  context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const widestLabel = (Array.isArray(labels) ? labels : [])
+    .map((label) => context.measureText(String(label ?? "")).width)
+    .reduce((max, width) => Math.max(max, width), 0);
+  return Math.max(1, Math.ceil(widestLabel + gap));
+}
+
+export function buildHourlyBoundaryHours(containerWidth = 960) {
+  const width = Number(containerWidth) || 960;
+  const step = width >= 760 ? 1 : width >= 480 ? 3 : 6;
+  return Array.from({ length: 25 }, (_, hour) => hour)
+    .filter((hour) => hour === 0 || hour === 24 || hour % step === 0);
+}
+
+export function buildPriceChartGeometry(width = 960, height = 350, {
+  dualAxis = false,
+  containerWidth = width,
+  leftAxisLabels = ["0 kW", "5 kW", "10 kW"],
+  rightAxisLabels = dualAxis ? ["0 öre/kWh", "100 öre/kWh"] : [],
+  leftAxisGutter = null,
+  rightAxisGutter = null,
+} = {}) {
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const renderedWidth = Math.max(320, Number(containerWidth) || chartWidth);
   const xAxisRailHeight = Math.round(16 * chartWidth / renderedWidth);
+  const plotLeft = Number.isFinite(leftAxisGutter) ? leftAxisGutter : priceAxisGutter(leftAxisLabels);
+  const plotRight = Number.isFinite(rightAxisGutter)
+    ? rightAxisGutter
+    : priceAxisGutter(rightAxisLabels);
   const plot = dualAxis
-    ? { left: 40, right: 64, top: 30, bottom: xAxisRailHeight }
-    : { left: 40, right: 8, top: 42, bottom: xAxisRailHeight };
+    ? { left: plotLeft, right: plotRight, top: 30, bottom: xAxisRailHeight }
+    : { left: plotLeft, right: priceAxisGutter(["0"], 8), top: 42, bottom: xAxisRailHeight };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
@@ -4210,23 +4248,23 @@ class ElrakningPanel {
         .price-chart .chart-axis-overlay-y-left {
           left: 0;
           padding-right: 8px;
-          text-align: right;
-          width: 40px;
+          text-align: left;
+          width: var(--price-axis-left-gutter, 1px);
         }
 
         .price-chart .chart-axis-overlay-y-right {
           padding-left: 8px;
           right: 0;
-          width: 64px;
+          width: var(--price-axis-right-gutter, 1px);
         }
 
         @container price-chart (max-width: 520px) {
           .chart-axis-overlay-x-cull { display: none; }
           .price-chart .chart-axis-overlay-y-left {
-            width: 40px;
+            width: var(--price-axis-left-gutter, 1px);
           }
           .price-chart .chart-axis-overlay-y-right {
-            width: 64px;
+            width: var(--price-axis-right-gutter, 1px);
           }
         }
 
@@ -9329,14 +9367,25 @@ class ElrakningPanel {
     this._updateAggregatedPriceSummary(data);
     const width = 960;
     const height = 350;
-    const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || width;
-    this._priceChartRenderedWidth = renderedWidth;
-    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true, containerWidth: renderedWidth });
-    const { plot, plotWidth, plotHeight } = geometry;
     const priceValues = data.map((item) => item.price).filter(Number.isFinite);
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
     const priceMax = Math.max(1, ...priceValues);
     const energyMax = Math.max(1, ...energyValues);
+    const leftAxisLabels = [0, .5, 1].map((ratio) => `${this._formatNumber(energyMax * ratio)} kWh`);
+    const rightAxisLabels = [0, .5, 1].map((ratio) => `${this._formatNumber(priceMax * ratio)} öre/kWh`);
+    const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || width;
+    this._priceChartRenderedWidth = renderedWidth;
+    const geometry = buildPriceChartGeometry(width, height, {
+      dualAxis: true,
+      containerWidth: renderedWidth,
+      leftAxisLabels,
+      rightAxisLabels,
+      leftAxisGutter: measuredPriceAxisGutter(chart, leftAxisLabels),
+      rightAxisGutter: measuredPriceAxisGutter(chart, rightAxisLabels),
+    });
+    chart.style.setProperty("--price-axis-left-gutter", `${geometry.plotLeft}px`);
+    chart.style.setProperty("--price-axis-right-gutter", `${geometry.plotRight}px`);
+    const { plot, plotWidth, plotHeight } = geometry;
     const xStep = plotWidth / Math.max(1, data.length);
     const x = (index) => plot.left + (index + .5) * xStep;
     const priceY = (value) => plot.top + (1 - value / priceMax) * plotHeight;
@@ -9432,9 +9481,16 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 350;
+    const axisLabels = ["0 kW", "5 kW", "10 kW"];
     const renderedWidth = chart.getBoundingClientRect().width || chart.clientWidth || width;
     this._priceChartRenderedWidth = renderedWidth;
-    const geometry = buildPriceChartGeometry(width, height, { containerWidth: renderedWidth });
+    const geometry = buildPriceChartGeometry(width, height, {
+      containerWidth: renderedWidth,
+      leftAxisLabels: axisLabels,
+      leftAxisGutter: measuredPriceAxisGutter(chart, axisLabels),
+    });
+    chart.style.setProperty("--price-axis-left-gutter", `${geometry.plotLeft}px`);
+    chart.style.setProperty("--price-axis-right-gutter", `${geometry.plotRight}px`);
     const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
@@ -9605,12 +9661,11 @@ class ElrakningPanel {
       const barColor = chartColor(category === "cheap" ? "priceCheap" : category === "expensive" ? "priceExpensive" : "priceNormal");
       return `<rect class="chart-bar ${category}" fill="${barColor}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
-    const hourLabels = Array.from({ length: 24 }, (_, hour) => {
+    const hourLabels = buildHourlyBoundaryHours(renderedWidth).map((hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
-      const cull = hour % 3 !== 0;
-      const edge = hour === 0 ? " edge-start" : hour === 23 ? " edge-end" : "";
-      return `<span class="chart-axis-overlay-label chart-axis-overlay-x${cull ? " chart-axis-overlay-x-cull" : ""}${edge}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
+      const edge = hour === 0 ? " edge-start" : hour === 24 ? " edge-end" : "";
+      return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
     }).join("");
     const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}</div>`;
     const legend = this.host.querySelector("[data-meter-legend]");
@@ -9647,7 +9702,6 @@ class ElrakningPanel {
       <g data-price-dynamic="lines">${meterLines}</g>
       ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
-      ${hourLabels}
     </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;
     this.bindChartTooltips();
     this._priceChartLiveSignature = this._getPriceChartLiveSignature();

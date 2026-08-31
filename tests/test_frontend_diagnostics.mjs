@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -988,12 +988,17 @@ assert.match(eonPanelSource, /\.phase-history-axis-overlay \.phase-history-axis-
 assert.match(eonPanelSource, /\.phase-history-axis-overlay \.phase-history-time-label \{[\s\S]*bottom: 5px/);
 const hourlyPriceGeometry = buildPriceChartGeometry();
 const dualPriceGeometry = buildPriceChartGeometry(960, 350, { dualAxis: true });
-assert.equal(hourlyPriceGeometry.plotLeft, 40);
+assert.equal(hourlyPriceGeometry.plotLeft, priceAxisGutter(["0 kW", "5 kW", "10 kW"]));
 assert.equal(hourlyPriceGeometry.plotBottom, hourlyPriceGeometry.xAxisRailHeight);
 assert.equal(hourlyPriceGeometry.plotBottom, 16);
 assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 320 }).plotBottom, 48);
-assert.equal(dualPriceGeometry.plotLeft, 40);
-assert.equal(dualPriceGeometry.plotRight, 64);
+assert.equal(dualPriceGeometry.plotLeft, priceAxisGutter(["0 kW", "5 kW", "10 kW"]));
+assert.equal(dualPriceGeometry.plotRight, priceAxisGutter(["0 öre/kWh", "100 öre/kWh"]));
+assert.deepEqual(buildHourlyBoundaryHours(960), Array.from({ length: 25 }, (_, hour) => hour));
+assert.deepEqual(buildHourlyBoundaryHours(600), [0, 3, 6, 9, 12, 15, 18, 21, 24]);
+assert.deepEqual(buildHourlyBoundaryHours(390), [0, 6, 12, 18, 24]);
+assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left, priceAxisGutter(["0 kW", "5 kW", "10 kW"]));
+assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left, buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left);
 assert.ok(hourlyPriceGeometry.plotWidth > 0 && dualPriceGeometry.plotWidth > 0);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-start/);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-end/);
@@ -1001,9 +1006,12 @@ assert.match(eonPanelSource, /_setupPriceChartResizeObserver\(\);/);
 assert.match(eonPanelSource, /new ResizeObserver\(updateChartGeometry\)/);
 assert.match(eonPanelSource, /chart\.getBoundingClientRect\(\)\.width \|\| chart\.clientWidth \|\| width/);
 assert.match(eonPanelSource, /this\._priceChartRenderedWidth = renderedWidth;/);
-assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 0[\s\S]*padding-right: 8px[\s\S]*width: 40px/);
-assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 0[\s\S]*padding-left: 8px[\s\S]*width: 64px/);
-assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*width: 40px/);
+assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 0[\s\S]*padding-right: 8px[\s\S]*text-align: left[\s\S]*width: var\(--price-axis-left-gutter/);
+assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 0[\s\S]*width: var\(--price-axis-right-gutter/);
+assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*width: var\(--price-axis-left-gutter/);
+assert.match(eonPanelSource, /Array\.from\(\{ length: 25 \}/);
+assert.match(eonPanelSource, /hour === 24 \? " edge-end"/);
+assert.doesNotMatch(eonPanelSource, /<svg class="chart-svg"[\s\S]*\$\{hourLabels\}[\s\S]*<\/svg>/);
 assert.match(eonPanelSource, /\.price-analysis \{[\s\S]*margin: 0;[\s\S]*min-height: 0;/);
 assert.match(eonPanelSource, /plotBottom: plot\.bottom/);
 assert.match(eonPanelSource, /\.price-chart-legend \{[\s\S]*min-height: 14px;[\s\S]*margin-top: 0;/);
