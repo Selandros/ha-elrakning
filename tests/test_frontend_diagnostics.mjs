@@ -56,8 +56,29 @@ assert.equal(costSeries.actual.at(-1).value, 356.61);
 assert.equal(costSeries.forecast[0].value, 356.61);
 assert.equal(costSeries.forecast.at(-1).value, 686.55);
 assert.deepEqual(costSeries.previous, [{ day: 1, value: 10 }, { day: 31, value: 640 }]);
-assert.equal(costSeries.method, "cumulative_rows_then_deterministic_remaining_to_month_end");
+assert.equal(costSeries.method, "cumulative_observed_rows_with_time_allocated_fixed_fee_and_explicit_segments");
+assert.equal(costSeries.fixed_fee_allocation_method, "monthly_fixed_fee_accrued_by_elapsed_month_fraction");
 assert.equal(buildCostAnalysisSeries({ month: "2026-08", rows: [] }, null, new Date("2026-08-15")).forecast_available, false);
+const costEdgeSeries = buildCostAnalysisSeries({
+  month: "2026-08",
+  total_so_far_sek: 356.704232,
+  estimated_month_total_sek: 685.529732,
+  forecast_missing_past_kwh: 176.544949,
+  trade_weighted_average_ore_per_kwh: 41.565,
+  grid_weighted_average_ore_per_kwh: 142,
+  trade: { fixed_fee_sek: 39 },
+  grid: { fixed_fee_sek: 226.25 },
+  rows: [
+    { end: "2026-08-24T12:00:00+02:00", trade_cost_sek: 20, grid_cost_sek: 40 },
+    { end: "2026-08-08T12:00:00+02:00", trade_cost_sek: 10, grid_cost_sek: 20 },
+  ],
+}, null, new Date("2026-08-31T12:00:00+02:00"));
+assert.equal(costEdgeSeries.actual.some((point) => point.day === 1 && point.value === 0), false);
+assert.equal(costEdgeSeries.estimated_past.length, 2);
+assert.equal(costEdgeSeries.actual.at(-1).value, 356.704232);
+assert.equal(costEdgeSeries.actual_display.at(-1).value > costEdgeSeries.actual.at(-1).value, true);
+assert.equal(costEdgeSeries.forecast_future.length, 0);
+assert.equal(costEdgeSeries.previous.length, 0);
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
 assert.doesNotMatch(eonPanelSource, /Vad har vi för data\?/);

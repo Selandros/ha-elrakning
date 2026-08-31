@@ -1053,24 +1053,42 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
   const year = current.getFullYear();
   const monthIndex = current.getMonth();
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const actualPoints = [{ day: 1, value: 0 }];
+  const actualPoints = [];
   let cumulative = 0;
+  const tradeFixed = Number(estimate?.trade?.fixed_fee_sek);
+  const gridFixed = Number(estimate?.grid?.fixed_fee_sek);
+  const monthlyFixed = (Number.isFinite(tradeFixed) ? tradeFixed : 0) + (Number.isFinite(gridFixed) ? gridFixed : 0);
+  const monthStartMs = new Date(year, monthIndex, 1).getTime();
+  const monthEndMs = new Date(year, monthIndex + 1, 1).getTime();
+  const fixedAt = (timestamp) => monthlyFixed * Math.max(0, Math.min(1, (timestamp - monthStartMs) / (monthEndMs - monthStartMs)));
   for (const row of Array.isArray(estimate?.rows) ? [...estimate.rows].sort((left, right) => new Date(left.end).getTime() - new Date(right.end).getTime()) : []) {
     const timestamp = new Date(row.end || row.start).getTime();
     const value = Number(row.trade_cost_sek) + Number(row.grid_cost_sek);
     if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
     cumulative += value;
-    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, new Date(timestamp).getDate())), value: cumulative });
+    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, new Date(timestamp).getDate())), value: cumulative + fixedAt(timestamp) });
   }
   if (Number.isFinite(Number(estimate?.total_so_far_sek))) {
     actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, current.getDate())), value: Number(estimate.total_so_far_sek) });
   }
   const dedupe = (points) => [...new Map(points.map((point) => [point.day, point])).values()].sort((left, right) => left.day - right.day);
   const actual = dedupe(actualPoints);
-  const actualLast = actual.at(-1) || { day: 1, value: 0 };
+  const actualLast = actual.at(-1) || null;
   const forecastTotal = Number(estimate?.estimated_month_total_sek);
-  const forecast = Number.isFinite(forecastTotal) && forecastTotal >= actualLast.value
-    ? [actualLast, { day: daysInMonth, value: forecastTotal }]
+  const weightedRate = Number(estimate?.trade_weighted_average_ore_per_kwh) + Number(estimate?.grid_weighted_average_ore_per_kwh);
+  const missingPastCost = Number.isFinite(Number(estimate?.forecast_missing_past_kwh)) && Number.isFinite(weightedRate)
+    ? Number(estimate.forecast_missing_past_kwh) * weightedRate / 100
+    : 0;
+  const firstActual = actual[0] || null;
+  const estimatedPast = missingPastCost > 0 && firstActual
+    ? [{ day: 1, value: 0 }, { day: firstActual.day, value: missingPastCost + firstActual.value }]
+    : [];
+  const actualDisplay = missingPastCost > 0
+    ? actual.map((point) => ({ ...point, value: point.value + missingPastCost }))
+    : actual;
+  const displayedLast = actualDisplay.at(-1) || null;
+  const forecast = Number.isFinite(forecastTotal) && displayedLast && forecastTotal >= displayedLast.value && daysInMonth > displayedLast.day
+    ? [displayedLast, { day: daysInMonth, value: forecastTotal }]
     : [];
   const previousCandidates = previousActual?.cumulative_points || previousActual?.chart_points;
   const previous = Array.isArray(previousCandidates)
@@ -1080,12 +1098,18 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
     month: estimate?.month || null,
     days_in_month: daysInMonth,
     actual,
+    actual_display: actualDisplay,
+    estimated_past: estimatedPast,
+    forecast_future: forecast,
     forecast,
     previous,
-    actual_latest_day: actualLast.day,
+    actual_latest_day: actualLast?.day || null,
+    actual_latest_observed_value: actualLast?.value ?? null,
+    estimated_past_cost_sek: missingPastCost,
     forecast_available: forecast.length > 0,
     previous_available: previous.length > 0,
-    method: "cumulative_rows_then_deterministic_remaining_to_month_end",
+    method: "cumulative_observed_rows_with_time_allocated_fixed_fee_and_explicit_segments",
+    fixed_fee_allocation_method: "monthly_fixed_fee_accrued_by_elapsed_month_fraction",
   };
 }
 
@@ -3143,9 +3167,16 @@ class ElrakningPanel {
 
         .cost-chart-gridline { stroke: var(--divider-color); stroke-width: 1; opacity: .45; }
         .cost-chart-actual { fill: none; stroke: var(--primary-color); stroke-width: 2.5; }
+        .cost-chart-estimated { fill: none; stroke: var(--primary-color); stroke-dasharray: 3 4; opacity: .58; stroke-width: 2; }
         .cost-chart-forecast { fill: none; stroke: var(--secondary-text-color); stroke-dasharray: 5 4; stroke-width: 2; }
         .cost-chart-previous { fill: none; stroke: var(--neutral-color, #8590A6); opacity: .55; stroke-width: 1.5; }
         .cost-chart-marker { fill: var(--primary-color); }
+        .cost-chart-legend { color: var(--secondary-text-color); display: flex; flex-wrap: wrap; font-size: var(--card-legend-size); gap: 8px 14px; margin-bottom: 4px; }
+        .cost-chart-legend span { align-items: center; display: inline-flex; gap: 4px; }
+        .cost-chart-legend i { background: var(--primary-color); display: inline-block; height: 2px; width: 14px; }
+        .cost-chart-legend-estimated { opacity: .58; }
+        .cost-chart-legend-forecast { background: var(--secondary-text-color) !important; }
+        .cost-chart-legend-previous { background: var(--neutral-color, #8590A6) !important; opacity: .55; }
 
         .cost-comparison {
           color: var(--primary-text-color);
@@ -6975,7 +7006,7 @@ class ElrakningPanel {
       item.append(name, output);
       return item;
     }));
-    const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
+    const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
     this._renderCostChart(chart, series);
     const comparison = showingCurrent ? buildInvoiceComparison(estimate, previous) : { available: false };
     comparisonElement.replaceChildren();
@@ -7022,14 +7053,17 @@ class ElrakningPanel {
 
   _renderCostChart(chart, series) {
     if (!chart) return;
-    if (!series.actual.length && !series.forecast.length && !series.previous.length) {
+    if (!series.actual_display?.length && !series.estimated_past?.length && !series.forecast_future?.length && !series.previous.length) {
       chart.replaceChildren();
       return;
     }
     const width = 960;
     const height = 190;
     const plot = { left: 48, right: 12, top: 12, bottom: 28 };
-    const all = [...series.actual, ...series.forecast, ...series.previous].filter((point) => Number.isFinite(point.value));
+    const actual = series.actual_display || series.actual || [];
+    const estimatedPast = series.estimated_past || [];
+    const forecastFuture = series.forecast_future || series.forecast || [];
+    const all = [...actual, ...estimatedPast, ...forecastFuture, ...series.previous].filter((point) => Number.isFinite(point.value));
     const max = Math.max(1, ...all.map((point) => point.value));
     const x = (day) => plot.left + ((day - 1) / Math.max(1, series.days_in_month - 1)) * (width - plot.left - plot.right);
     const y = (value) => plot.top + (1 - value / max) * (height - plot.top - plot.bottom);
@@ -7039,10 +7073,10 @@ class ElrakningPanel {
       return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" /><text class="cost-chart-axis-label" x="4" y="${y(value) + 4}">${this._formatNumber(value)} kr</text>`;
     }).join("");
     const xLabels = [1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<text class="cost-chart-x-label" text-anchor="middle" x="${x(day)}" y="${height - 6}">${day}</text>`).join("");
-    chart.innerHTML = `<svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-actual" d="${path(series.actual)}" /><path class="cost-chart-forecast" d="${path(series.forecast)}" /><circle class="cost-chart-marker" cx="${x(series.actual.at(-1).day)}" cy="${y(series.actual.at(-1).value)}" r="4" />${xLabels}<rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimatedPast)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}${xLabels}<rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".soc-tooltip");
-    const nearest = (day) => [...series.actual, ...series.forecast, ...series.previous].reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
+    const nearest = (day) => [...actual, ...estimatedPast, ...forecastFuture, ...series.previous].reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
     const clear = () => { tooltip.hidden = true; };
     svg.addEventListener("pointerleave", clear);
     svg.addEventListener("pointermove", (event) => {
@@ -7052,10 +7086,12 @@ class ElrakningPanel {
       const point = nearest(day);
       if (!point) { clear(); return; }
       const fields = [];
-      const actual = series.actual.find((item) => item.day === point.day);
-      const forecast = series.forecast.find((item) => item.day === point.day);
+      const actualPoint = actual.find((item) => item.day === point.day);
+      const estimated = estimatedPast.find((item) => item.day === point.day);
+      const forecast = forecastFuture.find((item) => item.day === point.day);
       const previous = series.previous.find((item) => item.day === point.day);
-      if (actual) fields.push({ label: "Faktiskt", value: actual.value, formatted: this._formatSek(actual.value) });
+      if (estimated) fields.push({ label: "Estimerat hittills", value: estimated.value, formatted: this._formatSek(estimated.value) });
+      if (actualPoint) fields.push({ label: "Kostnad hittills", value: actualPoint.value, formatted: this._formatSek(actualPoint.value) });
       if (forecast) fields.push({ label: "Prognos", value: forecast.value, formatted: this._formatSek(forecast.value) });
       if (previous) fields.push({ label: "Förra månaden", value: previous.value, formatted: this._formatSek(previous.value) });
       renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "") .split(" ")[0]}`, fields });
