@@ -1880,6 +1880,8 @@ class ElrakningPanel {
     this._spotBarsVisible = true;
     this._averageLineVisible = true;
     this._hoverIsolatedLayer = null;
+    this._soloChartLayer = null;
+    this._soloChartLayerSnapshot = null;
     this._previewLayersVisible = {
       solar: true,
       consumption: true,
@@ -4365,6 +4367,10 @@ class ElrakningPanel {
           opacity: 1;
         }
 
+        .chart-legend-toggle.long-pressing {
+          opacity: .72;
+        }
+
         .chart-legend-toggle:disabled {
           cursor: default;
           opacity: .35;
@@ -4935,8 +4941,23 @@ class ElrakningPanel {
 
   _effectiveChartLayerState() {
     const layers = this._chartLayerState();
+    if (this._soloChartLayer) return Object.fromEntries(Object.keys(layers).map((key) => [key, key === this._soloChartLayer]));
     if (!this._hoverIsolatedLayer) return layers;
     return Object.fromEntries(Object.keys(layers).map((key) => [key, key === this._hoverIsolatedLayer]));
+  }
+
+  _setSoloChartLayer(layer) {
+    if (!layer) return;
+    if (this._soloChartLayer === layer) {
+      this._applyChartLayerState(this._soloChartLayerSnapshot);
+      this._soloChartLayer = null;
+      this._soloChartLayerSnapshot = null;
+    } else {
+      if (!this._soloChartLayer) this._soloChartLayerSnapshot = this._chartLayerState();
+      this._soloChartLayer = layer;
+    }
+    this._syncChartLayerButtons();
+    this.renderPriceChart();
   }
 
   _applyMainCardState(mainCards) {
@@ -5020,7 +5041,7 @@ class ElrakningPanel {
   }
 
   _syncChartLayerButtons() {
-    const layers = this._chartLayerState();
+    const layers = this._effectiveChartLayerState();
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
       const value = layers[button.dataset.chartLayer];
       if (typeof value !== "boolean") continue;
@@ -5081,6 +5102,66 @@ class ElrakningPanel {
   }
 
   _bindChartLegend() {
+    const toggleLayer = (layer) => {
+      if (this._soloChartLayer) {
+        this._soloChartLayer = null;
+        this._soloChartLayerSnapshot = null;
+      }
+      if (layer === "import" || layer === "export") this._meterPowerVisible[layer] = !this._meterPowerVisible[layer];
+      else if (layer === "average") this._averageLineVisible = !this._averageLineVisible;
+      else if (layer === "spot") this._spotBarsVisible = !this._spotBarsVisible;
+      else if (layer in this._previewLayersVisible) this._previewLayersVisible[layer] = !this._previewLayersVisible[layer];
+      else return;
+      this._syncChartLayerButtons();
+      this.renderPriceChart();
+      this._persistChartPreferences({ chart_layers: this._chartLayerState() });
+    };
+    const bindLongPress = (button, layer) => {
+      let timer = null;
+      let startX = 0;
+      let startY = 0;
+      let longPressTriggered = false;
+      const cancel = () => {
+        if (timer !== null) window.clearTimeout(timer);
+        timer = null;
+        button.classList.remove("long-pressing");
+      };
+      button.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        longPressTriggered = false;
+        startX = event.clientX;
+        startY = event.clientY;
+        button.classList.add("long-pressing");
+        timer = window.setTimeout(() => {
+          timer = null;
+          longPressTriggered = true;
+          button.classList.remove("long-pressing");
+          this._setSoloChartLayer(layer);
+        }, 600);
+      });
+      button.addEventListener("pointermove", (event) => {
+        if (timer !== null && Math.hypot(event.clientX - startX, event.clientY - startY) > 8) cancel();
+      });
+      button.addEventListener("pointerup", (event) => {
+        if (timer !== null) cancel();
+        if (longPressTriggered) {
+          event.preventDefault();
+          button.dataset.longPressHandled = "true";
+        }
+      });
+      button.addEventListener("pointerleave", cancel);
+      button.addEventListener("pointercancel", cancel);
+      button.addEventListener("contextmenu", (event) => event.preventDefault());
+      button.addEventListener("click", (event) => {
+        if (button.dataset.longPressHandled === "true") {
+          delete button.dataset.longPressHandled;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        toggleLayer(layer);
+      });
+    };
     const bindHoverIsolation = (button, layer) => {
       button.addEventListener("pointerenter", (event) => {
         if (event.pointerType === "touch" || button.disabled) return;
@@ -5095,43 +5176,11 @@ class ElrakningPanel {
     };
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
       bindHoverIsolation(button, button.dataset.chartLayer);
-      button.addEventListener("click", () => {
-        const layer = button.dataset.chartLayer;
-        if (layer === "import" || layer === "export") {
-          this._meterPowerVisible[layer] = !this._meterPowerVisible[layer];
-          button.classList.toggle("active", this._meterPowerVisible[layer]);
-          button.setAttribute("aria-pressed", String(this._meterPowerVisible[layer]));
-          this.renderPriceChart();
-          this._persistChartPreferences({ chart_layers: this._chartLayerState() });
-          return;
-        }
-        if (layer === "average") {
-          this._averageLineVisible = !this._averageLineVisible;
-          button.classList.toggle("active", this._averageLineVisible);
-          button.setAttribute("aria-pressed", String(this._averageLineVisible));
-          this.renderPriceChart();
-          this._persistChartPreferences({ chart_layers: this._chartLayerState() });
-          return;
-        }
-        if (layer !== "spot") return;
-        this._spotBarsVisible = !this._spotBarsVisible;
-        button.classList.toggle("active", this._spotBarsVisible);
-        button.setAttribute("aria-pressed", String(this._spotBarsVisible));
-        this.renderPriceChart();
-        this._persistChartPreferences({ chart_layers: this._chartLayerState() });
-      });
+      bindLongPress(button, button.dataset.chartLayer);
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
       bindHoverIsolation(button, button.dataset.previewLayer);
-      button.addEventListener("click", () => {
-        const layer = button.dataset.previewLayer;
-        if (!(layer in this._previewLayersVisible)) return;
-        this._previewLayersVisible[layer] = !this._previewLayersVisible[layer];
-        button.classList.toggle("active", this._previewLayersVisible[layer]);
-        button.setAttribute("aria-pressed", String(this._previewLayersVisible[layer]));
-        this.renderPriceChart();
-        this._persistChartPreferences({ chart_layers: this._chartLayerState() });
-      });
+      bindLongPress(button, button.dataset.previewLayer);
     }
     for (const control of this.host.querySelectorAll("[data-price-layer]")) {
       const input = control.querySelector("[data-price-toggle]");
