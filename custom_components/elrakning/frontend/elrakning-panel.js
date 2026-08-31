@@ -616,8 +616,8 @@ export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = 
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const plot = dualAxis
-    ? { left: 56, right: 72, top: 30, bottom: 42 }
-    : { left: 48, right: 12, top: 42, bottom: 42 };
+    ? { left: 16, right: 16, top: 30, bottom: 42 }
+    : { left: 12, right: 8, top: 42, bottom: 42 };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
@@ -4196,11 +4196,27 @@ class ElrakningPanel {
           overscroll-behavior-x: contain;
         }
 
+        /* Price axes are integrated into the plot instead of reserving a rail. */
+        .price-chart .chart-axis-overlay-y-left {
+          left: 8px;
+          padding-right: 0;
+          text-align: left;
+          width: auto;
+        }
+
+        .price-chart .chart-axis-overlay-y-right {
+          padding-left: 0;
+          right: 8px;
+          width: auto;
+        }
+
         @container price-chart (max-width: 520px) {
           .chart-axis-overlay-x-cull { display: none; }
-          .chart-axis-overlay-y-left {
-            padding-right: 4px;
-            width: 44px;
+          .price-chart .chart-axis-overlay-y-left {
+            left: 4px;
+          }
+          .price-chart .chart-axis-overlay-y-right {
+            right: 4px;
           }
         }
 
