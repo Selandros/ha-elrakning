@@ -4038,6 +4038,62 @@ class ElrakningPanel {
           opacity: .9;
         }
 
+        @media (max-width: 600px) {
+          .price-section .period-picker {
+            align-items: stretch;
+            bottom: auto;
+            flex-direction: column;
+            gap: 8px;
+            left: auto;
+            max-width: 100%;
+            position: static;
+            right: auto;
+            width: 100%;
+          }
+
+          .price-section .period-picker-modes {
+            box-sizing: border-box;
+            display: grid;
+            gap: 2px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            order: 1;
+            padding: 2px;
+            width: 100%;
+          }
+
+          .price-section .period-picker-control {
+            box-sizing: border-box;
+            display: grid;
+            gap: 2px;
+            grid-template-columns: 44px minmax(0, 1fr) 44px;
+            order: 2;
+            padding: 2px;
+            width: 100%;
+          }
+
+          .price-section .period-picker button {
+            box-sizing: border-box;
+            min-height: 44px;
+            min-width: 0;
+            padding: 4px;
+          }
+
+          .price-section .period-picker-period {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+          }
+
+          .price-section .period-picker-popover {
+            bottom: calc(100% + 8px);
+            left: 50%;
+            max-width: calc(100vw - 24px);
+            right: auto;
+            transform: translateX(-50%);
+            width: min(320px, calc(100vw - 24px));
+          }
+        }
+
         .chart-bar.cheap {
           fill: #67C98C;
           fill-opacity: .32;

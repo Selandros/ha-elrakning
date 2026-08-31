@@ -89,6 +89,11 @@ assert.match(pickerPanelSource, /!event\.composedPath\(\)\.includes\(root\)/);
 assert.match(pickerPanelSource, /root\.addEventListener\("click", \(event\) => event\.stopPropagation\(\)\)/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*display: flex[\s\S]*align-items: center/);
 assert.match(pickerPanelSource, /\.price-section \{[\s\S]*overflow: visible/);
+assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.price-section \.period-picker \{[\s\S]*flex-direction: column;[\s\S]*position: static;[\s\S]*width: 100%/);
+assert.match(pickerPanelSource, /\.price-section \.period-picker-modes \{[\s\S]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)[\s\S]*order: 1/);
+assert.match(pickerPanelSource, /\.price-section \.period-picker-control \{[\s\S]*grid-template-columns: 44px minmax\(0, 1fr\) 44px[\s\S]*order: 2/);
+assert.match(pickerPanelSource, /\.price-section \.period-picker button \{[\s\S]*min-height: 44px/);
+assert.match(pickerPanelSource, /\.price-section \.period-picker-popover \{[\s\S]*left: 50%[\s\S]*max-width: calc\(100vw - 24px\)/);
 const costSeries = buildCostAnalysisSeries({
   month: "2026-08",
   total_so_far_sek: 356.61,
