@@ -4204,7 +4204,7 @@ class ElrakningPanel {
           overscroll-behavior-x: contain;
         }
 
-        /* Price axes are integrated into the plot instead of reserving a rail. */
+        /* Price axes reserve only a compact label-sized gutter before the plot. */
         .price-chart .chart-axis-overlay-y-left {
           left: 0;
           padding-right: 8px;
