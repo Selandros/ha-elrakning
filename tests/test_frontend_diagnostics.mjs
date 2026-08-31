@@ -1968,6 +1968,8 @@ assert.match(panelSource, /\.daily-energy-segment\.export \{\s*background-color:
 assert.match(panelSource, /\.daily-energy-segment\.import \{\s*background-color: var\(--daily-energy-import-color, #F0A06A\)/);
 assert.doesNotMatch(panelSource, /\.daily-energy-segment\.(?:local|supply|export|import) \{[^}]*color-mix\(/);
 assert.match(panelSource, /\.daily-energy-segment \{[\s\S]*display: block;[\s\S]*flex: 0 0 auto;[\s\S]*flex-basis: auto;[\s\S]*height: 100%;/);
+assert.match(panelSource, /\.daily-energy-segment \{[\s\S]*opacity: \.6;/);
+assert.doesNotMatch(panelSource, /\.daily-energy-segment[^{]*\{[^}]*opacity: (?!\.6)/);
 assert.doesNotMatch(panelSource, /marker-highlight/);
 assert.match(panelSource, /return `<rect class="chart-bar \$\{category\}" fill="\$\{barColor\}"/);
 assert.doesNotMatch(panelSource, /price-marker-label/);

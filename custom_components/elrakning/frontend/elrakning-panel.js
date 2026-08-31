@@ -2862,6 +2862,7 @@ class ElrakningPanel {
           flex-basis: auto;
           height: 100%;
           min-width: 0;
+          opacity: .6;
           transition: width 120ms ease;
         }
 
