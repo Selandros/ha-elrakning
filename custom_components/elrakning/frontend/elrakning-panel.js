@@ -1879,7 +1879,6 @@ class ElrakningPanel {
     this._meterPowerVisible = { import: true, export: true };
     this._spotBarsVisible = true;
     this._averageLineVisible = true;
-    this._hoverIsolatedLayer = null;
     this._soloChartLayer = null;
     this._soloChartLayerSnapshot = null;
     this._previewLayersVisible = {
@@ -4963,8 +4962,7 @@ class ElrakningPanel {
   _effectiveChartLayerState() {
     const layers = this._chartLayerState();
     if (this._soloChartLayer) return Object.fromEntries(Object.keys(layers).map((key) => [key, key === this._soloChartLayer]));
-    if (!this._hoverIsolatedLayer) return layers;
-    return Object.fromEntries(Object.keys(layers).map((key) => [key, key === this._hoverIsolatedLayer]));
+    return layers;
   }
 
   _setSoloChartLayer(layer) {
@@ -5194,24 +5192,10 @@ class ElrakningPanel {
         toggleLayer(layer);
       });
     };
-    const bindHoverIsolation = (button, layer) => {
-      button.addEventListener("pointerenter", (event) => {
-        if (event.pointerType === "touch" || button.disabled) return;
-        this._hoverIsolatedLayer = layer;
-        this.renderPriceChart();
-      });
-      button.addEventListener("pointerleave", (event) => {
-        if (event.pointerType === "touch") return;
-        this._hoverIsolatedLayer = null;
-        this.renderPriceChart();
-      });
-    };
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
-      bindHoverIsolation(button, button.dataset.chartLayer);
       bindLongPress(button, button.dataset.chartLayer);
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
-      bindHoverIsolation(button, button.dataset.previewLayer);
       bindLongPress(button, button.dataset.previewLayer);
     }
     for (const control of this.host.querySelectorAll("[data-price-layer]")) {
