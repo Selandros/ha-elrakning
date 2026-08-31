@@ -2857,28 +2857,28 @@ class ElrakningPanel {
         }
 
         .daily-energy-segment {
+          display: block;
+          flex: 0 0 auto;
+          flex-basis: auto;
+          height: 100%;
           min-width: 0;
           transition: width 120ms ease;
         }
 
         .daily-energy-segment.local {
-          background: rgba(119, 194, 161, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-local-color, #77C2A1) 70%, var(--el-card-bg));
+          background-color: var(--daily-energy-local-color, #77C2A1);
         }
 
         .daily-energy-segment.supply {
-          background: rgba(119, 194, 161, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-local-color, #77C2A1) 70%, var(--el-card-bg));
+          background-color: var(--daily-energy-local-color, #77C2A1);
         }
 
         .daily-energy-segment.export {
-          background: rgba(114, 170, 246, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-export-color, #72AAF6) 70%, var(--el-card-bg));
+          background-color: var(--daily-energy-export-color, #72AAF6);
         }
 
         .daily-energy-segment.import {
-          background: rgba(240, 160, 106, 0.70);
-          background: color-mix(in srgb, var(--daily-energy-import-color, #F0A06A) 70%, var(--el-card-bg));
+          background-color: var(--daily-energy-import-color, #F0A06A);
         }
 
         .daily-energy-percent {

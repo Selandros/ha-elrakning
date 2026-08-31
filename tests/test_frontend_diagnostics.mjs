@@ -1887,9 +1887,9 @@ assert.match(panelSource, /\.chart-bar\.normal \{\s*fill: #B9A05D;\s*fill-opacit
 assert.match(panelSource, /\.chart-bar\.expensive \{\s*fill: #E4687D;\s*fill-opacity: \.32;/);
 assert.equal((panelSource.match(/\.chart-bar\.(?:cheap|normal|expensive) \{[\s\S]*?fill: color-mix\(/g) || []).length, 0);
 assert.doesNotMatch(panelSource, /\.daily-energy-segment \{\n\s+filter:/);
-assert.match(panelSource, /\.daily-energy-segment\.local \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-local-color, #77C2A1\) 70%, var\(--el-card-bg\)\)/);
-assert.match(panelSource, /\.daily-energy-segment\.export \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-export-color, #72AAF6\) 70%, var\(--el-card-bg\)\)/);
-assert.match(panelSource, /\.daily-energy-segment\.import \{[\s\S]*background: color-mix\(in srgb, var\(--daily-energy-import-color, #F0A06A\) 70%, var\(--el-card-bg\)\)/);
+assert.match(panelSource, /\.daily-energy-segment\.local \{[\s\S]*background-color: var\(--daily-energy-local-color, #77C2A1\)/);
+assert.match(panelSource, /\.daily-energy-segment\.export \{[\s\S]*background-color: var\(--daily-energy-export-color, #72AAF6\)/);
+assert.match(panelSource, /\.daily-energy-segment\.import \{[\s\S]*background-color: var\(--daily-energy-import-color, #F0A06A\)/);
 assert.match(panelSource, /daily-energy-percent first/);
 assert.match(panelSource, /daily-energy-percent second/);
 assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4px, 1\.25cqw, 6px\);/);
@@ -1963,9 +1963,11 @@ assert.match(panelSource, /\.chart-bar\.normal \{\s*fill: #B9A05D;\s*fill-opacit
 assert.match(panelSource, /\.chart-bar\.expensive \{\s*fill: #E4687D;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.solar-history-reference-bar \{\s*fill-opacity: \.9;/);
 assert.doesNotMatch(panelSource, /\.solar-history-reference-bar \{[^}]*color-mix\(/);
-assert.match(panelSource, /\.daily-energy-segment\.local \{\s*background: rgba\(119, 194, 161, 0\.70\);\s*background: color-mix\(in srgb, var\(--daily-energy-local-color, #77C2A1\) 70%, var\(--el-card-bg\)\)/);
-assert.match(panelSource, /\.daily-energy-segment\.export \{\s*background: rgba\(114, 170, 246, 0\.70\);\s*background: color-mix\(in srgb, var\(--daily-energy-export-color, #72AAF6\) 70%, var\(--el-card-bg\)\)/);
-assert.match(panelSource, /\.daily-energy-segment\.import \{\s*background: rgba\(240, 160, 106, 0\.70\);\s*background: color-mix\(in srgb, var\(--daily-energy-import-color, #F0A06A\) 70%, var\(--el-card-bg\)\)/);
+assert.match(panelSource, /\.daily-energy-segment\.local \{\s*background-color: var\(--daily-energy-local-color, #77C2A1\)/);
+assert.match(panelSource, /\.daily-energy-segment\.export \{\s*background-color: var\(--daily-energy-export-color, #72AAF6\)/);
+assert.match(panelSource, /\.daily-energy-segment\.import \{\s*background-color: var\(--daily-energy-import-color, #F0A06A\)/);
+assert.doesNotMatch(panelSource, /\.daily-energy-segment\.(?:local|supply|export|import) \{[^}]*color-mix\(/);
+assert.match(panelSource, /\.daily-energy-segment \{[\s\S]*display: block;[\s\S]*flex: 0 0 auto;[\s\S]*flex-basis: auto;[\s\S]*height: 100%;/);
 assert.doesNotMatch(panelSource, /marker-highlight/);
 assert.match(panelSource, /return `<rect class="chart-bar \$\{category\}" fill="\$\{barColor\}"/);
 assert.doesNotMatch(panelSource, /price-marker-label/);
