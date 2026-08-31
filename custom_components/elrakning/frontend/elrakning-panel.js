@@ -2017,28 +2017,28 @@ class ElrakningPanel {
           <div class="price-chart" aria-live="polite"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle${this._spotBarsVisible ? " active" : ""}" data-chart-layer="spot" aria-pressed="${this._spotBarsVisible}">
-              <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris
+              <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle${this._averageLineVisible ? " active" : ""}" data-chart-layer="average" aria-pressed="${this._averageLineVisible}">
-              <span class="chart-legend-swatch average" aria-hidden="true"></span>Snitt
+              <span class="chart-legend-swatch average" aria-hidden="true"></span>Snitt<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle${this._meterPowerVisible.import ? " active" : ""}" data-chart-layer="import" aria-pressed="${this._meterPowerVisible.import}">
-              <span class="chart-legend-swatch import" aria-hidden="true"></span>Köp
+              <span class="chart-legend-swatch import" aria-hidden="true"></span>Köp<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle${this._meterPowerVisible.export ? " active" : ""}" data-chart-layer="export" aria-pressed="${this._meterPowerVisible.export}">
-              <span class="chart-legend-swatch export" aria-hidden="true"></span>Sälj
+              <span class="chart-legend-swatch export" aria-hidden="true"></span>Sälj<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.solar ? " active" : ""} solar" data-preview-layer="solar" aria-pressed="${this._previewLayersVisible.solar}">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Sol
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Sol<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.consumption ? " active" : ""} consumption" data-preview-layer="consumption" aria-pressed="${this._previewLayersVisible.consumption}">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Last
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Last<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.charging ? " active" : ""} charging" data-preview-layer="charging" aria-pressed="${this._previewLayersVisible.charging}">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Laddning<span class="chart-legend-solo-badge">SOLO</span>
             </button>
             <button type="button" class="chart-legend-toggle chart-legend-preview${this._previewLayersVisible.discharging ? " active" : ""} discharging" data-preview-layer="discharging" aria-pressed="${this._previewLayersVisible.discharging}">
-              <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning
+              <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning<span class="chart-legend-solo-badge">SOLO</span>
             </button>
           </div>
           <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
@@ -4371,6 +4371,22 @@ class ElrakningPanel {
           opacity: .72;
         }
 
+        .chart-legend-solo-badge {
+          border: 1px solid currentColor;
+          border-radius: 3px;
+          display: none;
+          font-size: 9px;
+          font-weight: 600;
+          letter-spacing: .04em;
+          line-height: 12px;
+          margin-left: 2px;
+          padding: 0 3px;
+        }
+
+        .chart-legend-toggle.solo-active .chart-legend-solo-badge {
+          display: inline-block;
+        }
+
         .chart-legend-toggle:disabled {
           cursor: default;
           opacity: .35;
@@ -4878,6 +4894,9 @@ class ElrakningPanel {
     });
     root.querySelectorAll("[data-period-picker-mode]").forEach((button) => button.addEventListener("click", () => {
       this._periodPickerState.mode = button.dataset.periodPickerMode;
+      if (this._soloChartLayer === "average" && this._periodPickerState.mode !== "hour") {
+        this._clearSoloChartLayer({ render: false });
+      }
       this._renderPeriodPicker();
       this.updatePriceSummary();
       this.renderPriceChart();
@@ -4924,7 +4943,9 @@ class ElrakningPanel {
       if (this._periodPickerState.open && !event.composedPath().includes(root)) close();
     });
     window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this._periodPickerState.open) close();
+      if (event.key !== "Escape") return;
+      if (this._soloChartLayer) this._clearSoloChartLayer();
+      if (this._periodPickerState.open) close();
     });
     this._renderPeriodPicker();
   }
@@ -4949,15 +4970,24 @@ class ElrakningPanel {
   _setSoloChartLayer(layer) {
     if (!layer) return;
     if (this._soloChartLayer === layer) {
-      this._applyChartLayerState(this._soloChartLayerSnapshot);
-      this._soloChartLayer = null;
-      this._soloChartLayerSnapshot = null;
+      this._clearSoloChartLayer();
+      return;
     } else {
       if (!this._soloChartLayer) this._soloChartLayerSnapshot = this._chartLayerState();
       this._soloChartLayer = layer;
     }
     this._syncChartLayerButtons();
     this.renderPriceChart();
+  }
+
+  _clearSoloChartLayer({ render = true } = {}) {
+    if (!this._soloChartLayer) return false;
+    this._applyChartLayerState(this._soloChartLayerSnapshot);
+    this._soloChartLayer = null;
+    this._soloChartLayerSnapshot = null;
+    this._syncChartLayerButtons();
+    if (render) this.renderPriceChart();
+    return true;
   }
 
   _applyMainCardState(mainCards) {
@@ -5046,12 +5076,14 @@ class ElrakningPanel {
       const value = layers[button.dataset.chartLayer];
       if (typeof value !== "boolean") continue;
       button.classList.toggle("active", value);
+      button.classList.toggle("solo-active", this._soloChartLayer === button.dataset.chartLayer);
       button.setAttribute("aria-pressed", String(value));
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
       const value = layers[button.dataset.previewLayer];
       if (typeof value !== "boolean") continue;
       button.classList.toggle("active", value);
+      button.classList.toggle("solo-active", this._soloChartLayer === button.dataset.previewLayer);
       button.setAttribute("aria-pressed", String(value));
     }
   }
@@ -5104,8 +5136,8 @@ class ElrakningPanel {
   _bindChartLegend() {
     const toggleLayer = (layer) => {
       if (this._soloChartLayer) {
-        this._soloChartLayer = null;
-        this._soloChartLayerSnapshot = null;
+        this._clearSoloChartLayer();
+        return;
       }
       if (layer === "import" || layer === "export") this._meterPowerVisible[layer] = !this._meterPowerVisible[layer];
       else if (layer === "average") this._averageLineVisible = !this._averageLineVisible;
@@ -6652,6 +6684,11 @@ class ElrakningPanel {
       axes: mode === "hour" ? { price: { unit: "öre/kWh", side: "left" }, energy: { unit: "kW", side: "right" } } : { energy: { unit: "kWh", side: "left" }, price: { unit: "öre/kWh", side: "right" } },
       coverage,
       provenance: Object.fromEntries(Object.entries(sourceEntities).map(([key, entities]) => [key, { method: key === "buy" || key === "sell" ? (this._billingHistory?.integration_method || billingEnergySource.method || "canonical_meter_history") : "canonical_power_history", source_entities: entities }])),
+      legend: {
+        visible_series: visibleSeries,
+        solo_series: this._soloChartLayer,
+        solo_active: Boolean(this._soloChartLayer),
+      },
       visible_series: visibleSeries,
     };
   }
