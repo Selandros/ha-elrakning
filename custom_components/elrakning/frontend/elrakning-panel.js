@@ -8875,7 +8875,6 @@ class ElrakningPanel {
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
     const priceMax = Math.max(1, ...priceValues);
     const energyMax = Math.max(1, ...energyValues);
-    const colorBands = priceColorBands(priceValues);
     const xStep = plotWidth / Math.max(1, data.length);
     const x = (index) => plot.left + (index + .5) * xStep;
     const priceY = (value) => plot.top + (1 - value / priceMax) * plotHeight;
@@ -8897,9 +8896,7 @@ class ElrakningPanel {
       const value = key === "price" ? item.price : item.energy[key];
       if (!Number.isFinite(value)) return "";
       const yValue = scale(value);
-      const color = key === "price"
-        ? chartColor(priceCategory(value, colorBands) === "cheap" ? "priceCheap" : priceCategory(value, colorBands) === "expensive" ? "priceExpensive" : "priceNormal")
-        : chartColor(colorKey);
+      const color = key === "price" ? chartColor("priceNormal") : chartColor(colorKey);
       return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
     }).join("")).join("");
     const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" /><text class="chart-meter-label" x="8" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(energyMax * ratio)} kWh</text><text class="chart-meter-label" text-anchor="end" x="${width - 4}" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(priceMax * ratio)} öre/kWh</text>`).join("");

@@ -140,6 +140,7 @@ assert.match(eonPanelSource, /aggregated-chart-hover-band/);
 assert.match(eonPanelSource, /data-group-index/);
 assert.match(eonPanelSource, /clearGroupHover/);
 assert.match(eonPanelSource, /aggregatedPriceGroupIndex/);
+assert.match(eonPanelSource, /key === "price" \? chartColor\("priceNormal"\)/);
 assert.match(eonPanelSource, /data-provider-card="elnet"/);
 assert.doesNotMatch(eonPanelSource, /Vad har vi för data\?/);
 assert.doesNotMatch(eonPanelSource, /data-provider-card="(?:elmatare|solar|battery)"/);
