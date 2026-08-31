@@ -624,8 +624,8 @@ export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = 
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const plot = dualAxis
-    ? { left: 40, right: 64, top: 30, bottom: 16 }
-    : { left: 40, right: 8, top: 42, bottom: 16 };
+    ? { left: 40, right: 64, top: 30, bottom: 24 }
+    : { left: 40, right: 8, top: 42, bottom: 24 };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
@@ -4243,7 +4243,7 @@ class ElrakningPanel {
           font-size: var(--price-card-text-size);
           height: auto;
           line-height: 18px;
-          margin: 1px 0 0;
+          margin: 0;
           min-height: 0;
           overflow: visible;
           overflow-wrap: anywhere;
@@ -4258,7 +4258,7 @@ class ElrakningPanel {
           flex-wrap: nowrap;
           gap: clamp(3px, 1cqw, 8px);
           justify-content: flex-end;
-          margin-top: 10px;
+          margin-top: 6px;
           max-width: 100%;
           min-width: 0;
           position: static;
@@ -4465,7 +4465,7 @@ class ElrakningPanel {
           display: flex;
           flex-wrap: nowrap;
           font-size: var(--card-legend-size);
-          min-height: 18px;
+          min-height: 14px;
           justify-content: space-between;
           margin-top: 0;
           margin-left: 0;
