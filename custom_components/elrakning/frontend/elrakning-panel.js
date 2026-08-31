@@ -5038,6 +5038,16 @@ class ElrakningPanel {
     const handlePickerClick = (event) => {
       if (event.__periodPickerHandled) return;
       event.__periodPickerHandled = true;
+      if (dialog.open && this._isMobilePeriodPicker()) {
+        const rect = dialog.getBoundingClientRect();
+        const outside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+        if (outside) {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+          return;
+        }
+      }
       event.stopPropagation();
       const dateButton = event.target.closest?.("[data-period-picker-date]");
       if (dateButton) this._periodPickerState.draft = new Date(Number(dateButton.dataset.periodPickerDate));
