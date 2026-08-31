@@ -4073,19 +4073,9 @@ class ElrakningPanel {
           opacity: .4;
         }
 
-        .aggregated-chart-bar.hovered {
-          stroke: rgba(255, 255, 255, .38);
-          stroke-width: 1.2;
-          filter: drop-shadow(0 0 2px rgba(255, 255, 255, .16));
-        }
-
         .aggregated-chart-svg .chart-label.hovered {
           fill: var(--primary-text-color);
           font-weight: 600;
-        }
-
-        .aggregated-chart-hover-band {
-          pointer-events: none;
         }
 
         .price-analysis {
@@ -6487,9 +6477,9 @@ class ElrakningPanel {
     const year = selected.getFullYear();
     const month = selected.getMonth();
     const localPeriod = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    let selectedPeriod = mode === "hour"
+    const selectedPeriod = mode === "hour"
       ? `${year}-${String(month + 1).padStart(2, "0")}-${String(selected.getDate()).padStart(2, "0")}`
-      : mode === "day" ? localPeriod(selected) : mode === "month" ? String(year) : null;
+      : mode === "day" ? localPeriod(selected) : String(year);
     const layers = this._effectiveChartLayerState();
     const visibleSeries = [
       layers.spot ? "price" : null,
@@ -6567,8 +6557,29 @@ class ElrakningPanel {
       const relevantPeriods = aggregatedPeriods.filter((period) => mode === "year" || periodInRange(period, rangeStart, rangeEnd));
       const validPeriods = relevantPeriods.filter((period) => Number.isFinite(this._comparisonPrice(period)));
       priceAggregation = { method: "duration_weighted_average", trade_enabled: this._priceComparisonVisible.electricity, grid_enabled: this._priceComparisonVisible.grid, period_count: relevantPeriods.length, valid_period_count: validPeriods.length, missing_period_count: relevantPeriods.length - validPeriods.length, unit: "ore/kWh" };
-      selectedPeriod = groups.length ? `${groups[0].period}-${groups.at(-1).period}` : null;
-      coverage = { group_count: groups.length, period: selectedPeriod, price: { groups: groups.filter((group) => group.price_average_ore_per_kwh !== null).map((group) => group.period) }, ...Object.fromEntries([["buy", "buy_kwh"], ["sell", "sell_kwh"], ["solar", "solar_kwh"], ["load", "load_kwh"], ["charging", "charging_kwh"], ["discharging", "discharging_kwh"]].map(([key, field]) => [key, { groups: groups.filter((group) => group[field] !== null).map((group) => group.period) }])), available_groups: groups.map((group) => group.period) };
+      const coverageFor = (field, predicate = (item) => item[field] !== null) => {
+        const available = data.filter(predicate);
+        return {
+          from: available.length ? new Date(available[0].startMs).toISOString() : null,
+          to: available.length ? new Date(available.at(-1).endMs).toISOString() : null,
+          completeness: available.length === data.length ? "full" : available.length ? "partial" : "missing",
+          group_count: available.length,
+          groups: available.map((item) => item.label),
+        };
+      };
+      coverage = {
+        group_count: groups.length,
+        period: selectedPeriod,
+        displayed_groups: groups.map((group) => group.period),
+        price: coverageFor("price", (item) => Number.isFinite(item.price)),
+        buy: coverageFor("import", (item) => Number.isFinite(item.energy.import)),
+        sell: coverageFor("export", (item) => Number.isFinite(item.energy.export)),
+        solar: coverageFor("solar", (item) => Number.isFinite(item.energy.solar)),
+        load: coverageFor("consumption", (item) => Number.isFinite(item.energy.consumption)),
+        charging: coverageFor("charging", (item) => Number.isFinite(item.energy.charging)),
+        discharging: coverageFor("discharging", (item) => Number.isFinite(item.energy.discharging)),
+        available_groups: groups.map((group) => group.period),
+      };
     }
     const billingEnergySource = this._billingHistory?.energy_source || {};
     const billingSourceEntities = Array.isArray(billingEnergySource.source_entities)
@@ -8901,18 +8912,12 @@ class ElrakningPanel {
     }).join("")).join("");
     const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" /><text class="chart-meter-label" x="8" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(energyMax * ratio)} kWh</text><text class="chart-meter-label" text-anchor="end" x="${width - 4}" y="${plot.top + (1 - ratio) * plotHeight + 4}">${this._formatNumber(priceMax * ratio)} öre/kWh</text>`).join("");
     const labels = data.map((item, index) => `<text class="chart-label" data-group-index="${index}" text-anchor="middle" x="${x(index)}" y="${height - 10}">${item.label}</text>`).join("");
-    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g><rect class="aggregated-chart-hover-band" x="${plot.left}" y="${plot.top}" width="0" height="${plotHeight}" fill="transparent" aria-hidden="true" />${bars}${labels}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg><div class="chart-tooltip" hidden></div>`;
+    chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}${labels}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg><div class="chart-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".chart-tooltip");
-    const hoverBand = chart.querySelector(".aggregated-chart-hover-band");
     const groupNodes = [...svg.querySelectorAll("[data-group-index]")];
     const clearGroupHover = () => {
       groupNodes.forEach((node) => node.classList.remove("hovered", "dimmed"));
-      if (hoverBand) {
-        hoverBand.setAttribute("x", String(plot.left));
-        hoverBand.setAttribute("width", "0");
-        hoverBand.setAttribute("fill", "transparent");
-      }
     };
     const setGroupHover = (index) => {
       groupNodes.forEach((node) => {
@@ -8920,11 +8925,6 @@ class ElrakningPanel {
         node.classList.toggle("hovered", active);
         node.classList.toggle("dimmed", !active);
       });
-      if (hoverBand) {
-        hoverBand.setAttribute("x", String(plot.left + index * xStep));
-        hoverBand.setAttribute("width", String(xStep));
-        hoverBand.setAttribute("fill", "rgba(255,255,255,0.035)");
-      }
     };
     const show = (event) => {
       const bounds = svg.getBoundingClientRect();
