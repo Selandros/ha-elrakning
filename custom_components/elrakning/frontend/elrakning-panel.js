@@ -612,6 +612,28 @@ export function buildPhaseChartGeometry(containerWidth = 960) {
   return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact };
 }
 
+export function buildPriceChartGeometry(width = 960, height = 350, { dualAxis = false } = {}) {
+  const chartWidth = Math.max(320, Math.round(Number(width) || 960));
+  const chartHeight = Math.max(160, Math.round(Number(height) || 350));
+  const plot = dualAxis
+    ? { left: 64, right: 72, top: 30, bottom: 42 }
+    : { left: 60, right: 12, top: 42, bottom: 42 };
+  const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
+  const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
+  return {
+    width: chartWidth,
+    height: chartHeight,
+    plotLeft: plot.left,
+    plotRight: plot.right,
+    plotTop: plot.top,
+    plotBottom: plot.bottom,
+    plotWidth,
+    plotHeight,
+    xAxisRailHeight: plot.bottom,
+    plot,
+  };
+}
+
 /** Convert a browser pointer to the SVG viewBox and plot coordinate systems. */
 export function pointerToPlotCoordinates(svg, event, plot, width, height) {
   const bounds = svg?.getBoundingClientRect?.();
@@ -3301,22 +3323,36 @@ class ElrakningPanel {
         }
 
         .chart-axis-overlay-y-left {
+          box-sizing: border-box;
           left: 0;
-          text-align: center;
+          padding-right: 8px;
+          text-align: right;
           transform: translateY(-50%);
-          width: 5%;
+          width: 60px;
         }
 
         .chart-axis-overlay-y-right {
+          box-sizing: border-box;
+          padding-left: 8px;
           right: 0;
           text-align: right;
           transform: translateY(-50%);
-          width: 8%;
+          width: 72px;
         }
 
         .chart-axis-overlay-x {
           bottom: 0;
           transform: translateX(-50%);
+        }
+
+        .chart-axis-overlay-x.edge-start {
+          text-align: left;
+          transform: none;
+        }
+
+        .chart-axis-overlay-x.edge-end {
+          text-align: right;
+          transform: translateX(-100%);
         }
 
         .cost-chart-gridline { stroke: var(--divider-color); stroke-width: 1; opacity: .45; }
@@ -9238,9 +9274,8 @@ class ElrakningPanel {
     this._updateAggregatedPriceSummary(data);
     const width = 960;
     const height = 350;
-    const plot = { left: 48, right: 48, top: 30, bottom: 42 };
-    const plotWidth = width - plot.left - plot.right;
-    const plotHeight = height - plot.top - plot.bottom;
+    const geometry = buildPriceChartGeometry(width, height, { dualAxis: true });
+    const { plot, plotWidth, plotHeight } = geometry;
     const priceValues = data.map((item) => item.price).filter(Number.isFinite);
     const energyValues = data.flatMap((item) => Object.values(item.energy)).filter(Number.isFinite);
     const priceMax = Math.max(1, ...priceValues);
@@ -9270,7 +9305,7 @@ class ElrakningPanel {
       return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
     }).join("")).join("");
     const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" />`).join("");
-    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(energyMax * ratio)} kWh</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(priceMax * ratio)} öre/kWh</span>`).join("")}${data.map((item, index) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-group-index="${index}" style="left:${(x(index) / width) * 100}%">${item.label}</span>`).join("")}</div>`;
+    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(energyMax * ratio)} kWh</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${this._formatNumber(priceMax * ratio)} öre/kWh</span>`).join("")}${data.map((item, index) => { const labelX = index === 0 ? plot.left : index === data.length - 1 ? width - plot.right : x(index); const edge = index === 0 ? " edge-start" : index === data.length - 1 ? " edge-end" : ""; return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" data-group-index="${index}" style="left:${(labelX / width) * 100}%">${item.label}</span>`; }).join("")}</div>`;
     chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg>${axisOverlay}<div class="chart-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".chart-tooltip");
@@ -9340,9 +9375,8 @@ class ElrakningPanel {
     this._chartTooltipDetails = new Map();
     const width = 960;
     const height = 350;
-    const plot = { left: 42, right: 8, top: 42, bottom: 30 };
-    const plotWidth = width - plot.left - plot.right;
-    const plotHeight = height - plot.top - plot.bottom;
+    const geometry = buildPriceChartGeometry(width, height);
+    const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
     const zeroY = Math.max(plot.top, Math.min(plot.top + plotHeight, y(0)));
@@ -9352,12 +9386,7 @@ class ElrakningPanel {
     dayEnd.setDate(dayEnd.getDate() + 1);
     const dayDuration = dayEnd.getTime() - dayStart.getTime();
     this._chartGeometry = {
-      width,
-      height,
-      plotLeft: plot.left,
-      plotTop: plot.top,
-      plotWidth,
-      plotHeight,
+      ...geometry,
       dayStartMs: dayStart.getTime(),
       dayDuration,
     };
@@ -9521,7 +9550,8 @@ class ElrakningPanel {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
       const cull = hour % 3 !== 0;
-      return `<span class="chart-axis-overlay-label chart-axis-overlay-x${cull ? " chart-axis-overlay-x-cull" : ""}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
+      const edge = hour === 0 ? " edge-start" : hour === 23 ? " edge-end" : "";
+      return `<span class="chart-axis-overlay-label chart-axis-overlay-x${cull ? " chart-axis-overlay-x-cull" : ""}${edge}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
     }).join("");
     const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}</div>`;
     const legend = this.host.querySelector("[data-meter-legend]");
