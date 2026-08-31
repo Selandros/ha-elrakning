@@ -85,6 +85,23 @@ export function invoicePeriodLabel(invoice) {
   return null;
 }
 
+export function buildGridSourceCost(estimate, fallback = null) {
+  const grid = estimate?.grid;
+  if (!grid || typeof grid !== "object") return fallback;
+  const existing = fallback && typeof fallback === "object" ? fallback : {};
+  return {
+    total_sek: grid.total_so_far_sek ?? null,
+    fixed_sek: grid.accrued_fixed_fee_sek ?? null,
+    variable_sek: grid.variable_cost_sek ?? null,
+    imported_kwh: estimate.imported_kwh_so_far ?? null,
+    subscription_sek_per_month: grid.fixed_fee_sek ?? existing.subscription_sek_per_month ?? null,
+    transfer_ore_per_kwh: estimate.grid_transfer_ore_per_kwh_gross ?? existing.transfer_ore_per_kwh ?? null,
+    energy_tax_ore_per_kwh: estimate.grid_energy_tax_ore_per_kwh_gross ?? existing.energy_tax_ore_per_kwh ?? null,
+    variable_grid_ore_per_kwh: estimate.grid_weighted_average_ore_per_kwh ?? existing.variable_grid_ore_per_kwh ?? null,
+    source: "canonical_invoice_estimate.grid",
+  };
+}
+
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -6350,7 +6367,7 @@ class ElrakningPanel {
       provider.textContent = "";
       copy.disabled = true;
       try {
-        const source = liveSource
+        let source = liveSource
           ? liveSource._livePowerRaw || {}
           : isEon
           ? await this.hass.callWS({ type: "elrakning/grid/source_data" })
@@ -6366,6 +6383,15 @@ class ElrakningPanel {
             }
             : this._buildCardSourceData(cardSource)
           : await this.hass.callWS({ type: "elrakning/electricity_provider_source_data", limit: 500 });
+        if (isEon) {
+          source = {
+            ...source,
+            current_month_cost: buildGridSourceCost(
+              this._invoiceEstimateRaw,
+              source.current_month_cost,
+            ),
+          };
+        }
         const providerName = liveSource ? liveSourceName : source.provider_name || source.facility?.provider_name;
         if (typeof providerName === "string" && providerName.trim()) {
           provider.textContent = `Källa: ${providerName.trim()}`;
