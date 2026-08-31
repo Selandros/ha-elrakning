@@ -124,6 +124,8 @@ assert.match(pickerSource, /dialog\.addEventListener\("cancel"/);
 assert.match(pickerSource, /dialog\.getBoundingClientRect\(\)/);
 assert.match(pickerSource, /event\.clientX < rect\.left[\s\S]*event\.clientY > rect\.bottom/);
 assert.match(pickerSource, /event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)[\s\S]*close\(\)/);
+assert.match(pickerSource, /data-period-picker-open[\s\S]*addEventListener\("click", \(event\) => \{[\s\S]*event\.stopPropagation\(\)/);
+assert.match(pickerSource, /event\.target\.closest\?\.\("\[data-period-picker-open\]"\)\) return;/);
 assert.match(pickerPanelSource, /_updatePeriodPickerDraftSelection\(\)[\s\S]*classList\.toggle\("selected"/);
 assert.match(pickerSource, /draftSelectionChanged[\s\S]*_updatePeriodPickerDraftSelection\(\)[\s\S]*return;/);
 assert.match(pickerPanelSource, /\.period-picker-day-grid button,[\s\S]*\.period-picker-choice \{[\s\S]*min-height: 36px/);
