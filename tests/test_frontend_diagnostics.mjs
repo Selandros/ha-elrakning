@@ -94,7 +94,7 @@ assert.match(pickerPanelSource, /\.price-section \.period-picker-modes \{[\s\S]*
 assert.match(pickerPanelSource, /\.price-section \.period-picker-control \{[\s\S]*grid-template-columns: 44px minmax\(0, 1fr\) 44px[\s\S]*order: 2/);
 assert.match(pickerPanelSource, /\.price-section \.period-picker button \{[\s\S]*min-height: 44px/);
 assert.match(pickerPanelSource, /\.price-section \.period-picker-popover \{[\s\S]*left: 50%[\s\S]*max-width: calc\(100vw - 24px\)/);
-assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.price-section \.period-picker-popover \{[\s\S]*bottom: calc\(env\(safe-area-inset-bottom, 0px\) \+ 12px\)[\s\S]*position: fixed;[\s\S]*width: min\(320px, calc\(100vw - 40px\)\)/);
+assert.match(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.price-section \.period-picker-popover \{[\s\S]*bottom: calc\(env\(safe-area-inset-bottom, 0px\) \+ 12px\) !important;[\s\S]*position: fixed !important;[\s\S]*width: min\(320px, calc\(100vw - 40px\)\) !important/);
 assert.match(pickerPanelSource, /\.price-section \.period-picker-day-grid button,[\s\S]*\.price-section \.period-picker-choice \{[\s\S]*min-height: 36px/);
 assert.doesNotMatch(pickerSource, /scrollIntoView\(|positionPicker|setPickerPosition/);
 const costSeries = buildCostAnalysisSeries({

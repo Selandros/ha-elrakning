@@ -4229,20 +4229,20 @@ class ElrakningPanel {
 
         @media (max-width: 600px) {
           .price-section .period-picker-popover {
-            bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
             box-sizing: border-box;
             height: auto;
-            left: 50%;
+            left: 50% !important;
             max-height: 460px;
             max-height: min(65vh, 460px);
             max-height: min(65dvh, 460px);
             overflow-y: auto;
-            position: fixed;
-            right: auto;
-            top: auto;
-            transform: translateX(-50%);
-            width: min(320px, calc(100vw - 40px));
-            z-index: 5;
+            position: fixed !important;
+            right: auto !important;
+            top: auto !important;
+            transform: translateX(-50%) !important;
+            width: min(320px, calc(100vw - 40px)) !important;
+            z-index: 1000;
           }
 
           .price-section .period-picker-popover-header {
@@ -4260,6 +4260,7 @@ class ElrakningPanel {
           .price-section .period-picker-day-grid button,
           .price-section .period-picker-choice {
             min-height: 36px !important;
+            touch-action: manipulation;
           }
 
           .price-section .period-picker-actions {
