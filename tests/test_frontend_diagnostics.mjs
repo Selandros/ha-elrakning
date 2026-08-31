@@ -998,7 +998,7 @@ assert.deepEqual(buildHourlyBoundaryHours(960), Array.from({ length: 25 }, (_, h
 assert.deepEqual(buildHourlyBoundaryHours(600), [0, 3, 6, 9, 12, 15, 18, 21, 24]);
 assert.deepEqual(buildHourlyBoundaryHours(390), [0, 6, 12, 18, 24]);
 assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left, priceAxisGutter(["0 kW", "5 kW", "10 kW"]));
-assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left, buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left);
+assert.ok(buildPriceChartGeometry(960, 350, { containerWidth: 390 }).plot.left > hourlyPriceGeometry.plot.left);
 assert.ok(hourlyPriceGeometry.plotWidth > 0 && dualPriceGeometry.plotWidth > 0);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-start/);
 assert.match(eonPanelSource, /chart-axis-overlay-x\.edge-end/);
@@ -1006,6 +1006,8 @@ assert.match(eonPanelSource, /_setupPriceChartResizeObserver\(\);/);
 assert.match(eonPanelSource, /new ResizeObserver\(updateChartGeometry\)/);
 assert.match(eonPanelSource, /chart\.getBoundingClientRect\(\)\.width \|\| chart\.clientWidth \|\| width/);
 assert.match(eonPanelSource, /this\._priceChartRenderedWidth = renderedWidth;/);
+assert.match(eonPanelSource, /--price-axis-left-gutter/,);
+assert.match(eonPanelSource, /geometry\.plotLeft \/ width/);
 assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 0[\s\S]*padding-right: 8px[\s\S]*text-align: left[\s\S]*width: var\(--price-axis-left-gutter/);
 assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 0[\s\S]*width: var\(--price-axis-right-gutter/);
 assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*width: var\(--price-axis-left-gutter/);

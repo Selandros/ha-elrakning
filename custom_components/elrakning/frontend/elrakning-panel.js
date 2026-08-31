@@ -659,13 +659,15 @@ export function buildPriceChartGeometry(width = 960, height = 350, {
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const renderedWidth = Math.max(320, Number(containerWidth) || chartWidth);
   const xAxisRailHeight = Math.round(16 * chartWidth / renderedWidth);
-  const plotLeft = Number.isFinite(leftAxisGutter) ? leftAxisGutter : priceAxisGutter(leftAxisLabels);
-  const plotRight = Number.isFinite(rightAxisGutter)
+  const leftGutter = Number.isFinite(leftAxisGutter) ? leftAxisGutter : priceAxisGutter(leftAxisLabels);
+  const rightGutter = Number.isFinite(rightAxisGutter)
     ? rightAxisGutter
     : priceAxisGutter(rightAxisLabels);
+  const plotLeft = leftGutter * chartWidth / renderedWidth;
+  const plotRight = rightGutter * chartWidth / renderedWidth;
   const plot = dualAxis
     ? { left: plotLeft, right: plotRight, top: 30, bottom: xAxisRailHeight }
-    : { left: plotLeft, right: priceAxisGutter(["0"], 8), top: 42, bottom: xAxisRailHeight };
+    : { left: plotLeft, right: priceAxisGutter(["0"], 8) * chartWidth / renderedWidth, top: 42, bottom: xAxisRailHeight };
   const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
@@ -9383,8 +9385,8 @@ class ElrakningPanel {
       leftAxisGutter: measuredPriceAxisGutter(chart, leftAxisLabels),
       rightAxisGutter: measuredPriceAxisGutter(chart, rightAxisLabels),
     });
-    chart.style.setProperty("--price-axis-left-gutter", `${geometry.plotLeft}px`);
-    chart.style.setProperty("--price-axis-right-gutter", `${geometry.plotRight}px`);
+    chart.style.setProperty("--price-axis-left-gutter", `${(geometry.plotLeft / width) * 100}%`);
+    chart.style.setProperty("--price-axis-right-gutter", `${(geometry.plotRight / width) * 100}%`);
     const { plot, plotWidth, plotHeight } = geometry;
     const xStep = plotWidth / Math.max(1, data.length);
     const x = (index) => plot.left + (index + .5) * xStep;
@@ -9489,8 +9491,8 @@ class ElrakningPanel {
       leftAxisLabels: axisLabels,
       leftAxisGutter: measuredPriceAxisGutter(chart, axisLabels),
     });
-    chart.style.setProperty("--price-axis-left-gutter", `${geometry.plotLeft}px`);
-    chart.style.setProperty("--price-axis-right-gutter", `${geometry.plotRight}px`);
+    chart.style.setProperty("--price-axis-left-gutter", `${(geometry.plotLeft / width) * 100}%`);
+    chart.style.setProperty("--price-axis-right-gutter", `${(geometry.plotRight / width) * 100}%`);
     const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
