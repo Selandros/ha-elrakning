@@ -4041,7 +4041,7 @@ class ElrakningPanel {
 
         @media (max-width: 600px) {
           .price-section .period-picker {
-            align-items: stretch;
+            align-items: center;
             bottom: auto;
             flex-direction: column;
             gap: 8px;
@@ -4054,35 +4054,43 @@ class ElrakningPanel {
 
           .price-section .period-picker-modes {
             box-sizing: border-box;
-            display: grid;
-            gap: 2px;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            display: flex;
+            gap: 4px;
             order: 1;
             padding: 2px;
-            width: 100%;
+            width: fit-content;
+            max-width: 100%;
           }
 
           .price-section .period-picker-control {
             box-sizing: border-box;
-            display: grid;
-            gap: 2px;
-            grid-template-columns: 44px minmax(0, 1fr) 44px;
+            display: flex;
+            gap: 4px;
             order: 2;
             padding: 2px;
-            width: 100%;
+            width: fit-content;
+            max-width: 100%;
           }
 
           .price-section .period-picker button {
             box-sizing: border-box;
-            min-height: 44px;
+            flex: 0 0 auto;
+            min-height: 0;
             min-width: 0;
-            padding: 4px;
+            padding: 7px 10px;
+          }
+
+          .price-section .period-picker-arrow {
+            min-width: 0;
+            padding-inline: 9px !important;
           }
 
           .price-section .period-picker-period {
+            min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
-            width: 100%;
+            white-space: nowrap;
+            width: auto;
           }
 
           .price-section .period-picker-popover {
@@ -4258,16 +4266,6 @@ class ElrakningPanel {
 
           .period-picker-popover {
             display: none;
-          }
-
-          .period-picker-modes,
-          .period-picker-control {
-            gap: 2px;
-          }
-
-          .period-picker button {
-            min-height: 40px;
-            padding-block: 2px;
           }
 
           .period-picker-popover-header {
