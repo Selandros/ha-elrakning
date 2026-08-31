@@ -5188,6 +5188,35 @@ class ElrakningPanel {
   }
 
   _bindChartLegend() {
+    const previewSelectors = {
+      spot: [".chart-bar", ".aggregated-chart-price"],
+      average: [".chart-average"],
+      import: [".aggregated-chart-import", ".chart-meter-import", ".chart-power-area-import"],
+      export: [".aggregated-chart-export", ".chart-meter-export", ".chart-power-area-export"],
+      solar: [".aggregated-chart-solar", ".chart-power-solar", ".chart-power-area-solar"],
+      consumption: [".aggregated-chart-consumption", ".chart-power-consumption", ".chart-power-area-consumption"],
+      charging: [".aggregated-chart-charging", ".chart-power-charging", ".chart-power-area-charging"],
+      discharging: [".aggregated-chart-discharging", ".chart-power-discharging", ".chart-power-area-discharging"],
+    };
+    const setHoverPreview = (layer) => {
+      if (this._soloChartLayer) return;
+      const chart = this.host.querySelector(".price-chart");
+      if (!chart || !previewSelectors[layer]) return;
+      const allSeries = Object.values(previewSelectors).flat();
+      chart.querySelectorAll(allSeries.join(",")).forEach((node) => {
+        node.style.opacity = "0";
+      });
+      chart.querySelectorAll(previewSelectors[layer].join(",")).forEach((node) => {
+        node.style.opacity = "";
+      });
+    };
+    const clearHoverPreview = () => {
+      const chart = this.host.querySelector(".price-chart");
+      if (!chart) return;
+      chart.querySelectorAll(Object.values(previewSelectors).flat().join(",")).forEach((node) => {
+        node.style.opacity = "";
+      });
+    };
     const toggleLayer = (layer) => {
       if (this._soloChartLayer) {
         this._clearSoloChartLayer();
@@ -5248,10 +5277,22 @@ class ElrakningPanel {
         toggleLayer(layer);
       });
     };
+    const bindHoverPreview = (button, layer) => {
+      button.addEventListener("pointerenter", (event) => {
+        if (event.pointerType === "touch" || button.disabled) return;
+        setHoverPreview(layer);
+      });
+      button.addEventListener("pointerleave", (event) => {
+        if (event.pointerType === "touch") return;
+        clearHoverPreview();
+      });
+    };
     for (const button of this.host.querySelectorAll("[data-chart-layer]")) {
+      bindHoverPreview(button, button.dataset.chartLayer);
       bindLongPress(button, button.dataset.chartLayer);
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
+      bindHoverPreview(button, button.dataset.previewLayer);
       bindLongPress(button, button.dataset.previewLayer);
     }
     for (const control of this.host.querySelectorAll("[data-price-layer]")) {
