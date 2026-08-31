@@ -135,7 +135,7 @@ assert.match(eonPanelSource, /axes: mode === "hour"/);
 assert.match(eonPanelSource, /this\._billingHistory \? \(this\._billingHistory\.price_periods \|\| \[\]\)/);
 assert.match(eonPanelSource, /this\._billingHistory \? \(this\._billingHistory\.energy_points \|\| \[\]\)/);
 assert.match(eonPanelSource, /billingEnergySource/);
-assert.match(eonPanelSource, /selectedPeriod.*String\(year\)/);
+assert.match(eonPanelSource, /selectedPeriod = mode === "hour"[\s\S]*: mode === "day" \? localPeriod\(selected\) : String\(year\)/);
 assert.match(eonPanelSource, /displayed_groups/);
 assert.match(eonPanelSource, /coverageFor/);
 assert.match(eonPanelSource, /data-group-index/);
