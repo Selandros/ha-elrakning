@@ -744,6 +744,33 @@ export function resolveFuseAmpere(meterState, gridState) {
   return value ?? null;
 }
 
+function phaseStateValueEqual(left, right) {
+  if (left == null || right == null) return left == null && right == null;
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+    ? leftNumber === rightNumber
+    : left === right;
+}
+
+export function phaseMeterStateDependenciesChanged(previous, next, gridState) {
+  if (!previous) return true;
+  if (resolveFuseAmpere(previous, gridState) !== resolveFuseAmpere(next, gridState)) return true;
+  for (const [metric, field] of [["current", "phase_current_a"], ["voltage", "phase_voltage_v"], ["active_power", "phase_active_power_kw"]]) {
+    for (const phase of ["l1", "l2", "l3"]) {
+      if (!phaseStateValueEqual(previous?.[field]?.[phase], next?.[field]?.[phase])) return true;
+    }
+    for (const phase of ["l1", "l2", "l3"]) {
+      if ((previous?.phase_source_entities?.[metric]?.[phase] || null) !== (next?.phase_source_entities?.[metric]?.[phase] || null)) return true;
+    }
+  }
+  return false;
+}
+
+export function phaseChartDomNeedsRender(chart) {
+  return Boolean(chart && !chart.querySelector(".phase-history-svg, .phase-history-empty"));
+}
+
 export function buildCanonicalPhasePoints(points, dayStart, axisEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const axisEndMs = new Date(axisEnd).getTime();
@@ -8869,6 +8896,9 @@ class ElrakningPanel {
   }
 
   _applyMeterState(state) {
+    const phaseDependenciesChanged = phaseMeterStateDependenciesChanged(this._meterState, state, this._eonGridState);
+    const phaseChart = this.host.querySelector("[data-phase-history-chart]");
+    const phaseDomNeedsRender = phaseChartDomNeedsRender(phaseChart);
     this._meterState = state;
     this._updateLivePhaseMaxima(state?.phase_current_a);
     const provider = this.host.querySelector('[data-provider-name="elmatare"]');
@@ -8881,7 +8911,7 @@ class ElrakningPanel {
     if (source) source.hidden = !this._debugEnabled || state?.configured !== true;
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
-    this._renderPhaseHistoryCard();
+    if (phaseDependenciesChanged || phaseDomNeedsRender) this._renderPhaseHistoryCard();
   }
 
   _updateLivePhaseMaxima(phaseCurrentA, timestamp = new Date()) {
