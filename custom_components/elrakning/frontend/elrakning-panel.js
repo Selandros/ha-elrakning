@@ -9880,7 +9880,7 @@ class ElrakningPanel {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       return;
     }
-    chart.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
+    chart.innerHTML = `<svg class="chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       <g data-price-dynamic="grid">${meterGrid}</g>
       ${bars}

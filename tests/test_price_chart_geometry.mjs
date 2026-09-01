@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildHourlyBarEdges, buildPriceCategoryBands, buildPriceChartGeometry } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+
+const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}" role="img" aria-label="Dagens elpris/);
 
 const hourly = buildPriceChartGeometry(960, 350, { containerWidth: 960 });
 const hourStart = hourly.plot.left;
