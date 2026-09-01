@@ -1363,6 +1363,16 @@ export function aggregatedPriceGroupIndex(viewX, plotLeft, plotWidth, groupCount
   return Math.max(0, Math.min(groupCount - 1, Math.floor((viewX - plotLeft) / (plotWidth / groupCount))));
 }
 
+export function buildPriceCategoryBands(plotLeft, plotRight, groupCount) {
+  if (!Number.isFinite(plotLeft) || !Number.isFinite(plotRight) || !Number.isInteger(groupCount) || groupCount < 1 || plotRight <= plotLeft) return [];
+  const bandWidth = (plotRight - plotLeft) / groupCount;
+  return Array.from({ length: groupCount }, (_, index) => ({
+    start: plotLeft + index * bandWidth,
+    center: plotLeft + (index + .5) * bandWidth,
+    end: plotLeft + (index + 1) * bandWidth,
+  }));
+}
+
 export function previousCalendarMonth(month) {
   if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
   const [year, monthNumber] = month.split("-").map(Number);
@@ -9562,8 +9572,9 @@ class ElrakningPanel {
     chart.style.setProperty("--price-axis-left-gutter", `${(geometry.plotLeft / width) * 100}%`);
     chart.style.setProperty("--price-axis-right-gutter", `${(geometry.plotRight / width) * 100}%`);
     const { plot, plotWidth, plotHeight } = geometry;
-    const xStep = plotWidth / Math.max(1, data.length);
-    const x = (index) => plot.left + (index + .5) * xStep;
+    const bands = buildPriceCategoryBands(plot.left, width - plot.right, data.length);
+    const xStep = bands[0]?.end - bands[0]?.start || plotWidth;
+    const x = (index) => bands[index]?.center ?? plot.left;
     const priceY = (value) => plot.top + (1 - value / priceMax) * plotHeight;
     const energyY = (value) => plot.top + (1 - value / energyMax) * plotHeight;
     const series = [
@@ -9576,18 +9587,19 @@ class ElrakningPanel {
       ["discharging", "Urladdning", "discharging", energyY, "kWh"],
     ];
     const layers = this._effectiveChartLayerState();
-    const barWidth = Math.max(2, Math.min(18, xStep / series.length - 3));
-    const bars = data.map((item, index) => series.map(([key, , colorKey, scale], seriesIndex) => {
-      if (key === "price" && !layers.spot) return "";
-      if (key !== "price" && !layers[key]) return "";
+    const visibleSeries = series.filter(([key]) => key === "price" ? layers.spot : layers[key]);
+    const seriesCount = Math.max(1, visibleSeries.length);
+    const barWidth = Math.max(2, Math.min(18, xStep / seriesCount - 3));
+    const groupWidth = seriesCount * barWidth + (seriesCount - 1);
+    const bars = data.map((item, index) => visibleSeries.map(([key, , colorKey, scale], seriesIndex) => {
       const value = key === "price" ? item.price : item.energy[key];
       if (!Number.isFinite(value)) return "";
       const yValue = scale(value);
       const color = key === "price" ? chartColor("priceNormal") : chartColor(colorKey);
-      return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) + (seriesIndex - (series.length - 1) / 2) * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
+      return `<rect class="aggregated-chart-bar aggregated-chart-${key}" data-group-index="${index}" fill="${color}" x="${x(index) - groupWidth / 2 + seriesIndex * (barWidth + 1)}" y="${yValue}" width="${barWidth}" height="${plot.top + plotHeight - yValue}" rx="1" />`;
     }).join("")).join("");
     const grid = [0, .5, 1].map((ratio) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${plot.top + (1 - ratio) * plotHeight}" x2="${width - plot.right}" y2="${plot.top + (1 - ratio) * plotHeight}" />`).join("");
-    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio, index) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${leftAxisLabels[index]}</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${rightAxisLabels[index]}</span>`).join("")}${data.map((item, index) => { const labelX = index === 0 ? plot.left : index === data.length - 1 ? width - plot.right : x(index); const edge = index === 0 ? " edge-start" : index === data.length - 1 ? " edge-end" : ""; return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" data-group-index="${index}" style="left:${(labelX / width) * 100}%">${item.label}</span>`; }).join("")}</div>`;
+    const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio, index) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${leftAxisLabels[index]}</span><span class="chart-axis-overlay-label chart-axis-overlay-y-right" style="top:${((plot.top + (1 - ratio) * plotHeight) / height) * 100}%">${rightAxisLabels[index]}</span>`).join("")}${data.map((item, index) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-group-index="${index}" style="left:${(x(index) / width) * 100}%">${item.label}</span>`).join("")}</div>`;
     chart.innerHTML = `<svg class="chart-svg aggregated-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Aggregerat elpris och energi"><g>${grid}</g>${bars}<rect class="aggregated-chart-hit" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" fill="transparent" /></svg>${axisOverlay}<div class="chart-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".chart-tooltip");
