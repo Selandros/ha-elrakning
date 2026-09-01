@@ -1406,6 +1406,19 @@ export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSerie
   }).filter((bucket) => bucket.price !== null || Object.keys(bucket.energy).length > 0);
 }
 
+export function selectHourlyPricePeriods(periods, selectedDate = new Date()) {
+  const selected = new Date(selectedDate);
+  if (!Number.isFinite(selected.getTime())) return [];
+  const start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate()).getTime();
+  const endDate = new Date(start);
+  endDate.setDate(endDate.getDate() + 1);
+  const end = endDate.getTime();
+  return (Array.isArray(periods) ? periods : []).filter((period) => {
+    const timestamp = new Date(period?.start).getTime();
+    return Number.isFinite(timestamp) && timestamp >= start && timestamp < end;
+  });
+}
+
 export function aggregatedPriceGroupIndex(viewX, plotLeft, plotWidth, groupCount) {
   if (!Number.isFinite(viewX) || !Number.isFinite(plotLeft) || !Number.isFinite(plotWidth) || !Number.isInteger(groupCount) || groupCount < 1) return -1;
   if (viewX < plotLeft || viewX > plotLeft + plotWidth) return -1;
@@ -5402,7 +5415,7 @@ class ElrakningPanel {
       this.updatePriceSummary();
       this.renderPriceChart();
     }));
-    root.querySelectorAll("[data-period-picker-nav]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-period-picker-nav]").forEach((button) => button.addEventListener("click", async () => {
       const date = new Date(this._periodPickerState.confirmed);
       const direction = button.dataset.periodPickerNav === "next" ? 1 : -1;
       if (this._periodPickerState.mode === "hour") date.setDate(date.getDate() + direction);
@@ -5411,8 +5424,12 @@ class ElrakningPanel {
       this._periodPickerState.confirmed = date;
       this._periodPickerState.draft = new Date(date);
       this._renderPeriodPicker();
-      this.updatePriceSummary();
-      this.renderPriceChart();
+      if (this._periodPickerState.mode === "hour") {
+        await this.loadPriceData(date);
+      } else {
+        this.updatePriceSummary();
+        this.renderPriceChart();
+      }
     }));
     const handlePickerClick = (event) => {
       if (event.__periodPickerHandled) return;
@@ -8465,10 +8482,17 @@ class ElrakningPanel {
     return this._backendHydrationPromise;
   }
 
-  async loadPriceData() {
+  async loadPriceData(selectedDate = null) {
     if (!this.hass?.callWS) return;
     try {
-      const response = await this.hass.callWS({ type: "elrakning/price_data" });
+      const request = { type: "elrakning/price_data" };
+      const requestedDate = selectedDate instanceof Date
+        ? selectedDate
+        : this._periodPickerState?.mode === "hour" ? this._periodPickerState.confirmed : null;
+      if (requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())) {
+        request.date = `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`;
+      }
+      const response = await this.hass.callWS(request);
       if (response?.error === "integration_unavailable") return;
       this.priceSnapshot = response;
     } catch {
@@ -9256,9 +9280,12 @@ class ElrakningPanel {
   }
 
   updatePriceSummary() {
-    const periods = Array.isArray(this.priceSnapshot?.periods)
+    const sourcePeriods = Array.isArray(this.priceSnapshot?.periods)
       ? this.priceSnapshot.periods
       : [];
+    const periods = this._periodPickerState?.mode === "hour"
+      ? selectHourlyPricePeriods(sourcePeriods, this._periodPickerState.confirmed)
+      : sourcePeriods;
     const now = new Date();
     const currentPeriod = periods.find((period) => {
       const start = new Date(period.start);
@@ -9689,7 +9716,9 @@ class ElrakningPanel {
       return;
     }
 
-    const periods = this.priceData.periods;
+    const periods = this._periodPickerState?.mode === "hour"
+      ? selectHourlyPricePeriods(this.priceData.periods, this._periodPickerState.confirmed)
+      : this.priceData.periods;
     const visibleLayers = this._effectiveChartLayerState();
     this._updatePriceComparisonControls();
     const prices = periods.map((period) => this._periodCustomerPrice(period));

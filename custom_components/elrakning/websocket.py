@@ -120,7 +120,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     hass.data[f"{DOMAIN}_websocket_registered"] = True
 
 
-@websocket_api.websocket_command({vol.Required("type"): COMMAND})
+@websocket_api.websocket_command({vol.Required("type"): COMMAND, vol.Optional("date"): str})
 @websocket_api.async_response
 async def websocket_get_price_data(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
@@ -128,7 +128,16 @@ async def websocket_get_price_data(
     """Return cached periods and discovered Nord Pool sensor values."""
     entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
     coordinator: ElrakningCoordinator | None = entry.runtime_data if entry else None
-    data = coordinator.data if coordinator else None
+    data = None
+    if coordinator:
+        requested_date = msg.get("date")
+        if requested_date:
+            try:
+                data = await coordinator.async_get_price_data(date.fromisoformat(requested_date))
+            except ValueError:
+                data = None
+        else:
+            data = coordinator.data
     connection.send_result(msg["id"], _serialize_price_data(hass, data))
 
 
