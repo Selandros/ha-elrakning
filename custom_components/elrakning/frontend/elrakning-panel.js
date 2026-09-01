@@ -6850,9 +6850,8 @@ class ElrakningPanel {
 
   _appendPowerState(eventData) {
     if (eventData?.state) {
-      this._applyPowerState(eventData.state);
       for (const entry of eventData.points || []) this._appendPowerPoint(entry.series, entry.point);
-      this._refreshPowerEnergyState();
+      this._applyPowerState(eventData.state);
       if (this.host.querySelector(".price-chart")
         && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
         this.renderPriceChart({ liveUpdate: true });
