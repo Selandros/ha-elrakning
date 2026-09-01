@@ -3682,6 +3682,7 @@ class ElrakningPanel {
           gap: 6px;
           margin-left: auto;
           min-width: 0;
+          transform: translateY(-10px);
         }
 
         .phase-history-metric-selector button {
@@ -3853,6 +3854,7 @@ class ElrakningPanel {
         @media (max-width: 600px) {
           .phase-history-metric-selector {
             gap: 4px;
+            transform: none;
           }
 
           .phase-history-metric-selector button {
