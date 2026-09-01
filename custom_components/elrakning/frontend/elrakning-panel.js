@@ -3671,7 +3671,7 @@ class ElrakningPanel {
         }
 
         @media (min-width: 601px) {
-          .phase-history-card {
+          .card.phase-history-card {
             padding-top: 14px;
           }
         }
