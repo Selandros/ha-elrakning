@@ -8205,7 +8205,6 @@ class ElrakningPanel {
             powerMapping.soc_entity,
             powerMapping.capacity_entity,
           ];
-          if (powerEntities.includes(entityId)) this.loadPowerState();
         },
         "state_changed",
       );
