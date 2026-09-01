@@ -3671,8 +3671,8 @@ class ElrakningPanel {
         }
 
         @media (min-width: 601px) {
-          .phase-history-heading {
-            transform: translateY(-6px);
+          .phase-history-card {
+            padding-top: 14px;
           }
         }
 
@@ -3871,10 +3871,6 @@ class ElrakningPanel {
             margin-top: 10px;
             min-height: 0;
             padding-bottom: 24px;
-          }
-
-          .phase-history-heading {
-            transform: none;
           }
 
           .phase-history-axis-overlay {
