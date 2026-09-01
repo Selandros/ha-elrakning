@@ -1717,6 +1717,7 @@ export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capa
 }
 
 export function buildSolarDailyHistory(points, forecastBaselines, now = new Date(), dayCount = 7, liveForecast = null) {
+  const forecastCompletionEpsilonKwh = 0.001;
   const current = new Date(now);
   const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
   const days = Math.max(1, Math.min(7, Math.trunc(Number(dayCount) || 7)));
@@ -1739,8 +1740,13 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const expectedSoFarKwh = isToday && liveTodayKwh !== null && liveRemainingKwh !== null
       ? liveTodayKwh - liveRemainingKwh
       : null;
-    const comparisonExpectedKwh = isToday ? expectedSoFarKwh : forecastKwh;
-    const comparisonBasis = isToday ? "forecast_so_far" : "full_day_forecast";
+    const completedToday = isToday && liveRemainingKwh !== null && liveRemainingKwh <= forecastCompletionEpsilonKwh;
+    const comparisonExpectedKwh = isToday
+      ? (completedToday ? forecastKwh : expectedSoFarKwh)
+      : forecastKwh;
+    const comparisonBasis = isToday
+      ? (completedToday ? (forecastKwh !== null ? "full_day_forecast" : "full_day_forecast_unavailable") : "forecast_so_far")
+      : "full_day_forecast";
     const comparisonIsValid = Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedKwh)
       && actualKwh >= 0 && comparisonExpectedKwh > 0;
     const forecastAccuracyPercent = comparisonIsValid
@@ -1763,6 +1769,7 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
       rawDayForecastKwh: forecastKwh,
       rawExpectedSoFarKwh: expectedSoFarKwh,
       actualSoFarKwh: isToday ? actualKwh : null,
+      forecastCompletionEpsilonKwh,
       performanceRatio: comparisonIsValid ? actualKwh / comparisonExpectedKwh : null,
       performanceDeltaPercent: forecastDeviationPercent,
     };
@@ -1775,7 +1782,7 @@ export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(
     lines.push(`Producerat: ${day.producedKwh} kWh`);
   }
   const today = new Date(now).toLocaleDateString("sv-SE");
-  if (day?.date === today) {
+  if (day?.date === today && (!day?.forecastComparisonBasis || day.forecastComparisonBasis === "forecast_so_far")) {
     const liveTodayKwh = Number.isFinite(Number(liveForecast?.today_kwh)) ? Number(liveForecast.today_kwh) : null;
     const liveRemainingKwh = Number.isFinite(Number(liveForecast?.remaining_today_kwh)) ? Number(liveForecast.remaining_today_kwh) : null;
     const expectedSoFarKwh = liveTodayKwh !== null && liveRemainingKwh !== null
@@ -2043,7 +2050,7 @@ export function buildSolarHistoryTooltipFields(day, liveForecast, now = new Date
   };
   if (Number.isFinite(day?.producedKwh)) add("Producerat", day.producedKwh, `${tooltipNumber(day.producedKwh)} kWh`);
   const today = new Date(now).toLocaleDateString("sv-SE");
-  if (day?.date === today) {
+  if (day?.date === today && (!day?.forecastComparisonBasis || day.forecastComparisonBasis === "forecast_so_far")) {
     const liveTodayKwh = Number.isFinite(Number(liveForecast?.today_kwh)) ? Number(liveForecast.today_kwh) : null;
     const liveRemainingKwh = Number.isFinite(Number(liveForecast?.remaining_today_kwh)) ? Number(liveForecast.remaining_today_kwh) : null;
     const expectedSoFarKwh = liveTodayKwh !== null && liveRemainingKwh !== null ? liveTodayKwh - liveRemainingKwh : null;

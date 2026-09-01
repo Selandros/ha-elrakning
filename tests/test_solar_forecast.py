@@ -131,6 +131,31 @@ class ForecastSolarTests(unittest.TestCase):
         self.assertEqual(solar_forecast.normalize_forecast_value(_state(1500, "W", "power production next hour"), "power_next_hour_kw"), 1.5)
         self.assertIsNone(solar_forecast.normalize_forecast_value(_state("unknown", "kWh", "energy production today"), "today_kwh"))
 
+    def test_official_translation_keys_are_discovered(self):
+        states = {
+            "sensor.energy_current_hour": _state(1, "kWh", "Energy current hour"),
+            "sensor.energy_next_hour": _state(2, "kWh", "Energy next hour"),
+            "sensor.power_production_next_12hours": _state(1200, "W", "Power production next 12 hours"),
+            "sensor.power_production_next_24hours": _state(2400, "W", "Power production next 24 hours"),
+        }
+        registry = [
+            types.SimpleNamespace(
+                entity_id=entity_id,
+                config_entry_id="forecast-0",
+                unique_id=entity_id,
+                original_name=state.attributes["friendly_name"],
+                translation_key=entity_id.removeprefix("sensor."),
+            )
+            for entity_id, state in states.items()
+        ]
+        hass, manager = self._manager(states, registry)
+        asyncio.run(manager.async_load())
+        public = manager.public_state()
+        self.assertEqual(public["this_hour_kwh"], 1)
+        self.assertEqual(public["next_hour_kwh"], 2)
+        self.assertEqual(public["power_next_12_hours_kw"], 1.2)
+        self.assertEqual(public["power_next_24_hours_kw"], 2.4)
+
     def test_single_source_discovers_facts_and_captures_baselines(self):
         states = {
             "sensor.energy_production_today": _state(5, "kWh", "Estimated energy production today"),

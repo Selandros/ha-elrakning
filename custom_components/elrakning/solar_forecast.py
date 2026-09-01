@@ -48,10 +48,14 @@ def _role(tokens: str) -> str | None:
         return "remaining_today_kwh"
     if "energy production tomorrow" in tokens:
         return "tomorrow_kwh"
-    if "energy production this hour" in tokens:
+    if "energy current hour" in tokens or "energy production this hour" in tokens:
         return "this_hour_kwh"
-    if "energy production next hour" in tokens:
+    if "energy next hour" in tokens or "energy production next hour" in tokens:
         return "next_hour_kwh"
+    if "power production next 12 hours" in tokens or "power production next 12hours" in tokens:
+        return "power_next_12_hours_kw"
+    if "power production next 24 hours" in tokens or "power production next 24hours" in tokens:
+        return "power_next_24_hours_kw"
     if "power production now" in tokens or "power production current" in tokens:
         return "power_now_kw"
     if "power production next hour" in tokens:
@@ -100,6 +104,8 @@ class SolarForecastManager:
             "next_hour_kwh": None,
             "power_now_kw": None,
             "power_next_hour_kw": None,
+            "power_next_12_hours_kw": None,
+            "power_next_24_hours_kw": None,
             "peak_time_today": None,
             "peak_time_tomorrow": None,
         }
