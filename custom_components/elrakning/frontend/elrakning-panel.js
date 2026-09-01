@@ -8662,6 +8662,7 @@ class ElrakningPanel {
   }
 
   _applyEonGridState(state) {
+    const previousFuseAmpere = resolveFuseAmpere(this._meterState, this._eonGridState);
     this._eonGridState = state;
     this._eonGridPrice = state?.grid_price || state?.tariff?.grid_price || null;
     const configured = state?.configured === true;
@@ -8687,6 +8688,7 @@ class ElrakningPanel {
       state?.daily_phase_max || this._meterPowerHistory?.daily_phase_max,
       fuseAmpere,
     );
+    const fuseChanged = previousFuseAmpere !== fuseAmpere;
     const dailyMaxPhase = dailyMaxPhaseBase
       ? {
         ...dailyMaxPhaseBase,
@@ -8746,6 +8748,7 @@ class ElrakningPanel {
     this._updatePriceComparisonControls();
     if (this.host.querySelector(".price-chart") && this.priceData.periods.length) this.renderPriceChart();
     this._renderInvoiceEstimateCard();
+    if (fuseChanged) this._renderPhaseHistoryCard();
   }
 
   _bindEonGridDialog() {
