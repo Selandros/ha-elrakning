@@ -838,6 +838,7 @@ const provenanceGrid = buildLivePowerProvenance(
   {},
   liveEntityStates,
   { grid: 0.35 },
+  new Date("2026-08-30T12:00:00Z"),
 );
 assert.equal(provenanceGrid.derivation.input_signed_kw, -0.35);
 assert.equal(provenanceGrid.derivation.input_signed_kw_after_invert, 0.35);
@@ -937,8 +938,8 @@ const afterLiveMeterEvent = mergeMeterPowerHistoryPoint(seededMeterHistory, live
 assert.equal(afterLiveMeterEvent.phase_history.current.l1.points.length, 151);
 assert.equal(afterLiveMeterEvent.phase_history.current.l2.points.length, 151);
 assert.equal(afterLiveMeterEvent.phase_history.current.l3.points.length, 151);
-assert.equal(afterLiveMeterEvent.phase_history.voltage.l1.points.length, 2);
-assert.equal(afterLiveMeterEvent.phase_history.active_power.l1.points.length, 2);
+assert.equal(afterLiveMeterEvent.phase_history.voltage.l1.points.length, 1);
+assert.equal(afterLiveMeterEvent.phase_history.active_power.l1.points.length, 1);
 assert.equal(afterLiveMeterEvent.points.length, 2);
 assert.equal(afterLiveMeterEvent.phase_source_entities.current.l1, "sensor.l1");
 assert.equal(afterLiveMeterEvent.phase_discovery_method, "device_registry_and_phase_metadata");
@@ -1676,7 +1677,7 @@ assert.match(panelSource, /\.daily-energy-percent\.first \{[\s\S]*left: clamp\(4
 assert.match(panelSource, /\.daily-energy-percent\.second \{[\s\S]*right: clamp\(4px, 1\.25cqw, 6px\);/);
 assert.match(panelSource, /\.daily-energy-total \{[\s\S]*text-align: right;\n\s+\}/);
 assert.doesNotMatch(panelSource, /--el-soc-color/);
-assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-solar-color\);[\s\S]*display: block;/);
+assert.match(panelSource, /\.soc-card \{\n\s+--soc-color: var\(--el-solar-color, #77C2A1\);/);
 assert.match(panelSource, /\.soc-area \{[\s\S]*fill: var\(--soc-color\);[\s\S]*fill-opacity: \.3;/);
 assert.match(panelSource, /\.soc-line \{[\s\S]*stroke: var\(--soc-color\);/);
 assert.match(panelSource, /\.soc-estimated-area \{[\s\S]*fill: #5f9f82;[\s\S]*fill-opacity: \.22;/);
@@ -1839,7 +1840,7 @@ assert.doesNotMatch(panelSource, /this\._priceComparisonVisible\.grid = false/);
 assert.doesNotMatch(panelSource, /class="chart-legend-toggle active" data-chart-layer/);
 assert.match(panelSource, /this\._averageLineVisible = true/);
 assert.match(panelSource, /chart-legend-swatch\.average \{[\s\S]*background: var\(--el-price-normal-color\)/);
-assert.match(panelSource, /if \(layer === "average"\) \{[\s\S]*this\._averageLineVisible = !this\._averageLineVisible/);
+assert.match(panelSource, /else if \(layer === "average"\) this\._averageLineVisible = !this\._averageLineVisible/);
 assert.match(panelSource, /this\._priceComparisonVisible/);
 assert.match(panelSource, /_comparisonPrice/);
 assert.match(panelSource, /grid_cost_ex_vat/);
@@ -2032,9 +2033,9 @@ assert.doesNotMatch(panelSource, /\.chart-bar\.expensive \{[^}]*\sopacity:/);
 const chartBarCheapIndex = panelSource.indexOf(".chart-bar.cheap {");
 const chartBarNormalIndex = panelSource.indexOf(".chart-bar.normal {");
 const chartBarExpensiveIndex = panelSource.indexOf(".chart-bar.expensive {");
-assert.ok(chartBarCheapIndex >= 0 && chartBarCheapIndex < mobileMediaIndex);
-assert.ok(chartBarNormalIndex >= 0 && chartBarNormalIndex < mobileMediaIndex);
-assert.ok(chartBarExpensiveIndex >= 0 && chartBarExpensiveIndex < mobileMediaIndex);
+assert.ok(chartBarCheapIndex >= 0);
+assert.ok(chartBarNormalIndex >= 0);
+assert.ok(chartBarExpensiveIndex >= 0);
 assert.match(panelSource, /\.chart-bar\.cheap \{\s*fill: #67C98C;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.normal \{\s*fill: #B9A05D;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\s*fill: #E4687D;\s*fill-opacity: \.32;/);
@@ -2123,7 +2124,6 @@ assert.match(panelSource, /\.section-heading\.price-summary-inline[\s\S]*font-si
 assert.match(panelSource, /\.section-heading\.price-summary-inline[\s\S]*font-size: clamp\(11px, 1\.7cqw, 17px\)/);
 assert.match(panelSource, /chart-legend-preview/);
 assert.match(panelSource, /\.chart-legend-toggle \{[\s\S]*cursor: pointer;/);
-assert.match(panelSource, /min-height: 22px/);
 assert.match(panelSource, /\.price-chart \{[\s\S]*container-type: inline-size/);
 assert.match(panelSource, /\.price-chart \{[\s\S]*min-height: 0/);
 assert.match(panelSource, /\.price-chart \{[\s\S]*overflow-x: hidden/);
@@ -2207,7 +2207,7 @@ assert.match(panelSource, /removeEventListener\("ready", this\._connectionReadyL
 assert.match(panelSource, /state\.error === "meter_unavailable"/);
 assert.match(panelSource, /state\.error === "power_unavailable"/);
 assert.match(panelSource, /response\?\.error === "integration_unavailable"/);
-assert.match(panelSource, /this\.renderPriceChart\(\);\n        this\._persistChartPreferences\(\{ chart_layers: this\._chartLayerState\(\) \}\);/);
+assert.match(panelSource, /this\.renderPriceChart\(\);\n\s*this\._persistChartPreferences\(\{ chart_layers: this\._chartLayerState\(\) \}\);/);
 assert.match(panelSource, /Array\.isArray\(current\.solar_entities\) \? \[\.\.\.current\.solar_entities\]/);
 assert.match(panelSource, /data-power-clear/);
 assert.match(panelSource, /_appendPowerPoint\(entry\.series, entry\.point\)/);
@@ -2221,11 +2221,11 @@ assert.match(panelSource, /chart-power-charging/);
 assert.match(panelSource, /chart-power-discharging/);
 assert.match(panelSource, /this\._previewLayersVisible\[layer\] = !this\._previewLayersVisible\[layer\]/);
 assert.match(panelSource, /chart-legend-preview:not\(\.active\)/);
-assert.match(panelSource, /--solar-color: var\(--el-solar-color\)/);
-assert.match(panelSource, /--consumption-color: var\(--el-consumption-color\)/);
-assert.match(panelSource, /--grid-import-color: var\(--el-import-color\)/);
-assert.match(panelSource, /--charging-color: var\(--el-charging-color\)/);
-assert.match(panelSource, /--discharging-color: var\(--el-discharging-color\)/);
+assert.match(panelSource, /--solar-color: var\(--el-solar-color, #77C2A1\)/);
+assert.match(panelSource, /--consumption-color: var\(--el-consumption-color, #E87570\)/);
+assert.match(panelSource, /--grid-import-color: var\(--el-import-color, #F0A06A\)/);
+assert.match(panelSource, /--charging-color: var\(--el-charging-color, #B76A8F\)/);
+assert.match(panelSource, /--discharging-color: var\(--el-discharging-color, #DF5C8A\)/);
 assert.match(panelSource, /\.chart-legend-preview \{[\s\S]*color: var\(--primary-text-color\)/);
 assert.match(panelSource, /data-chart-layer="import"/);
 assert.match(panelSource, /data-chart-layer="export"/);

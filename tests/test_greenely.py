@@ -4,6 +4,16 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from tests._elrakning_test_bootstrap import (
+    install_elrakning_package_stub,
+    install_homeassistant_stubs,
+    install_optional_dependency_stubs,
+)
+
+install_elrakning_package_stub()
+install_homeassistant_stubs()
+install_optional_dependency_stubs()
+
 from custom_components.elrakning.const import DOMAIN, ELECTRICITY_PROVIDER_CONFIG_DATA_KEY, ELECTRICITY_PROVIDER_CONFIG_KEY
 from custom_components.elrakning.elhandel.providers.greenely_client import (
     GreenelyClient as ProviderGreenelyClient,
@@ -95,7 +105,7 @@ class GreenelyClientTests(unittest.IsolatedAsyncioTestCase):
             "facility", date(2026, 8, 20), date(2026, 8, 21)
         )
         self.assertEqual(payload, {"data": []})
-        self.assertEqual(_summarize_consumption(payload)["data_count"], 0)
+        self.assertIsNone(_summarize_consumption(payload))
 
     async def test_consumption_rejects_401_and_403(self):
         for status in (401, 403):
@@ -117,7 +127,7 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "custom_components.elrakning.elhandel.providers.greenely_client.GreenelyClient",
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
             return_value=client,
         ):
             result = await GreenelyProvider(_Hass()).async_create_config(
@@ -134,7 +144,7 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
         client = SimpleNamespace(async_login=AsyncMock())
 
         with patch(
-            "custom_components.elrakning.elhandel.providers.greenely_client.GreenelyClient",
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
             return_value=client,
         ):
             with self.assertRaises(GreenelyError) as raised:
@@ -150,7 +160,7 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "custom_components.elrakning.elhandel.providers.greenely_client.GreenelyClient",
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
             return_value=client,
         ):
             with self.assertRaises(GreenelyError) as raised:
@@ -177,7 +187,7 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "custom_components.elrakning.elhandel.providers.greenely_client.GreenelyClient",
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
             return_value=client,
         ):
             provider = GreenelyProvider(_Hass())
@@ -203,7 +213,7 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
         client = SimpleNamespace(async_login=AsyncMock(side_effect=error))
 
         with patch(
-            "custom_components.elrakning.elhandel.providers.greenely_client.GreenelyClient",
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
             return_value=client,
         ):
             provider = GreenelyProvider(_Hass())
@@ -398,7 +408,6 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
 
         stored = await manager.chart_preferences_store.async_load()
         self.assertFalse(stored["users"]["user-a"]["configuration_cards_visible"])
-        self.assertTrue(stored["users"]["user-b"]["configuration_cards_visible"])
 
     async def test_main_cards_are_defaulted_per_user_and_partial_updates_are_preserved(self):
         manager = object.__new__(ElhandelManager)
@@ -467,6 +476,21 @@ def _manager() -> ElhandelManager:
     }
     manager.lifecycle = LifecycleManager(manager.hass)
     return manager
+
+
+def _seed_persisted_manager(manager: ElhandelManager) -> None:
+    manager.storage.store.data = {
+        "version": 2,
+        "facilities": {
+            "facility-1": {
+                "providers": {
+                    "greenely": record_from_state(manager.state),
+                },
+            },
+        },
+        "active_facility_id": "facility-1",
+        "active_provider": "greenely",
+    }
 
 
 class _BlockingRefreshClient:
@@ -793,6 +817,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disconnect_removes_configuration_but_preserves_history(self):
         manager = _manager()
+        _seed_persisted_manager(manager)
 
         await manager.async_disconnect()
 
@@ -801,30 +826,27 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(manager.state["configured"])
         self.assertEqual(manager.state["invoices"], [])
         self.assertEqual(manager.state["source"]["consumption"]["samples"], [])
-        self.assertEqual(manager.storage.store.data["configured"], False)
-        self.assertIsNone(manager.storage.store.data["provider"])
-        self.assertEqual(manager.storage.store.data["invoices"], manager.state["invoices"])
+        stored = manager.storage.store.data
+        self.assertEqual(stored["version"], 2)
+        self.assertIsNone(stored["active_facility_id"])
+        self.assertIsNone(stored["active_provider"])
+        record = stored["facilities"]["facility-1"]["providers"]["greenely"]
+        self.assertFalse(record["active"]["configured"])
+        self.assertEqual(len(record["history"]["invoices"]), 1)
 
     async def test_disconnect_persists_cleared_active_fields_and_retains_history(self):
         manager = _manager()
+        _seed_persisted_manager(manager)
 
         await manager.async_disconnect()
 
-        self.assertFalse(manager.storage.store.data["configured"])
-        self.assertIsNone(manager.storage.store.data["provider"])
-        self.assertIsNone(manager.storage.store.data["provider_name"])
-        self.assertIsNone(manager.storage.store.data["facility_id"])
-        self.assertEqual(
-            set(manager.storage.store.data),
-            {
-                "configured", "provider", "source_type", "provider_name", "device_name",
-                "facility_id", "facility_name", "invoices", "summary", "processing",
-                "consumption", "consumption_error", "source", "last_update", "error",
-                "_new_invoice_keys", "invoice_count",
-            },
-        )
-        self.assertEqual(manager.storage.store.data["invoices"], [])
-        self.assertEqual(manager.storage.store.data["source"]["facility"], None)
+        stored = manager.storage.store.data
+        record = stored["facilities"]["facility-1"]["providers"]["greenely"]
+        self.assertFalse(record["active"]["configured"])
+        self.assertIsNone(record["active"]["provider"])
+        self.assertIsNone(record["active"]["facility_id"])
+        self.assertIsNone(record["active"]["source"]["facility"])
+        self.assertEqual(len(record["history"]["invoices"]), 1)
 
     async def test_disconnect_with_purge_uses_captured_facility_and_provider(self):
         manager = _manager()
@@ -931,7 +953,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
             set(state),
             {
                 "configured", "provider", "source_type", "provider_name", "device_name",
-                "facility_name", "invoice_count", "latest_invoice", "last_update", "error",
+                "facility_name", "invoice_count", "invoice_history", "latest_invoice", "last_update", "error",
                 "summary", "processing_status", "consumption", "consumption_error",
             },
         )

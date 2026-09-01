@@ -1,3 +1,8 @@
+from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
+
+install_elrakning_package_stub()
+install_homeassistant_stubs()
+
 from custom_components.elrakning.elhandel.storage import (
     ELECTRICITY_STORAGE_VERSION,
     empty_electricity_store,
