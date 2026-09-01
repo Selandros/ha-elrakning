@@ -986,6 +986,8 @@ async def websocket_power_history(hass, connection, msg):
     forecast = forecast_manager.public_state() if forecast_manager else SolarForecastManager._unavailable_facts()
     result["solar_forecast"] = forecast
     result["solar_forecast_baselines"] = forecast.get("baselines", {})
+    shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
+    result["solar_shadow"] = shadow.public_state() if shadow else {"available": False, "snapshots": []}
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
     result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
     result["solar_sun"] = build_sun_context(hass)
