@@ -664,6 +664,17 @@ export function buildHourlyBoundaryHours(containerWidth = 960) {
     .filter((hour) => hour === 0 || hour === 24 || hour % step === 0);
 }
 
+export function buildHourlyBarEdges(periodStart, periodEnd, dayStart, dayEnd, plotLeft, plotRight) {
+  const start = new Date(periodStart).getTime();
+  const end = new Date(periodEnd).getTime();
+  const axisStart = new Date(dayStart).getTime();
+  const axisEnd = new Date(dayEnd).getTime();
+  if (![start, end, axisStart, axisEnd, plotLeft, plotRight].every(Number.isFinite)
+    || axisEnd <= axisStart || end < start || plotRight < plotLeft) return null;
+  const x = (timestamp) => plotLeft + ((timestamp - axisStart) / (axisEnd - axisStart)) * (plotRight - plotLeft);
+  return { left: x(start), right: x(end) };
+}
+
 export function buildPriceChartGeometry(width = 960, height = 350, {
   dualAxis = false,
   containerWidth = width,
@@ -4361,17 +4372,6 @@ class ElrakningPanel {
             max-height: 295px;
           }
 
-          .price-section .price-chart-legend {
-            min-height: 28px;
-          }
-
-          .price-section .price-analysis {
-            min-height: 40px;
-          }
-
-          .price-section .period-picker {
-            margin-top: 11px;
-          }
         }
 
         /* Price axes reserve only a compact label-sized gutter before the plot. */
@@ -9842,12 +9842,10 @@ class ElrakningPanel {
       const top = price >= 0 ? y(price) : zeroY;
       const bottom = price >= 0 ? zeroY : y(price);
       const category = priceCategory(price, colorBands);
-      const start = new Date(period.start);
-      const end = new Date(period.end);
-      const startX = x(period.start);
-      const barWidth = ((end.getTime() - start.getTime()) / dayDuration) * plotWidth;
+      const edges = buildHourlyBarEdges(period.start, period.end, dayStart, dayEnd, plot.left, width - plot.right);
+      if (!edges) return "";
       const barColor = chartColor(category === "cheap" ? "priceCheap" : category === "expensive" ? "priceExpensive" : "priceNormal");
-      return `<rect class="chart-bar ${category}" fill="${barColor}" data-index="${index}" x="${startX}" y="${top}" width="${Math.max(1, barWidth - 1)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
+      return `<rect class="chart-bar ${category}" fill="${barColor}" data-index="${index}" x="${edges.left}" y="${top}" width="${Math.max(1, edges.right - edges.left)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
     }).join("") : "";
     const hourLabels = buildHourlyBoundaryHours(renderedWidth).map((hour) => {
       const hourDate = new Date(dayStart);
