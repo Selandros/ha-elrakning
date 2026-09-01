@@ -9112,21 +9112,8 @@ class ElrakningPanel {
 
   _appendMeterPowerPoint(point) {
     const hasPhaseData = Boolean(point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw);
-    let phaseRenderChanged = false;
     if (hasPhaseData) {
       this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());
-      const phaseMerge = mergeMeterPowerHistoryPoint(
-        this._meterPowerHistory,
-        point,
-        this._meterState?.power_entity,
-      );
-      this._meterPowerHistory = phaseMerge.history;
-      phaseRenderChanged = phaseMerge.phaseRenderChanged;
-      this._renderLivePowerRow();
-    }
-    if (!point?.timestamp || (point.entity_id && point.entity_id !== this._meterState?.power_entity)) {
-      if (phaseRenderChanged) this._renderPhaseHistoryCard();
-      return;
     }
     const meterMerge = mergeMeterPowerHistoryPoint(
       this._meterPowerHistory,
@@ -9134,7 +9121,12 @@ class ElrakningPanel {
       this._meterState?.power_entity,
     );
     this._meterPowerHistory = meterMerge.history;
-    phaseRenderChanged = phaseRenderChanged || meterMerge.phaseRenderChanged;
+    if (hasPhaseData) this._renderLivePowerRow();
+    if (!point?.timestamp || (point.entity_id && point.entity_id !== this._meterState?.power_entity)) {
+      if (meterMerge.phaseRenderChanged) this._renderPhaseHistoryCard();
+      return;
+    }
+    const phaseRenderChanged = meterMerge.phaseRenderChanged;
     if (phaseRenderChanged) this._renderPhaseHistoryCard();
     if (this.host.querySelector(".price-chart")
       && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
