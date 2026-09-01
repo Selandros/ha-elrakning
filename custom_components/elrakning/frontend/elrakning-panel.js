@@ -5355,6 +5355,10 @@ class ElrakningPanel {
     const popover = root?.querySelector("[data-period-picker-popover]");
     const dialog = root?.querySelector("[data-period-picker-dialog]");
     if (!root || !label || !popover || !dialog) return;
+    const showPeriodNavigation = state.mode !== "year";
+    root.querySelectorAll("[data-period-picker-nav]").forEach((button) => {
+      button.hidden = !showPeriodNavigation;
+    });
     label.textContent = this._periodPickerLabel();
     root.querySelectorAll("[data-period-picker-mode]").forEach((button) => {
       const active = button.dataset.periodPickerMode === state.mode;
@@ -5431,6 +5435,7 @@ class ElrakningPanel {
       this.renderPriceChart();
     }));
     root.querySelectorAll("[data-period-picker-nav]").forEach((button) => button.addEventListener("click", async () => {
+      if (this._periodPickerState.mode === "year") return;
       const date = new Date(this._periodPickerState.confirmed);
       const direction = button.dataset.periodPickerNav === "next" ? 1 : -1;
       if (this._periodPickerState.mode === "hour") date.setDate(date.getDate() + direction);

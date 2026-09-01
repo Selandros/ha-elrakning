@@ -56,13 +56,18 @@ const label = new FakeElement();
 const popover = new FakeElement();
 const previous = new FakeElement();
 previous.dataset.periodPickerNav = "previous";
+const modeButtons = ["hour", "day", "month", "year"].map((mode) => {
+  const button = new FakeElement();
+  button.dataset.periodPickerMode = mode;
+  return button;
+});
 root.children = new Map([
   ["[data-period-picker-dialog]", dialog],
   ["[data-period-picker-label]", label],
   ["[data-period-picker-popover]", popover],
 ]);
 root.groups = new Map([
-  ["[data-period-picker-mode]", []],
+  ["[data-period-picker-mode]", modeButtons],
   ["[data-period-picker-nav]", [previous]],
 ]);
 
@@ -81,10 +86,13 @@ const loads = [];
 panel.loadPriceData = async (date) => {
   loads.push(date);
 };
+panel.updatePriceSummary = () => {};
+panel.renderPriceChart = () => {};
 
 panel._bindPeriodPicker();
 assert.equal(label.textContent, "2026-09-01");
 assert.equal(root.groups.get("[data-period-picker-nav]")[0], previous);
+assert.equal(previous.hidden, false);
 
 const loadPromise = previous.dispatch("click");
 assert.equal(panel._periodPickerState.confirmed.toISOString(), "2026-08-30T22:00:00.000Z");
@@ -94,13 +102,27 @@ await loadPromise;
 assert.equal(loads.length, 1);
 assert.equal(loads[0].toISOString(), "2026-08-30T22:00:00.000Z");
 
+modeButtons[3].dispatch("click");
+assert.equal(panel._periodPickerState.mode, "year");
+assert.equal(previous.hidden, true);
+const confirmedInYearMode = panel._periodPickerState.confirmed.getTime();
+await previous.dispatch("click");
+assert.equal(panel._periodPickerState.confirmed.getTime(), confirmedInYearMode);
+for (const button of modeButtons.slice(0, 3)) {
+  button.dispatch("click");
+  assert.equal(previous.hidden, false);
+}
+
 const boundButton = previous;
 panel._renderPeriodPicker();
 assert.equal(root.groups.get("[data-period-picker-nav]")[0], boundButton);
 assert.equal(boundButton.listeners.has("click"), true);
 
 assert.match(source, /root\.querySelectorAll\("\[data-period-picker-nav\]"\)\.forEach\(\(button\) => button\.addEventListener\("click"/);
+assert.match(source, /const showPeriodNavigation = state\.mode !== "year"/);
+assert.match(source, /if \(this\._periodPickerState\.mode === "year"\) return;/);
 assert.equal((source.match(/this\.host\.innerHTML\s*=/g) || []).length, 1);
 assert.equal((source.match(/data-period-picker-nav="previous"/g) || []).length, 1);
+assert.match(source, /period-picker-year-grid/);
 
 console.log("period picker event wiring regression passed");
