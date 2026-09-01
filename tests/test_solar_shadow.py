@@ -273,6 +273,58 @@ class SolarShadowTests(unittest.TestCase):
         manager._snapshots.append(snapshot)
         self.assertTrue(manager._is_duplicate(dict(snapshot)))
 
+    def test_pre_shadow_baselines_are_explicitly_not_replayable(self):
+        manager = solar_shadow.SolarShadowManager.__new__(solar_shadow.SolarShadowManager)
+        manager.forecast_manager = types.SimpleNamespace(public_state=lambda: {
+            "baselines": {
+                "2026-08-29": 18.829,
+                "2026-08-30": 16.571,
+                "2026-08-31": 16.602,
+                "2026-09-01": 37.874,
+                "2026-09-17": 42.0,
+            },
+        })
+        manager._snapshots = []
+        manager._frames = {"forecast": {}, "weather": {}, "sun": {}}
+        records = manager._public_day_records()
+        self.assertEqual(records[0]["raw_forecast_kwh"], 18.829)
+        self.assertIsNone(records[0]["candidate_forecast_kwh"])
+        self.assertFalse(records[0]["candidate_replay_available"])
+        self.assertEqual(records[0]["shadow_data_status"], "historical_inputs_missing")
+        self.assertEqual(
+            [(item["target_date"], item["raw_forecast_kwh"], item["candidate_forecast_kwh"])
+             for item in records[:4]],
+            [
+                ("2026-08-29", 18.829, None),
+                ("2026-08-30", 16.571, None),
+                ("2026-08-31", 16.602, None),
+                ("2026-09-01", 37.874, None),
+            ],
+        )
+        self.assertEqual(records[4]["target_date"], "2026-09-17")
+
+    def test_captured_snapshot_overrides_only_its_day(self):
+        manager = solar_shadow.SolarShadowManager.__new__(solar_shadow.SolarShadowManager)
+        manager.forecast_manager = types.SimpleNamespace(public_state=lambda: {
+            "baselines": {"2026-08-29": 18.829, "2026-08-30": 16.571},
+        })
+        manager._frames = {"forecast": {"f": {"today_kwh": 16.571}}, "weather": {}, "sun": {}}
+        manager._snapshots = [{
+            "target_date": "2026-08-30", "forecast_frame": "f", "model": {"candidate_forecast_kwh": 15.5},
+            "capture_type": "intraday", "actual_final_kwh": None, "quality": "unknown_quality",
+        }]
+        records = manager._public_day_records()
+        self.assertIsNone(records[0]["candidate_forecast_kwh"])
+        self.assertEqual(records[1]["candidate_forecast_kwh"], 15.5)
+        self.assertTrue(records[1]["candidate_replay_available"])
+
+    def test_missing_shadow_records_never_enter_learning(self):
+        self.assertEqual(solar_shadow._site_multiplier([
+            {"target_date": "2026-08-29", "raw_forecast_kwh": 18.829,
+             "candidate_forecast_kwh": None, "shadow_data_status": "historical_inputs_missing",
+             "quality": "unknown_quality", "actual_final_kwh": 0.76},
+        ])[0], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

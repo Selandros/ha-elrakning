@@ -363,6 +363,43 @@ class SolarShadowManager:
     def _calibration_before(self, target_date: date) -> list[dict[str, Any]]:
         return [item for item in self._snapshots if item.get("quality") == "valid" and item.get("target_date", "") < target_date.isoformat()]
 
+    def _public_day_records(self) -> list[dict[str, Any]]:
+        """Expose raw baselines without implying that they are shadow captures."""
+        forecast_state = self.forecast_manager.public_state()
+        records = {
+            target_date: {
+                "target_date": target_date,
+                "raw_forecast_kwh": value,
+                "candidate_forecast_kwh": None,
+                "candidate_replay_available": False,
+                "shadow_data_status": "historical_inputs_missing",
+            }
+            for target_date, value in (forecast_state.get("baselines") or {}).items()
+            if isinstance(target_date, str)
+        }
+        for snapshot in self._snapshots:
+            target_date = snapshot.get("target_date")
+            if not isinstance(target_date, str):
+                continue
+            materialized = self._materialize(snapshot)
+            forecast = materialized.get("forecast_solar") or {}
+            raw_key = "tomorrow_kwh" if snapshot.get("capture_type") == "day_ahead" else "today_kwh"
+            raw = _number(forecast.get(raw_key))
+            model = snapshot.get("model") or {}
+            candidate = _number(model.get("candidate_forecast_kwh"))
+            record = records.setdefault(target_date, {"target_date": target_date})
+            if raw is not None:
+                record["raw_forecast_kwh"] = raw
+            record.update({
+                "candidate_forecast_kwh": candidate,
+                "candidate_replay_available": candidate is not None,
+                "shadow_data_status": "captured" if candidate is not None else "captured_without_candidate",
+                "capture_type": snapshot.get("capture_type"),
+                "actual_final_kwh": snapshot.get("actual_final_kwh"),
+                "quality": snapshot.get("quality"),
+            })
+        return [records[key] for key in sorted(records)]
+
     def _is_duplicate(self, snapshot: dict[str, Any]) -> bool:
         key = (snapshot.get("target_date"), snapshot.get("forecast_frame"), snapshot.get("weather_frame"), snapshot.get("sun_frame"), snapshot.get("pv"))
         return any((item.get("target_date"), item.get("forecast_frame"), item.get("weather_frame"), item.get("sun_frame"), item.get("pv")) == key for item in self._snapshots[-4:])
@@ -383,6 +420,7 @@ class SolarShadowManager:
             "snapshot_count": len(self._snapshots),
             "frames": {kind: dict(values) for kind, values in self._frames.items()},
             "snapshots": [self._materialize(item) for item in self._snapshots],
+            "days": self._public_day_records(),
         }
 
 
