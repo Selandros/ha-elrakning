@@ -2049,6 +2049,10 @@ class ElrakningPanel {
     this._meterHistorySummary = null;
     this._meterHistoryRequestToken = 0;
     this._powerState = null;
+    this._eventConnection = null;
+    this._powerStateRequestGeneration = 0;
+    this._powerStateMutationGeneration = 0;
+    this._powerStateLifecycleGeneration = 0;
     this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._powerHistoryRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
@@ -5902,9 +5906,11 @@ class ElrakningPanel {
       result.textContent = "Hämtar sparad konfiguration …";
       try {
         if (mode === "house_load") {
-          const powerResponse = await this.hass.callWS({ type: "elrakning/power_state" });
-          this._applyPowerState(powerResponse);
-          renderConsumptionSelector(powerResponse);
+          const request = this._beginPowerStateRequest();
+          const powerResponse = await request.hass.callWS({ type: "elrakning/power_state" });
+          if (!this._isCurrentPowerStateContext(request)) return;
+          const state = this._applyPowerStateResponse(request, powerResponse) ? powerResponse : this._powerState;
+          renderConsumptionSelector(state);
         } else {
           const meterResponse = await this.hass.callWS({ type: "elrakning/meter_state" });
           this._applyMeterState(meterResponse);
@@ -5929,7 +5935,7 @@ class ElrakningPanel {
         try {
           const response = await this.hass.callWS({ type: "elrakning/power_save", ...powerMapping });
           if (!response?.success) throw new Error(response?.error || "power_save_failed");
-          this._applyPowerState(response);
+          this._applyAuthoritativePowerState(response);
           await this.loadPowerHistory();
           close();
         } catch (error) {
@@ -6002,7 +6008,7 @@ class ElrakningPanel {
         this._resetPowerLivePoints();
         const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
         if (!response?.success) throw new Error(response?.error || "power_clear_failed");
-        this._applyPowerState(response);
+        this._applyAuthoritativePowerState(response);
         renderConsumptionSelector(response);
         await this.loadPowerHistory();
         save.disabled = false;
@@ -6106,13 +6112,15 @@ class ElrakningPanel {
       save.disabled = true;
       result.textContent = "Hämtar sparad konfiguration …";
       try {
-        const state = await this.hass.callWS({ type: "elrakning/power_state" });
-        solarCount = Math.max(2, state?.solar_entities?.length || 0);
-        batteryMode = state?.battery_power_entity ? "combined" : "separate";
+        const request = this._beginPowerStateRequest();
+        const state = await request.hass.callWS({ type: "elrakning/power_state" });
+        if (!this._isCurrentPowerStateContext(request)) return;
+        const currentState = this._applyPowerStateResponse(request, state) ? state : this._powerState;
+        solarCount = Math.max(2, currentState?.solar_entities?.length || 0);
+        batteryMode = currentState?.battery_power_entity ? "combined" : "separate";
         batteryModeOptions.forEach((option) => { option.checked = option.value === batteryMode; });
-        if (invertBatteryToggle) invertBatteryToggle.checked = state?.invert_battery_power === true;
-        this._applyPowerState(state);
-        renderSelectors(state);
+        if (invertBatteryToggle) invertBatteryToggle.checked = currentState?.invert_battery_power === true;
+        renderSelectors(currentState);
         if (addSolar) addSolar.hidden = mode !== "solar";
         result.textContent = "Välj de entiteter som ska användas.";
         save.disabled = false;
@@ -6173,7 +6181,7 @@ class ElrakningPanel {
         this._resetPowerLivePoints();
         const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
         if (!response?.success) throw new Error(response?.error || "power_save_failed");
-        this._applyPowerState(response);
+        this._applyAuthoritativePowerState(response);
         await this.loadPowerHistory();
         close();
       } catch (error) {
@@ -6214,7 +6222,7 @@ class ElrakningPanel {
         this._resetPowerLivePoints();
         const response = await this.hass.callWS({ type: "elrakning/power_save", ...mapping });
         if (!response?.success) throw new Error(response?.error || "power_clear_failed");
-        this._applyPowerState(response);
+        this._applyAuthoritativePowerState(response);
         await this.loadPowerHistory();
         close();
       } catch (error) {
@@ -6274,6 +6282,40 @@ class ElrakningPanel {
     this._renderSocChart();
     this._renderBatteryHistoryCard();
     this._renderSolarHistoryCard();
+  }
+
+  _beginPowerStateRequest() {
+    return {
+      requestGeneration: ++this._powerStateRequestGeneration,
+      mutationGeneration: this._powerStateMutationGeneration,
+      lifecycleGeneration: this._powerStateLifecycleGeneration,
+      hass: this.hass,
+      connection: this.hass?.connection || null,
+    };
+  }
+
+  _isCurrentPowerStateRequest(request) {
+    return this._isCurrentPowerStateContext(request)
+      && request.requestGeneration === this._powerStateRequestGeneration
+      && request.mutationGeneration === this._powerStateMutationGeneration;
+  }
+
+  _isCurrentPowerStateContext(request) {
+    return request
+      && request.lifecycleGeneration === this._powerStateLifecycleGeneration
+      && request.connection === (this.hass?.connection || null)
+      && request.connection === this._eventConnection;
+  }
+
+  _applyPowerStateResponse(request, state) {
+    if (!this._isCurrentPowerStateRequest(request)) return false;
+    this._applyPowerState(state);
+    return true;
+  }
+
+  _applyAuthoritativePowerState(state) {
+    this._powerStateMutationGeneration += 1;
+    this._applyPowerState(state);
   }
 
   _calculatePowerEnergy(seriesKey) {
@@ -6878,10 +6920,11 @@ class ElrakningPanel {
 
   async loadPowerState(loadHistory = false) {
     if (!this.hass?.callWS) return;
+    const request = this._beginPowerStateRequest();
     try {
-      const state = await this.hass.callWS({ type: "elrakning/power_state" });
+      const state = await request.hass.callWS({ type: "elrakning/power_state" });
       if (state?.success === false && state.error === "power_unavailable") return;
-      this._applyPowerState(state);
+      this._applyPowerStateResponse(request, state);
       if (loadHistory) await this.loadPowerHistory();
     } catch {
       // Keep optional power cards unconfigured when state is unavailable.
@@ -6940,7 +6983,7 @@ class ElrakningPanel {
   _appendPowerState(eventData) {
     if (eventData?.state) {
       for (const entry of eventData.points || []) this._appendPowerPoint(entry.series, entry.point);
-      this._applyPowerState(eventData.state);
+      this._applyAuthoritativePowerState(eventData.state);
       if (this.host.querySelector(".price-chart")
         && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
         this.renderPriceChart({ liveUpdate: true });
@@ -8127,6 +8170,8 @@ class ElrakningPanel {
     if (connectionChanged) {
       this._diagnosticsLifecycleGeneration += 1;
       this._diagnosticsRequestGeneration += 1;
+      this._powerStateLifecycleGeneration += 1;
+      this._powerStateRequestGeneration += 1;
     }
     this._bindDiagnostics(connectionChanged);
     this._syncCardTheme();
@@ -8242,6 +8287,9 @@ class ElrakningPanel {
   destroy() {
     this._diagnosticsLifecycleGeneration += 1;
     this._diagnosticsRequestGeneration += 1;
+    this._powerStateLifecycleGeneration += 1;
+    this._powerStateRequestGeneration += 1;
+    this._powerStateMutationGeneration += 1;
     if (this._eventUnsubscribePromise) {
       Promise.resolve(this._eventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
