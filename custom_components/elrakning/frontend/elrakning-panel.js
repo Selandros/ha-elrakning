@@ -1930,6 +1930,24 @@ export function buildSolarHistoryTooltipFields(day, liveForecast, now = new Date
   return fields;
 }
 
+export function mergePowerHistoryPoint(existingPoints, incomingPoint, incomingTimestampMs = Date.parse(incomingPoint?.timestamp)) {
+  const existing = Array.isArray(existingPoints) ? existingPoints : [];
+  const last = existing.at(-1);
+  if (!last) return [incomingPoint];
+  const lastTimestampMs = Date.parse(last.timestamp);
+  if (Number.isFinite(lastTimestampMs) && Number.isFinite(incomingTimestampMs)) {
+    if (incomingTimestampMs > lastTimestampMs) return [...existing, incomingPoint];
+    if (incomingTimestampMs === lastTimestampMs) {
+      const updated = [...existing];
+      updated[updated.length - 1] = incomingPoint;
+      return updated;
+    }
+  }
+  const byTimestamp = new Map(existing.map((item) => [item.timestamp, item]));
+  byTimestamp.set(incomingPoint.timestamp, incomingPoint);
+  return [...byTimestamp.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -6875,13 +6893,15 @@ class ElrakningPanel {
       [valueKey]: Number(point[valueKey]),
     });
     const existing = Array.isArray(this._powerHistory.series?.[series]?.points)
-      ? [...this._powerHistory.series[series].points]
+      ? this._powerHistory.series[series].points
       : [];
-    const byTimestamp = new Map(existing.map((item) => [item.timestamp, item]));
-    byTimestamp.set(timestamp.toISOString(), this._powerLivePoints[series].get(timestamp.toISOString()));
+    const normalizedPoint = this._powerLivePoints[series].get(timestamp.toISOString());
     this._powerHistory.series = {
       ...this._powerHistory.series,
-      [series]: { ...(this._powerHistory.series?.[series] || {}), points: [...byTimestamp.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp)) },
+      [series]: {
+        ...(this._powerHistory.series?.[series] || {}),
+        points: mergePowerHistoryPoint(existing, normalizedPoint, timestamp.getTime()),
+      },
     };
   }
 
