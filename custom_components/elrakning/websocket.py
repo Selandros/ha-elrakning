@@ -133,7 +133,13 @@ async def websocket_get_price_data(
         requested_date = msg.get("date")
         if requested_date:
             try:
-                data = await coordinator.async_get_price_data(date.fromisoformat(requested_date))
+                target_date = date.fromisoformat(requested_date)
+                current_data = coordinator.data
+                data = (
+                    current_data
+                    if current_data and current_data.date == target_date and current_data.periods
+                    else await coordinator.async_get_price_data(target_date)
+                )
             except ValueError:
                 data = None
         else:

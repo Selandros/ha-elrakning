@@ -8486,9 +8486,7 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     try {
       const request = { type: "elrakning/price_data" };
-      const requestedDate = selectedDate instanceof Date
-        ? selectedDate
-        : this._periodPickerState?.mode === "hour" ? this._periodPickerState.confirmed : null;
+      const requestedDate = selectedDate instanceof Date ? selectedDate : null;
       if (requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())) {
         request.date = `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`;
       }

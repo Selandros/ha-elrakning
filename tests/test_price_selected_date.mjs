@@ -20,7 +20,12 @@ assert.notDeepEqual(august, september);
 
 assert.match(panelSource, /selectHourlyPricePeriods\(this\.priceData\.periods, this\._periodPickerState\.confirmed\)/);
 assert.match(panelSource, /request\.date = `\$\{requestedDate\.getFullYear\(\)\}/);
+assert.match(panelSource, /const requestedDate = selectedDate instanceof Date \? selectedDate : null;/);
 assert.match(websocketSource, /vol\.Optional\("date"\): str/);
-assert.match(websocketSource, /coordinator\.async_get_price_data\(date\.fromisoformat\(requested_date\)\)/);
+assert.match(websocketSource, /target_date = date\.fromisoformat\(requested_date\)/);
+assert.match(websocketSource, /current_data = coordinator\.data/);
+assert.match(websocketSource, /current_data\.date == target_date/);
+assert.match(websocketSource, /await coordinator\.async_get_price_data\(target_date\)/);
+assert.match(websocketSource, /else:\n\s+data = coordinator\.data/);
 
 console.log("selected hourly price date regression passed");
