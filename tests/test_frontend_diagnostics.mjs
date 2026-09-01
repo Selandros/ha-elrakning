@@ -92,7 +92,7 @@ assert.match(pickerPanelSource, /\.period-picker-control \{ order: 2; \}/);
 assert.match(pickerPanelSource, /\.period-picker-modes \{ order: 1; \}/);
 assert.match(pickerPanelSource, /\.period-picker-control,[\s\S]*\.period-picker-actions \{[\s\S]*flex: 0 1 auto;[\s\S]*white-space: nowrap;/);
 assert.match(pickerPanelSource, /\.period-picker \{[\s\S]*gap: clamp\(3px, 1cqw, 8px\);[\s\S]*min-width: 0;/);
-assert.match(pickerPanelSource, /\.period-picker-control button,[\s\S]*\.period-picker-modes button \{[\s\S]*padding: clamp\(2px, \.7cqw, 4px\) clamp\(3px, 1\.1cqw, 8px\);/);
+assert.match(pickerPanelSource, /\.period-picker-control button,[\s\S]*\.period-picker-modes button,[\s\S]*\.period-picker-control \.period-picker-period \{[\s\S]*padding: clamp\(2px, \.7cqw, 4px\) clamp\(3px, 1\.1cqw, 8px\);/);
 assert.match(pickerPanelSource, /\.period-picker-arrow \{[\s\S]*font-size: clamp\(14px, 2\.5cqw, 18px\)/);
 assert.match(pickerPanelSource, /\.period-picker-modes button \{ font-size: clamp\(10px, 1\.7cqw, 12px\); \}/);
 assert.match(pickerPanelSource, /\.price-section \{[\s\S]*overflow: visible/);
@@ -112,7 +112,7 @@ assert.match(pickerPanelSource, /_isMobilePeriodPicker\(\)[\s\S]*matchMedia\("\(
 assert.match(pickerPanelSource, /@media \(hover: hover\) and \(pointer: fine\) \{[\s\S]*\.period-picker-modes button:hover:not\(\.selected\):not\(\.active\)/);
 assert.match(pickerPanelSource, /\.period-picker-modes button:active:not\(\.selected\):not\(\.active\)/);
 assert.match(pickerPanelSource, /\.period-picker-dialog button:hover:not\(\.selected\):not\(\.active\)/);
-assert.match(pickerPanelSource, /\.period-picker-control button,[\s\S]*\.period-picker-modes button \{[\s\S]*padding: clamp\(2px, \.7cqw, 4px\)/);
+assert.match(pickerPanelSource, /\.period-picker-control button,[\s\S]*\.period-picker-modes button,[\s\S]*\.period-picker-control \.period-picker-period \{[\s\S]*padding: clamp\(2px, \.7cqw, 4px\)/);
 assert.match(pickerPanelSource, /\.period-picker-dialog button \{[\s\S]*padding: 4px 8px/);
 assert.doesNotMatch(pickerPanelSource, /\.period-picker-actions\s*\{[^}]*gap:\s*clamp/);
 assert.doesNotMatch(pickerPanelSource, /@media \(max-width: 600px\) \{[\s\S]*\.price-section \.period-picker button \{[\s\S]*padding: 7px 10px/);

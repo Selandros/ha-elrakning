@@ -4511,7 +4511,8 @@ class ElrakningPanel {
         .period-picker-modes { margin-top: 0; }
 
         .period-picker-control button,
-        .period-picker-modes button {
+        .period-picker-modes button,
+        .period-picker-control .period-picker-period {
           background: transparent;
           border: 0;
           border-radius: 6px;
@@ -4524,6 +4525,9 @@ class ElrakningPanel {
           min-width: 0;
           padding: clamp(2px, .7cqw, 4px) clamp(3px, 1.1cqw, 8px);
         }
+
+        .period-picker-control button,
+        .period-picker-modes button { cursor: pointer; }
 
         .period-picker-dialog button {
           background: transparent;
@@ -5366,7 +5370,24 @@ class ElrakningPanel {
       button.setAttribute("aria-selected", String(active));
     });
     const periodButton = root.querySelector("[data-period-picker-open]");
-    periodButton?.setAttribute("aria-expanded", String(state.open));
+    const staticPeriod = root.querySelector("[data-period-picker-static]");
+    if (state.mode === "year" && periodButton) {
+      const replacement = periodButton.ownerDocument.createElement("span");
+      replacement.className = periodButton.className;
+      replacement.setAttribute("data-period-picker-static", "");
+      replacement.appendChild(label);
+      periodButton.replaceWith(replacement);
+    } else if (state.mode !== "year" && staticPeriod) {
+      const replacement = staticPeriod.ownerDocument.createElement("button");
+      replacement.type = "button";
+      replacement.className = staticPeriod.className;
+      replacement.setAttribute("data-period-picker-open", "");
+      replacement.setAttribute("aria-haspopup", "dialog");
+      replacement.appendChild(label);
+      staticPeriod.replaceWith(replacement);
+    }
+    const activePeriodButton = root.querySelector("[data-period-picker-open]");
+    activePeriodButton?.setAttribute("aria-expanded", String(state.open));
     popover.hidden = true;
     if (!state.open) {
       if (dialog.open) dialog.close();

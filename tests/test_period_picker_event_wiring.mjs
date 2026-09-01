@@ -8,6 +8,7 @@ globalThis.window = { addEventListener() {} };
 
 class FakeElement {
   constructor() {
+    this.tagName = "BUTTON";
     this.listeners = new Map();
     this.attributes = new Map();
     this.dataset = {};
@@ -15,10 +16,26 @@ class FakeElement {
     this.hidden = false;
     this.open = false;
     this.textContent = "";
+    this.ownerDocument = {
+      createElement: (tagName) => {
+        const element = new FakeElement();
+        element.tagName = tagName.toUpperCase();
+        return element;
+      },
+    };
   }
 
   addEventListener(type, callback) {
     this.listeners.set(type, callback);
+  }
+
+  appendChild(child) {
+    this.child = child;
+    return child;
+  }
+
+  replaceWith(replacement) {
+    this.onReplace?.(replacement);
   }
 
   dispatch(type) {
@@ -56,6 +73,16 @@ const label = new FakeElement();
 const popover = new FakeElement();
 const previous = new FakeElement();
 previous.dataset.periodPickerNav = "previous";
+let periodElement = new FakeElement();
+periodElement.className = "period-picker-period";
+periodElement.onReplace = (replacement) => {
+  periodElement = replacement;
+  periodElement.className = "period-picker-period";
+  periodElement.onReplace = (next) => {
+    periodElement = next;
+    periodElement.className = "period-picker-period";
+  };
+};
 const modeButtons = ["hour", "day", "month", "year"].map((mode) => {
   const button = new FakeElement();
   button.dataset.periodPickerMode = mode;
@@ -70,6 +97,12 @@ root.groups = new Map([
   ["[data-period-picker-mode]", modeButtons],
   ["[data-period-picker-nav]", [previous]],
 ]);
+const rootQuerySelector = root.querySelector.bind(root);
+root.querySelector = (selector) => {
+  if (selector === "[data-period-picker-open]") return periodElement.tagName === "BUTTON" ? periodElement : null;
+  if (selector === "[data-period-picker-static]") return periodElement.tagName === "SPAN" ? periodElement : null;
+  return rootQuerySelector(selector);
+};
 
 const host = new FakeElement();
 host.querySelector = (selector) => selector === "[data-period-picker]" ? root : null;
@@ -105,12 +138,18 @@ assert.equal(loads[0].toISOString(), "2026-08-30T22:00:00.000Z");
 modeButtons[3].dispatch("click");
 assert.equal(panel._periodPickerState.mode, "year");
 assert.equal(previous.hidden, true);
+assert.equal(periodElement.tagName, "SPAN");
+assert.equal(root.querySelector("[data-period-picker-open]"), null);
+assert.equal(root.querySelector("[data-period-picker-static]"), periodElement);
+assert.equal(periodElement.listeners.has("click"), false);
 const confirmedInYearMode = panel._periodPickerState.confirmed.getTime();
 await previous.dispatch("click");
 assert.equal(panel._periodPickerState.confirmed.getTime(), confirmedInYearMode);
 for (const button of modeButtons.slice(0, 3)) {
   button.dispatch("click");
   assert.equal(previous.hidden, false);
+  assert.equal(periodElement.tagName, "BUTTON");
+  assert.equal(root.querySelector("[data-period-picker-open]"), periodElement);
 }
 
 const boundButton = previous;
