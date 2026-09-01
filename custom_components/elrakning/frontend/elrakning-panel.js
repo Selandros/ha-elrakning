@@ -751,6 +751,29 @@ export function buildCanonicalPhasePoints(points, dayStart, axisEnd, slotMs = 5 
   return canonical;
 }
 
+export function buildPhaseRenderDomain(allPoints, metric, fuse) {
+  const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
+  let minValue = metric === "current" ? 0 : Math.min(...values);
+  const observedMax = values.length ? Math.max(...values.map((value) => metric === "current" ? Math.abs(value) : value)) : 0;
+  let maxValue = metric === "current"
+    ? Math.max(Number.isFinite(fuse) ? fuse : 0, observedMax * 1.08)
+    : Math.max(...values);
+  if (metric === "active_power") {
+    minValue = Math.min(0, minValue);
+    maxValue = Math.max(0, maxValue);
+  }
+  const margin = Math.max(1, (maxValue - minValue) * 0.08);
+  if (metric !== "current") {
+    minValue -= margin;
+    maxValue += margin;
+  }
+  if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue) {
+    minValue = 0;
+    maxValue = 1;
+  }
+  return { minValue, maxValue };
+}
+
 export function buildLiveSourceEntity(states, entityId, role) {
   const state = entityId && states?.[entityId];
   return {
@@ -8433,25 +8456,11 @@ class ElrakningPanel {
       this._phaseRenderSignature = "empty";
       return;
     }
-    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints, geometry });
+    const renderDomain = buildPhaseRenderDomain(allPoints, metric, fuse);
+    const renderSignature = JSON.stringify({ metric, axisStart, axisEnd, fuse, phasePoints, geometry, domain: renderDomain });
     if (renderSignature === this._phaseRenderSignature && chart.querySelector(".phase-history-svg")) return;
     this._phaseRenderSignature = renderSignature;
-    const values = allPoints.map((point) => Number(point.value)).filter(Number.isFinite);
-    let minValue = metric === "current" ? 0 : Math.min(...values);
-    const observedMax = values.length ? Math.max(...values.map((value) => metric === "current" ? Math.abs(value) : value)) : 0;
-    let maxValue = metric === "current"
-      ? Math.max(Number.isFinite(fuse) ? fuse : 0, observedMax * 1.08)
-      : Math.max(...values);
-    if (metric === "active_power") {
-      minValue = Math.min(0, minValue);
-      maxValue = Math.max(0, maxValue);
-    }
-    const margin = Math.max(1, (maxValue - minValue) * 0.08);
-    if (metric !== "current") {
-      minValue -= margin;
-      maxValue += margin;
-    }
-    if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue) { minValue = 0; maxValue = 1; }
+    const { minValue, maxValue } = renderDomain;
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - axisStart) / timeRange) * (width - plot.left - plot.right);
     const y = (value) => plot.top + (maxValue - value) / (maxValue - minValue) * (height - plot.top - plot.bottom);
     const phaseColors = PHASE_COLOR_MAP;
