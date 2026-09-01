@@ -637,14 +637,25 @@ export function buildPhaseChartGeometry(containerWidth = 960, { metric = "curren
   return { width, height, plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight: Math.max(1, height - plotTop - plotBottom), compact, axisLabelGutter: plotLeft };
 }
 
+export function axisCollisionInset(actualTextExtent, desiredGap = 8, availableOutsideSpace = 0) {
+  const textExtent = Number(actualTextExtent);
+  const gap = Number(desiredGap);
+  const outsideSpace = Number(availableOutsideSpace);
+  return Math.max(0, (Number.isFinite(textExtent) ? textExtent : 0)
+    + (Number.isFinite(gap) ? Math.max(0, gap) : 0)
+    - (Number.isFinite(outsideSpace) ? Math.max(0, outsideSpace) : 0));
+}
+
 export function priceAxisGutter(labels = [], gap = 8) {
+  if (!Array.isArray(labels) || labels.length === 0) return 0;
   const widestLabel = (Array.isArray(labels) ? labels : [])
     .map((label) => String(label ?? "").length * 7)
     .reduce((max, width) => Math.max(max, width), 0);
-  return Math.max(1, Math.ceil(widestLabel + gap));
+  return Math.ceil(axisCollisionInset(widestLabel, gap));
 }
 
 function measuredPriceAxisGutter(chart, labels, gap = 8) {
+  if (!Array.isArray(labels) || labels.length === 0) return 0;
   if (!chart || typeof document === "undefined") return priceAxisGutter(labels, gap);
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
@@ -654,7 +665,7 @@ function measuredPriceAxisGutter(chart, labels, gap = 8) {
   const widestLabel = (Array.isArray(labels) ? labels : [])
     .map((label) => context.measureText(String(label ?? "")).width)
     .reduce((max, width) => Math.max(max, width), 0);
-  return Math.max(1, Math.ceil(widestLabel + gap));
+  return Math.ceil(axisCollisionInset(widestLabel, gap));
 }
 
 export function buildHourlyBoundaryHours(containerWidth = 960) {
@@ -682,27 +693,39 @@ export function buildPriceChartGeometry(width = 960, height = 350, {
   rightAxisLabels = dualAxis ? ["0 öre/kWh", "100 öre/kWh"] : [],
   leftAxisGutter = null,
   rightAxisGutter = null,
+  contentLeft = 0,
+  contentRight = null,
 } = {}) {
   const chartWidth = Math.max(320, Math.round(Number(width) || 960));
   const chartHeight = Math.max(160, Math.round(Number(height) || 350));
   const renderedWidth = Math.max(320, Number(containerWidth) || chartWidth);
+  const contentStartValue = Number(contentLeft);
+  const contentEndValue = Number(contentRight);
+  const contentStart = Number.isFinite(contentStartValue) ? contentStartValue : 0;
+  const contentEnd = contentRight != null && Number.isFinite(contentEndValue) ? contentEndValue : chartWidth;
   const xAxisRailHeight = Math.round(16 * chartWidth / renderedWidth);
   const leftGutter = Number.isFinite(leftAxisGutter) ? leftAxisGutter : priceAxisGutter(leftAxisLabels);
   const rightGutter = Number.isFinite(rightAxisGutter)
     ? rightAxisGutter
     : priceAxisGutter(rightAxisLabels);
-  const plotLeft = leftGutter * chartWidth / renderedWidth;
-  const plotRight = rightGutter * chartWidth / renderedWidth;
+  const leftInset = leftGutter * chartWidth / renderedWidth;
+  const rightInset = rightGutter * chartWidth / renderedWidth;
+  const plotLeft = contentStart + leftInset;
+  const plotRight = contentEnd - rightInset;
   const plot = dualAxis
-    ? { left: plotLeft, right: plotRight, top: 30, bottom: xAxisRailHeight }
-    : { left: plotLeft, right: priceAxisGutter(["0"], 8) * chartWidth / renderedWidth, top: 42, bottom: xAxisRailHeight };
-  const plotWidth = Math.max(1, chartWidth - plot.left - plot.right);
+    ? { left: leftInset, right: rightInset, top: 30, bottom: xAxisRailHeight }
+    : { left: leftInset, right: rightInset, top: 42, bottom: xAxisRailHeight };
+  const plotWidth = Math.max(1, plotRight - plotLeft);
   const plotHeight = Math.max(1, chartHeight - plot.top - plot.bottom);
   return {
     width: chartWidth,
     height: chartHeight,
-    plotLeft: plot.left,
-    plotRight: plot.right,
+    contentLeft: contentStart,
+    contentRight: contentEnd,
+    leftInset,
+    rightInset,
+    plotLeft,
+    plotRight,
     plotTop: plot.top,
     plotBottom: plot.bottom,
     plotWidth,
@@ -9569,8 +9592,8 @@ class ElrakningPanel {
       leftAxisGutter: measuredPriceAxisGutter(chart, leftAxisLabels),
       rightAxisGutter: measuredPriceAxisGutter(chart, rightAxisLabels),
     });
-    chart.style.setProperty("--price-axis-left-gutter", `${(geometry.plotLeft / width) * 100}%`);
-    chart.style.setProperty("--price-axis-right-gutter", `${(geometry.plotRight / width) * 100}%`);
+    chart.style.setProperty("--price-axis-left-gutter", `${(geometry.leftInset / width) * 100}%`);
+    chart.style.setProperty("--price-axis-right-gutter", `${(geometry.rightInset / width) * 100}%`);
     const { plot, plotWidth, plotHeight } = geometry;
     const bands = buildPriceCategoryBands(plot.left, width - plot.right, data.length);
     const xStep = bands[0]?.end - bands[0]?.start || plotWidth;
@@ -9677,8 +9700,8 @@ class ElrakningPanel {
       leftAxisLabels: axisLabels,
       leftAxisGutter: measuredPriceAxisGutter(chart, axisLabels),
     });
-    chart.style.setProperty("--price-axis-left-gutter", `${(geometry.plotLeft / width) * 100}%`);
-    chart.style.setProperty("--price-axis-right-gutter", `${(geometry.plotRight / width) * 100}%`);
+    chart.style.setProperty("--price-axis-left-gutter", `${(geometry.leftInset / width) * 100}%`);
+    chart.style.setProperty("--price-axis-right-gutter", `${(geometry.rightInset / width) * 100}%`);
     const { plot, plotWidth, plotHeight } = geometry;
     const valueRange = range || 1;
     const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;

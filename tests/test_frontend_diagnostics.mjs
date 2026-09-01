@@ -994,7 +994,7 @@ assert.equal(hourlyPriceGeometry.plotBottom, hourlyPriceGeometry.xAxisRailHeight
 assert.equal(hourlyPriceGeometry.plotBottom, 16);
 assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 320 }).plotBottom, 48);
 assert.equal(dualPriceGeometry.plotLeft, priceAxisGutter(["0 kW", "5 kW", "10 kW"]));
-assert.equal(dualPriceGeometry.plotRight, priceAxisGutter(["0 öre/kWh", "100 öre/kWh"]));
+assert.equal(dualPriceGeometry.plotRight, 960 - priceAxisGutter(["0 öre/kWh", "100 öre/kWh"]));
 assert.ok(priceAxisGutter(["0", "21,12", "42,24"]) < priceAxisGutter(["0 kWh", "21,12 kWh", "42,24 kWh"]));
 assert.deepEqual(buildHourlyBoundaryHours(960), Array.from({ length: 25 }, (_, hour) => hour));
 assert.deepEqual(buildHourlyBoundaryHours(600), [0, 3, 6, 9, 12, 15, 18, 21, 24]);
@@ -1013,7 +1013,7 @@ assert.match(eonPanelSource, /const rightAxisLabels = \[0, \.5, 1\]\.map\(\(rati
 assert.match(eonPanelSource, /leftAxisLabels\[index\]/);
 assert.match(eonPanelSource, /rightAxisLabels\[index\]/);
 assert.match(eonPanelSource, /--price-axis-left-gutter/,);
-assert.match(eonPanelSource, /geometry\.plotLeft \/ width/);
+assert.match(eonPanelSource, /geometry\.leftInset \/ width/);
 assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-left \{[\s\S]*left: 0[\s\S]*padding-right: 8px[\s\S]*text-align: left[\s\S]*width: var\(--price-axis-left-gutter/);
 assert.match(eonPanelSource, /\.price-chart \.chart-axis-overlay-y-right \{[\s\S]*right: 0[\s\S]*width: var\(--price-axis-right-gutter/);
 assert.match(eonPanelSource, /@container price-chart \(max-width: 520px\) \{[\s\S]*\.price-chart \.chart-axis-overlay-y-left[\s\S]*width: var\(--price-axis-left-gutter/);
