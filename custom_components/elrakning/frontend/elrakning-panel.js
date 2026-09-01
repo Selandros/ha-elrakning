@@ -530,38 +530,55 @@ export function createMeterPowerHistoryState(date = null) {
 
 export function mergeMeterPowerHistoryPoint(history = {}, point = {}, powerEntityId = null) {
   let next = { ...history };
+  let phaseRenderChanged = false;
   if (point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw) {
     const timestamp = point.timestamp || new Date().toISOString();
-    const phaseHistory = mergePhaseHistory(history.phase_history, {});
+    let phaseHistory = history.phase_history || {};
     for (const [metric, values] of [["current", point.phase_current_a], ["voltage", point.phase_voltage_v], ["active_power", point.phase_active_power_kw]]) {
       if (!values || typeof values !== "object") continue;
-      phaseHistory[metric] = { ...(phaseHistory[metric] || {}) };
+      const timestampMs = Date.parse(timestamp);
+      const sameTimestamp = (candidate) => {
+        const candidateMs = Date.parse(candidate);
+        return Number.isFinite(timestampMs) && Number.isFinite(candidateMs)
+          ? candidateMs === timestampMs
+          : candidate === timestamp;
+      };
       for (const phase of ["l1", "l2", "l3"]) {
         const raw = values[phase];
         const value = raw == null ? NaN : Number(raw);
         if (!Number.isFinite(value)) continue;
-        const points = Array.isArray(phaseHistory[metric][phase]?.points) ? [...phaseHistory[metric][phase].points] : [];
-        const nextPoint = { timestamp, value: metric === "current" ? Math.abs(value) : value };
-        const index = points.findIndex((item) => item.timestamp === timestamp);
+        const storedValue = metric === "current" ? Math.abs(value) : value;
+        const existingSeries = phaseHistory[metric]?.[phase] || {};
+        const existingPoints = Array.isArray(existingSeries.points) ? existingSeries.points : [];
+        const lastIndex = existingPoints.length - 1;
+        const index = lastIndex >= 0 && sameTimestamp(existingPoints[lastIndex]?.timestamp)
+          ? lastIndex
+          : existingPoints.findIndex((item) => sameTimestamp(item.timestamp));
+        if (index >= 0 && existingPoints[index]?.value === storedValue) continue;
+        const points = [...existingPoints];
+        const nextPoint = { timestamp: index >= 0 ? existingPoints[index].timestamp : timestamp, value: storedValue };
         if (index >= 0) points[index] = { ...points[index], ...nextPoint }; else points.push(nextPoint);
         points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
-        phaseHistory[metric][phase] = { ...(phaseHistory[metric][phase] || {}), points: points.slice(-2000) };
+        const nextMetric = { ...(phaseHistory[metric] || {}) };
+        nextMetric[phase] = { ...existingSeries, points: points.slice(-2000) };
+        phaseHistory = { ...phaseHistory, [metric]: nextMetric };
+        phaseRenderChanged = true;
       }
     }
     next = { ...next, phase_history: phaseHistory, last_live_merge_at: new Date().toISOString(), last_live_timestamp: timestamp };
   }
-  if (!point?.timestamp || (point.entity_id && point.entity_id !== powerEntityId)) return next;
+  if (!point?.timestamp || (point.entity_id && point.entity_id !== powerEntityId)) return { history: next, phaseRenderChanged };
   const timestamp = new Date(point.timestamp);
-  if (Number.isNaN(timestamp.getTime())) return next;
+  if (Number.isNaN(timestamp.getTime())) return { history: next, phaseRenderChanged };
   const date = timestamp.toLocaleDateString("sv-SE");
   const currentDate = next.date || date;
-  if (date !== currentDate) return next;
+  if (date !== currentDate) return { history: next, phaseRenderChanged };
   const points = Array.isArray(next.points) ? [...next.points] : [];
   const nextPoint = { timestamp: timestamp.toISOString(), import_kw: normalizeMeterValue(point.import_kw), export_kw: normalizeMeterValue(point.export_kw) };
   const index = points.findIndex((item) => item.timestamp === nextPoint.timestamp);
   if (index >= 0) points[index] = nextPoint; else points.push(nextPoint);
   points.sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
-  return { ...next, date: currentDate, points };
+  return { history: { ...next, date: currentDate, points }, phaseRenderChanged };
 }
 
 export function phaseHistoryPointCounts(history = {}) {
@@ -8994,22 +9011,30 @@ class ElrakningPanel {
 
   _appendMeterPowerPoint(point) {
     const hasPhaseData = Boolean(point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw);
+    let phaseRenderChanged = false;
     if (hasPhaseData) {
       this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());
-      this._meterPowerHistory = mergeMeterPowerHistoryPoint(
+      const phaseMerge = mergeMeterPowerHistoryPoint(
         this._meterPowerHistory,
         point,
         this._meterState?.power_entity,
       );
+      this._meterPowerHistory = phaseMerge.history;
+      phaseRenderChanged = phaseMerge.phaseRenderChanged;
       this._renderLivePowerRow();
-      this._renderPhaseHistoryCard();
     }
-    if (!point?.timestamp || (point.entity_id && point.entity_id !== this._meterState?.power_entity)) return;
-    this._meterPowerHistory = mergeMeterPowerHistoryPoint(
+    if (!point?.timestamp || (point.entity_id && point.entity_id !== this._meterState?.power_entity)) {
+      if (phaseRenderChanged) this._renderPhaseHistoryCard();
+      return;
+    }
+    const meterMerge = mergeMeterPowerHistoryPoint(
       this._meterPowerHistory,
       point,
       this._meterState?.power_entity,
     );
+    this._meterPowerHistory = meterMerge.history;
+    phaseRenderChanged = phaseRenderChanged || meterMerge.phaseRenderChanged;
+    if (phaseRenderChanged) this._renderPhaseHistoryCard();
     if (this.host.querySelector(".price-chart")
       && this._getPriceChartLiveSignature() !== this._priceChartLiveSignature) {
       this.renderPriceChart({ liveUpdate: true });

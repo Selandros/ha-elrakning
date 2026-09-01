@@ -933,7 +933,7 @@ const liveMeterEvent = {
   import_kw: 0.4,
   export_kw: 0,
 };
-const afterLiveMeterEvent = mergeMeterPowerHistoryPoint(seededMeterHistory, liveMeterEvent, "sensor.grid_power");
+const afterLiveMeterEvent = mergeMeterPowerHistoryPoint(seededMeterHistory, liveMeterEvent, "sensor.grid_power").history;
 assert.equal(afterLiveMeterEvent.phase_history.current.l1.points.length, 151);
 assert.equal(afterLiveMeterEvent.phase_history.current.l2.points.length, 151);
 assert.equal(afterLiveMeterEvent.phase_history.current.l3.points.length, 151);
@@ -949,7 +949,7 @@ for (let iteration = 1; iteration <= 50; iteration += 1) {
   repeatedMeterHistory = mergeMeterPowerHistoryPoint(repeatedMeterHistory, {
     ...liveMeterEvent,
     timestamp: `2026-08-30T12:${String(iteration).padStart(2, "0")}:00.000Z`,
-  }, "sensor.grid_power");
+  }, "sensor.grid_power").history;
   assert.equal(repeatedMeterHistory.phase_history.current.l1.points.length, 151 + iteration);
   assert.deepEqual(Object.keys(repeatedMeterHistory), Object.keys(afterLiveMeterEvent));
 }
