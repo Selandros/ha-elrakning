@@ -1716,12 +1716,15 @@ export function buildBatteryDailyHistory(chargingPoints, dischargingPoints, capa
   });
 }
 
-export function buildSolarDailyHistory(points, forecastBaselines, now = new Date(), dayCount = 7, liveForecast = null) {
+export function buildSolarDailyHistory(points, forecastBaselines, now = new Date(), dayCount = 7, liveForecast = null, shadowDays = null) {
   const forecastCompletionEpsilonKwh = 0.001;
   const current = new Date(now);
   const todayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
   const days = Math.max(1, Math.min(7, Math.trunc(Number(dayCount) || 7)));
   const forecastByDate = forecastBaselines && typeof forecastBaselines === "object" ? forecastBaselines : {};
+  const shadowByDate = Array.isArray(shadowDays)
+    ? Object.fromEntries(shadowDays.filter((item) => item && typeof item.target_date === "string").map((item) => [item.target_date, item]))
+    : null;
   return Array.from({ length: days }, (_, index) => {
     const dayStart = new Date(todayStart);
     dayStart.setDate(todayStart.getDate() - (days - index - 1));
@@ -1744,10 +1747,13 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const comparisonExpectedKwh = isToday
       ? (completedToday ? forecastKwh : expectedSoFarKwh)
       : forecastKwh;
+    const shadowComparisonAvailable = shadowByDate === null
+      ? true
+      : shadowByDate[localDate]?.candidate_comparison_available === true;
     const comparisonBasis = isToday
       ? (completedToday ? (forecastKwh !== null ? "full_day_forecast" : "full_day_forecast_unavailable") : "forecast_so_far")
       : "full_day_forecast";
-    const comparisonIsValid = Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedKwh)
+    const comparisonIsValid = shadowComparisonAvailable && Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedKwh)
       && actualKwh >= 0 && comparisonExpectedKwh > 0;
     const forecastAccuracyPercent = comparisonIsValid
       ? Math.max(0, Math.min(100, Math.min(actualKwh, comparisonExpectedKwh) / Math.max(actualKwh, comparisonExpectedKwh) * 100))
@@ -2132,7 +2138,7 @@ class ElrakningPanel {
     this._powerStateRequestGeneration = 0;
     this._powerStateMutationGeneration = 0;
     this._powerStateLifecycleGeneration = 0;
-    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._powerHistoryRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
@@ -6771,6 +6777,7 @@ class ElrakningPanel {
         new Date(),
         7,
         powerHistory.solar_forecast,
+        powerHistory.solar_shadow?.days,
       );
       return {
         card: "solar-history",
@@ -6889,6 +6896,7 @@ class ElrakningPanel {
       new Date(),
       7,
       this._powerHistory?.solar_forecast,
+      this._powerHistory?.solar_shadow?.days,
     );
     const values = days.flatMap((day) => [day.producedKwh, day.forecastKwh]).filter((value) => Number.isFinite(value));
     if (!values.length) {
@@ -7105,6 +7113,7 @@ class ElrakningPanel {
         solar_analysis: response?.solar_analysis || { available: false, days: [] },
         solar_forecast: response?.solar_forecast || { available: false },
         solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
+        solar_shadow: response?.solar_shadow || { available: false, days: [] },
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: response?.solar_sun || { available: false },
       };
@@ -7113,7 +7122,7 @@ class ElrakningPanel {
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
-      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
       this._refreshPowerEnergyState();
     }
   }

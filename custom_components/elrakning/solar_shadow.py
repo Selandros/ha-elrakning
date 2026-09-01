@@ -372,6 +372,7 @@ class SolarShadowManager:
                 "raw_forecast_kwh": value,
                 "candidate_forecast_kwh": None,
                 "candidate_replay_available": False,
+                "candidate_comparison_available": False,
                 "shadow_data_status": "historical_inputs_missing",
             }
             for target_date, value in (forecast_state.get("baselines") or {}).items()
@@ -388,16 +389,24 @@ class SolarShadowManager:
             model = snapshot.get("model") or {}
             candidate = _number(model.get("candidate_forecast_kwh"))
             record = records.setdefault(target_date, {"target_date": target_date})
+            comparison_available = (
+                candidate is not None
+                and snapshot.get("actual_final_kwh") is not None
+                and snapshot.get("quality") == "valid"
+            )
             if raw is not None:
                 record["raw_forecast_kwh"] = raw
-            record.update({
+            captured = {
                 "candidate_forecast_kwh": candidate,
                 "candidate_replay_available": candidate is not None,
-                "shadow_data_status": "captured" if candidate is not None else "captured_without_candidate",
+                "candidate_comparison_available": comparison_available,
+                "shadow_data_status": "complete" if comparison_available else "captured_without_candidate",
                 "capture_type": snapshot.get("capture_type"),
                 "actual_final_kwh": snapshot.get("actual_final_kwh"),
                 "quality": snapshot.get("quality"),
-            })
+            }
+            if not record.get("candidate_comparison_available"):
+                record.update(captured)
         return [records[key] for key in sorted(records)]
 
     def _is_duplicate(self, snapshot: dict[str, Any]) -> bool:

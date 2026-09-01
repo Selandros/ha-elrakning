@@ -290,6 +290,7 @@ class SolarShadowTests(unittest.TestCase):
         self.assertEqual(records[0]["raw_forecast_kwh"], 18.829)
         self.assertIsNone(records[0]["candidate_forecast_kwh"])
         self.assertFalse(records[0]["candidate_replay_available"])
+        self.assertFalse(records[0]["candidate_comparison_available"])
         self.assertEqual(records[0]["shadow_data_status"], "historical_inputs_missing")
         self.assertEqual(
             [(item["target_date"], item["raw_forecast_kwh"], item["candidate_forecast_kwh"])
@@ -317,6 +318,23 @@ class SolarShadowTests(unittest.TestCase):
         self.assertIsNone(records[0]["candidate_forecast_kwh"])
         self.assertEqual(records[1]["candidate_forecast_kwh"], 15.5)
         self.assertTrue(records[1]["candidate_replay_available"])
+        self.assertFalse(records[1]["candidate_comparison_available"])
+        self.assertEqual(records[1]["shadow_data_status"], "captured_without_candidate")
+
+    def test_complete_valid_snapshot_is_comparison_available(self):
+        manager = solar_shadow.SolarShadowManager.__new__(solar_shadow.SolarShadowManager)
+        manager.forecast_manager = types.SimpleNamespace(public_state=lambda: {
+            "baselines": {"2026-08-28": 12.0},
+        })
+        manager._frames = {"forecast": {"f": {"today_kwh": 12.0}}, "weather": {}, "sun": {}}
+        manager._snapshots = [{
+            "target_date": "2026-08-28", "forecast_frame": "f", "model": {"candidate_forecast_kwh": 11.5},
+            "capture_type": "day_ahead", "actual_final_kwh": 10.0, "quality": "valid",
+        }]
+        record = manager._public_day_records()[0]
+        self.assertTrue(record["candidate_replay_available"])
+        self.assertTrue(record["candidate_comparison_available"])
+        self.assertEqual(record["shadow_data_status"], "complete")
 
     def test_missing_shadow_records_never_enter_learning(self):
         self.assertEqual(solar_shadow._site_multiplier([
