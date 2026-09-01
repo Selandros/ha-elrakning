@@ -5401,6 +5401,21 @@ class ElrakningPanel {
     const root = this.host.querySelector("[data-period-picker]");
     const dialog = root?.querySelector("[data-period-picker-dialog]");
     if (!root || !dialog) return;
+    const applySelectedHourDate = async (date) => {
+      const next = new Date(date);
+      if (!Number.isFinite(next.getTime())) return;
+      const previous = this._periodPickerState.confirmed;
+      const changed = !previous || previous.getTime() !== next.getTime();
+      this._periodPickerState.confirmed = next;
+      this._periodPickerState.draft = new Date(next);
+      this._periodPickerState.open = false;
+      this._renderPeriodPicker();
+      if (changed) await this.loadPriceData(next);
+      else {
+        this.updatePriceSummary();
+        this.renderPriceChart();
+      }
+    };
     const close = () => {
       this._periodPickerState.open = false;
       this._periodPickerState.draft = new Date(this._periodPickerState.confirmed);
@@ -5421,12 +5436,12 @@ class ElrakningPanel {
       if (this._periodPickerState.mode === "hour") date.setDate(date.getDate() + direction);
       else if (this._periodPickerState.mode === "day") date.setMonth(date.getMonth() + direction, 1);
       else date.setFullYear(date.getFullYear() + direction, date.getMonth(), 1);
-      this._periodPickerState.confirmed = date;
-      this._periodPickerState.draft = new Date(date);
-      this._renderPeriodPicker();
       if (this._periodPickerState.mode === "hour") {
-        await this.loadPriceData(date);
+        await applySelectedHourDate(date);
       } else {
+        this._periodPickerState.confirmed = date;
+        this._periodPickerState.draft = new Date(date);
+        this._renderPeriodPicker();
         this.updatePriceSummary();
         this.renderPriceChart();
       }
@@ -5482,8 +5497,13 @@ class ElrakningPanel {
         this._periodPickerState.cursor = new Date(now.getFullYear(), now.getMonth(), 1);
       }
       if (event.target.closest?.("[data-period-picker-confirm]")) {
+        if (this._periodPickerState.mode === "hour") {
+          applySelectedHourDate(this._periodPickerState.draft);
+          return;
+        }
         this._periodPickerState.confirmed = new Date(this._periodPickerState.draft);
         this._periodPickerState.open = false;
+        this._renderPeriodPicker();
         this.updatePriceSummary();
         this.renderPriceChart();
       }
