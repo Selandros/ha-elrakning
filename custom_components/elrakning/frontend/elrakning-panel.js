@@ -3034,14 +3034,17 @@ class ElrakningPanel {
         }
 
         .solar-history-reference-bar {
-          fill-opacity: .9;
+          fill-opacity: .22;
           rx: 4;
           ry: 4;
         }
 
-        .solar-history-day.hovered .solar-history-bar,
-        .solar-history-day.hovered .solar-history-reference-bar {
+        .solar-history-day.hovered .solar-history-bar {
           fill-opacity: 1;
+        }
+
+        .solar-history-day.hovered .solar-history-reference-bar {
+          fill-opacity: .32;
         }
 
         .daily-energy-row {
@@ -6913,7 +6916,7 @@ class ElrakningPanel {
     const bars = days.map((day, index) => {
       const center = groupX(index);
       const forecast = Number.isFinite(day.forecastKwh) && day.forecastKwh > 0
-        ? `<rect class="solar-history-reference-bar" fill="${chartColor("solarForecast")}" x="${center - referenceBarWidth / 2}" y="${y(day.forecastKwh)}" width="${referenceBarWidth}" height="${plot.top + plotHeight - y(day.forecastKwh)}" />`
+        ? `<rect class="solar-history-reference-bar" fill="${chartColor("socEstimated")}" x="${center - referenceBarWidth / 2}" y="${y(day.forecastKwh)}" width="${referenceBarWidth}" height="${plot.top + plotHeight - y(day.forecastKwh)}" />`
         : "";
       const actual = Number.isFinite(day.producedKwh)
         ? `<rect class="solar-history-bar" fill="${chartColor("solar")}" x="${center - barWidth / 2}" y="${y(day.producedKwh)}" width="${barWidth}" height="${plot.top + plotHeight - y(day.producedKwh)}" />`
