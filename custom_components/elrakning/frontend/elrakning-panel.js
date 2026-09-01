@@ -3755,7 +3755,7 @@ class ElrakningPanel {
         }
 
         .phase-history-chart {
-          margin-top: 16px;
+          margin-top: 2px;
           min-height: 0;
           overflow-anchor: none;
           position: relative;
