@@ -668,6 +668,21 @@ function measuredPriceAxisGutter(chart, labels, gap = 8) {
   return Math.ceil(axisCollisionInset(widestLabel, gap));
 }
 
+function measuredPriceAxisLabelGutter(chart, labels, gap = 8) {
+  if (!Array.isArray(labels) || labels.length === 0) return 0;
+  if (!chart || typeof document === "undefined") return priceAxisGutter(labels, gap);
+  const sample = document.createElement("span");
+  sample.className = "chart-axis-overlay-label chart-axis-overlay-y-left";
+  sample.textContent = labels.reduce((longest, label) => String(label ?? "").length > String(longest ?? "").length ? label : longest, "");
+  sample.style.cssText = "position:absolute;visibility:hidden;width:auto;padding:0;white-space:nowrap;";
+  chart.append(sample);
+  const range = document.createRange();
+  range.selectNodeContents(sample);
+  const measuredWidth = range.getBoundingClientRect().width;
+  sample.remove();
+  return Math.ceil(axisCollisionInset(measuredWidth, gap));
+}
+
 export function buildHourlyBoundaryHours(containerWidth = 960) {
   const width = Number(containerWidth) || 960;
   const step = width >= 760 ? 1 : width >= 480 ? 3 : 6;
@@ -9698,7 +9713,7 @@ class ElrakningPanel {
     const geometry = buildPriceChartGeometry(width, height, {
       containerWidth: renderedWidth,
       leftAxisLabels: axisLabels,
-      leftAxisGutter: measuredPriceAxisGutter(chart, axisLabels),
+      leftAxisGutter: measuredPriceAxisLabelGutter(chart, axisLabels),
     });
     chart.style.setProperty("--price-axis-left-gutter", `${(geometry.leftInset / width) * 100}%`);
     chart.style.setProperty("--price-axis-right-gutter", `${(geometry.rightInset / width) * 100}%`);
