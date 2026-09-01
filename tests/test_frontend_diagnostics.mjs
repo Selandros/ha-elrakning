@@ -97,7 +97,7 @@ assert.match(pickerPanelSource, /\.period-picker-arrow \{[\s\S]*font-size: clamp
 assert.match(pickerPanelSource, /\.period-picker-modes button \{ font-size: clamp\(10px, 1\.7cqw, 12px\); \}/);
 assert.match(pickerPanelSource, /\.price-section \{[\s\S]*overflow: visible/);
 assert.doesNotMatch(pickerPanelSource, /@container price-card \(max-width: 900px\)/);
-assert.doesNotMatch(pickerPanelSource, /\.price-section \.period-picker \{[\s\S]*flex-direction: column/);
+assert.doesNotMatch(pickerPanelSource, /\.price-section \.period-picker \{[^}]*flex-direction: column/);
 assert.doesNotMatch(pickerPanelSource, /\.price-section \.period-picker-modes \{[\s\S]*width: 100%/);
 assert.match(pickerPanelSource, /\.period-picker-dialog \{[\s\S]*margin: auto;[\s\S]*max-height: calc\(100dvh - 48px\)[\s\S]*max-width: calc\(100vw - 48px\)[\s\S]*overflow-y: auto[\s\S]*width: min\(520px, calc\(100vw - 48px\)/);
 const pickerRenderSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderPeriodPicker()"), pickerPanelSource.indexOf("  _bindPeriodPicker()"));
@@ -2098,7 +2098,7 @@ assert.match(panelSource, /data-price="current"[\s\S]*data-price="average"[\s\S]
 assert.match(panelSource, /\.price-analysis-status[\s\S]*font-size: var\(--price-card-text-size\)/);
 assert.match(panelSource, /\.price-analysis-forecast[\s\S]*font-size: var\(--price-card-text-size\)/);
 assert.match(panelSource, /\.price-section \.section-heading \.status[\s\S]*font-size: var\(--price-card-text-size\)/);
-assert.doesNotMatch(panelSource, /\.chart-svg \{[\s\S]*min-width: [^0]/);
+assert.match(panelSource, /\.chart-svg \{[^}]*min-width: 0;/);
 assert.match(panelSource, /\.section-heading \{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap/);
 assert.match(panelSource, /\.section-heading h2,[\s\S]*white-space: nowrap/);
 assert.match(panelSource, /class="price-heading-main"/);

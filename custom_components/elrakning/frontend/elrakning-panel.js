@@ -4339,6 +4339,31 @@ class ElrakningPanel {
           overscroll-behavior-x: contain;
         }
 
+        /* Keep the desktop price card compact while preserving its full-width plot. */
+        @media (min-width: 601px) {
+          .price-section .price-chart,
+          .price-section .price-chart .chart-svg,
+          .price-section .price-chart .chart-axis-overlay {
+            height: 295px;
+          }
+
+          .price-section .price-chart .chart-svg {
+            max-height: 295px;
+          }
+
+          .price-section .price-chart-legend {
+            min-height: 28px;
+          }
+
+          .price-section .price-analysis {
+            min-height: 40px;
+          }
+
+          .price-section .period-picker {
+            margin-top: 11px;
+          }
+        }
+
         /* Price axes reserve only a compact label-sized gutter before the plot. */
         .price-chart .chart-axis-overlay-y-left {
           left: 0;
