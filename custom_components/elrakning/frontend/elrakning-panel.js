@@ -2031,6 +2031,10 @@ class ElrakningPanel {
       battery: false,
     };
     this._diagnosticEntries = [];
+    this._diagnosticsBound = false;
+    this._diagnosticsDomNodes = null;
+    this._diagnosticsRequestGeneration = 0;
+    this._diagnosticsLifecycleGeneration = 0;
     this._chartTouch = null;
     this._chartDebugCopyText = "";
     this._tooltipOrbit = { angle: null };
@@ -7629,7 +7633,7 @@ class ElrakningPanel {
     });
   }
 
-  _bindDiagnostics() {
+  _bindDiagnostics(loadInitial = false) {
     const list = this.host.querySelector("[data-diagnostics-list]");
     const status = this.host.querySelector("[data-diagnostics-status]");
     const copy = this.host.querySelector("[data-diagnostics-copy]");
@@ -7655,15 +7659,24 @@ class ElrakningPanel {
       }));
     };
     const load = async () => {
+      const requestGeneration = ++this._diagnosticsRequestGeneration;
+      const lifecycleGeneration = this._diagnosticsLifecycleGeneration;
+      const requestHass = this.hass;
+      const isCurrentRequest = () => requestGeneration === this._diagnosticsRequestGeneration
+        && lifecycleGeneration === this._diagnosticsLifecycleGeneration
+        && this.hass === requestHass;
       try {
-        const response = await this.hass.callWS({ type: "elrakning/diagnostics_state" });
+        const response = await requestHass.callWS({ type: "elrakning/diagnostics_state" });
+        if (!isCurrentRequest()) return;
         render(response.logs);
       } catch {
-        status.textContent = "Varning";
+        if (isCurrentRequest()) status.textContent = "Varning";
       }
     };
     this._loadDiagnosticsState = load;
-    if (!this._diagnosticsBound) {
+    const domNodes = { list, status, copy, copyStatus, clear };
+    const domChanged = Object.entries(domNodes).some(([key, node]) => this._diagnosticsDomNodes?.[key] !== node);
+    if (!this._diagnosticsBound || domChanged) {
       copy.addEventListener("click", async () => {
         try {
           const clipboardEntries = this._diagnosticEntries.slice();
@@ -7679,8 +7692,10 @@ class ElrakningPanel {
         await load();
       });
       this._diagnosticsBound = true;
+      this._diagnosticsDomNodes = domNodes;
+      if (!loadInitial && this._diagnosticEntries.length) render(this._diagnosticEntries);
     }
-    load();
+    if (loadInitial) load();
   }
 
   _updateInvoiceCard(response) {
@@ -8107,8 +8122,13 @@ class ElrakningPanel {
   }
 
   setHass(hass) {
+    const connectionChanged = Boolean(hass?.connection && this._eventConnection !== hass.connection);
     this.hass = hass;
-    this._bindDiagnostics();
+    if (connectionChanged) {
+      this._diagnosticsLifecycleGeneration += 1;
+      this._diagnosticsRequestGeneration += 1;
+    }
+    this._bindDiagnostics(connectionChanged);
     this._syncCardTheme();
     if (hass?.connection && this._eventConnection !== hass.connection) {
       if (this._eventUnsubscribePromise) {
@@ -8221,6 +8241,8 @@ class ElrakningPanel {
   }
 
   destroy() {
+    this._diagnosticsLifecycleGeneration += 1;
+    this._diagnosticsRequestGeneration += 1;
     if (this._eventUnsubscribePromise) {
       Promise.resolve(this._eventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -8287,6 +8309,8 @@ class ElrakningPanel {
     this._connectionReadyListener = null;
     this._backendHydrationPromise = null;
     this._loadDiagnosticsState = null;
+    this._diagnosticsBound = false;
+    this._diagnosticsDomNodes = null;
     this._eventConnection = null;
     window.removeEventListener("resize", this._onThemeResize);
     window.removeEventListener("focus", this._onThemeFocus);
