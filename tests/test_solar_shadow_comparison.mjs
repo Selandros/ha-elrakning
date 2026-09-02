@@ -34,4 +34,15 @@ assert.ok(Number.isFinite(byDate["2026-08-28"].utilizationPercent));
 assert.equal(byDate["2026-08-28"].forecastComparisonExpectedKwh, 11.5);
 assert.equal(byDate["2026-09-01"].forecastAccuracyPercent, null);
 
+const completedCurrentDay = buildSolarDailyHistory(
+  points,
+  { "2026-09-01": 37.874 },
+  now,
+  1,
+  { today_kwh: 46.941, remaining_today_kwh: 10 },
+  [{ target_date: "2026-09-01", candidate_forecast_kwh: 40, candidate_comparison_available: true }],
+)[0];
+assert.equal(completedCurrentDay.forecastComparisonExpectedKwh, 40);
+assert.ok(Number.isFinite(completedCurrentDay.forecastAccuracyPercent));
+
 console.log("solar shadow comparison availability semantics passed");

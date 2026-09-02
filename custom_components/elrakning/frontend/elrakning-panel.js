@@ -1756,9 +1756,9 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const comparisonBasis = isToday
       ? (completedToday ? (forecastKwh !== null ? "full_day_forecast" : "full_day_forecast_unavailable") : "forecast_so_far")
       : "full_day_forecast";
-    const comparisonExpectedWithShadowKwh = isToday
-      ? (completedToday ? shadowCandidateKwh : expectedSoFarKwh)
-      : shadowCandidateKwh;
+    const comparisonExpectedWithShadowKwh = shadowByDate !== null && shadowComparisonAvailable
+      ? shadowCandidateKwh
+      : (isToday ? (completedToday ? shadowCandidateKwh : expectedSoFarKwh) : shadowCandidateKwh);
     const comparisonIsValid = shadowComparisonAvailable && Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedWithShadowKwh)
       && actualKwh >= 0 && comparisonExpectedWithShadowKwh > 0;
     const forecastAccuracyPercent = comparisonIsValid
