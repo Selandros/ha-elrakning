@@ -166,18 +166,19 @@ def build_candidate_forecast(
 class SolarShadowManager:
     """Persist immutable forecast inputs and candidate outputs for later replay."""
 
-    def __init__(self, hass, forecast_manager, weather_manager, power_manager) -> None:
+    def __init__(self, hass, forecast_manager, weather_manager, power_manager, pvgis_manager=None) -> None:
         self.hass = hass
         self.forecast_manager = forecast_manager
         self.weather_manager = weather_manager
         self.power_manager = power_manager
+        self.pvgis_manager = pvgis_manager
         self.store = Store(hass, 1, STORE_KEY)
         self._snapshots: list[dict[str, Any]] = []
         self._last_capture_at = None
         self._last_input_signature = None
         self._capture_lock = None
         self._last_enrichment_date = None
-        self._frames = {"forecast": {}, "weather": {}, "sun": {}}
+        self._frames = {"forecast": {}, "weather": {}, "sun": {}, "pvgis": {}}
         self._unsubs = [
             hass.bus.async_listen("elrakning_solar_forecast_update", self._async_trigger),
             hass.bus.async_listen("elrakning_solar_weather_update", self._async_trigger),
@@ -235,7 +236,9 @@ class SolarShadowManager:
             forecast = self.forecast_manager.public_state()
             weather = self.weather_manager.public_state()
             sun = self._sun_state()
-            signature = repr((forecast, weather))
+            pvgis_manager = getattr(self, "pvgis_manager", None)
+            pvgis_context = pvgis_manager.public_state() if pvgis_manager else {"available": False}
+            signature = repr((forecast, weather, pvgis_context.get("installation", {}).get("fingerprint")))
             if self._last_capture_at is not None and (
                 now - self._last_capture_at
             ).total_seconds() < MIN_CAPTURE_INTERVAL_SECONDS:
@@ -260,6 +263,9 @@ class SolarShadowManager:
                     "weather": self._store_frame("weather", _copy_weather(weather)),
                     "sun": self._store_frame("sun", _copy_sun(sun)),
                 }
+                pvgis = pvgis_manager.public_state(target_date) if pvgis_manager else {"available": False}
+                if pvgis.get("available"):
+                    frame_ids["pvgis"] = self._store_frame("pvgis", pvgis)
                 snapshot = {
                     "timestamp": now.isoformat(),
                     "target_date": target_date.isoformat(),
@@ -267,6 +273,7 @@ class SolarShadowManager:
                     "forecast_frame": frame_ids["forecast"],
                     "weather_frame": frame_ids["weather"],
                     "sun_frame": frame_ids["sun"],
+                    "pvgis_frame": frame_ids.get("pvgis"),
                     "pv": {"actual_so_far_kwh": actual_so_far if target_date == today else None},
                     "model": {**candidate, "input_availability": {
                         "forecast": raw is not None,
@@ -292,7 +299,7 @@ class SolarShadowManager:
     def _store_frame(self, kind: str, payload: dict[str, Any]) -> str:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         frame_id = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
-        self._frames[kind].setdefault(frame_id, payload)
+        self._frames.setdefault(kind, {}).setdefault(frame_id, payload)
         return frame_id
 
     def _materialize(self, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -301,6 +308,7 @@ class SolarShadowManager:
             result["forecast_solar"] = dict(self._frames["forecast"].get(snapshot["forecast_frame"], {}))
             result["smhi"] = dict(self._frames["weather"].get(snapshot.get("weather_frame"), {}))
             result["sun"] = dict(self._frames["sun"].get(snapshot.get("sun_frame"), {}))
+            result["pvgis"] = dict(self._frames.get("pvgis", {}).get(snapshot.get("pvgis_frame"), {}))
         return result
 
     async def _enrich_completed_days(self, today: date) -> None:
@@ -443,16 +451,16 @@ class SolarShadowManager:
         return [records[key] for key in sorted(records)]
 
     def _is_duplicate(self, snapshot: dict[str, Any]) -> bool:
-        key = (snapshot.get("target_date"), snapshot.get("forecast_frame"), snapshot.get("weather_frame"), snapshot.get("sun_frame"), snapshot.get("pv"))
-        return any((item.get("target_date"), item.get("forecast_frame"), item.get("weather_frame"), item.get("sun_frame"), item.get("pv")) == key for item in self._snapshots[-4:])
+        key = (snapshot.get("target_date"), snapshot.get("forecast_frame"), snapshot.get("weather_frame"), snapshot.get("sun_frame"), snapshot.get("pvgis_frame"), snapshot.get("pv"))
+        return any((item.get("target_date"), item.get("forecast_frame"), item.get("weather_frame"), item.get("sun_frame"), item.get("pvgis_frame"), item.get("pv")) == key for item in self._snapshots[-4:])
 
     def _trim(self, today: date) -> None:
         minimum = today - timedelta(days=RETENTION_DAYS - 1)
         self._snapshots = [item for item in self._snapshots if item.get("target_date", "") >= minimum.isoformat()]
         self._snapshots = self._snapshots[-MAX_SNAPSHOTS:]
-        for kind in ("forecast", "weather", "sun"):
+        for kind in ("forecast", "weather", "sun", "pvgis"):
             referenced = {item.get(f"{kind}_frame") for item in self._snapshots}
-            self._frames[kind] = {key: value for key, value in self._frames[kind].items() if key in referenced}
+            self._frames[kind] = {key: value for key, value in self._frames.get(kind, {}).items() if key in referenced}
 
     def public_state(self) -> dict[str, Any]:
         return {

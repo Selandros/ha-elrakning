@@ -955,6 +955,9 @@ async def websocket_power_save(hass, connection, msg):
     except Exception as err:
         connection.send_result(msg["id"], {"success": False, "error": str(err) or "power_save_failed"})
         return
+    pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
+    if pvgis_manager:
+        await pvgis_manager.async_refresh_for_power_state(state)
     connection.send_result(msg["id"], {"success": True, **state})
 
 
@@ -990,6 +993,8 @@ async def websocket_power_history(hass, connection, msg):
     result["solar_shadow"] = shadow.public_state() if shadow else {"available": False, "snapshots": []}
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
     result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
+    pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
+    result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager else {"available": False, "source": "jrc_pvgis"}
     result["solar_sun"] = build_sun_context(hass)
     connection.send_result(msg["id"], result)
 

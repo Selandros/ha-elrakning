@@ -17,6 +17,7 @@ from .elnat.eon_handoff import async_register_eon_handoff_views
 from .meter import MeterManager
 from .power import PowerManager
 from .solar_forecast import SolarForecastManager
+from .solar_pvgis import SolarPvgisManager
 from .solar_shadow import SolarShadowManager
 from .solar_weather import SolarWeatherManager
 from .websocket import async_register_websocket_commands
@@ -60,7 +61,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     solar_weather_manager = SolarWeatherManager(hass)
     await solar_weather_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_weather_manager"] = solar_weather_manager
-    solar_shadow_manager = SolarShadowManager(hass, solar_forecast_manager, solar_weather_manager, power_manager)
+    solar_pvgis_manager = SolarPvgisManager(hass, power_manager)
+    await solar_pvgis_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["solar_pvgis_manager"] = solar_pvgis_manager
+    solar_shadow_manager = SolarShadowManager(hass, solar_forecast_manager, solar_weather_manager, power_manager, solar_pvgis_manager)
     await solar_shadow_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_shadow_manager"] = solar_shadow_manager
     grid_manager = GridManager(hass, entry)
@@ -154,6 +158,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await solar_weather_manager.async_shutdown()
     if solar_shadow_manager := frontend_data.pop("solar_shadow_manager", None):
         await solar_shadow_manager.async_shutdown()
+    if solar_pvgis_manager := frontend_data.pop("solar_pvgis_manager", None):
+        await solar_pvgis_manager.async_shutdown()
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
         unsubscribe()
     coordinator.cancel_midnight_recovery()
