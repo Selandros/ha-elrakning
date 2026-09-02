@@ -128,6 +128,7 @@ def build_candidate_forecast(
     actual_so_far_kwh: float | None = None,
     expected_so_far_kwh: float | None = None,
     remaining_forecast_kwh: float | None = None,
+    open_meteo: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic, conservative shadow forecast."""
     raw = _number(raw_forecast_kwh)
@@ -142,6 +143,8 @@ def build_candidate_forecast(
     weather_candidate = raw * weather_factor
     blended = raw * 0.8 + weather_candidate * 0.2
     calibrated = blended * (1.0 + (site_factor - 1.0) * 0.5)
+    open_meteo_profile = open_meteo if isinstance(open_meteo, dict) else {}
+    open_meteo_potential = _number(open_meteo_profile.get("potential_dc_kwh"))
     intraday_factor = 1.0
     reasons = [weather_method, site_method]
     actual = _number(actual_so_far_kwh)
@@ -156,6 +159,8 @@ def build_candidate_forecast(
     return {
         "candidate_forecast_kwh": max(0.0, calibrated),
         "weather_component": weather_factor,
+        "open_meteo_potential_dc_kwh": open_meteo_potential,
+        "open_meteo_used_for_candidate": False,
         "site_bias": site_factor,
         "intraday_bias": intraday_factor,
         "confidence": confidence,
@@ -166,19 +171,20 @@ def build_candidate_forecast(
 class SolarShadowManager:
     """Persist immutable forecast inputs and candidate outputs for later replay."""
 
-    def __init__(self, hass, forecast_manager, weather_manager, power_manager, pvgis_manager=None) -> None:
+    def __init__(self, hass, forecast_manager, weather_manager, power_manager, pvgis_manager=None, open_meteo_manager=None) -> None:
         self.hass = hass
         self.forecast_manager = forecast_manager
         self.weather_manager = weather_manager
         self.power_manager = power_manager
         self.pvgis_manager = pvgis_manager
+        self.open_meteo_manager = open_meteo_manager
         self.store = Store(hass, 1, STORE_KEY)
         self._snapshots: list[dict[str, Any]] = []
         self._last_capture_at = None
         self._last_input_signature = None
         self._capture_lock = None
         self._last_enrichment_date = None
-        self._frames = {"forecast": {}, "weather": {}, "sun": {}, "pvgis": {}}
+        self._frames = {"forecast": {}, "weather": {}, "sun": {}, "pvgis": {}, "open_meteo": {}}
         self._unsubs = [
             hass.bus.async_listen("elrakning_solar_forecast_update", self._async_trigger),
             hass.bus.async_listen("elrakning_solar_weather_update", self._async_trigger),
@@ -193,7 +199,7 @@ class SolarShadowManager:
             if isinstance(frames, dict):
                 self._frames = {
                     kind: dict(frames.get(kind, {})) if isinstance(frames.get(kind), dict) else {}
-                    for kind in ("forecast", "weather", "sun")
+                    for kind in ("forecast", "weather", "sun", "pvgis", "open_meteo")
                 }
         await self._capture("startup")
 
@@ -238,7 +244,11 @@ class SolarShadowManager:
             sun = self._sun_state()
             pvgis_manager = getattr(self, "pvgis_manager", None)
             pvgis_context = pvgis_manager.public_state() if pvgis_manager else {"available": False}
-            signature = repr((forecast, weather, pvgis_context.get("installation", {}).get("fingerprint")))
+            open_meteo_manager = getattr(self, "open_meteo_manager", None)
+            if open_meteo_manager:
+                await open_meteo_manager.async_refresh_for_power_state(await self.power_manager.async_state())
+            open_meteo_context = open_meteo_manager.public_state() if open_meteo_manager else {"available": False}
+            signature = repr((forecast, weather, pvgis_context.get("installation", {}).get("fingerprint"), open_meteo_context.get("frame_id")))
             if self._last_capture_at is not None and (
                 now - self._last_capture_at
             ).total_seconds() < MIN_CAPTURE_INTERVAL_SECONDS:
@@ -252,20 +262,24 @@ class SolarShadowManager:
             added = False
             for target_date, capture_type in targets:
                 raw = forecast.get("today_kwh" if target_date == today else "tomorrow_kwh")
+                pvgis = pvgis_manager.public_state(target_date) if pvgis_manager else {"available": False}
+                open_meteo = open_meteo_manager.public_state(target_date) if open_meteo_manager else {"available": False}
                 candidate = build_candidate_forecast(
                     raw, weather, self._calibration_before(target_date),
                     actual_so_far if target_date == today else None,
                     expected_so_far if target_date == today else None,
                     remaining if target_date == today else None,
+                    open_meteo.get("profile") if open_meteo.get("available") else None,
                 )
                 frame_ids = {
                     "forecast": self._store_frame("forecast", _copy_forecast(forecast)),
                     "weather": self._store_frame("weather", _copy_weather(weather)),
                     "sun": self._store_frame("sun", _copy_sun(sun)),
                 }
-                pvgis = pvgis_manager.public_state(target_date) if pvgis_manager else {"available": False}
                 if pvgis.get("available"):
                     frame_ids["pvgis"] = self._store_frame("pvgis", pvgis)
+                if open_meteo.get("available") and isinstance(open_meteo.get("profile"), dict):
+                    frame_ids["open_meteo"] = self._store_frame("open_meteo", open_meteo)
                 snapshot = {
                     "timestamp": now.isoformat(),
                     "target_date": target_date.isoformat(),
@@ -274,10 +288,12 @@ class SolarShadowManager:
                     "weather_frame": frame_ids["weather"],
                     "sun_frame": frame_ids["sun"],
                     "pvgis_frame": frame_ids.get("pvgis"),
+                    "open_meteo_frame": frame_ids.get("open_meteo"),
                     "pv": {"actual_so_far_kwh": actual_so_far if target_date == today else None},
                     "model": {**candidate, "input_availability": {
                         "forecast": raw is not None,
                         "weather": bool(weather.get("available")),
+                        "open_meteo": bool(open_meteo.get("available")),
                         "actual_so_far": actual_so_far is not None if target_date == today else False,
                     }},
                     "actual_final_kwh": None,
@@ -309,6 +325,7 @@ class SolarShadowManager:
             result["smhi"] = dict(self._frames["weather"].get(snapshot.get("weather_frame"), {}))
             result["sun"] = dict(self._frames["sun"].get(snapshot.get("sun_frame"), {}))
             result["pvgis"] = dict(self._frames.get("pvgis", {}).get(snapshot.get("pvgis_frame"), {}))
+            result["open_meteo"] = dict(self._frames.get("open_meteo", {}).get(snapshot.get("open_meteo_frame"), {}))
         return result
 
     async def _enrich_completed_days(self, today: date) -> None:
@@ -451,14 +468,14 @@ class SolarShadowManager:
         return [records[key] for key in sorted(records)]
 
     def _is_duplicate(self, snapshot: dict[str, Any]) -> bool:
-        key = (snapshot.get("target_date"), snapshot.get("forecast_frame"), snapshot.get("weather_frame"), snapshot.get("sun_frame"), snapshot.get("pvgis_frame"), snapshot.get("pv"))
-        return any((item.get("target_date"), item.get("forecast_frame"), item.get("weather_frame"), item.get("sun_frame"), item.get("pvgis_frame"), item.get("pv")) == key for item in self._snapshots[-4:])
+        key = (snapshot.get("target_date"), snapshot.get("forecast_frame"), snapshot.get("weather_frame"), snapshot.get("sun_frame"), snapshot.get("pvgis_frame"), snapshot.get("open_meteo_frame"), snapshot.get("pv"))
+        return any((item.get("target_date"), item.get("forecast_frame"), item.get("weather_frame"), item.get("sun_frame"), item.get("pvgis_frame"), item.get("open_meteo_frame"), item.get("pv")) == key for item in self._snapshots[-4:])
 
     def _trim(self, today: date) -> None:
         minimum = today - timedelta(days=RETENTION_DAYS - 1)
         self._snapshots = [item for item in self._snapshots if item.get("target_date", "") >= minimum.isoformat()]
         self._snapshots = self._snapshots[-MAX_SNAPSHOTS:]
-        for kind in ("forecast", "weather", "sun", "pvgis"):
+        for kind in ("forecast", "weather", "sun", "pvgis", "open_meteo"):
             referenced = {item.get(f"{kind}_frame") for item in self._snapshots}
             self._frames[kind] = {key: value for key, value in self._frames.get(kind, {}).items() if key in referenced}
 
