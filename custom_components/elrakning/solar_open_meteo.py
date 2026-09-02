@@ -30,6 +30,16 @@ def _number(value: Any) -> float | None:
     return number if number == number and number not in (float("inf"), float("-inf")) else None
 
 
+def _parse_fetched_at(value: Any):
+    """Return a parsed cache timestamp, or a cache miss for invalid input."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return dt_util.parse_datetime(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def compass_to_open_meteo_azimuth(compass_azimuth: Any) -> float | None:
     """Convert compass azimuth (north=0, clockwise) to Open-Meteo azimuth."""
     value = _number(compass_azimuth)
@@ -90,13 +100,24 @@ class SolarOpenMeteoManager:
         self._frame_id: str | None = None
 
     async def async_load(self) -> None:
-        cached = await self.store.async_load()
+        try:
+            cached = await self.store.async_load()
+        except Exception:
+            cached = None
         if isinstance(cached, dict) and cached.get("cache_version") == _CACHE_VERSION:
             self._installation = cached.get("installation") if isinstance(cached.get("installation"), dict) else None
             self._frame = cached.get("frame") if isinstance(cached.get("frame"), dict) else None
             self._frame_id = cached.get("frame_id") if isinstance(cached.get("frame_id"), str) else None
             self._state = cached.get("state") if isinstance(cached.get("state"), dict) else self._state
-        await self.async_refresh_for_power_state(await self.power_manager.async_state())
+        try:
+            await self.async_refresh_for_power_state(await self.power_manager.async_state())
+        except Exception:
+            self._state = {
+                "available": False,
+                "source": OPEN_METEO_SOURCE,
+                "model": OPEN_METEO_MODEL,
+                "reason": "startup_unavailable",
+            }
 
     async def async_refresh_for_power_state(self, power_state: dict[str, Any]) -> None:
         installation = build_installation(self.hass, power_state)
@@ -106,7 +127,7 @@ class SolarOpenMeteoManager:
             self._frame_id = None
             self._state = {"available": False, "source": OPEN_METEO_SOURCE, "model": OPEN_METEO_MODEL, "reason": "installation_inputs_missing"}
             return
-        fetched_at = dt_util.parse_datetime(self._state.get("fetched_at"))
+        fetched_at = _parse_fetched_at(self._state.get("fetched_at"))
         if (
             self._installation and self._installation.get("fingerprint") == installation["fingerprint"]
             and self._frame and fetched_at and dt_util.now() - fetched_at < _CACHE_TTL

@@ -66,7 +66,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await solar_pvgis_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_pvgis_manager"] = solar_pvgis_manager
     solar_open_meteo_manager = SolarOpenMeteoManager(hass, power_manager)
-    await solar_open_meteo_manager.async_load()
+    try:
+        await solar_open_meteo_manager.async_load()
+    except Exception:
+        # Optional external forecast data must never prevent panel setup.
+        pass
     hass.data.setdefault(DOMAIN, {})["solar_open_meteo_manager"] = solar_open_meteo_manager
     solar_shadow_manager = SolarShadowManager(
         hass, solar_forecast_manager, solar_weather_manager, power_manager,
