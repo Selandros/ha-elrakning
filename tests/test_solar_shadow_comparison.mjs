@@ -31,6 +31,7 @@ for (const date of ["2026-08-29", "2026-08-30", "2026-08-31", "2026-09-01"]) {
   assert.equal(byDate[date].utilizationPercent, null, `${date} must not expose legacy accuracy`);
 }
 assert.ok(Number.isFinite(byDate["2026-08-28"].utilizationPercent));
+assert.equal(byDate["2026-08-28"].forecastComparisonExpectedKwh, 11.5);
 assert.equal(byDate["2026-09-01"].forecastAccuracyPercent, null);
 
 console.log("solar shadow comparison availability semantics passed");

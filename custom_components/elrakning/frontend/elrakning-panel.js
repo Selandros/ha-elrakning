@@ -1750,16 +1750,22 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
     const shadowComparisonAvailable = shadowByDate === null
       ? true
       : shadowByDate[localDate]?.candidate_comparison_available === true;
+    const shadowCandidateKwh = shadowByDate !== null && Number.isFinite(Number(shadowByDate[localDate]?.candidate_forecast_kwh))
+      ? Number(shadowByDate[localDate].candidate_forecast_kwh)
+      : forecastKwh;
     const comparisonBasis = isToday
       ? (completedToday ? (forecastKwh !== null ? "full_day_forecast" : "full_day_forecast_unavailable") : "forecast_so_far")
       : "full_day_forecast";
-    const comparisonIsValid = shadowComparisonAvailable && Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedKwh)
-      && actualKwh >= 0 && comparisonExpectedKwh > 0;
+    const comparisonExpectedWithShadowKwh = isToday
+      ? (completedToday ? shadowCandidateKwh : expectedSoFarKwh)
+      : shadowCandidateKwh;
+    const comparisonIsValid = shadowComparisonAvailable && Number.isFinite(actualKwh) && Number.isFinite(comparisonExpectedWithShadowKwh)
+      && actualKwh >= 0 && comparisonExpectedWithShadowKwh > 0;
     const forecastAccuracyPercent = comparisonIsValid
-      ? Math.max(0, Math.min(100, Math.min(actualKwh, comparisonExpectedKwh) / Math.max(actualKwh, comparisonExpectedKwh) * 100))
+      ? Math.max(0, Math.min(100, Math.min(actualKwh, comparisonExpectedWithShadowKwh) / Math.max(actualKwh, comparisonExpectedWithShadowKwh) * 100))
       : null;
     const forecastDeviationPercent = comparisonIsValid
-      ? (actualKwh - comparisonExpectedKwh) / comparisonExpectedKwh * 100
+      ? (actualKwh - comparisonExpectedWithShadowKwh) / comparisonExpectedWithShadowKwh * 100
       : null;
     return {
       date: localDate,
@@ -1770,7 +1776,7 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
       forecastAccuracyPercent,
       forecastDeviationPercent,
       forecastComparisonActualKwh: actualKwh,
-      forecastComparisonExpectedKwh: comparisonExpectedKwh,
+      forecastComparisonExpectedKwh: comparisonExpectedWithShadowKwh,
       forecastComparisonBasis: comparisonBasis,
       rawDayForecastKwh: forecastKwh,
       rawExpectedSoFarKwh: expectedSoFarKwh,

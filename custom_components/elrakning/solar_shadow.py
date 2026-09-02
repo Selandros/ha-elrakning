@@ -366,6 +366,45 @@ class SolarShadowManager:
     def _public_day_records(self) -> list[dict[str, Any]]:
         """Expose raw baselines without implying that they are shadow captures."""
         forecast_state = self.forecast_manager.public_state()
+        today = dt_util.as_local(dt_util.now()).date()
+        remaining_today = _number(forecast_state.get("remaining_today_kwh"))
+        candidate_by_date: dict[str, float] = {}
+        replay_by_date: dict[str, float] = {}
+        actual_by_date: set[str] = set()
+        metadata_by_date: dict[str, dict[str, Any]] = {}
+        for snapshot in self._snapshots:
+            target_date = snapshot.get("target_date")
+            if not isinstance(target_date, str):
+                continue
+            candidate = _number((snapshot.get("model") or {}).get("candidate_forecast_kwh"))
+            if candidate is not None:
+                replay_by_date[target_date] = candidate
+            snapshot_date = date.fromisoformat(target_date) if len(target_date) == 10 else None
+            captured_at = dt_util.parse_datetime(snapshot.get("timestamp"))
+            if (
+                candidate is not None
+                and snapshot.get("capture_type") == "day_ahead"
+                and snapshot_date is not None
+                and captured_at is not None
+                and dt_util.as_local(captured_at).date() < snapshot_date
+            ):
+                candidate_by_date[target_date] = candidate
+            actual_final = _number(snapshot.get("actual_final_kwh"))
+            actual_so_far = _number((snapshot.get("pv") or {}).get("actual_so_far_kwh"))
+            if actual_final is not None or (
+                actual_so_far is not None
+                and snapshot_date is not None
+                and (
+                    snapshot_date < today
+                    or (snapshot_date == today and remaining_today is not None and remaining_today <= 0.001)
+                )
+            ):
+                actual_by_date.add(target_date)
+            metadata_by_date[target_date] = {
+                "capture_type": snapshot.get("capture_type"),
+                "actual_final_kwh": snapshot.get("actual_final_kwh"),
+                "quality": snapshot.get("quality"),
+            }
         records = {
             target_date: {
                 "target_date": target_date,
@@ -386,27 +425,21 @@ class SolarShadowManager:
             forecast = materialized.get("forecast_solar") or {}
             raw_key = "tomorrow_kwh" if snapshot.get("capture_type") == "day_ahead" else "today_kwh"
             raw = _number(forecast.get(raw_key))
-            model = snapshot.get("model") or {}
-            candidate = _number(model.get("candidate_forecast_kwh"))
             record = records.setdefault(target_date, {"target_date": target_date})
-            comparison_available = (
-                candidate is not None
-                and snapshot.get("actual_final_kwh") is not None
-                and snapshot.get("quality") == "valid"
-            )
             if raw is not None:
                 record["raw_forecast_kwh"] = raw
-            captured = {
+        for target_date, record in records.items():
+            candidate = candidate_by_date.get(target_date, replay_by_date.get(target_date))
+            comparison_available = target_date in candidate_by_date and target_date in actual_by_date
+            record.update({
                 "candidate_forecast_kwh": candidate,
                 "candidate_replay_available": candidate is not None,
                 "candidate_comparison_available": comparison_available,
-                "shadow_data_status": "complete" if comparison_available else "captured_without_candidate",
-                "capture_type": snapshot.get("capture_type"),
-                "actual_final_kwh": snapshot.get("actual_final_kwh"),
-                "quality": snapshot.get("quality"),
-            }
-            if not record.get("candidate_comparison_available"):
-                record.update(captured)
+                "shadow_data_status": "complete" if comparison_available else (
+                    "captured_without_candidate" if candidate is not None else record.get("shadow_data_status", "historical_inputs_missing")
+                ),
+                **metadata_by_date.get(target_date, {}),
+            })
         return [records[key] for key in sorted(records)]
 
     def _is_duplicate(self, snapshot: dict[str, Any]) -> bool:

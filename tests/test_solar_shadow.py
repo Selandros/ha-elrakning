@@ -328,13 +328,38 @@ class SolarShadowTests(unittest.TestCase):
         })
         manager._frames = {"forecast": {"f": {"today_kwh": 12.0}}, "weather": {}, "sun": {}}
         manager._snapshots = [{
-            "target_date": "2026-08-28", "forecast_frame": "f", "model": {"candidate_forecast_kwh": 11.5},
+            "target_date": "2026-08-28", "timestamp": "2026-08-27T23:00:00+00:00", "forecast_frame": "f", "model": {"candidate_forecast_kwh": 11.5},
             "capture_type": "day_ahead", "actual_final_kwh": 10.0, "quality": "valid",
         }]
         record = manager._public_day_records()[0]
         self.assertTrue(record["candidate_replay_available"])
         self.assertTrue(record["candidate_comparison_available"])
         self.assertEqual(record["shadow_data_status"], "complete")
+
+    def test_day_ahead_candidate_and_completed_current_day_are_display_eligible(self):
+        manager = solar_shadow.SolarShadowManager.__new__(solar_shadow.SolarShadowManager)
+        manager.forecast_manager = types.SimpleNamespace(public_state=lambda: {
+            "baselines": {"2026-09-01": 37.874}, "remaining_today_kwh": 0,
+        })
+        manager._frames = {"forecast": {}, "weather": {}, "sun": {}}
+        manager._snapshots = [
+            {
+                "target_date": "2026-09-01", "timestamp": "2026-08-31T23:00:00+00:00",
+                "capture_type": "day_ahead", "model": {"candidate_forecast_kwh": 37.5},
+                "actual_final_kwh": None, "quality": "unknown_quality", "pv": {"actual_so_far_kwh": None},
+            },
+            {
+                "target_date": "2026-09-01", "timestamp": "2026-09-01T20:00:00+00:00",
+                "capture_type": "intraday", "model": {"candidate_forecast_kwh": 40.0},
+                "actual_final_kwh": None, "quality": "unknown_quality", "pv": {"actual_so_far_kwh": 38.0},
+            },
+        ]
+        record = manager._public_day_records()[0]
+        self.assertEqual(record["candidate_forecast_kwh"], 37.5)
+        self.assertTrue(record["candidate_replay_available"])
+        self.assertTrue(record["candidate_comparison_available"])
+        self.assertEqual(record["quality"], "unknown_quality")
+        self.assertIsNone(record["actual_final_kwh"])
 
     def test_missing_shadow_records_never_enter_learning(self):
         self.assertEqual(solar_shadow._site_multiplier([
