@@ -65,6 +65,7 @@ export function diagnosticComponent(component) {
     source: "Source data",
     meter: "Elmätare",
     price: "Pris",
+    performance: "Performance",
     websocket: "Websocket",
   }[component] || component || "Elräkning";
 }
@@ -2113,6 +2114,12 @@ export function mergePowerHistoryPoint(existingPoints, incomingPoint, incomingTi
   return [...byTimestamp.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp));
 }
 
+export function performanceWarningKind(durationMs, stallTimes = [], nowMs = Date.now()) {
+  if (durationMs >= 500) return "ui_stall";
+  const recent = stallTimes.filter((timestamp) => nowMs - timestamp <= 60_000);
+  return recent.length >= 3 ? "repeated_ui_stalls" : null;
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -2133,6 +2140,7 @@ class ElrakningPanel {
     this._diagnosticsDomNodes = null;
     this._diagnosticsRequestGeneration = 0;
     this._diagnosticsLifecycleGeneration = 0;
+    this._performanceWatchdog = null;
     this._chartTouch = null;
     this._chartDebugCopyText = "";
     this._tooltipOrbit = { angle: null };
@@ -5361,6 +5369,77 @@ class ElrakningPanel {
     this._setupPriceHeaderLayoutObserver();
     this._setupPriceChartResizeObserver();
     this.renderPriceChart();
+    this._startPerformanceWatchdog();
+  }
+
+  _performanceMemoryText() {
+    const memory = performance.memory;
+    if (!memory || !Number.isFinite(memory.usedJSHeapSize)) return "";
+    const usedMb = Math.round(memory.usedJSHeapSize / 1048576);
+    const totalMb = Number.isFinite(memory.totalJSHeapSize) ? Math.round(memory.totalJSHeapSize / 1048576) : null;
+    return totalMb ? ` · Heap: ${usedMb} / ${totalMb} MB` : ` · Heap: ${usedMb} MB`;
+  }
+
+  _sendPerformanceDiagnostic(level, event, message) {
+    if (!this.hass?.callWS) return;
+    this.hass.callWS({ type: "elrakning/meter_diagnostic", component: "performance", level, event, message }).catch(() => {});
+  }
+
+  _startPerformanceWatchdog() {
+    if (this._performanceWatchdog) return;
+    const state = { observer: null, recentStalls: [], totalLongTasks: 0, totalWarnings: 0, maxLongTaskMs: 0, slowRendersByComponent: {}, maxRenderByComponent: {}, lastWarningAt: new Map(), startupSent: false };
+    this._performanceWatchdog = state;
+    if (typeof PerformanceObserver === "function") {
+      try {
+        state.observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) this._recordPerformanceStall(entry.duration);
+        });
+        state.observer.observe({ type: "longtask", buffered: true });
+      } catch {
+        state.observer = null;
+      }
+    }
+    this._flushPerformanceWatchdogStartup();
+  }
+
+  _recordPerformanceStall(durationMs) {
+    const state = this._performanceWatchdog;
+    if (!state || !Number.isFinite(durationMs)) return;
+    const now = Date.now();
+    state.totalLongTasks += 1;
+    state.maxLongTaskMs = Math.max(state.maxLongTaskMs, durationMs);
+    state.recentStalls = state.recentStalls.filter((timestamp) => now - timestamp <= 60_000);
+    if (durationMs >= 100) state.recentStalls.push(now);
+    const kind = performanceWarningKind(durationMs, state.recentStalls, now);
+    if (!kind) return;
+    const last = state.lastWarningAt.get(kind) || 0;
+    if (now - last < 180_000) return;
+    state.lastWarningAt.set(kind, now);
+    state.totalWarnings += 1;
+    const detail = kind === "ui_stall"
+      ? `UI performance degraded · Main-thread stall: ${Math.round(durationMs)} ms · Events this session: ${state.totalLongTasks}`
+      : `Repeated UI stalls · ${state.recentStalls.length} events / 60 s · Max: ${Math.round(state.maxLongTaskMs)} ms · Session total: ${state.totalLongTasks}`;
+    this._sendPerformanceDiagnostic("WARNING", kind, `${detail}${this._performanceMemoryText()}`);
+  }
+
+  _recordSlowRender(component, durationMs) {
+    const state = this._performanceWatchdog;
+    if (!state || !Number.isFinite(durationMs) || durationMs < 250) return;
+    state.slowRendersByComponent[component] = (state.slowRendersByComponent[component] || 0) + 1;
+    state.maxRenderByComponent[component] = Math.max(state.maxRenderByComponent[component] || 0, durationMs);
+    const key = `slow_render:${component}`;
+    const now = Date.now();
+    if (now - (state.lastWarningAt.get(key) || 0) < 180_000) return;
+    state.lastWarningAt.set(key, now);
+    state.totalWarnings += 1;
+    this._sendPerformanceDiagnostic("WARNING", "slow_render", `Slow render · Component: ${component} · Duration: ${Math.round(durationMs)} ms · Session count: ${state.slowRendersByComponent[component]}${this._performanceMemoryText()}`);
+  }
+
+  _flushPerformanceWatchdogStartup() {
+    const state = this._performanceWatchdog;
+    if (!state || state.startupSent || !this.hass?.callWS) return;
+    this._sendPerformanceDiagnostic("INFO", "performance_monitor_started", `Performance monitor started · Long Tasks: ${state.observer ? "supported" : "unsupported"} · Memory: ${performance.memory ? "supported" : "unsupported"}`);
+    state.startupSent = true;
   }
 
   _setupPriceHeaderLayoutObserver() {
@@ -8443,6 +8522,7 @@ class ElrakningPanel {
   setHass(hass) {
     const connectionChanged = Boolean(hass?.connection && this._eventConnection !== hass.connection);
     this.hass = hass;
+    this._flushPerformanceWatchdogStartup();
     if (connectionChanged) {
       this._diagnosticsLifecycleGeneration += 1;
       this._diagnosticsRequestGeneration += 1;
@@ -8657,6 +8737,8 @@ class ElrakningPanel {
     this._socCardHeightObserver?.disconnect();
     this._socCardHeightObserver = null;
     this._themeBackgroundReady = false;
+    this._performanceWatchdog?.observer?.disconnect();
+    this._performanceWatchdog = null;
   }
 
   async _refreshBackendState(loadHistory = true) {
@@ -9755,13 +9837,16 @@ class ElrakningPanel {
   }
 
   renderPriceChart(options = {}) {
+    const started = performance.now();
     if (this._periodPickerState?.mode !== "hour") {
       this._renderAggregatedPriceChart();
+      this._recordSlowRender("price-chart", performance.now() - started);
       return;
     }
     const averageToggle = this.host.querySelector('[data-meter-legend] [data-chart-layer="average"]');
     if (averageToggle) averageToggle.hidden = false;
     this._renderHourlyPriceChart(options);
+    this._recordSlowRender("price-chart", performance.now() - started);
   }
 
   _updateAggregatedPriceSummary(data) {

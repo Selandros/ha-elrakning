@@ -816,7 +816,7 @@ async def websocket_meter_save(hass, connection, msg):
 @websocket_api.websocket_command(
     {
         vol.Required("type"): METER_DIAGNOSTIC_COMMAND,
-        vol.Optional("component", default="meter"): vol.In({"meter", "price"}),
+        vol.Optional("component", default="meter"): vol.In({"meter", "price", "performance"}),
         vol.Required("level"): vol.In({"INFO", "WARNING", "ERROR"}),
         vol.Required("event"): str,
         vol.Required("message"): str,
