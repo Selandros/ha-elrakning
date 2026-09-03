@@ -5377,7 +5377,8 @@ class ElrakningPanel {
     if (!memory || !Number.isFinite(memory.usedJSHeapSize)) return "";
     const usedMb = Math.round(memory.usedJSHeapSize / 1048576);
     const totalMb = Number.isFinite(memory.totalJSHeapSize) ? Math.round(memory.totalJSHeapSize / 1048576) : null;
-    return totalMb ? ` · Heap: ${usedMb} / ${totalMb} MB` : ` · Heap: ${usedMb} MB`;
+    const limitMb = Number.isFinite(memory.jsHeapSizeLimit) ? Math.round(memory.jsHeapSizeLimit / 1048576) : null;
+    return ` · Heap: ${usedMb} MB used · ${totalMb ? `${totalMb} MB allocated` : "allocated size unavailable"}${limitMb ? ` · Limit: ${limitMb} MB` : ""}`;
   }
 
   _sendPerformanceDiagnostic(level, event, message) {

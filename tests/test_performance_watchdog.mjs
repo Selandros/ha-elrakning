@@ -13,8 +13,12 @@ assert.match(panel, /new PerformanceObserver/);
 assert.match(panel, /_performanceWatchdog\?\.observer\?\.disconnect\(\)/);
 assert.match(panel, /type: "elrakning\/meter_diagnostic", component: "performance"/);
 assert.match(panel, /now - last < 180_000/);
+assert.match(panel, /Heap: \$\{usedMb\} MB used/);
+assert.match(panel, /jsHeapSizeLimit/);
 assert.match(panel, /_recordSlowRender\("price-chart"/);
 assert.match(websocket, /vol\.In\(\{"meter", "price", "performance"\}\)/);
 assert.doesNotMatch(panel, /setInterval\(/);
+const loader = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-loader.js", import.meta.url), "utf8");
+assert.match(loader, /disconnectedCallback\(\) \{[\s\S]*_panel\?\.destroy\?\.\(\)[\s\S]*_panel = null[\s\S]*_loadedVersion = null/);
 
 console.log("performance watchdog lifecycle/threshold tests passed");

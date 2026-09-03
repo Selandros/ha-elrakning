@@ -15,6 +15,9 @@ class ElrakningPanel extends HTMLElement {
 
   disconnectedCallback() {
     this._stopVersionWatch();
+    this._panel?.destroy?.();
+    this._panel = null;
+    this._loadedVersion = null;
   }
 
   async _getInstalledVersion() {
