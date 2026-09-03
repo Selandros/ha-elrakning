@@ -3081,10 +3081,12 @@ class ElrakningPanel {
           fill-opacity: .32;
         }
 
-        .solar-evidence-debug {
+        .card.solar-evidence-debug {
           background: var(--ha-card-background, var(--card-background-color));
           box-shadow: none;
+          backdrop-filter: none;
           margin-top: 16px;
+          -webkit-backdrop-filter: none;
         }
         .solar-evidence-summary, .solar-evidence-status { line-height: 1.45; }
         .solar-evidence-status { font-weight: 600; margin-top: 4px; }
