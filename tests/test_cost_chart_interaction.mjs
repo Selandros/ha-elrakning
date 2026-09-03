@@ -62,6 +62,7 @@ assert.match(costRender, /buildCostChartTooltipFields\(\{/);
 assert.match(costRender, /buildCostChartGeometry\(width, plot, series\.days_in_month\)/);
 assert.match(costRender, /getScreenCTM\?\.\(\)/);
 assert.match(costRender, /data-cost-axis-day/);
+assert.match(costRender, /cost-chart-svg" preserveAspectRatio="none"/);
 assert.match(costRender, /tick\.style\.left = `\$\{screenMatrix\.a \* x\(day\)/);
 assert.doesNotMatch(costRender, /chart-axis-overlay-x" style="left:/);
 assert.match(costRender, /<g class="cost-chart-hover" aria-hidden="true"><\/g>/);
