@@ -82,7 +82,7 @@ assert.deepEqual(buildGridSourceCost(null, { total_sek: 12 }), { total_sek: 12 }
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker/);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
-assert.match(pickerPanelSource, /\.phase-history-row:has\(> \[data-phase-history-card\]\[hidden\]\):has\(> \[data-cost-card\]\[hidden\]\) \{[\s\S]*display: none/);
+assert.match(pickerPanelSource, /\.card\.soc-card\[hidden\] \{[\s\S]*display: none/);
 const priceEmptyStateSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderHourlyPriceChart"), pickerPanelSource.indexOf("  autoScrollToNow"));
 assert.match(priceEmptyStateSource, /this\.priceData\.error === "site_unconfigured"[\s\S]*<strong>Ej konfigurerad<\/strong>/);
 assert.match(priceEmptyStateSource, /this\.priceData\.error === "missing_integration"[\s\S]*Ingen Nord Pool-sensor hittades/);

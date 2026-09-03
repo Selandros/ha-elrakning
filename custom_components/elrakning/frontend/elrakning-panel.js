@@ -3603,10 +3603,6 @@ class ElrakningPanel {
           margin-top: 16px;
         }
 
-        .phase-history-row:has(> [data-phase-history-card][hidden]):has(> [data-cost-card][hidden]) {
-          display: none;
-        }
-
         .cost-card {
           min-width: 0;
         }
@@ -5334,6 +5330,10 @@ class ElrakningPanel {
 
         .card.soc-card {
           min-height: 0;
+        }
+
+        .card.soc-card[hidden] {
+          display: none;
         }
 
         .card-heading {
