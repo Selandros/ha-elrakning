@@ -26,6 +26,27 @@ const series = buildCostAnalysisSeries({
 assert.equal(series.actual.at(-1).value, 28.05);
 assert.equal(series.forecast.at(-1).value, 307.26);
 
+const dailySeries = buildCostAnalysisSeries({
+  month: "2026-09",
+  total_so_far_sek: 60,
+  estimated_month_total_sek: 300,
+  rows: [
+    { end: "2026-09-01T23:45:00+02:00", trade_cost_sek: 10, grid_cost_sek: 0 },
+    { end: "2026-09-02T23:45:00+02:00", trade_cost_sek: 20, grid_cost_sek: 0 },
+    { end: "2026-09-03T12:00:00+02:00", trade_cost_sek: 30, grid_cost_sek: 0 },
+  ],
+}, null, new Date("2026-09-03T12:00:00+02:00"));
+
+assert.deepEqual(dailySeries.actual.map((point) => point.day), [1, 2, 3]);
+assert.equal(dailySeries.actual.at(-1).value, 60);
+assert.equal(dailySeries.forecast[0].day, 3);
+assert.equal(dailySeries.forecast.at(-1).day, 30);
+assert.equal(dailySeries.forecast.at(-1).value, 300);
+assert.ok(dailySeries.forecast.length > 2);
+assert.ok(dailySeries.forecast.every((point, index, points) => index === 0 || point.day === points[index - 1].day + 1));
+assert.deepEqual(dailySeries.estimated.map((point) => point.day), Array.from({ length: 30 }, (_, index) => index + 1));
+assert.equal(dailySeries.estimated.at(-1).value, 300);
+
 const source = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series)"), source.indexOf("  _bindCostCard()"));
 

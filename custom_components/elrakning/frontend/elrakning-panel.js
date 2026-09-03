@@ -1297,8 +1297,13 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
     : actual;
   const displayedLast = actualDisplay.at(-1) || null;
   const forecast = Number.isFinite(forecastTotal) && displayedLast && forecastTotal >= displayedLast.value && daysInMonth > displayedLast.day
-    ? [displayedLast, { day: daysInMonth, value: forecastTotal }]
+    ? Array.from({ length: daysInMonth - displayedLast.day + 1 }, (_, index) => {
+      const day = displayedLast.day + index;
+      const progress = index / (daysInMonth - displayedLast.day);
+      return { day, value: displayedLast.value + (forecastTotal - displayedLast.value) * progress };
+    })
     : [];
+  const estimated = dedupe([...estimatedPast, ...actualDisplay, ...forecast]);
   const previousCandidates = previousActual?.cumulative_points || previousActual?.chart_points;
   const previous = Array.isArray(previousCandidates)
     ? dedupe(previousCandidates.map((point) => ({ day: Number(point.day), value: Number(point.value) })).filter((point) => Number.isFinite(point.day) && Number.isFinite(point.value) && point.day >= 1))
@@ -1309,6 +1314,7 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
     actual,
     actual_display: actualDisplay,
     estimated_past: estimatedPast,
+    estimated,
     forecast_future: forecast,
     forecast,
     previous,
@@ -8362,9 +8368,10 @@ class ElrakningPanel {
     const height = 190;
     const plot = { left: 48, right: 12, top: 12, bottom: 28 };
     const actual = series.actual_display || series.actual || [];
+    const estimated = series.estimated || series.estimated_past || [];
     const estimatedPast = series.estimated_past || [];
     const forecastFuture = series.forecast_future || series.forecast || [];
-    const all = [...actual, ...estimatedPast, ...forecastFuture, ...series.previous].filter((point) => Number.isFinite(point.value));
+    const all = [...actual, ...estimated, ...forecastFuture, ...series.previous].filter((point) => Number.isFinite(point.value));
     const max = Math.max(1, ...all.map((point) => point.value));
     const x = (day) => plot.left + ((day - 1) / Math.max(1, series.days_in_month - 1)) * (width - plot.left - plot.right);
     const y = (value) => plot.top + (1 - value / max) * (height - plot.top - plot.bottom);
@@ -8374,7 +8381,7 @@ class ElrakningPanel {
       return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" />`;
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" style="left:${(x(day) / width) * 100}%">${day}</span>`).join("")}</div>`;
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><div class="cost-chart-plot"><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimatedPast)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}<g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><div class="cost-chart-plot"><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimated)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}<g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".soc-tooltip");
     const hover = chart.querySelector(".cost-chart-hover");
