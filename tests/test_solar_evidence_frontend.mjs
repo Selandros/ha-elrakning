@@ -19,6 +19,10 @@ assert.match(panel, /return date === today \? "–" : "❌"/);
 assert.match(panel, /solarEvidenceStatus\(evidenceDays, day\.date, today\)/);
 assert.match(panel, /solar_evidence: this\._powerHistory\?\.solar_evidence/);
 assert.match(panel, /card\.hidden = !this\._debugEnabled \|\| !evidence\?\.available/);
+assert.match(panel, /solar-evidence-list \{[^}]*max-height: 58vh;[^}]*overflow-x: hidden;[^}]*overflow-y: auto;/);
+assert.match(panel, /solar-evidence-debug \{[^}]*background: var\(--ha-card-background, var\(--card-background-color\)\);[^}]*box-shadow: none;/);
+assert.match(panel, /solar-evidence-day \{[^}]*padding: 6px 8px;/);
+assert.match(panel, /solar-evidence-list \{[^}]*gap: 5px;/);
 assert.match(panel, /Actual.*omError.*forecastError/);
 assert.match(panel, /Number\.isFinite\(Number\(value\)\)/);
 const evidenceDays = [

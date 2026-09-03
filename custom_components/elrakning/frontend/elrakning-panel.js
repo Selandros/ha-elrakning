@@ -3081,24 +3081,28 @@ class ElrakningPanel {
           fill-opacity: .32;
         }
 
-        .solar-evidence-debug { margin-top: 16px; }
+        .solar-evidence-debug {
+          background: var(--ha-card-background, var(--card-background-color));
+          box-shadow: none;
+          margin-top: 16px;
+        }
         .solar-evidence-summary, .solar-evidence-status { line-height: 1.45; }
-        .solar-evidence-status { font-weight: 600; margin-top: 8px; }
+        .solar-evidence-status { font-weight: 600; margin-top: 4px; }
         .solar-evidence-progress { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 4px; }
         .solar-evidence-progress > div { display: grid; gap: 2px; }
         .solar-evidence-progress strong { font-size: 0.9rem; }
         .solar-evidence-progress span { color: var(--secondary-text-color); font-size: 0.9rem; }
         .solar-evidence-progress meter { height: 6px; width: 100%; }
         .solar-evidence-protocol { color: var(--secondary-text-color); display: block; margin-top: 8px; }
-        .solar-evidence-list { display: grid; gap: 8px; margin-top: 12px; }
-        .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 9px 10px; }
+        .solar-evidence-list { display: grid; gap: 5px; margin-top: 8px; max-height: 58vh; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+        .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 6px 8px; }
         .solar-evidence-day-heading { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
         .solar-evidence-day-heading strong { color: var(--primary-text-color); }
         .solar-evidence-day-heading span { color: var(--secondary-text-color); font-size: 0.84rem; font-weight: 600; }
-        .solar-evidence-metrics { display: grid; gap: 4px 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 7px; }
+        .solar-evidence-metrics { display: grid; gap: 3px 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 4px; }
         .solar-evidence-metrics span { color: var(--secondary-text-color); font-size: 0.84rem; min-width: 0; }
         .solar-evidence-metrics b { color: var(--primary-text-color); display: block; font-size: 0.78rem; font-weight: 600; }
-        .solar-evidence-day small { color: var(--secondary-text-color); display: block; line-height: 1.4; margin-top: 7px; }
+        .solar-evidence-day small { color: var(--secondary-text-color); display: block; line-height: 1.35; margin-top: 4px; }
 
         @media (max-width: 700px) {
           .solar-evidence-progress { grid-template-columns: 1fr; }
