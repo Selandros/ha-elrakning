@@ -1788,6 +1788,13 @@ export function buildSolarDailyHistory(points, forecastBaselines, now = new Date
   });
 }
 
+export function solarEvidenceStatus(evidenceDays, date, today = localDateKey(new Date())) {
+  const evidenceDay = (Array.isArray(evidenceDays) ? evidenceDays : []).find((day) => day?.date === date);
+  if (!evidenceDay || evidenceDay.audit_complete == null) return "–";
+  if (evidenceDay.audit_complete === true) return "✅";
+  return date === today ? "–" : "❌";
+}
+
 export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(), weather = null, sun = null) {
   const lines = [];
   if (Number.isFinite(day?.producedKwh)) {
@@ -2367,13 +2374,6 @@ class ElrakningPanel {
           </article>
         </div>
 
-        <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
-          <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
-          <div data-solar-evidence-summary></div>
-          <div data-solar-evidence-status></div>
-          <div class="solar-evidence-list" data-solar-evidence-list></div>
-        </section>
-
         <div class="daily-energy-row phase-history-row">
           <article class="card phase-history-card" data-phase-history-card hidden aria-labelledby="phase-history-title">
             <div class="phase-history-heading" aria-label="Faser">
@@ -2438,6 +2438,12 @@ class ElrakningPanel {
           <div class="invoice-diagnostic-grid" data-invoice-diagnostic-fields></div>
           <h3>PDF-textutdrag</h3>
           <pre data-invoice-debug-text></pre>
+        </section>
+        <section class="card solar-evidence-debug" data-solar-evidence-debug hidden aria-labelledby="solar-evidence-debug-title">
+          <div class="card-heading"><h2 id="solar-evidence-debug-title">Solar Evidence</h2></div>
+          <div data-solar-evidence-summary></div>
+          <div data-solar-evidence-status></div>
+          <div class="solar-evidence-list" data-solar-evidence-list></div>
         </section>
         <section class="card diagnostics-card" data-diagnostics-card hidden>
           <div class="card-heading"><h2>Diagnostik</h2><span class="status" data-diagnostics-status>OK</span></div>
@@ -3046,6 +3052,14 @@ class ElrakningPanel {
           font-weight: 600;
         }
 
+        .solar-history-evidence-status {
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: var(--chart-axis-font-size);
+          line-height: var(--chart-axis-line-height);
+          min-height: var(--chart-axis-line-height);
+        }
+
         .solar-history-bar {
           fill: var(--solar-color);
           fill-opacity: .78;
@@ -3067,13 +3081,29 @@ class ElrakningPanel {
           fill-opacity: .32;
         }
 
-        .solar-evidence-card { margin-top: 16px; }
+        .solar-evidence-debug { margin-top: 16px; }
         .solar-evidence-summary, .solar-evidence-status { line-height: 1.45; }
-        .solar-evidence-status { font-weight: 600; margin-top: 4px; }
+        .solar-evidence-status { font-weight: 600; margin-top: 8px; }
+        .solar-evidence-progress { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 4px; }
+        .solar-evidence-progress > div { display: grid; gap: 2px; }
+        .solar-evidence-progress strong { font-size: 0.9rem; }
+        .solar-evidence-progress span { color: var(--secondary-text-color); font-size: 0.9rem; }
+        .solar-evidence-progress meter { height: 6px; width: 100%; }
+        .solar-evidence-protocol { color: var(--secondary-text-color); display: block; margin-top: 8px; }
         .solar-evidence-list { display: grid; gap: 8px; margin-top: 12px; }
-        .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 8px 10px; }
-        .solar-evidence-day strong { color: var(--primary-text-color); }
-        .solar-evidence-day small { color: var(--secondary-text-color); display: block; line-height: 1.4; margin-top: 3px; }
+        .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 9px 10px; }
+        .solar-evidence-day-heading { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+        .solar-evidence-day-heading strong { color: var(--primary-text-color); }
+        .solar-evidence-day-heading span { color: var(--secondary-text-color); font-size: 0.84rem; font-weight: 600; }
+        .solar-evidence-metrics { display: grid; gap: 4px 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 7px; }
+        .solar-evidence-metrics span { color: var(--secondary-text-color); font-size: 0.84rem; min-width: 0; }
+        .solar-evidence-metrics b { color: var(--primary-text-color); display: block; font-size: 0.78rem; font-weight: 600; }
+        .solar-evidence-day small { color: var(--secondary-text-color); display: block; line-height: 1.4; margin-top: 7px; }
+
+        @media (max-width: 700px) {
+          .solar-evidence-progress { grid-template-columns: 1fr; }
+          .solar-evidence-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
 
         .daily-energy-row {
           align-items: stretch;
@@ -5982,6 +6012,7 @@ class ElrakningPanel {
     const priceSource = this.host.querySelector('[data-card-source="price"]');
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
+    const solarEvidence = this.host.querySelector("[data-solar-evidence-debug]");
     const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
     const cardSources = this.host.querySelectorAll("[data-card-source]");
     if (source) source.hidden = !this._debugEnabled;
@@ -5990,6 +6021,7 @@ class ElrakningPanel {
     if (priceSource) priceSource.hidden = !this._debugEnabled;
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
+    if (solarEvidence) solarEvidence.hidden = !this._debugEnabled || !this._powerHistory?.solar_evidence?.available;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
     cardSources.forEach((button) => {
       const card = button.closest(".card");
@@ -6955,7 +6987,13 @@ class ElrakningPanel {
       return `<g class="solar-history-day" data-solar-history-index="${index}">${forecast}${actual}</g>`;
     }).join("");
     const yLabelMarkup = [range, range / 2, 0].map((level, index) => `<span class="solar-history-axis-label ${index === 0 ? "top" : index === 1 ? "middle" : "bottom"}">${this._formatNumber(level)}</span>`).join("");
-    const xLabelMarkup = days.map((day, index) => `<span class="solar-history-x-label" style="left: ${(index + .5) / days.length * 100}%"><span class="solar-history-day-label">${day.label}</span><span class="solar-history-utilization">${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span></span>`).join("");
+    const evidenceDays = this._powerHistory?.solar_evidence?.days;
+    const today = localDateKey(new Date());
+    const xLabelMarkup = days.map((day, index) => {
+      const evidenceStatus = solarEvidenceStatus(evidenceDays, day.date, today);
+      const evidenceLabel = evidenceStatus === "✅" ? "Godkänd evidence" : evidenceStatus === "❌" ? "Exkluderad evidence" : "Evidence ej bedömd";
+      return `<span class="solar-history-x-label" style="left: ${(index + .5) / days.length * 100}%"><span class="solar-history-day-label">${day.label}</span><span class="solar-history-utilization">${Number.isFinite(day.utilizationPercent) ? `${this._formatNumber(day.utilizationPercent)} %` : "—"}</span><span class="solar-history-evidence-status" title="${evidenceLabel}">${evidenceStatus}</span></span>`;
+    }).join("");
     chart.innerHTML = `<div class="solar-history-y-label-rail" aria-hidden="true">${yLabelMarkup}</div><svg class="solar-history-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Solproduktion de senaste sju dagarna">${grid}${bars}</svg><div class="solar-history-x-label-rail" aria-hidden="true">${xLabelMarkup}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".solar-history-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
@@ -6993,26 +7031,34 @@ class ElrakningPanel {
   }
 
   _renderSolarEvidence() {
-    const card = this.host.querySelector("[data-solar-evidence-card]");
+    const card = this.host.querySelector("[data-solar-evidence-debug]");
     const summary = this.host.querySelector("[data-solar-evidence-summary]");
     const status = this.host.querySelector("[data-solar-evidence-status]");
     const list = this.host.querySelector("[data-solar-evidence-list]");
     const evidence = this._powerHistory?.solar_evidence;
     if (!card || !summary || !status || !list) return;
     const days = Array.isArray(evidence?.days) ? evidence.days : [];
-    card.hidden = !evidence?.available;
+    card.hidden = !this._debugEnabled || !evidence?.available;
     if (!evidence?.available) return;
-    summary.textContent = `Open-Meteo complete ${evidence.progress?.open_meteo_complete || 0} / ${evidence.progress?.open_meteo_target || 21} · Forecast.Solar common ${evidence.progress?.forecast_solar_common || 0} / ${evidence.progress?.forecast_solar_target || 14} · Protocol ${evidence.protocol_version || "evidence-v1"} · LOCKED`;
+    const progress = evidence.progress || {};
+    const omComplete = Number.isFinite(Number(progress.open_meteo_complete)) ? Number(progress.open_meteo_complete) : 0;
+    const omTarget = Number.isFinite(Number(progress.open_meteo_target)) ? Number(progress.open_meteo_target) : 21;
+    const commonComplete = Number.isFinite(Number(progress.forecast_solar_common)) ? Number(progress.forecast_solar_common) : 0;
+    const commonTarget = Number.isFinite(Number(progress.forecast_solar_target)) ? Number(progress.forecast_solar_target) : 14;
+    summary.innerHTML = `<div class="solar-evidence-progress"><div><strong>Open-Meteo</strong><span>${omComplete} / ${omTarget}</span><meter min="0" max="${omTarget}" value="${omComplete}"></meter></div><div><strong>Forecast.Solar common</strong><span>${commonComplete} / ${commonTarget}</span><meter min="0" max="${commonTarget}" value="${commonComplete}"></meter></div></div><small class="solar-evidence-protocol">${evidence.protocol_version || "evidence-v1"} · LOCKED</small>`;
     status.textContent = evidence.status || "INSUFFICIENT – KEEP COLLECTING";
-    list.innerHTML = days.map((day) => {
-      const actual = Number.isFinite(Number(day.actual_kwh)) ? this._formatNumber(day.actual_kwh) : "—";
-      const openMeteo = Number.isFinite(Number(day.open_meteo_nominal_kwh)) ? this._formatNumber(day.open_meteo_nominal_kwh) : "—";
-      const omError = Number.isFinite(Number(day.open_meteo_nominal_kwh)) && Number.isFinite(Number(day.actual_kwh)) ? this._formatNumber(Math.abs(Number(day.actual_kwh) - Number(day.open_meteo_nominal_kwh))) : "—";
-      const forecast = Number.isFinite(Number(day.forecast_solar_frozen_kwh)) ? this._formatNumber(day.forecast_solar_frozen_kwh) : "—";
-      const forecastError = Number.isFinite(Number(day.forecast_solar_frozen_kwh)) && Number.isFinite(Number(day.actual_kwh)) ? this._formatNumber(Math.abs(Number(day.actual_kwh) - Number(day.forecast_solar_frozen_kwh))) : "—";
-      const state = day.audit_complete ? "✅ Godkänd" : "❌ Exkluderad";
-      const reasons = Array.isArray(day.exclusion_reasons) && day.exclusion_reasons.length ? ` · Orsak: ${day.exclusion_reasons.join(", ")}` : "";
-      return `<div class="solar-evidence-day"><strong>${day.date || "—"} · ${state}</strong><small>Actual ${actual} kWh · OM ${openMeteo} kWh · OM-fel ${omError} kWh · Forecast.Solar ${forecast} kWh · FS-fel ${forecastError} kWh · ${day.merged_points || 0} punkter · max gap ${this._formatNumber(day.max_internal_gap_minutes || 0)} min${reasons}</small></div>`;
+    list.innerHTML = [...days].sort((left, right) => String(right.date || "").localeCompare(String(left.date || ""))).map((day) => {
+      const number = (value) => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null;
+      const actualValue = number(day.actual_kwh);
+      const openMeteoValue = number(day.open_meteo_nominal_kwh);
+      const forecastValue = number(day.forecast_solar_frozen_kwh);
+      const display = (value) => value === null ? "—" : this._formatNumber(value);
+      const omError = actualValue !== null && openMeteoValue !== null ? display(Math.abs(actualValue - openMeteoValue)) : "—";
+      const forecastError = actualValue !== null && forecastValue !== null ? display(Math.abs(actualValue - forecastValue)) : "—";
+      const state = day.audit_complete ? "✅ GODKÄND" : "❌ EXKLUDERAD";
+      const reasons = Array.isArray(day.exclusion_reasons) && day.exclusion_reasons.length ? day.exclusion_reasons.join(", ") : "Ingen ytterligare orsak angiven";
+      const common = day.common_forecast_solar_day ? " · Common" : "";
+      return `<div class="solar-evidence-day"><div class="solar-evidence-day-heading"><strong>${day.date || "—"}</strong><span>${state}${common}</span></div><div class="solar-evidence-metrics"><span><b>Actual</b>${display(actualValue)} kWh</span><span><b>Open-Meteo</b>${display(openMeteoValue)} kWh</span><span><b>OM error</b>${omError} kWh</span><span><b>Forecast.Solar</b>${display(forecastValue)} kWh</span><span><b>FS error</b>${forecastError} kWh</span></div><small>${display(number(day.merged_points))} punkter · max gap ${display(number(day.max_internal_gap_minutes))} min · ${reasons}</small></div>`;
     }).join("");
   }
 
