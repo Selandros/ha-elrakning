@@ -30,6 +30,20 @@ def _state(value, timestamp, unit="W"):
 
 
 class SolarEvidenceTests(unittest.TestCase):
+    def test_common_progress_requires_open_meteo_eligibility(self):
+        manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+        manager._days = {
+            "2026-09-01": {"audit_complete": False, "open_meteo_status": "complete", "forecast_solar_frozen_kwh": 10},
+            "2026-09-02": {"audit_complete": True, "open_meteo_status": "invalid", "forecast_solar_frozen_kwh": 10},
+            "2026-09-03": {"audit_complete": True, "open_meteo_status": "complete", "forecast_solar_frozen_kwh": 10},
+        }
+        state = manager.public_state()
+        self.assertEqual(state["progress"]["open_meteo_complete"], 1)
+        self.assertEqual(state["progress"]["forecast_solar_common"], 1)
+        self.assertFalse(state["days"][0]["common_forecast_solar_day"])
+        self.assertFalse(state["days"][1]["common_forecast_solar_day"])
+        self.assertTrue(state["days"][2]["common_forecast_solar_day"])
+
     def test_store_failure_does_not_escape_async_load(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
 

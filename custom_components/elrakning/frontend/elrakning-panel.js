@@ -6808,6 +6808,7 @@ class ElrakningPanel {
           production_points: powerHistory.series?.solar?.points || [],
           forecast_baselines: powerHistory.solar_forecast_baselines || {},
           live_forecast: powerHistory.solar_forecast || null,
+          solar_evidence: powerHistory.solar_evidence || { available: false, days: [] },
           weather: powerHistory.solar_weather || null,
           sun: powerHistory.solar_sun || null,
         },

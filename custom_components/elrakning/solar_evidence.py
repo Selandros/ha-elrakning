@@ -254,7 +254,20 @@ class SolarEvidenceManager:
         return merged
 
     def public_state(self) -> dict[str, Any]:
-        days = [dict(self._days[key]) for key in sorted(self._days)]
+        days = []
+        for key in sorted(self._days):
+            day = dict(self._days[key])
+            day["common_forecast_solar_day"] = (
+                day.get("audit_complete") is True
+                and day.get("open_meteo_status") == "complete"
+                and day.get("forecast_solar_frozen_kwh") is not None
+            )
+            days.append(day)
         om_complete = sum(1 for item in days if item.get("audit_complete") and item.get("open_meteo_status") == "complete")
-        common = sum(1 for item in days if item.get("common_forecast_solar_day") and item.get("forecast_solar_frozen_kwh") is not None)
+        common = sum(
+            1 for item in days
+            if item.get("audit_complete") is True
+            and item.get("open_meteo_status") == "complete"
+            and item.get("forecast_solar_frozen_kwh") is not None
+        )
         return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}

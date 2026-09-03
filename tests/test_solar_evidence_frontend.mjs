@@ -5,6 +5,7 @@ const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/e
 const websocket = fs.readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
 
 assert.match(panel, /data-solar-evidence-card/);
+assert.match(panel, /solar_evidence: powerHistory\.solar_evidence/);
 assert.match(panel, /solar_evidence: response\?\.solar_evidence/);
 assert.match(panel, /Open-Meteo complete/);
 assert.match(websocket, /SOLAR_EVIDENCE_STATE_COMMAND/);
