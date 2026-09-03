@@ -42,8 +42,51 @@ async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> No
     coordinator.async_schedule_midnight_recovery()
 
 
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Register the panel before optional runtime initialization can fail."""
+    integration_dir = Path(__file__).parent
+    frontend_data = hass.data.setdefault(DOMAIN, {})
+    if not frontend_data.get("static_path_registered"):
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    PANEL_LOADER_PATH,
+                    str(integration_dir / "frontend" / "elrakning-loader.js"),
+                    cache_headers=False,
+                ),
+                StaticPathConfig(
+                    PANEL_RESOURCE_PATH,
+                    str(integration_dir / "frontend" / "elrakning-panel.js"),
+                    cache_headers=False,
+                ),
+                StaticPathConfig(
+                    PANEL_MANIFEST_PATH,
+                    str(integration_dir / "manifest.json"),
+                    cache_headers=False,
+                ),
+            ]
+        )
+        frontend_data["static_path_registered"] = True
+    if not frontend.async_panel_exists(hass, PANEL_PATH):
+        frontend.async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            frontend_url_path=PANEL_PATH,
+            sidebar_title="Elräkning",
+            sidebar_icon="mdi:flash-outline",
+            config={
+                "_panel_custom": {
+                    "name": "elrakning-panel",
+                    "js_url": PANEL_LOADER_PATH,
+                    "embed_iframe": False,
+                }
+            },
+        )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
+    await _async_register_frontend(hass)
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
@@ -106,7 +149,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
         grid_manager.async_start_refresh()
 
-    integration_dir = Path(__file__).parent
     frontend_data = hass.data.setdefault(DOMAIN, {})
     async_register_websocket_commands(hass)
     frontend_data["coordinator_unsub"] = coordinator.async_add_listener(
@@ -133,44 +175,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         minute=0,
         second=0,
     )
-    if not frontend_data.get("static_path_registered"):
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    PANEL_LOADER_PATH,
-                    str(integration_dir / "frontend" / "elrakning-loader.js"),
-                    cache_headers=False,
-                ),
-                StaticPathConfig(
-                    PANEL_RESOURCE_PATH,
-                    str(integration_dir / "frontend" / "elrakning-panel.js"),
-                    cache_headers=False,
-                ),
-                StaticPathConfig(
-                    PANEL_MANIFEST_PATH,
-                    str(integration_dir / "manifest.json"),
-                    cache_headers=False,
-                ),
-            ]
-        )
-        frontend_data["static_path_registered"] = True
-
-    if not frontend.async_panel_exists(hass, PANEL_PATH):
-        frontend.async_register_built_in_panel(
-            hass,
-            component_name="custom",
-            frontend_url_path=PANEL_PATH,
-            sidebar_title="Elräkning",
-            sidebar_icon="mdi:flash-outline",
-            config={
-                "_panel_custom": {
-                    "name": "elrakning-panel",
-                    "js_url": PANEL_LOADER_PATH,
-                    "embed_iframe": False,
-                }
-            },
-        )
-
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True
 

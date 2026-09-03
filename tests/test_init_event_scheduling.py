@@ -152,3 +152,12 @@ def test_integration_ready_event_is_fired_after_runtime_components_are_ready():
     assert "async_register_websocket_commands(hass)" in source
     assert "hass.bus.async_fire(INTEGRATION_READY_EVENT)" in source
     assert source.index("async_register_websocket_commands(hass)") < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
+
+
+def test_panel_is_registered_before_site_runtime_initialization():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert "async_register_built_in_panel" in source
+    assert source.index("await _async_register_frontend(hass)") < source.index("await manager.async_load()")
+    assert source.index("await _async_register_frontend(hass)") < source.index("await site_identity_manager.async_prepare_runtime_bindings")
