@@ -2120,6 +2120,11 @@ export function performanceWarningKind(durationMs, stallTimes = [], nowMs = Date
   return recent.length >= 3 ? "repeated_ui_stalls" : null;
 }
 
+export function createPerformanceSessionId(randomValue = null) {
+  const value = randomValue || globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `perf-${String(value).replace(/[^a-z0-9]/gi, "").slice(0, 8)}`;
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -5382,13 +5387,14 @@ class ElrakningPanel {
   }
 
   _sendPerformanceDiagnostic(level, event, message) {
-    if (!this.hass?.callWS) return;
-    this.hass.callWS({ type: "elrakning/meter_diagnostic", component: "performance", level, event, message }).catch(() => {});
+    const state = this._performanceWatchdog;
+    if (!this.hass?.callWS || !state || (state.stopped && event !== "performance_monitor_stopped")) return;
+    this.hass.callWS({ type: "elrakning/meter_diagnostic", component: "performance", level, event, message: `Session: ${state.sessionId} · ${message}` }).catch(() => {});
   }
 
   _startPerformanceWatchdog() {
     if (this._performanceWatchdog) return;
-    const state = { observer: null, recentStalls: [], totalLongTasks: 0, totalWarnings: 0, maxLongTaskMs: 0, slowRendersByComponent: {}, maxRenderByComponent: {}, lastWarningAt: new Map(), startupSent: false };
+    const state = { observer: null, sessionId: createPerformanceSessionId(), recentStalls: [], totalLongTasks: 0, totalWarnings: 0, maxLongTaskMs: 0, slowRendersByComponent: {}, maxRenderByComponent: {}, lastWarningAt: new Map(), startupSent: false, stopped: false };
     this._performanceWatchdog = state;
     if (typeof PerformanceObserver === "function") {
       try {
@@ -5420,7 +5426,7 @@ class ElrakningPanel {
     const detail = kind === "ui_stall"
       ? `UI performance degraded · Main-thread stall: ${Math.round(durationMs)} ms · Events this session: ${state.totalLongTasks}`
       : `Repeated UI stalls · ${state.recentStalls.length} events / 60 s · Max: ${Math.round(state.maxLongTaskMs)} ms · Session total: ${state.totalLongTasks}`;
-    this._sendPerformanceDiagnostic("WARNING", kind, `${detail}${this._performanceMemoryText()}`);
+    this._sendPerformanceDiagnostic("WARNING", kind, `${detail} · Visibility: ${document.visibilityState}${this._performanceMemoryText()}`);
   }
 
   _recordSlowRender(component, durationMs) {
@@ -5441,6 +5447,15 @@ class ElrakningPanel {
     if (!state || state.startupSent || !this.hass?.callWS) return;
     this._sendPerformanceDiagnostic("INFO", "performance_monitor_started", `Performance monitor started · Long Tasks: ${state.observer ? "supported" : "unsupported"} · Memory: ${performance.memory ? "supported" : "unsupported"}`);
     state.startupSent = true;
+  }
+
+  _stopPerformanceWatchdog() {
+    const state = this._performanceWatchdog;
+    if (!state || state.stopped) return;
+    state.stopped = true;
+    state.observer?.disconnect();
+    this._sendPerformanceDiagnostic("INFO", "performance_monitor_stopped", "Performance monitor stopped");
+    this._performanceWatchdog = null;
   }
 
   _setupPriceHeaderLayoutObserver() {
@@ -8738,8 +8753,7 @@ class ElrakningPanel {
     this._socCardHeightObserver?.disconnect();
     this._socCardHeightObserver = null;
     this._themeBackgroundReady = false;
-    this._performanceWatchdog?.observer?.disconnect();
-    this._performanceWatchdog = null;
+    this._stopPerformanceWatchdog();
   }
 
   async _refreshBackendState(loadHistory = true) {
