@@ -1771,6 +1771,7 @@ assert.match(panelSource, /data-invoice-estimate-card/);
 assert.match(panelSource, /Estimerad faktura/);
 assert.match(panelSource, /grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/);
 assert.match(panelSource, /\.live-power-tile\.invoice-estimate-card \{[\s\S]*min-height: 0;/);
+assert.match(panelSource, /\.live-power-tile\.invoice-estimate-card \{[\s\S]*align-self: start;/);
 assert.match(panelSource, /@media \(max-width: 760px\) \{[\s\S]*\.invoice-estimate-card \{[\s\S]*grid-column: 1 \/ -1;/);
 assert.match(panelSource, /data-live-power-tile="battery"[\s\S]*data-invoice-estimate-card/);
 assert.match(panelSource, /class="live-power-title">Estimerad faktura/);
