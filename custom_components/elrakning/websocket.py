@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -26,6 +27,7 @@ from .elhandel.providers.greenely_source import paginate_source
 from .elnat.manager import GridManager
 from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
+from .invoice import build_today_variable_cost
 from .power import PowerManager
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -909,6 +911,11 @@ async def websocket_billing_history(hass, connection, msg):
         else:
             missing_price_dates += 1
         target += timedelta(days=1)
+    invoice_today = build_today_variable_cost(
+        billing.get("points", []),
+        price_periods,
+        dt_util.as_local(dt_util.now()),
+    )
     connection.send_result(msg["id"], {
         "success": True,
         "start": billing["start"],
@@ -924,6 +931,7 @@ async def websocket_billing_history(hass, connection, msg):
         "energy_coverage": billing.get("coverage", {}),
         "price_periods": price_periods,
         "price_source": "nord_pool_historical_daily_periods",
+        "invoice_estimate": {"today": invoice_today},
         "price_coverage": {
             "period_count": len(price_periods),
             "missing_dates": missing_price_dates,

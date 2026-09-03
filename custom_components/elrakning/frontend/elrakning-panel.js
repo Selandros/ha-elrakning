@@ -1257,28 +1257,6 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   };
 }
 
-export function buildInvoiceTodayVariableCost(rows, now = new Date()) {
-  const current = new Date(now);
-  const nowMs = current.getTime();
-  if (!Number.isFinite(nowMs)) return null;
-  const todayStartMs = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime();
-  let total = 0;
-  let includedRows = 0;
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (row?.forecast === true) continue;
-    const startMs = new Date(row?.start).getTime();
-    const endMs = Math.min(new Date(row?.end).getTime(), nowMs);
-    const cost = Number(row?.trade_cost_sek) + Number(row?.grid_cost_sek);
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs || !Number.isFinite(cost)) continue;
-    const overlapStartMs = Math.max(startMs, todayStartMs);
-    const overlapEndMs = endMs;
-    if (overlapEndMs <= overlapStartMs) continue;
-    total += cost * (overlapEndMs - overlapStartMs) / (endMs - startMs);
-    includedRows += 1;
-  }
-  return includedRows ? total : null;
-}
-
 export function buildCostAnalysisSeries(estimate, previousActual = null, now = new Date()) {
   const current = new Date(now);
   const year = current.getFullYear();
@@ -8209,7 +8187,7 @@ class ElrakningPanel {
     total.textContent = estimate.estimated_month_total_sek == null || !Number.isFinite(Number(estimate.estimated_month_total_sek))
       ? "–"
       : this._formatSek(Number(estimate.estimated_month_total_sek));
-    const todayVariableCostSek = buildInvoiceTodayVariableCost(estimate.rows);
+    const todayVariableCostSek = Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
     today.hidden = !Number.isFinite(todayVariableCostSek);
     today.textContent = today.hidden ? "" : `+${this._formatSek(todayVariableCostSek)} idag`;
     const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(
