@@ -77,6 +77,12 @@ def integrate_actual(points: list[dict[str, Any]], start: datetime, end: datetim
     interior_long = 0
     parsed = [(dt_util.parse_datetime(item.get("timestamp")), _number(item.get("value_kw"))) for item in points]
     parsed = [(timestamp, value) for timestamp, value in parsed if timestamp is not None and value is not None]
+    active_times = [
+        timestamp for timestamp, value in parsed
+        if start <= timestamp < end and value > ACTIVE_THRESHOLD_KW
+    ]
+    first_active = min(active_times, default=None)
+    last_active = max(active_times, default=None)
     for (left_time, left_value), (right_time, right_value) in zip(parsed, parsed[1:]):
         if left_time < start or left_time >= end:
             continue
@@ -86,7 +92,9 @@ def integrate_actual(points: list[dict[str, Any]], start: datetime, end: datetim
             total += (left_value + right_value) / 2 * duration
         elif duration > 1:
             boundary_long += 1
-            if left_value > ACTIVE_THRESHOLD_KW or right_value > ACTIVE_THRESHOLD_KW:
+            if (first_active is not None and first_active <= left_time
+                    and right_time <= last_active
+                    and (left_value > ACTIVE_THRESHOLD_KW or right_value > ACTIVE_THRESHOLD_KW)):
                 interior_long += 1
     return total if parsed else None, boundary_long, interior_long
 

@@ -92,6 +92,34 @@ class SolarEvidenceTests(unittest.TestCase):
         self.assertEqual(boundary_long, 1)
         self.assertEqual(interior_long, 1)
 
+    def test_long_boundary_gaps_do_not_become_interior_gaps(self):
+        points = [
+            {"timestamp": "2026-09-02T00:00:00+00:00", "value_kw": 0},
+            {"timestamp": "2026-09-02T06:00:00+00:00", "value_kw": 1},
+            {"timestamp": "2026-09-02T18:00:00+00:00", "value_kw": 1},
+            {"timestamp": "2026-09-03T00:00:00+00:00", "value_kw": 0},
+        ]
+        total, boundary_long, interior_long = integrate_actual(
+            points,
+            datetime(2026, 9, 2, tzinfo=timezone.utc),
+            datetime(2026, 9, 3, tzinfo=timezone.utc),
+        )
+        self.assertEqual(total, 0)
+        self.assertEqual(boundary_long, 3)
+        self.assertEqual(interior_long, 1)
+
+    def test_long_gap_between_active_points_is_interior(self):
+        points = [
+            {"timestamp": "2026-09-02T06:00:00+00:00", "value_kw": 1},
+            {"timestamp": "2026-09-02T08:30:00+00:00", "value_kw": 1},
+        ]
+        _, _, interior_long = integrate_actual(
+            points,
+            datetime(2026, 9, 2, tzinfo=timezone.utc),
+            datetime(2026, 9, 3, tzinfo=timezone.utc),
+        )
+        self.assertEqual(interior_long, 1)
+
     def test_completeness_uses_frozen_thresholds(self):
         points = [
             {"timestamp": f"2026-09-02T00:{hour * 3:02d}:00+00:00", "value_kw": 1}
