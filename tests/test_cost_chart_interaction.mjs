@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartTooltipFields } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+
+const septemberGeometry = buildCostChartGeometry(960, { left: 48, right: 12 }, 30);
+assert.equal(septemberGeometry.x(1), 48);
+assert.equal(septemberGeometry.x(30), 948);
+assert.equal(septemberGeometry.x(15), 48 + (14 / 29) * 900);
+const februaryGeometry = buildCostChartGeometry(960, { left: 48, right: 12 }, 28);
+assert.equal(februaryGeometry.x(1), 48);
+assert.equal(februaryGeometry.x(28), 948);
 
 assert.deepEqual(buildCostChartTooltipFields({
   actual: 28.05,
@@ -51,6 +59,7 @@ const source = readFileSync(new URL("../custom_components/elrakning/frontend/elr
 const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series)"), source.indexOf("  _bindCostCard()"));
 
 assert.match(costRender, /buildCostChartTooltipFields\(\{/);
+assert.match(costRender, /buildCostChartGeometry\(width, plot, series\.days_in_month\)/);
 assert.match(costRender, /<g class="cost-chart-hover" aria-hidden="true"><\/g>/);
 assert.match(costRender, /svg\.addEventListener\("pointerdown", update\)/);
 assert.match(costRender, /svg\.addEventListener\("pointermove", update\)/);

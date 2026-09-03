@@ -1345,6 +1345,13 @@ export function buildCostChartTooltipFields({ estimated = null, actual = null, f
   return fields;
 }
 
+export function buildCostChartGeometry(width, plot, daysInMonth) {
+  const plotWidth = width - plot.left - plot.right;
+  const daySpan = Math.max(1, daysInMonth - 1);
+  const x = (day) => plot.left + ((day - 1) / daySpan) * plotWidth;
+  return { plotWidth, x };
+}
+
 export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSeries, mode, selectedDate = new Date(), priceForPeriod = (period) => Number(period.price)) {
   const selected = new Date(selectedDate);
   const year = selected.getFullYear();
@@ -8373,7 +8380,7 @@ class ElrakningPanel {
     const forecastFuture = series.forecast_future || series.forecast || [];
     const all = [...actual, ...estimated, ...forecastFuture, ...series.previous].filter((point) => Number.isFinite(point.value));
     const max = Math.max(1, ...all.map((point) => point.value));
-    const x = (day) => plot.left + ((day - 1) / Math.max(1, series.days_in_month - 1)) * (width - plot.left - plot.right);
+    const { x } = buildCostChartGeometry(width, plot, series.days_in_month);
     const y = (value) => plot.top + (1 - value / max) * (height - plot.top - plot.bottom);
     const path = (points) => points.length < 2 ? "" : points.map((point, index) => `${index ? "L" : "M"} ${x(point.day)} ${y(point.value)}`).join(" ");
     const grid = [0, .5, 1].map((ratio) => {
