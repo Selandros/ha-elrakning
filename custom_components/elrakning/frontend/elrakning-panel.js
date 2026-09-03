@@ -1322,6 +1322,23 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
   };
 }
 
+export function buildCostChartTooltipFields({ estimated = null, actual = null, forecast = null, previous = null } = {}) {
+  const fields = [];
+  if (estimated != null && Number.isFinite(Number(estimated))) {
+    fields.push({ label: "Estimerat hittills", value: Number(estimated) });
+  }
+  if (actual != null && Number.isFinite(Number(actual))) {
+    fields.push({ label: "Kostnad hittills", value: Number(actual) });
+  }
+  if (forecast != null && Number.isFinite(Number(forecast))) {
+    fields.push({ label: "Prognos", value: Number(forecast) });
+  }
+  if (previous != null && Number.isFinite(Number(previous))) {
+    fields.push({ label: "Förra månaden", value: Number(previous) });
+  }
+  return fields;
+}
+
 export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSeries, mode, selectedDate = new Date(), priceForPeriod = (period) => Number(period.price)) {
   const selected = new Date(selectedDate);
   const year = selected.getFullYear();
@@ -3556,6 +3573,22 @@ class ElrakningPanel {
           min-width: 0;
         }
 
+        .cost-card .card-heading {
+          align-items: flex-start;
+          flex-direction: row;
+          gap: 12px;
+          justify-content: space-between;
+        }
+
+        .cost-card .card-heading > div {
+          min-width: 0;
+        }
+
+        .cost-card .card-heading .status {
+          margin-top: 2px;
+          text-align: right;
+        }
+
         .cost-period {
           color: var(--secondary-text-color);
           display: block;
@@ -3565,9 +3598,9 @@ class ElrakningPanel {
 
         .cost-kpis {
           display: grid;
-          gap: 12px;
+          gap: 8px;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          margin-top: 16px;
+          margin-top: 12px;
         }
 
         .cost-kpi,
@@ -3591,14 +3624,14 @@ class ElrakningPanel {
         }
 
         .cost-chart {
-          min-height: 190px;
-          margin-top: 18px;
+          min-height: 144px;
+          margin-top: 12px;
           position: relative;
         }
 
         .cost-chart-svg {
           display: block;
-          height: 190px;
+          height: 144px;
           overflow: visible;
           width: 100%;
         }
@@ -3663,7 +3696,7 @@ class ElrakningPanel {
         .cost-chart-forecast { fill: none; stroke: var(--secondary-text-color); stroke-dasharray: 5 4; stroke-width: 2; }
         .cost-chart-previous { fill: none; stroke: var(--neutral-color, #8590A6); opacity: .55; stroke-width: 1.5; }
         .cost-chart-marker { fill: var(--primary-color); }
-        .cost-chart-legend { color: var(--secondary-text-color); display: flex; flex-wrap: wrap; font-size: var(--card-legend-size); gap: 8px 14px; margin-bottom: 4px; }
+        .cost-chart-legend { color: var(--secondary-text-color); display: flex; flex-wrap: wrap; font-size: var(--card-legend-size); gap: 4px 12px; margin-bottom: 2px; }
         .cost-chart-legend span { align-items: center; display: inline-flex; gap: 4px; }
         .cost-chart-legend i { background: var(--primary-color); display: inline-block; height: 2px; width: 14px; }
         .cost-chart-legend-estimated { opacity: .58; }
@@ -3672,17 +3705,17 @@ class ElrakningPanel {
 
         .cost-comparison {
           color: var(--primary-text-color);
-          margin-top: 10px;
-          min-height: 1.2em;
+          margin-top: 6px;
+          min-height: 0;
         }
 
         .cost-comparison-value { font-weight: 600; margin-top: 2px; }
 
         .cost-details {
           display: grid;
-          gap: 8px 18px;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          margin-top: 18px;
+          gap: 6px 14px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 12px;
         }
 
         .cost-detail strong { font-weight: 500; }
@@ -3733,6 +3766,7 @@ class ElrakningPanel {
         @container (max-width: 600px) {
           .cost-kpis { gap: 8px; }
           .cost-kpi strong { font-size: 1rem; }
+          .cost-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
 
         .card-source-action {
@@ -8340,31 +8374,51 @@ class ElrakningPanel {
       return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" />`;
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" style="left:${(x(day) / width) * 100}%">${day}</span>`).join("")}</div>`;
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><div class="cost-chart-plot"><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimatedPast)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}<rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><div class="cost-chart-plot"><svg class="cost-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimatedPast)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}<g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const tooltip = chart.querySelector(".soc-tooltip");
+    const hover = chart.querySelector(".cost-chart-hover");
     const nearest = (day) => [...actual, ...estimatedPast, ...forecastFuture, ...series.previous].reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
-    const clear = () => { tooltip.hidden = true; };
-    svg.addEventListener("pointerleave", clear);
-    svg.addEventListener("pointermove", (event) => {
+    const clear = () => {
+      tooltip.hidden = true;
+      hover.replaceChildren();
+    };
+    const update = (event) => {
       const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
-      if (!pointer?.inside) { clear(); return; }
+      if (!pointer?.inside) {
+        clear();
+        return;
+      }
       const day = 1 + ((pointer.viewX - plot.left) / Math.max(1, width - plot.left - plot.right)) * (series.days_in_month - 1);
       const point = nearest(day);
-      if (!point) { clear(); return; }
-      const fields = [];
+      if (!point) {
+        clear();
+        return;
+      }
       const actualPoint = actual.find((item) => item.day === point.day);
       const estimated = estimatedPast.find((item) => item.day === point.day);
       const forecast = forecastFuture.find((item) => item.day === point.day);
       const previous = series.previous.find((item) => item.day === point.day);
-      if (estimated) fields.push({ label: "Estimerat hittills", value: estimated.value, formatted: this._formatSek(estimated.value) });
-      if (actualPoint) fields.push({ label: "Kostnad hittills", value: actualPoint.value, formatted: this._formatSek(actualPoint.value) });
-      if (forecast) fields.push({ label: "Prognos", value: forecast.value, formatted: this._formatSek(forecast.value) });
-      if (previous) fields.push({ label: "Förra månaden", value: previous.value, formatted: this._formatSek(previous.value) });
-      renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "") .split(" ")[0]}`, fields });
+      const fields = buildCostChartTooltipFields({
+        estimated: estimated?.value,
+        actual: actualPoint?.value,
+        forecast: forecast?.value,
+        previous: previous?.value,
+      }).map((field) => ({ ...field, formatted: this._formatSek(field.value) }));
+      const activePoint = actualPoint || forecast || estimated || previous;
+      if (!activePoint || !fields.length) {
+        clear();
+        return;
+      }
+      renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "").split(" ")[0]}`, fields });
       tooltip.hidden = false;
+      hover.innerHTML = `<circle class="chart-hover-marker" fill="${forecast && !actualPoint ? "var(--secondary-text-color)" : "var(--primary-color)"}" cx="${x(activePoint.day)}" cy="${y(activePoint.value)}" r="4" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
-    });
+    };
+    svg.addEventListener("pointerleave", clear);
+    svg.addEventListener("pointercancel", clear);
+    svg.addEventListener("pointerdown", update);
+    svg.addEventListener("pointermove", update);
   }
 
   _bindCostCard() {
