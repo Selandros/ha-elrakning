@@ -1774,9 +1774,9 @@ assert.match(panelSource, /\.live-power-tile\.invoice-estimate-card \{[\s\S]*min
 assert.match(panelSource, /@media \(max-width: 760px\) \{[\s\S]*\.invoice-estimate-card \{[\s\S]*grid-column: 1 \/ -1;/);
 assert.match(panelSource, /data-live-power-tile="battery"[\s\S]*data-invoice-estimate-card/);
 assert.match(panelSource, /class="live-power-title">Estimerad faktura/);
-assert.match(panelSource, /class="live-power-title">Estimerad faktura<\/span><\/div>\s*<span class="live-power-grid-meta invoice-estimate-month"/);
-assert.match(panelSource, /\.invoice-estimate-month \{[\s\S]*justify-self: start;/);
-assert.match(panelSource, /\.invoice-estimate-month \{[\s\S]*margin-left: 0;[\s\S]*text-align: left;/);
+assert.match(panelSource, /class="live-power-title">Estimerad faktura<\/span><span class="live-power-grid-meta invoice-estimate-month"/);
+assert.match(panelSource, /\.invoice-estimate-month \{[\s\S]*grid-row: auto;[\s\S]*text-align: right;/);
+assert.match(panelSource, /\.live-power-tile\.invoice-estimate-card \{[\s\S]*grid-template-rows: auto auto minmax\(0, auto\);/);
 assert.match(panelSource, /class="live-power-value" data-invoice-estimate-total/);
 assert.match(panelSource, /data-invoice-estimate-total/);
 assert.match(panelSource, /_formatInvoiceMonth\(estimate\.month\)\.split\(" "\)\[0\]/);

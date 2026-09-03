@@ -2264,8 +2264,7 @@ class ElrakningPanel {
           </article>
           <article class="live-power-tile invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
-            <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span></div>
-            <span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span>
+            <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span><span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span></div>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="invoice" hidden>Visa data</button></div>
           </article>
@@ -3987,7 +3986,7 @@ class ElrakningPanel {
         }
 
         .live-power-tile.invoice-estimate-card {
-          grid-template-rows: auto auto auto minmax(0, auto);
+          grid-template-rows: auto auto minmax(0, auto);
           min-height: 0;
         }
 
@@ -3996,14 +3995,12 @@ class ElrakningPanel {
         }
 
         .invoice-estimate-month {
-          grid-row: 2;
-          margin-left: 0;
-          justify-self: start;
-          text-align: left;
+          grid-row: auto;
+          text-align: right;
         }
 
         .invoice-estimate-card .live-power-value {
-          grid-row: 3;
+          grid-row: 2;
         }
 
         .provider-invoice-cost span {
