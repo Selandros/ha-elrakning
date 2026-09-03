@@ -6,7 +6,7 @@ const websocket = fs.readFileSync(new URL("../custom_components/elrakning/websoc
 
 assert.match(panel, /data-solar-evidence-card/);
 assert.match(panel, /solar_evidence: powerHistory\.solar_evidence/);
-assert.match(panel, /solar_evidence: response\?\.solar_evidence/);
+assert.match(panel, /solar_evidence: this\._powerHistory\?\.solar_evidence \|\| \{ available: false, days: \[\] \}/);
 assert.match(panel, /Open-Meteo complete/);
 assert.match(websocket, /SOLAR_EVIDENCE_STATE_COMMAND/);
 assert.match(websocket, /websocket_solar_evidence_state/);

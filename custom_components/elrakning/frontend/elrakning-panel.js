@@ -7161,7 +7161,7 @@ class ElrakningPanel {
         solar_forecast: response?.solar_forecast || { available: false },
         solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
         solar_shadow: response?.solar_shadow || { available: false, days: [] },
-        solar_evidence: response?.solar_evidence || { available: false, days: [] },
+        solar_evidence: this._powerHistory?.solar_evidence || { available: false, days: [] },
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: response?.solar_sun || { available: false },
       };
