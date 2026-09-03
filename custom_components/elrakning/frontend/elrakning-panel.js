@@ -402,11 +402,21 @@ export function buildDailyObservedMaxima(powerHistory = {}, meterHistory = {}, n
 
 export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {}) {
   const finiteMagnitude = (value) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : null;
+  const houseConfigured = Boolean(powerState.consumption_entity);
+  const solarConfigured = Array.isArray(powerState.solar_entities) && powerState.solar_entities.some(Boolean);
+  const batteryConfigured = Boolean(
+    powerState.battery_power_entity
+    || powerState.charging_entity
+    || powerState.discharging_entity
+    || powerState.soc_entity
+    || powerState.capacity_entity,
+  );
+  const gridConfigured = meterState.configured === true && Boolean(meterState.power_entity);
   const house = finiteMagnitude(powerState.consumption_kw);
   const solar = finiteMagnitude(powerState.solar_kw);
-  const gridPower = Number(meterState.power_kw);
-  let grid = { value: null, status: "Ej tillgängligt", direction: null };
-  if (Number.isFinite(gridPower)) {
+  const gridPower = meterState.power_kw == null ? null : Number(meterState.power_kw);
+  let grid = { value: null, status: gridConfigured ? "Ej tillgängligt" : "Ej konfigurerad", direction: null };
+  if (gridConfigured && Number.isFinite(gridPower)) {
     const normalized = displayPowerValue(gridPower);
     grid = normalized === 0
       ? { value: 0, status: "Ingen överföring", direction: null }
@@ -414,8 +424,8 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
         ? { value: normalized, status: "Importerar", direction: "import" }
         : { value: Math.abs(normalized), status: "Exporterar", direction: "export" };
   }
-  const fuseAmpere = Number(meterState.facility?.fuse_ampere ?? meterState.fuse_ampere);
-  const phaseValues = meterState.phase_current_a && typeof meterState.phase_current_a === "object"
+  const fuseAmpere = gridConfigured ? Number(meterState.facility?.fuse_ampere ?? meterState.fuse_ampere) : NaN;
+  const phaseValues = gridConfigured && meterState.phase_current_a && typeof meterState.phase_current_a === "object"
     ? Object.fromEntries(["l1", "l2", "l3"].map((phase) => [phase, meterState.phase_current_a[phase] == null ? null : Number(meterState.phase_current_a[phase])]))
     : {};
   const validPhaseValues = Object.values(phaseValues).filter(Number.isFinite);
@@ -428,7 +438,9 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
   const discharging = finiteMagnitude(powerState.discharging_kw);
   const chargingActive = charging !== null && charging > POWER_DISPLAY_THRESHOLD_KW;
   const dischargingActive = discharging !== null && discharging > POWER_DISPLAY_THRESHOLD_KW;
-  const battery = chargingActive && dischargingActive
+  const battery = !batteryConfigured
+    ? { value: null, status: "Ej konfigurerad", direction: null, colorKey: "neutral", charging, discharging }
+    : chargingActive && dischargingActive
     ? { value: null, status: "Inkonsekvent data", direction: "invalid", colorKey: "neutral", charging, discharging }
     : chargingActive
       ? { value: charging, status: "Laddar", direction: "charging", colorKey: "charging", charging, discharging }
@@ -442,8 +454,8 @@ export function buildLivePowerTiles(powerState = {}, meterState = {}, maxima = {
     return { ...tile, maxToday, scaleMax, fillPercent: Math.max(0, Math.min(100, current / scaleMax * 100)) };
   };
   return {
-    house: withScale({ value: house, status: house === null ? "Ej tillgängligt" : "Förbrukar", colorKey: "consumption" }, "house"),
-    solar: withScale({ value: solar, status: solar === null ? "Ej tillgängligt" : solar === 0 ? "Ingen produktion" : "Producerar", colorKey: solar === 0 ? "neutral" : "solar" }, "solar"),
+    house: withScale({ value: houseConfigured ? house : null, status: houseConfigured ? (house === null ? "Ej tillgängligt" : "Förbrukar") : "Ej konfigurerad", colorKey: "consumption" }, "house"),
+    solar: withScale({ value: solarConfigured ? solar : null, status: solarConfigured ? (solar === null ? "Ej tillgängligt" : solar === 0 ? "Ingen produktion" : "Producerar") : "Ej konfigurerad", colorKey: solarConfigured && solar === 0 ? "neutral" : "solar" }, "solar"),
     grid: withScale(grid, "grid"),
     battery: withScale(battery, "battery"),
   };
@@ -10237,7 +10249,9 @@ class ElrakningPanel {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       const legend = this.host.querySelector("[data-meter-legend]");
       if (legend) legend.hidden = true;
-      const message = this.priceData.error === "missing_integration"
+      const message = this.priceData.error === "site_unconfigured"
+        ? "<strong>Ej konfigurerad</strong>"
+        : this.priceData.error === "missing_integration"
         ? "<strong>Ingen Nord Pool-sensor hittades.</strong><span>Lägg till Nord Pool i Home Assistant för att visa dagens elpris.</span>"
         : "<strong>Dagens Nord Pool-priser kunde inte hämtas.</strong>";
       chart.innerHTML = `<div class="empty-chart">${message}</div>`;

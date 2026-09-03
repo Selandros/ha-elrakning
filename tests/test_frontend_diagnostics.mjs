@@ -82,6 +82,10 @@ assert.deepEqual(buildGridSourceCost(null, { total_sek: 12 }), { total_sek: 12 }
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker/);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+const priceEmptyStateSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderHourlyPriceChart"), pickerPanelSource.indexOf("  autoScrollToNow"));
+assert.match(priceEmptyStateSource, /this\.priceData\.error === "site_unconfigured"[\s\S]*<strong>Ej konfigurerad<\/strong>/);
+assert.match(priceEmptyStateSource, /this\.priceData\.error === "missing_integration"[\s\S]*Ingen Nord Pool-sensor hittades/);
+assert.match(priceEmptyStateSource, /Dagens Nord Pool-priser kunde inte hämtas/);
 const pickerSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _bindPeriodPicker()"), pickerPanelSource.indexOf("  _chartLayerState()"));
 assert.match(pickerSource, /renderPriceChart\(\)/);
 assert.doesNotMatch(pickerSource, /callWS|selectedMonth/);
@@ -683,8 +687,8 @@ assert.ok(solarTooltipFields.length <= 5);
 assert.ok(solarTooltipFields.some((field) => field.label === "Prognosträff hittills" && field.formatted === "54,7 %"));
 assert.ok(solarTooltipFields.some((field) => field.label === "Avvikelse" && field.formatted === "+82,7 %"));
 const liveTiles = buildLivePowerTiles(
-  { consumption_kw: 0.63, solar_kw: 6.94, charging_kw: 0, discharging_kw: 0 },
-  { power_kw: 2.43 },
+  { consumption_entity: "sensor.house", solar_entities: ["sensor.solar"], charging_entity: "sensor.charge", discharging_entity: "sensor.discharge", consumption_kw: 0.63, solar_kw: 6.94, charging_kw: 0, discharging_kw: 0 },
+  { configured: true, power_entity: "sensor.grid", power_kw: 2.43 },
   { house: 2, solar: 10, grid: 5, battery: 4 },
 );
 assert.equal(liveTiles.house.value, 0.63);
@@ -693,36 +697,47 @@ assert.equal(liveTiles.house.maxToday, 2);
 assert.equal(liveTiles.house.fillPercent, 31.5);
 assert.equal(liveTiles.solar.value, 6.94);
 assert.equal(liveTiles.solar.status, "Producerar");
-assert.equal(buildLivePowerTiles({ solar_kw: 0 }, {}).solar.status, "Ingen produktion");
-assert.equal(buildLivePowerTiles({ solar_kw: 0 }, {}).solar.colorKey, "neutral");
+assert.equal(buildLivePowerTiles({ solar_entities: ["sensor.solar"], solar_kw: 0 }, {}).solar.status, "Ingen produktion");
+assert.equal(buildLivePowerTiles({ solar_entities: ["sensor.solar"], solar_kw: 0 }, {}).solar.colorKey, "neutral");
+const unconfiguredTiles = buildLivePowerTiles({}, {});
+assert.equal(unconfiguredTiles.house.value, null);
+assert.equal(unconfiguredTiles.house.status, "Ej konfigurerad");
+assert.equal(unconfiguredTiles.solar.value, null);
+assert.equal(unconfiguredTiles.solar.status, "Ej konfigurerad");
+assert.equal(unconfiguredTiles.grid.value, null);
+assert.equal(unconfiguredTiles.grid.status, "Ej konfigurerad");
+assert.equal(unconfiguredTiles.grid.fuseAmpere, null);
+assert.deepEqual(unconfiguredTiles.grid.phaseCurrentA, {});
+assert.equal(unconfiguredTiles.battery.value, null);
+assert.equal(unconfiguredTiles.battery.status, "Ej konfigurerad");
 assert.equal(liveTiles.grid.value, 2.43);
 assert.equal(liveTiles.grid.status, "Importerar");
 const gridTilesWithPhases = buildLivePowerTiles(
   {},
-  { power_kw: 2.85, phase_current_a: { l1: 7.2, l2: 9.8, l3: 8.4 } },
+  { configured: true, power_entity: "sensor.grid", power_kw: 2.85, phase_current_a: { l1: 7.2, l2: 9.8, l3: 8.4 } },
   {},
 );
 assert.equal(gridTilesWithPhases.grid.maxPhaseCurrentA, 9.8);
 assert.equal(gridTilesWithPhases.grid.fuseUtilizationPercent, null);
 const gridTilesWithFuse = buildLivePowerTiles(
   {},
-  { power_kw: 2.85, phase_current_a: { l1: 7.2, l2: 9.8, l3: 8.4 }, facility: { fuse_ampere: 16 } },
+  { configured: true, power_entity: "sensor.grid", power_kw: 2.85, phase_current_a: { l1: 7.2, l2: 9.8, l3: 8.4 }, facility: { fuse_ampere: 16 } },
   {},
 );
 assert.equal(gridTilesWithFuse.grid.fuseAmpere, 16);
 assert.ok(Math.abs(gridTilesWithFuse.grid.fuseUtilizationPercent - 61.25) < 1e-12);
 const gridTilesWithNegativePhase = buildLivePowerTiles(
   {},
-  { power_kw: 0, phase_current_a: { l1: -14, l2: 3, l3: 4 }, facility: { fuse_ampere: 16 } },
+  { configured: true, power_entity: "sensor.grid", power_kw: 0, phase_current_a: { l1: -14, l2: 3, l3: 4 }, facility: { fuse_ampere: 16 } },
   {},
 );
 assert.equal(gridTilesWithNegativePhase.grid.maxPhaseCurrentA, 14);
 assert.equal(gridTilesWithNegativePhase.grid.fuseUtilizationPercent, 87.5);
 assert.equal(liveTiles.battery.status, "Ingen aktivitet");
-assert.equal(buildLivePowerTiles({ charging_kw: 0, discharging_kw: 0 }, {}).battery.status, "Ingen aktivitet");
+assert.equal(buildLivePowerTiles({ charging_entity: "sensor.charge", discharging_entity: "sensor.discharge", charging_kw: 0, discharging_kw: 0 }, {}).battery.status, "Ingen aktivitet");
 assert.equal(liveTiles.battery.fillPercent, 0);
 assert.equal(buildLivePowerTiles({}, {}).solar.scaleMax, 1);
-assert.equal(buildLivePowerTiles({ solar_kw: 5.24 }, {}).solar.scaleMax, 5.24);
+assert.equal(buildLivePowerTiles({ solar_entities: ["sensor.solar"], solar_kw: 5.24 }, {}).solar.scaleMax, 5.24);
 const maxima = buildDailyObservedMaxima({ series: {
   solar: { points: [{ timestamp: "2026-08-30T10:00:00+02:00", value_kw: 4.2 }] },
   consumption: { points: [{ timestamp: "2026-08-30T11:00:00+02:00", value_kw: 2.1 }] },
@@ -730,18 +745,18 @@ const maxima = buildDailyObservedMaxima({ series: {
   discharging: { points: [{ timestamp: "2026-08-30T13:00:00+02:00", value_kw: 4.4 }] },
 } }, { points: [{ timestamp: "2026-08-30T14:00:00+02:00", import_kw: 5.2, export_kw: 0 }] }, new Date("2026-08-30T15:00:00+02:00"));
 assert.deepEqual(maxima, { date: "2026-08-30", house: 2.1, solar: 4.2, grid: 5.2, battery: 4.4 });
-assert.equal(buildLivePowerTiles({}, { power_kw: -0.11 }).grid.status, "Exporterar");
-assert.equal(buildLivePowerTiles({}, { power_kw: 0.05 }).grid.status, "Ingen överföring");
-assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 0 }).battery.status, "Laddar");
-assert.equal(buildLivePowerTiles({ charging_kw: 0, discharging_kw: 3.1 }).battery.status, "Urladdar");
-assert.equal(buildLivePowerTiles({ charging_kw: 6.2, discharging_kw: 3.1 }).battery.status, "Inkonsekvent data");
-assert.equal(buildLivePowerTiles({ consumption_kw: 1 }, {}).house.colorKey, "consumption");
-assert.equal(buildLivePowerTiles({ solar_kw: 1 }, {}).solar.colorKey, "solar");
-assert.equal(buildLivePowerTiles({}, { power_kw: 1 }).grid.colorKey, "import");
-assert.equal(buildLivePowerTiles({}, { power_kw: -1 }).grid.colorKey, "export");
-assert.equal(buildLivePowerTiles({}, { power_kw: 0 }).grid.colorKey, "neutral");
-assert.equal(buildLivePowerTiles({ charging_kw: 1 }, {}).battery.colorKey, "charging");
-assert.equal(buildLivePowerTiles({ discharging_kw: 1 }, {}).battery.colorKey, "discharging");
+assert.equal(buildLivePowerTiles({}, { configured: true, power_entity: "sensor.grid", power_kw: -0.11 }).grid.status, "Exporterar");
+assert.equal(buildLivePowerTiles({}, { configured: true, power_entity: "sensor.grid", power_kw: 0.05 }).grid.status, "Ingen överföring");
+assert.equal(buildLivePowerTiles({ charging_entity: "sensor.charge", charging_kw: 6.2, discharging_kw: 0 }).battery.status, "Laddar");
+assert.equal(buildLivePowerTiles({ discharging_entity: "sensor.discharge", charging_kw: 0, discharging_kw: 3.1 }).battery.status, "Urladdar");
+assert.equal(buildLivePowerTiles({ charging_entity: "sensor.charge", discharging_entity: "sensor.discharge", charging_kw: 6.2, discharging_kw: 3.1 }).battery.status, "Inkonsekvent data");
+assert.equal(buildLivePowerTiles({ consumption_entity: "sensor.house", consumption_kw: 1 }, {}).house.colorKey, "consumption");
+assert.equal(buildLivePowerTiles({ solar_entities: ["sensor.solar"], solar_kw: 1 }, {}).solar.colorKey, "solar");
+assert.equal(buildLivePowerTiles({}, { configured: true, power_entity: "sensor.grid", power_kw: 1 }).grid.colorKey, "import");
+assert.equal(buildLivePowerTiles({}, { configured: true, power_entity: "sensor.grid", power_kw: -1 }).grid.colorKey, "export");
+assert.equal(buildLivePowerTiles({}, { configured: true, power_entity: "sensor.grid", power_kw: 0 }).grid.colorKey, "neutral");
+assert.equal(buildLivePowerTiles({ charging_entity: "sensor.charge", charging_kw: 1 }, {}).battery.colorKey, "charging");
+assert.equal(buildLivePowerTiles({ discharging_entity: "sensor.discharge", discharging_kw: 1 }, {}).battery.colorKey, "discharging");
 assert.equal(buildLivePowerTiles({}, {}).battery.colorKey, "neutral");
 const liveEntityStates = {
   "sensor.pv_a": { state: "1200", attributes: { unit_of_measurement: "W", device_class: "power" }, last_updated: "2026-08-30T12:00:00Z" },
