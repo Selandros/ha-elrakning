@@ -85,8 +85,20 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Elräkning with the control plane available during startup."""
+    frontend_data = hass.data.setdefault(DOMAIN, {})
+    frontend_data["runtime_status"] = "initializing"
+    try:
+        await _async_register_frontend(hass)
+        async_register_websocket_commands(hass)
+        return await _async_setup_entry(hass, entry)
+    except Exception:
+        frontend_data["runtime_status"] = "failed"
+        raise
+
+
+async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
-    await _async_register_frontend(hass)
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
@@ -150,7 +162,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         grid_manager.async_start_refresh()
 
     frontend_data = hass.data.setdefault(DOMAIN, {})
-    async_register_websocket_commands(hass)
     frontend_data["coordinator_unsub"] = coordinator.async_add_listener(
         lambda: hass.bus.async_fire("elrakning_price_update")
     )
@@ -175,6 +186,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         minute=0,
         second=0,
     )
+    frontend_data["runtime_status"] = "ready"
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True
 
@@ -182,6 +194,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Elräkning from a config entry."""
     frontend_data = hass.data.get(DOMAIN, {})
+    frontend_data["runtime_status"] = "unavailable"
     if unsubscribe := frontend_data.pop("coordinator_unsub", None):
         unsubscribe()
     if unsubscribe := frontend_data.pop("electricity_provider_price_unsub", None):

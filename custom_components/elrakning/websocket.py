@@ -319,6 +319,18 @@ def _site_is_configured(hass: HomeAssistant) -> bool:
     return manager is None or checker is None or checker()
 
 
+def _runtime_status(hass: HomeAssistant) -> str:
+    """Return the setup lifecycle state exposed by the control plane."""
+    return hass.data.get(DOMAIN, {}).get("runtime_status", "unavailable")
+
+
+def _runtime_not_ready(hass: HomeAssistant) -> dict | None:
+    status = _runtime_status(hass)
+    if status == "ready":
+        return None
+    return {"success": False, "status": status, "error": "runtime_not_ready"}
+
+
 def _electricity_provider_state(manager: ElhandelManager | None) -> dict:
     state = manager.public_state() if manager else serialize_provider_state(ProviderData())
     return {
@@ -892,6 +904,9 @@ async def websocket_meter_diagnostic(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): METER_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_meter_state(hass, connection, msg):
+    if response := _runtime_not_ready(hass):
+        connection.send_result(msg["id"], response)
+        return
     manager = _meter_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "meter_unavailable"})
@@ -1032,6 +1047,9 @@ async def websocket_power_save(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): POWER_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_power_state(hass, connection, msg):
+    if response := _runtime_not_ready(hass):
+        connection.send_result(msg["id"], response)
+        return
     manager = _power_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "power_unavailable"})
@@ -1086,6 +1104,9 @@ async def websocket_solar_evidence_state(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_site_identity(hass, connection, msg):
     """Return current site identity and configured source generations."""
+    if response := _runtime_not_ready(hass):
+        connection.send_result(msg["id"], response)
+        return
     manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     connection.send_result(msg["id"], manager.public_state() if manager else {"site_id": None, "logical_roles": [], "source_ledger": []})
 

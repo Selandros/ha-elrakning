@@ -154,6 +154,27 @@ def test_integration_ready_event_is_fired_after_runtime_components_are_ready():
     assert source.index("async_register_websocket_commands(hass)") < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
 
 
+def test_control_plane_is_registered_before_risky_runtime_initialization():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert 'frontend_data["runtime_status"] = "initializing"' in source
+    assert 'frontend_data["runtime_status"] = "failed"' in source
+    assert 'frontend_data["runtime_status"] = "ready"' in source
+    assert source.index("async_register_websocket_commands(hass)") < source.index("await manager.async_load()")
+    assert source.index('frontend_data["runtime_status"] = "ready"') < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
+
+
+def test_control_plane_state_handlers_have_safe_pre_ready_contract():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert source.count("if response := _runtime_not_ready(hass):") == 3
+    assert '"status": status' in source
+    assert '"error": "runtime_not_ready"' in source
+    assert '"runtime_status", "unavailable"' in source
+
+
 def test_panel_is_registered_before_site_runtime_initialization():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
