@@ -2174,6 +2174,7 @@ class ElrakningPanel {
     this._debugEnabled = false;
     this._debugPreferenceChanged = false;
     this._configurationCardsVisible = true;
+    this._siteState = null;
     this._mainCards = {
       elhandel: false,
       elnet: false,
@@ -2261,7 +2262,7 @@ class ElrakningPanel {
               <span class="frontend-version">${this.version}</span>
             </div>
             <div class="header-icon-controls" aria-label="Elräkningens kontroller">
-              <button type="button" class="header-icon-button config-cards-button${this._configurationCardsVisible ? " active" : ""}" aria-label="Visa konfigurationskort" aria-pressed="${this._configurationCardsVisible}" data-config-cards-toggle><ha-icon icon="mdi:cog-outline"></ha-icon></button>
+              <button type="button" class="header-icon-button config-cards-button" aria-label="Öppna inställningar" aria-haspopup="dialog" data-config-cards-toggle><ha-icon icon="mdi:cog-outline"></ha-icon></button>
               <button type="button" class="header-icon-button debug-button${this._debugEnabled ? " active" : ""}" aria-label="Visa diagnostik" aria-pressed="${this._debugEnabled}" data-debug-toggle><ha-icon icon="mdi:bug-outline"></ha-icon></button>
               <button type="button" class="header-icon-button" aria-label="Visa data" data-board-data-toggle>Visa data</button>
             </div>
@@ -2524,6 +2525,27 @@ class ElrakningPanel {
           <pre data-board-data-text></pre>
           <button type="button" data-board-data-copy>Kopiera</button>
           <button type="button" data-board-data-close>Stäng</button>
+        </div>
+      </div>
+      <div class="provider-source-dialog site-settings-dialog" data-site-settings-dialog hidden role="dialog" aria-modal="true" aria-labelledby="site-settings-title">
+        <div class="provider-dialog-card">
+          <h2 id="site-settings-title">Installation / bostad</h2>
+          <p class="site-settings-label">Aktiv installation</p>
+          <p class="site-settings-current" data-site-current-name>–</p>
+          <p class="site-settings-label">Site ID</p>
+          <code class="site-settings-id" data-site-current-id>–</code>
+          <p class="site-settings-created" data-site-current-created></p>
+          <div class="site-settings-actions">
+            <button type="button" data-site-rename>Byt namn</button>
+            <button type="button" data-site-create>+ Ny installation / bostad</button>
+          </div>
+          <label class="site-settings-label" for="site-settings-select">Byt installation</label>
+          <select id="site-settings-select" data-site-select></select>
+          <p class="site-settings-help">Att markera en installation ändrar inte aktiv site.</p>
+          <button type="button" data-site-activate disabled>Gör till aktiv installation</button>
+          <p class="site-settings-result" data-site-settings-result aria-live="polite"></p>
+          <label class="site-settings-config-toggle"><input type="checkbox" data-site-config-cards-toggle> Visa konfigurationskort på tavlan</label>
+          <button type="button" data-site-settings-close>Stäng</button>
         </div>
       </div>
       <div class="meter-dialog" data-meter-dialog hidden role="dialog" aria-modal="true" aria-labelledby="meter-title">
@@ -3489,6 +3511,72 @@ class ElrakningPanel {
         .provider-source-dialog .provider-dialog-card {
           max-height: calc(100vh - 40px);
           overflow: auto;
+        }
+
+        .site-settings-dialog .provider-dialog-card {
+          max-width: 520px;
+        }
+
+        .site-settings-label {
+          color: var(--secondary-text-color);
+          font-size: 13px;
+          margin-top: 16px;
+        }
+
+        .site-settings-current {
+          font-size: 18px;
+          margin-top: 4px;
+        }
+
+        .site-settings-id {
+          color: var(--secondary-text-color);
+          display: block;
+          margin-top: 4px;
+          overflow-wrap: anywhere;
+        }
+
+        .site-settings-created,
+        .site-settings-help,
+        .site-settings-result {
+          color: var(--secondary-text-color);
+          font-size: 13px;
+          margin-top: 8px;
+        }
+
+        .site-settings-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .site-settings-actions button,
+        .site-settings-dialog [data-site-activate],
+        .site-settings-dialog [data-site-settings-close] {
+          margin-top: 16px;
+        }
+
+        .site-settings-dialog select {
+          background: var(--primary-background-color);
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          box-sizing: border-box;
+          color: var(--primary-text-color);
+          font: inherit;
+          margin-top: 6px;
+          padding: 9px;
+          width: 100%;
+        }
+
+        .site-settings-config-toggle {
+          align-items: center;
+          display: flex !important;
+          gap: 8px;
+        }
+
+        .site-settings-config-toggle input {
+          display: inline-block;
+          margin: 0;
+          width: auto;
         }
 
         .provider-dialog-card label {
@@ -5438,6 +5526,7 @@ class ElrakningPanel {
     this._bindPowerDialog();
     this._bindDebugToggle();
     this._bindConfigurationCardsToggle();
+    this._bindSiteSettingsDialog();
     this._bindMainCardToggles();
     this._bindProviderSourceDialog();
     this._bindBoardDataDialog();
@@ -6129,9 +6218,124 @@ class ElrakningPanel {
   _bindConfigurationCardsToggle() {
     const toggle = this.host.querySelector("[data-config-cards-toggle]");
     if (!toggle) return;
-    toggle.addEventListener("click", () => {
-      this._applyConfigurationCardsVisibility(!this._configurationCardsVisible);
+    toggle.addEventListener("click", () => this._openSiteSettings());
+  }
+
+  async _loadSiteIdentity() {
+    if (!this.hass?.callWS) return null;
+    try {
+      const state = await this.hass.callWS({ type: "elrakning/site_identity" });
+      this._siteState = state;
+      this._renderSiteSettings();
+      return state;
+    } catch (error) {
+      const result = this.host.querySelector("[data-site-settings-result]");
+      if (result) result.textContent = "Installationer kunde inte hämtas.";
+      return null;
+    }
+  }
+
+  _renderSiteSettings() {
+    const state = this._siteState || {};
+    const current = state.current_site || state.site || {};
+    const currentId = state.site_id || current.site_id || null;
+    const name = this.host.querySelector("[data-site-current-name]");
+    const id = this.host.querySelector("[data-site-current-id]");
+    const created = this.host.querySelector("[data-site-current-created]");
+    const select = this.host.querySelector("[data-site-select]");
+    const activate = this.host.querySelector("[data-site-activate]");
+    const configToggle = this.host.querySelector("[data-site-config-cards-toggle]");
+    if (name) name.textContent = current.name || "Namnlös installation";
+    if (id) id.textContent = currentId || "–";
+    if (created) created.textContent = current.created_at ? `Skapad ${current.created_at}` : "";
+    if (configToggle) configToggle.checked = this._configurationCardsVisible;
+    if (!select) return;
+    const sites = Array.isArray(state.available_sites) ? state.available_sites : [];
+    select.replaceChildren(...sites.map((site) => {
+      const option = document.createElement("option");
+      option.value = site.site_id || "";
+      option.textContent = site.name || site.site_id || "Namnlös installation";
+      option.selected = option.value === currentId;
+      return option;
+    }));
+    if (activate) activate.disabled = !select.value || select.value === currentId;
+  }
+
+  _setSiteSettingsBusy(busy) {
+    for (const control of this.host.querySelectorAll("[data-site-activate], [data-site-rename], [data-site-create], [data-site-select]")) control.disabled = busy;
+  }
+
+  async _openSiteSettings() {
+    const dialog = this.host.querySelector("[data-site-settings-dialog]");
+    if (!dialog) return;
+    dialog.hidden = false;
+    await this._loadSiteIdentity();
+  }
+
+  _bindSiteSettingsDialog() {
+    const dialog = this.host.querySelector("[data-site-settings-dialog]");
+    const close = this.host.querySelector("[data-site-settings-close]");
+    const select = this.host.querySelector("[data-site-select]");
+    const activate = this.host.querySelector("[data-site-activate]");
+    const rename = this.host.querySelector("[data-site-rename]");
+    const create = this.host.querySelector("[data-site-create]");
+    const configToggle = this.host.querySelector("[data-site-config-cards-toggle]");
+    if (!dialog || !close || !select || !activate || !rename || !create || !configToggle) return;
+    const result = this.host.querySelector("[data-site-settings-result]");
+    const currentId = () => this._siteState?.current_site?.site_id || this._siteState?.site_id || null;
+    close.addEventListener("click", () => { dialog.hidden = true; });
+    dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.hidden = true; });
+    select.addEventListener("change", () => { activate.disabled = !select.value || select.value === currentId(); });
+    configToggle.addEventListener("change", () => {
+      this._applyConfigurationCardsVisibility(configToggle.checked);
       this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
+    });
+    rename.addEventListener("click", async () => {
+      const id = currentId();
+      const name = window.prompt("Namn på installationen", this._siteState?.current_site?.name || "");
+      if (!id || name == null || !name.trim()) return;
+      this._setSiteSettingsBusy(true);
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/site_rename", site_id: id, name: name.trim() });
+        if (!response?.success) throw new Error(response?.error || "site_rename_failed");
+        this._siteState = response;
+        this._renderSiteSettings();
+        if (result) result.textContent = "Namnet sparades.";
+      } catch (error) {
+        if (result) result.textContent = `Namn kunde inte sparas: ${error.message}`;
+      } finally { this._setSiteSettingsBusy(false); }
+    });
+    create.addEventListener("click", async () => {
+      const name = window.prompt("Namn på ny installation", "Ny installation");
+      if (name == null || !name.trim()) return;
+      this._setSiteSettingsBusy(true);
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/site_create", name: name.trim() });
+        if (!response?.success) throw new Error(response?.error || "site_create_failed");
+        this._siteState = response;
+        this._renderSiteSettings();
+        if (result) result.textContent = "Installationen skapades. Välj den och bekräfta byte om den ska aktiveras.";
+      } catch (error) {
+        if (result) result.textContent = `Installation kunde inte skapas: ${error.message}`;
+      } finally { this._setSiteSettingsBusy(false); }
+    });
+    activate.addEventListener("click", async () => {
+      const site = this._siteState?.available_sites?.find((item) => item.site_id === select.value);
+      if (!site || select.value === currentId()) return;
+      if (!window.confirm(`Byt aktiv installation till ${site.name || site.site_id}? Nya mappings tillhör därefter denna site. Gamla data raderas inte.`)) return;
+      this._setSiteSettingsBusy(true);
+      if (result) result.textContent = "Byter installation …";
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/site_activate", site_id: site.site_id, confirm: true });
+        if (!response?.success) throw new Error(response?.error || "site_activate_failed");
+        this._siteState = response;
+        this._renderSiteSettings();
+        await this._refreshBackendState(true);
+        if (result) result.textContent = "Installationen är aktiv.";
+      } catch (error) {
+        if (result) result.textContent = `Byte kunde inte genomföras: ${error.message}`;
+        await this._loadSiteIdentity();
+      } finally { this._setSiteSettingsBusy(false); }
     });
     this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
   }
