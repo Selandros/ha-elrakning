@@ -165,6 +165,7 @@ class MeterManager:
     def __init__(self, hass, diagnostic_callback: Callable[..., Awaitable[None]] | None = None) -> None:
         self.hass = hass
         self._diagnostic_callback = diagnostic_callback
+        self._mapping_changed_callback = None
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {field: None for field in METER_FIELDS}
         self.mapping[METER_INVERT_FIELD] = False
@@ -174,6 +175,18 @@ class MeterManager:
         self._phase_source_entities: dict[str, dict[str, str]] = {"current": {}, "voltage": {}, "active_power": {}}
         self._phase_current_discovery_method = "device_registry_and_phase_metadata"
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
+
+    def set_mapping_changed_callback(self, callback) -> None:
+        """Register the metadata-only source ledger callback."""
+        self._mapping_changed_callback = callback
+
+    async def _notify_mapping_changed(self) -> None:
+        if self._mapping_changed_callback is None:
+            return
+        try:
+            await self._mapping_changed_callback()
+        except Exception:
+            return
 
     async def _async_state_changed(self, event: Event) -> None:
         """Publish normalized live power without polling."""
@@ -240,6 +253,7 @@ class MeterManager:
         self.mapping[METER_INVERT_FIELD] = False
         self._history_summary = None
         await self.store.async_remove()
+        await self._notify_mapping_changed()
         return await self.async_state()
 
     async def async_save_mapping(self, mapping: dict[str, Any]) -> dict[str, Any]:
@@ -270,6 +284,7 @@ class MeterManager:
             self.mapping = selected
             self._history_summary = None
             await self.store.async_save(self.mapping)
+            await self._notify_mapping_changed()
             await self._diagnostic("INFO", "meter_store_write_success", "Meter mapping stored")
             await self._diagnostic(
                 "INFO",

@@ -70,6 +70,7 @@ BILLING_HISTORY_COMMAND = f"{DOMAIN}/billing_history"
 POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
+SITE_IDENTITY_COMMAND = f"{DOMAIN}/site_identity"
 SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
 SOLAR_EVIDENCE_STATE_COMMAND = f"{DOMAIN}/solar_evidence_state"
 UPDATE_EVENT = "elrakning_price_update"
@@ -119,6 +120,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_save)
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
+    websocket_api.async_register_command(hass, websocket_site_identity)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -668,7 +670,15 @@ async def websocket_electricity_provider_source_data(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_diagnostics_state(hass, connection, msg):
     manager = _elhandel_manager(hass)
-    connection.send_result(msg["id"], {"logs": manager.diagnostics if manager else []})
+    site_identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    connection.send_result(msg["id"], {
+        "logs": manager.diagnostics if manager else [],
+        "site_identity": site_identity.public_state() if site_identity else {
+            "site_id": None,
+            "logical_roles": [],
+            "source_ledger": [],
+        },
+    })
 
 
 @websocket_api.websocket_command({vol.Required("type"): DIAGNOSTICS_CLEAR_COMMAND})
@@ -1022,6 +1032,14 @@ async def websocket_solar_forecast_state(hass, connection, msg):
 async def websocket_solar_evidence_state(hass, connection, msg):
     manager = hass.data.get(DOMAIN, {}).get("solar_evidence_manager")
     connection.send_result(msg["id"], manager.public_state() if manager else {"available": False, "days": []})
+
+
+@websocket_api.websocket_command({vol.Required("type"): SITE_IDENTITY_COMMAND})
+@websocket_api.async_response
+async def websocket_site_identity(hass, connection, msg):
+    """Return current site identity and configured source generations."""
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    connection.send_result(msg["id"], manager.public_state() if manager else {"site_id": None, "logical_roles": [], "source_ledger": []})
 
 
 def _solar_forecast_manager(hass) -> SolarForecastManager | None:

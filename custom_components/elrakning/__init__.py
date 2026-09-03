@@ -22,6 +22,7 @@ from .solar_pvgis import SolarPvgisManager
 from .solar_shadow import SolarShadowManager
 from .solar_evidence import SolarEvidenceManager
 from .solar_weather import SolarWeatherManager
+from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
 
 PANEL_PATH = DOMAIN
@@ -57,6 +58,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_manager = PowerManager(hass, manager.async_diagnostic)
     await power_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["power_manager"] = power_manager
+    site_identity_manager = SiteIdentityManager(hass, power_manager, meter_manager)
+    await site_identity_manager.async_load()
+    await site_identity_manager.async_sync_from_current()
+    power_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
+    meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
+    hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
     solar_forecast_manager = SolarForecastManager(hass, manager.async_diagnostic)
     await solar_forecast_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_forecast_manager"] = solar_forecast_manager
@@ -189,6 +196,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await meter_manager.async_shutdown()
     if power_manager := frontend_data.pop("power_manager", None):
         await power_manager.async_shutdown()
+    frontend_data.pop("site_identity_manager", None)
     if solar_forecast_manager := frontend_data.pop("solar_forecast_manager", None):
         await solar_forecast_manager.async_shutdown()
     if grid_manager := frontend_data.pop("grid_manager", None):

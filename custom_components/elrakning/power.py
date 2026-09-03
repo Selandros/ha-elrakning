@@ -169,10 +169,23 @@ class PowerManager:
     def __init__(self, hass, diagnostic_callback: Callable[..., Awaitable[None]] | None = None) -> None:
         self.hass = hass
         self._diagnostic_callback = diagnostic_callback
+        self._mapping_changed_callback = None
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {"solar_entities": [], SOLAR_ARRAY_METADATA_KEY: {}, **{field: None for field in POWER_FIELDS}, "invert_battery_power": False}
         self._history_inflight: dict[tuple[str, str, int], asyncio.Task] = {}
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
+
+    def set_mapping_changed_callback(self, callback) -> None:
+        """Register the metadata-only source ledger callback."""
+        self._mapping_changed_callback = callback
+
+    async def _notify_mapping_changed(self) -> None:
+        if self._mapping_changed_callback is None:
+            return
+        try:
+            await self._mapping_changed_callback()
+        except Exception:
+            return
 
     async def _async_state_changed(self, event: Event) -> None:
         entity_id = event.data.get("entity_id")
@@ -286,6 +299,7 @@ class PowerManager:
             self._validate_unit(entity_id, state, field in {"consumption_entity", "charging_entity", "discharging_entity", "battery_power_entity"}, field)
         self.mapping = selected
         await self.store.async_save(self.mapping)
+        await self._notify_mapping_changed()
         return await self.async_state()
 
     @staticmethod
