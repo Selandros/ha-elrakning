@@ -2251,6 +2251,7 @@ class ElrakningPanel {
             <div class="header-icon-controls" aria-label="Elräkningens kontroller">
               <button type="button" class="header-icon-button config-cards-button${this._configurationCardsVisible ? " active" : ""}" aria-label="Visa konfigurationskort" aria-pressed="${this._configurationCardsVisible}" data-config-cards-toggle><ha-icon icon="mdi:cog-outline"></ha-icon></button>
               <button type="button" class="header-icon-button debug-button${this._debugEnabled ? " active" : ""}" aria-label="Visa diagnostik" aria-pressed="${this._debugEnabled}" data-debug-toggle><ha-icon icon="mdi:bug-outline"></ha-icon></button>
+              <button type="button" class="header-icon-button" aria-label="Visa data" data-board-data-toggle>Visa data</button>
             </div>
           </div>
         </header>
@@ -2503,6 +2504,14 @@ class ElrakningPanel {
           <pre data-provider-source-text></pre>
           <button type="button" data-provider-source-copy disabled>Kopiera</button>
           <button type="button" data-provider-source-close>Stäng</button>
+        </div>
+      </div>
+      <div class="provider-source-dialog" data-board-data-dialog hidden role="dialog" aria-modal="true" aria-labelledby="board-data-dialog-title">
+        <div class="provider-dialog-card">
+          <h2 id="board-data-dialog-title">Visa data</h2>
+          <pre data-board-data-text></pre>
+          <button type="button" data-board-data-copy>Kopiera</button>
+          <button type="button" data-board-data-close>Stäng</button>
         </div>
       </div>
       <div class="meter-dialog" data-meter-dialog hidden role="dialog" aria-modal="true" aria-labelledby="meter-title">
@@ -5415,6 +5424,7 @@ class ElrakningPanel {
     this._bindConfigurationCardsToggle();
     this._bindMainCardToggles();
     this._bindProviderSourceDialog();
+    this._bindBoardDataDialog();
     this._bindMeterSourceDialog();
     this._bindLivePowerCards();
     this._bindPhaseHistoryCard();
@@ -6129,6 +6139,139 @@ class ElrakningPanel {
         this._persistChartPreferences({ main_cards: { ...this._mainCards } });
       });
     }
+  }
+
+  async _buildBoardDataSnapshot() {
+    const call = async (type) => {
+      try {
+        return { status: "ok", data: await this.hass.callWS({ type }) };
+      } catch (error) {
+        return { status: "error", error_type: error?.name || "Error" };
+      }
+    };
+    const [site, power, meter, provider, grid, forecast, evidence] = await Promise.all([
+      call("elrakning/site_identity"),
+      call("elrakning/power_state"),
+      call("elrakning/meter_state"),
+      call("elrakning/electricity_provider_state"),
+      call("elrakning/grid/state"),
+      call("elrakning/solar_forecast_state"),
+      call("elrakning/solar_evidence_state"),
+    ]);
+    const siteData = site.data || {};
+    const currentSiteId = siteData.current_site?.site_id || siteData.site_id || null;
+    const allSites = Array.isArray(siteData.available_sites) ? siteData.available_sites : [];
+    const foreignSiteIds = allSites
+      .map((item) => item?.site_id)
+      .filter((siteId) => siteId && siteId !== currentSiteId);
+    const currentPayload = { power: power.data, meter: meter.data, provider: provider.data, grid: grid.data, forecast: forecast.data, evidence: evidence.data };
+    const currentPayloadText = JSON.stringify(currentPayload);
+    const ledger = Array.isArray(siteData.source_ledger) ? siteData.source_ledger : [];
+    const foreignGenerationIds = ledger
+      .filter((item) => item?.site_id && item.site_id !== currentSiteId)
+      .map((item) => item.generation_id)
+      .filter(Boolean);
+
+    return sanitizeDebugData({
+      board: {
+        version: this.version,
+        generated_at: new Date().toISOString(),
+        runtime_status: siteData.runtime_status || null,
+      },
+      site: {
+        current_site: siteData.current_site || siteData.site || null,
+        available_sites: allSites,
+        site_configured: siteData.site_configured ?? null,
+        current_site_id: currentSiteId,
+        current_site_name: siteData.current_site?.name || siteData.site?.name || null,
+      },
+      source_ledger: {
+        current_site_logical_roles: siteData.logical_roles || [],
+        current_site_source_ledger: siteData.source_ledger || [],
+        current_site_ledger_count: ledger.length,
+      },
+      power: power.data,
+      meter: meter.data,
+      provider: provider.data,
+      price: {
+        binding: this._priceBinding || null,
+        coordinator_state: this.priceData,
+        source_state: this._priceState || null,
+      },
+      solar_context: {
+        forecast: forecast.data,
+        weather: this._powerHistory?.solar_weather || null,
+        pvgis: this._powerHistory?.solar_pvgis || null,
+        open_meteo: this._powerHistory?.solar_open_meteo || null,
+        shadow: this._powerHistory?.solar_shadow || null,
+        evidence: evidence.data || this._powerHistory?.solar_evidence || null,
+      },
+      battery: {
+        configured: Boolean(power.data?.battery_power_entity || power.data?.soc_entity || power.data?.capacity_entity),
+        power: { charging_kw: power.data?.charging_kw ?? null, discharging_kw: power.data?.discharging_kw ?? null },
+        soc_percent: power.data?.soc_percent ?? null,
+        capacity_kwh: power.data?.capacity_kwh ?? null,
+      },
+      cost: {
+        configured: this._invoiceEstimateRaw != null,
+        invoice_estimate: this._invoiceEstimateRaw || null,
+        billing_source: this._billingHistory?.source || null,
+        billing_history_loaded: Boolean(this._billingHistory),
+      },
+      frontend: {
+        house: this.host.querySelector('[data-live-power-tile="house"]')?._livePowerRaw || null,
+        solar: this.host.querySelector('[data-live-power-tile="solar"]')?._livePowerRaw || null,
+        grid: this.host.querySelector('[data-live-power-tile="grid"]')?._livePowerRaw || null,
+        battery: this.host.querySelector('[data-live-power-tile="battery"]')?._livePowerRaw || null,
+        price: { status: this.priceData?.error || "available", period_count: this.priceData?.periods?.length || 0 },
+        elhandel: this._electricityProviderState,
+        elnat: this._eonGridState,
+        cost: this._invoiceEstimateRaw || null,
+      },
+      diagnostics: {
+        entries: this._diagnosticEntries || [],
+        current_payload_contains_foreign_site_ids: foreignSiteIds.filter((siteId) => currentPayloadText.includes(siteId)),
+      },
+      site_isolation_check: {
+        current_site_id: currentSiteId,
+        foreign_site_ids_seen: foreignSiteIds.filter((siteId) => currentPayloadText.includes(siteId)),
+        foreign_source_generation_ids_seen: foreignGenerationIds,
+        foreign_binding_fingerprints_seen: [],
+      },
+      endpoints: { site, power, meter, provider, grid, forecast, evidence },
+    });
+  }
+
+  _bindBoardDataDialog() {
+    const open = this.host.querySelector("[data-board-data-toggle]");
+    const dialog = this.host.querySelector("[data-board-data-dialog]");
+    const text = this.host.querySelector("[data-board-data-text]");
+    const copy = this.host.querySelector("[data-board-data-copy]");
+    const close = this.host.querySelector("[data-board-data-close]");
+    if (!open || !dialog || !text || !copy || !close) return;
+    const dismiss = () => { dialog.hidden = true; };
+    open.addEventListener("click", async () => {
+      dialog.hidden = false;
+      text.textContent = "Hämtar data …";
+      copy.disabled = true;
+      try {
+        text.textContent = JSON.stringify(await this._buildBoardDataSnapshot(), null, 2);
+        copy.disabled = false;
+      } catch {
+        text.textContent = JSON.stringify({ status: "error", error_type: "snapshot_failed" }, null, 2);
+      }
+    });
+    copy.addEventListener("click", async () => {
+      try {
+        await this._copyText(text.textContent);
+        copy.textContent = "Kopierat";
+        window.setTimeout(() => { copy.textContent = "Kopiera"; }, 1500);
+      } catch {
+        copy.textContent = "Kunde inte kopiera";
+      }
+    });
+    close.addEventListener("click", dismiss);
+    dialog.addEventListener("click", (event) => { if (event.target === dialog) dismiss(); });
   }
 
   async _loadDebugPreference() {
