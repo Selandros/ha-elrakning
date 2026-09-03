@@ -97,6 +97,22 @@ def _hass(*entity_ids):
 
 
 class MeterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unconfigured_meter_does_not_expose_stale_phase_context(self):
+        hass = _hass("sensor.phase_l1", "sensor.phase_l2", "sensor.phase_l3")
+        manager = meter.MeterManager(hass)
+        manager.mapping = {field: None for field in meter.METER_FIELDS}
+        manager.mapping[meter.METER_INVERT_FIELD] = False
+        manager._phase_current_entities = {"l1": "sensor.phase_l1"}
+        manager._phase_source_entities = {"current": {"l1": "sensor.phase_l1"}, "voltage": {}, "active_power": {}}
+
+        state = await manager.async_state()
+
+        self.assertFalse(state["configured"])
+        self.assertFalse(state["phase_current_available"])
+        self.assertEqual(state["phase_current_entities"], {})
+        self.assertEqual(state["phase_source_entities"], {"current": {}, "voltage": {}, "active_power": {}})
+        self.assertEqual(manager._phase_current_entities, {})
+
     def test_phase_current_discovery_uses_current_unit_and_phase_metadata(self):
         class Entry:
             def __init__(self, device_id, unique_id):

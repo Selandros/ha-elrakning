@@ -90,6 +90,31 @@ class _Coordinator:
 
 
 class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_site_identity_filters_ledger_to_active_site(self):
+        power = _MappingManager({})
+        meter = _MappingManager({})
+        manager = object.__new__(SiteIdentityManager)
+        manager.power_manager = power
+        manager.meter_manager = meter
+        manager.state = {
+            "active_site_id": "site-b",
+            "site": {"site_id": "site-b", "name": "B"},
+            "sites": [
+                {"site_id": "site-a", "name": "A"},
+                {"site_id": "site-b", "name": "B"},
+            ],
+            "site_configs": {"site-b": {"power": {}, "meter": {}, "bindings": {}}},
+            "ledger": [
+                {"site_id": "site-a", "generation_id": "generation-a"},
+                {"site_id": "site-b", "generation_id": "generation-b"},
+            ],
+        }
+
+        state = manager.public_state()
+
+        self.assertEqual([item["generation_id"] for item in state["source_ledger"]], ["generation-b"])
+        self.assertEqual([item["generation_id"] for item in state["logical_roles"]], ["generation-b"])
+
     async def test_price_fetch_requires_explicit_site_binding(self):
         entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
         services = _Services({"SE2": [{

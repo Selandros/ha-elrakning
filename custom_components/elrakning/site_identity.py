@@ -518,7 +518,10 @@ class SiteIdentityManager:
             ),
             "bindings": deepcopy(self.state.get("site_configs", {}).get(active_site_id, {}).get("bindings", {})),
             "logical_roles": [item for item in ledger if item.get("site_id") == active_site_id and item.get("effective_to") is None],
-            "source_ledger": ledger,
+            "source_ledger": [
+                item for item in ledger
+                if item.get("site_id") == active_site_id
+            ],
         }
 
     def active_site_is_configured(self) -> bool:

@@ -260,12 +260,20 @@ class MeterManager:
         selected[METER_INVERT_FIELD] = mapping.get(METER_INVERT_FIELD) is True
         self.mapping = selected
         self._history_summary = None
+        self._clear_phase_context()
         await self.store.async_save(self.mapping)
+
+    def _clear_phase_context(self) -> None:
+        """Drop phase discovery and live context when the active site has no meter."""
+        self._phase_current_entities = {}
+        self._phase_source_entities = {"current": {}, "voltage": {}, "active_power": {}}
+        self._phase_current_discovery_method = None
 
     async def async_clear(self) -> dict[str, Any]:
         self.mapping = {field: None for field in METER_FIELDS}
         self.mapping[METER_INVERT_FIELD] = False
         self._history_summary = None
+        self._clear_phase_context()
         await self.store.async_remove()
         await self._notify_mapping_changed()
         return await self.async_state()
@@ -319,6 +327,21 @@ class MeterManager:
             "energy_import_valid": None,
             "energy_export_valid": None,
         })
+        if not result["configured"]:
+            self._clear_phase_context()
+            result.update({
+                "phase_current_a": {},
+                "phase_voltage_v": {},
+                "phase_active_power_kw": {},
+                "phase_current_entities": {},
+                "phase_current_source_entities": {},
+                "phase_current_discovery_method": None,
+                "phase_current_available": False,
+                "phase_source_entities": {"current": {}, "voltage": {}, "active_power": {}},
+                "phase_discovery_method": None,
+            })
+            return result
+        self._phase_current_discovery_method = "device_registry_and_phase_metadata"
         phase_sources = self._discover_phase_entities()
         self._phase_source_entities = phase_sources
         phase_entities = phase_sources["current"]
