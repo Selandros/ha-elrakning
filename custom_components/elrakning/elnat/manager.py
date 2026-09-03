@@ -19,6 +19,7 @@ class GridManager:
         self.definition = definition
         self.provider = definition.manager_factory(hass, entry) if definition else None
         self._site_binding: dict[str, Any] | None = None
+        self._refresh_unsub = None
 
     @property
     def configured(self) -> bool:
