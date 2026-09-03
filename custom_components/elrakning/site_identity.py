@@ -5,15 +5,20 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .meter import METER_FIELDS
+from .power import POWER_FIELDS
+
 
 STORE_KEY = "elrakning.site_identity"
 STORE_VERSION = 1
+SITE_BINDING_SERVICES = ("elhandel", "grid", "nord_pool")
 
 ROLE_MAP = {
     "consumption_entity": "house.consumption",
@@ -118,29 +123,309 @@ class SiteIdentityManager:
         self.meter_manager = meter_manager
         self.store = Store(hass, STORE_VERSION, STORE_KEY)
         self.state: dict[str, Any] = {}
+        self._provider_manager = None
+        self._grid_manager = None
+        self._coordinator = None
+        self._solar_managers: dict[str, Any] = {}
 
     async def async_load(self) -> None:
         cached = await self.store.async_load()
         if isinstance(cached, dict) and isinstance(cached.get("site"), dict):
+            site = dict(cached["site"])
+            site.setdefault("name", "Nuvarande installation")
+            site.setdefault("is_current", site.get("current", True) is True)
+            sites = cached.get("sites")
+            if not isinstance(sites, list) or not sites:
+                sites = [site]
             self.state = {
-                "site": dict(cached["site"]),
+                "site": site,
+                "sites": [dict(item) for item in sites if isinstance(item, dict)],
+                "active_site_id": cached.get("active_site_id") or site.get("site_id"),
+                "site_configs": deepcopy(cached.get("site_configs", {})) if isinstance(cached.get("site_configs"), dict) else {},
                 "ledger": list(cached.get("ledger", [])) if isinstance(cached.get("ledger", []), list) else [],
                 "migration_complete": cached.get("migration_complete", bool(cached.get("ledger"))),
             }
             self.state["site"].setdefault("current", True)
             self.state["site"].setdefault("location_fingerprint", _location_fingerprint(self.hass))
+            self._normalize_sites()
+            if not self.state["site_configs"]:
+                self.state["site_configs"] = {
+                    self.state["active_site_id"]: {
+                        **self._current_mapping_config(),
+                        "bindings": {},
+                    }
+                }
+            for item in self.state["sites"]:
+                self.state["site_configs"].setdefault(item["site_id"], self._empty_site_config())
+            for config in self.state["site_configs"].values():
+                if isinstance(config, dict):
+                    config.setdefault("bindings", {})
+            await self._restore_active_config()
             return
+        site = {
+            "site_id": str(uuid.uuid4()),
+            "name": "Nuvarande installation",
+            "created_at": _now(),
+            "current": True,
+            "is_current": True,
+            "location_fingerprint": _location_fingerprint(self.hass),
+        }
         self.state = {
-            "site": {
-                "site_id": str(uuid.uuid4()),
-                "created_at": _now(),
-                "current": True,
-                "location_fingerprint": _location_fingerprint(self.hass),
-            },
+            "site": site,
+            "sites": [site],
+            "active_site_id": site["site_id"],
+            "site_configs": {site["site_id"]: {**self._current_mapping_config(), "bindings": {}}},
             "ledger": [],
             "migration_complete": False,
         }
         await self.store.async_save(self.state)
+
+    def _normalize_sites(self) -> None:
+        sites = self.state.get("sites")
+        if not isinstance(sites, list) or not sites:
+            sites = [self.state["site"]]
+        normalized = []
+        for site in sites:
+            if not isinstance(site, dict) or not site.get("site_id"):
+                continue
+            item = dict(site)
+            item.setdefault("name", "Installation / bostad")
+            item.setdefault("is_current", item.get("site_id") == self.state.get("active_site_id"))
+            item.setdefault("current", item["is_current"])
+            normalized.append(item)
+        if not normalized:
+            normalized = [self.state["site"]]
+        active_id = self.state.get("active_site_id") or self.state["site"].get("site_id")
+        if not any(site.get("site_id") == active_id for site in normalized):
+            active_id = normalized[0]["site_id"]
+        for site in normalized:
+            site["is_current"] = site.get("site_id") == active_id
+            site["current"] = site["is_current"]
+        self.state["sites"] = normalized
+        self.state["active_site_id"] = active_id
+        self.state["site"] = next(site for site in normalized if site["site_id"] == active_id)
+
+    async def async_rename_site(self, site_id: str, name: str) -> dict[str, Any]:
+        self._normalize_sites()
+        clean_name = name.strip() if isinstance(name, str) else ""
+        if not clean_name:
+            raise ValueError("invalid_site_name")
+        site = next((item for item in self.state["sites"] if item.get("site_id") == site_id), None)
+        if site is None:
+            raise ValueError("site_not_found")
+        site["name"] = clean_name
+        self._normalize_sites()
+        await self.store.async_save(self.state)
+        return self.public_state()
+
+    async def async_create_site(self, name: str) -> dict[str, Any]:
+        clean_name = name.strip() if isinstance(name, str) else ""
+        if not clean_name:
+            raise ValueError("invalid_site_name")
+        self._normalize_sites()
+        site = {
+            "site_id": str(uuid.uuid4()),
+            "name": clean_name,
+            "created_at": _now(),
+            "current": False,
+            "is_current": False,
+            "location_fingerprint": _location_fingerprint(self.hass),
+        }
+        self.state["sites"].append(site)
+        self.state.setdefault("site_configs", {})[site["site_id"]] = self._empty_site_config()
+        await self.store.async_save(self.state)
+        return self.public_state()
+
+    async def async_activate_site(self, site_id: str) -> dict[str, Any]:
+        self._normalize_sites()
+        if not any(item.get("site_id") == site_id for item in self.state["sites"]):
+            raise ValueError("site_not_found")
+        await self.async_sync_from_current()
+        self._snapshot_runtime_state()
+        self.state["active_site_id"] = site_id
+        self._normalize_sites()
+        await self._restore_active_config()
+        if self._provider_manager and self._coordinator:
+            await self.async_apply_runtime_context(
+                self._provider_manager, self._grid_manager, self._coordinator
+            )
+            await self.async_prepare_solar_contexts(self._solar_managers)
+            if self._provider_manager.state.get("configured") and self.active_binding("elhandel"):
+                self._provider_manager.async_start_refresh("site_switch")
+            if self._grid_manager and self._grid_manager.configured and self.active_binding("grid"):
+                self._grid_manager.async_start_refresh()
+        await self.async_sync_from_current()
+        await self.store.async_save(self.state)
+        return self.public_state()
+
+    @staticmethod
+    def _empty_site_config() -> dict[str, Any]:
+        return {"power": {}, "meter": {}, "bindings": {}}
+
+    def _current_mapping_config(self) -> dict[str, Any]:
+        return {
+            "power": deepcopy(self.power_manager.mapping),
+            "meter": deepcopy(self.meter_manager.mapping),
+        }
+
+    @staticmethod
+    def binding_fingerprint(binding: dict[str, Any] | None) -> str | None:
+        """Return a deterministic fingerprint for non-secret site binding data."""
+        if not isinstance(binding, dict):
+            return None
+        payload = {key: value for key, value in binding.items() if key != "binding_fingerprint"}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def active_binding(self, service: str) -> dict[str, Any] | None:
+        """Return only the active site's explicit binding for one service."""
+        self._normalize_sites()
+        config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
+        bindings = config.get("bindings", {}) if isinstance(config, dict) else {}
+        binding = bindings.get(service) if isinstance(bindings, dict) else None
+        return dict(binding) if isinstance(binding, dict) else None
+
+    def _set_binding(self, service: str, binding: dict[str, Any]) -> None:
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            self.state["active_site_id"], self._empty_site_config()
+        )
+        bindings = config.setdefault("bindings", {})
+        normalized = deepcopy(binding)
+        normalized["binding_fingerprint"] = self.binding_fingerprint(normalized)
+        bindings[service] = normalized
+
+    async def async_prepare_runtime_bindings(self, provider_manager, grid_manager, coordinator) -> None:
+        """Migrate verified current resources into Site A and apply active context."""
+        self._normalize_sites()
+        self._provider_manager = provider_manager
+        self._grid_manager = grid_manager
+        self._coordinator = coordinator
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            self.state["active_site_id"], self._empty_site_config()
+        )
+        config.setdefault("bindings", {})
+        legacy_site_migration = len(self.state.get("sites", [])) == 1
+        if legacy_site_migration and not config["bindings"].get("elhandel") and provider_manager.state.get("facility_id"):
+            self._set_binding("elhandel", {
+                "config_entry_id": provider_manager.entry.entry_id,
+                "provider": provider_manager.state.get("provider"),
+                "facility_id": provider_manager.state.get("facility_id"),
+                "configured_at": _now(),
+            })
+        if legacy_site_migration and not config["bindings"].get("grid") and grid_manager and grid_manager.provider:
+            grid_state = grid_manager.provider.state
+            if grid_manager.configured and isinstance(grid_state.get("facility"), dict):
+                self._set_binding("grid", {
+                    "config_entry_id": grid_manager.entry.entry_id,
+                    "provider": getattr(grid_manager.definition, "provider_id", None),
+                    "facility": deepcopy(grid_state.get("facility")),
+                    "tariff": deepcopy(grid_state.get("tariff")),
+                    "grid_price": deepcopy(grid_state.get("grid_price")),
+                    "configured_at": _now(),
+                })
+                config.setdefault("runtime", {})["grid_state"] = deepcopy(grid_state)
+        if legacy_site_migration and not config["bindings"].get("nord_pool"):
+            discover = getattr(coordinator, "discovered_binding", None)
+            binding = discover() if discover else None
+            if binding:
+                self._set_binding("nord_pool", binding)
+        await self.store.async_save(self.state)
+        await self.async_apply_runtime_context(provider_manager, grid_manager, coordinator)
+
+    async def async_apply_runtime_context(self, provider_manager, grid_manager, coordinator) -> None:
+        """Apply the active site's explicit provider, grid and price context."""
+        provider_binding = self.active_binding("elhandel")
+        grid_binding = self.active_binding("grid")
+        price_binding = self.active_binding("nord_pool")
+        config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
+        runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
+        if hasattr(provider_manager, "async_apply_site_binding"):
+            await provider_manager.async_apply_site_binding(provider_binding)
+        if grid_manager and hasattr(grid_manager, "async_apply_site_binding"):
+            await grid_manager.async_apply_site_binding(
+                grid_binding,
+                deepcopy(runtime.get("grid_state")) if isinstance(runtime, dict) else None,
+            )
+        if hasattr(coordinator, "set_site_binding"):
+            coordinator.set_site_binding(price_binding)
+
+    async def async_bind_provider_runtime(self, provider_manager) -> None:
+        """Record an explicit provider facility selection for the active site."""
+        state = provider_manager.state
+        facility_id = state.get("facility_id")
+        if not facility_id:
+            raise ValueError("facility_not_identified")
+        self._set_binding("elhandel", {
+            "config_entry_id": provider_manager.entry.entry_id,
+            "provider": state.get("provider"),
+            "facility_id": facility_id,
+            "configured_at": _now(),
+        })
+        await self.store.async_save(self.state)
+        await provider_manager.async_apply_site_binding(self.active_binding("elhandel"))
+
+    async def async_bind_grid_runtime(self, grid_manager) -> None:
+        """Record the selected grid facility while keeping credentials global."""
+        if not grid_manager or not grid_manager.provider:
+            raise ValueError("grid_unavailable")
+        state = grid_manager.provider.state
+        self._set_binding("grid", {
+            "config_entry_id": grid_manager.entry.entry_id,
+            "provider": getattr(grid_manager.definition, "provider_id", None),
+            "facility": deepcopy(state.get("facility")),
+            "tariff": deepcopy(state.get("tariff")),
+            "grid_price": deepcopy(state.get("grid_price")),
+            "configured_at": _now(),
+        })
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            self.state["active_site_id"], self._empty_site_config()
+        )
+        config.setdefault("runtime", {})["grid_state"] = deepcopy(state)
+        await self.store.async_save(self.state)
+        await grid_manager.async_apply_site_binding(
+            self.active_binding("grid"), deepcopy(state)
+        )
+
+    async def async_prepare_solar_contexts(self, managers: dict[str, Any]) -> None:
+        """Migrate and apply explicit site context for solar and weather managers."""
+        self._solar_managers = {name: manager for name, manager in managers.items() if manager is not None}
+        managers = self._solar_managers
+        self._normalize_sites()
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            self.state["active_site_id"], self._empty_site_config()
+        )
+        bindings = config.setdefault("bindings", {})
+        legacy_site_migration = len(self.state.get("sites", [])) == 1
+        for name, manager in managers.items():
+            if legacy_site_migration and not bindings.get(name):
+                discover = getattr(manager, "discovered_binding", None)
+                binding = discover() if discover else None
+                if binding:
+                    self._set_binding(name, binding)
+        await self.store.async_save(self.state)
+        active_site_id = self.state["active_site_id"]
+        for name, manager in managers.items():
+            apply_context = getattr(manager, "async_apply_site_context", None)
+            if apply_context:
+                await apply_context(active_site_id, self.active_binding(name))
+
+    def _snapshot_runtime_state(self) -> None:
+        """Persist non-secret state needed to restore the active site context."""
+        if not self._grid_manager or not self._grid_manager.provider:
+            return
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            self.state["active_site_id"], self._empty_site_config()
+        )
+        config.setdefault("runtime", {})["grid_state"] = deepcopy(
+            self._grid_manager.provider.state
+        )
+
+    async def _restore_active_config(self) -> None:
+        configs = self.state.setdefault("site_configs", {})
+        config = configs.setdefault(self.state["active_site_id"], self._empty_site_config())
+        if hasattr(self.power_manager, "async_restore_mapping"):
+            await self.power_manager.async_restore_mapping(config.get("power"))
+        if hasattr(self.meter_manager, "async_restore_mapping"):
+            await self.meter_manager.async_restore_mapping(config.get("meter"))
 
     def _current_sources(self) -> dict[str, list[str]]:
         sources: dict[str, list[str]] = {}
@@ -159,12 +444,18 @@ class SiteIdentityManager:
         """Snapshot current mappings while leaving functional managers authoritative."""
         current = self._current_sources()
         ledger = self.state.setdefault("ledger", [])
-        site_id = self.state["site"]["site_id"]
+        self._normalize_sites()
+        site_id = self.state["active_site_id"]
+        config = self.state.setdefault("site_configs", {}).setdefault(site_id, self._empty_site_config())
+        config.update(self._current_mapping_config())
+        config.setdefault("bindings", {})
         initial_migration = self.state.get("migration_complete") is not True
         for role, entity_ids in current.items():
             active = [
                 item for item in ledger
-                if item.get("logical_role") == role and item.get("effective_to") is None
+                if item.get("site_id") == site_id
+                and item.get("logical_role") == role
+                and item.get("effective_to") is None
             ]
             matched: set[int] = set()
             for entity_id in entity_ids:
@@ -205,17 +496,39 @@ class SiteIdentityManager:
                     old.setdefault("provenance", {})["end_reason"] = "mapping_changed_or_removed"
         current_roles = set(current)
         for item in ledger:
-            if item.get("effective_to") is None and item.get("logical_role") not in current_roles:
+            if item.get("site_id") == site_id and item.get("effective_to") is None and item.get("logical_role") not in current_roles:
                 item["effective_to"] = _now()
                 item.setdefault("provenance", {})["end_reason"] = "mapping_removed"
         self.state["migration_complete"] = True
         await self.store.async_save(self.state)
 
     def public_state(self) -> dict[str, Any]:
+        self._normalize_sites()
         ledger = self.state.get("ledger", [])
+        active_site_id = self.state.get("active_site_id")
         return {
             "site": dict(self.state.get("site", {})),
-            "site_id": self.state.get("site", {}).get("site_id"),
-            "logical_roles": [item for item in ledger if item.get("effective_to") is None],
+            "site_id": active_site_id,
+            "current_site": dict(self.state.get("site", {})),
+            "available_sites": [dict(site) for site in self.state.get("sites", [])],
+            "site_configured": bool(
+                self.state.get("site_configs", {}).get(active_site_id, {}).get("power", {}).get("solar_entities")
+                or any(self.state.get("site_configs", {}).get(active_site_id, {}).get("power", {}).get(field) for field in POWER_FIELDS)
+                or any(self.state.get("site_configs", {}).get(active_site_id, {}).get("meter", {}).get(field) for field in METER_FIELDS)
+            ),
+            "bindings": deepcopy(self.state.get("site_configs", {}).get(active_site_id, {}).get("bindings", {})),
+            "logical_roles": [item for item in ledger if item.get("site_id") == active_site_id and item.get("effective_to") is None],
             "source_ledger": ledger,
         }
+
+    def active_site_is_configured(self) -> bool:
+        """Return whether the active site has an explicit physical source mapping."""
+        self._normalize_sites()
+        config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
+        power = config.get("power", {}) if isinstance(config, dict) else {}
+        meter = config.get("meter", {}) if isinstance(config, dict) else {}
+        return bool(
+            power.get("solar_entities")
+            or any(power.get(field) for field in POWER_FIELDS)
+            or any(meter.get(field) for field in METER_FIELDS)
+        )

@@ -58,10 +58,14 @@ def _hass(entries):
 
 
 def _managers(mapping, meter_mapping=None):
-    return (
-        types.SimpleNamespace(mapping=dict(mapping)),
-        types.SimpleNamespace(mapping=dict(meter_mapping or {})),
-    )
+    class _Manager:
+        def __init__(self, value):
+            self.mapping = dict(value)
+
+        async def async_restore_mapping(self, value):
+            self.mapping = dict(value or {})
+
+    return _Manager(mapping), _Manager(meter_mapping or {})
 
 
 class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
@@ -168,6 +172,34 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
             manager.state["ledger"][0]["source_identity"]["identity_key"],
             manager.state["ledger"][1]["source_identity"]["identity_key"],
         )
+
+    async def test_new_site_has_empty_site_scoped_mapping_and_preserves_site_a(self):
+        hass = _hass({"sensor.load": _Entity("registry-load", "load")})
+        power, meter = _managers({"consumption_entity": "sensor.load"}, {"power_entity": "sensor.import"})
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store()
+        await manager.async_load()
+        await manager.async_sync_from_current()
+        site_a = manager.state["active_site_id"]
+        await manager.async_create_site("Adress B")
+        site_b = manager.state["sites"][-1]["site_id"]
+        self.assertEqual(manager.state["site_configs"][site_a]["power"]["consumption_entity"], "sensor.load")
+        self.assertEqual(
+            manager.state["site_configs"][site_b],
+            {"power": {}, "meter": {}, "bindings": {}},
+        )
+        await manager.async_activate_site(site_b)
+        self.assertEqual(manager.public_state()["site_id"], site_b)
+        self.assertEqual(manager.public_state()["logical_roles"], [])
+        self.assertEqual(manager.state["site_configs"][site_a]["meter"]["power_entity"], "sensor.import")
+        power.mapping["consumption_entity"] = "sensor.load_b"
+        await manager.async_sync_from_current()
+        await manager.async_activate_site(site_a)
+        self.assertEqual(power.mapping["consumption_entity"], "sensor.load")
+        self.assertEqual(meter.mapping["power_entity"], "sensor.import")
+        await manager.async_activate_site(site_b)
+        self.assertEqual(power.mapping["consumption_entity"], "sensor.load_b")
+        self.assertEqual(meter.mapping, {})
 
     def test_identity_classification_does_not_guess_without_stable_identity(self):
         old = {"source_identity": {"identity_key": None}}

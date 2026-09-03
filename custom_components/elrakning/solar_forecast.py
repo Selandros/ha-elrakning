@@ -11,6 +11,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .site_context import async_load_site_store
+
 
 FORECAST_SOLAR_DOMAIN = "forecast_solar"
 STORE_KEY = "elrakning.solar_forecast"
@@ -90,6 +92,8 @@ class SolarForecastManager:
         self._baselines: dict[str, dict[str, Any]] = {}
         self._entities: dict[str, str] = {}
         self._facts: dict[str, Any] = self._unavailable_facts()
+        self._site_id: str | None = None
+        self._site_context_enabled = False
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     @staticmethod
@@ -122,6 +126,41 @@ class SolarForecastManager:
         self._trim_baselines(dt_util.as_local(dt_util.now()).date())
         self._discover()
         await self._refresh(capture=True)
+
+    def discovered_binding(self) -> dict[str, Any] | None:
+        """Return the explicit Forecast.Solar resource selected by discovery."""
+        if not self._entities:
+            return None
+        entries = self.hass.config_entries.async_entries(FORECAST_SOLAR_DOMAIN)
+        if len(entries) != 1:
+            return None
+        return {
+            "config_entry_id": entries[0].entry_id,
+            "entities": dict(self._entities),
+            "source": "forecast_solar",
+        }
+
+    async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
+        """Switch baselines and live discovery to one explicit site."""
+        self._site_id = site_id if isinstance(binding, dict) else None
+        self._site_context_enabled = True
+        if self._site_id is None:
+            self._baselines = {}
+            self._entities = {}
+            self._facts = self._unavailable_facts()
+            return
+        legacy = {"days": self._baselines}
+        self.store, cached = await async_load_site_store(
+            self.hass, STORE_KEY, 1, self._site_id, legacy
+        )
+        if cached and isinstance(cached.get("days", cached), dict):
+            self._baselines = {
+                key: value for key, value in cached.get("days", cached).items()
+                if isinstance(key, str) and isinstance(value, dict)
+            }
+        self._entities = dict(binding.get("entities", {}))
+        self._facts = self._read_facts()
+        self._facts["site_id"] = self._site_id
 
     async def async_shutdown(self) -> None:
         if self._state_unsub:
@@ -211,6 +250,7 @@ class SolarForecastManager:
             "captured_at": dt_util.now().isoformat(),
             "source": "forecast_solar",
             "capture_type": capture_type,
+            "site_id": self._site_id,
         }
         if existing and existing.get("forecast_kwh") == next_value["forecast_kwh"] and existing.get("capture_type") == capture_type:
             return False
@@ -218,6 +258,8 @@ class SolarForecastManager:
         return True
 
     async def _async_state_changed(self, event: Event) -> None:
+        if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
+            return
         if event.data.get("entity_id") not in self._entities.values():
             return
         await self._refresh(capture=True)

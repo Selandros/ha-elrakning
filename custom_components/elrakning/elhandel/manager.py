@@ -71,6 +71,7 @@ class ElhandelManager:
         self.preferences_store = Store(hass, 1, "elrakning.frontend_preferences")
         self.chart_preferences_store = Store(hass, 1, "elrakning.chart_preferences")
         self._chart_preferences_lock = asyncio.Lock()
+        self._site_binding: dict[str, Any] | None = None
         self.frontend_preferences = {"debug_enabled": False}
         self.lifecycle = LifecycleManager(hass)
         self.diagnostics: list[dict[str, Any]] = []
@@ -129,6 +130,46 @@ class ElhandelManager:
             entry_data = dict(self.entry.data)
             entry_data[ELECTRICITY_PROVIDER_CONFIG_KEY] = GREENELY_PROVIDER
             self.hass.config_entries.async_update_entry(self.entry, data=entry_data)
+
+    async def async_apply_site_binding(self, binding: dict[str, Any] | None) -> None:
+        """Apply one explicit site facility without changing shared credentials."""
+        self._site_binding = dict(binding) if isinstance(binding, dict) else None
+        self.lifecycle.invalidate_generation()
+        self.lifecycle.cancel_tasks()
+        if not self._site_binding:
+            self.state = {**self.state, **self._empty_site_runtime_state()}
+            return
+        facility_id = self._site_binding.get("facility_id")
+        if not isinstance(facility_id, str) or not facility_id:
+            self.state = {**self.state, **self._empty_site_runtime_state()}
+            return
+        cached = await self.storage.async_load(
+            facility_id=facility_id,
+            provider=self._site_binding.get("provider") or GREENELY_PROVIDER,
+            use_active_namespace=False,
+        )
+        if isinstance(cached, dict):
+            self.state = self.storage.sanitize(cached)
+            self.state["configured"] = True
+            self.state["provider"] = self._site_binding.get("provider") or GREENELY_PROVIDER
+            return
+        self.state = {**self.state, **self._empty_site_runtime_state()}
+
+    def _empty_site_runtime_state(self) -> dict[str, Any]:
+        return {
+            "configured": False,
+            "provider": None,
+            "provider_name": None,
+            "facility_id": None,
+            "facility_name": None,
+            "invoice_count": 0,
+            "invoices": [],
+            "summary": None,
+            "consumption": None,
+            "consumption_error": None,
+            "source": {"facility": None, "contracts": [], "invoices": [], "consumption": {"samples": []}},
+            "error": None,
+        }
 
     def _config(self) -> dict[str, Any]:
         config = self.entry.data.get(ELECTRICITY_PROVIDER_CONFIG_DATA_KEY, {})
@@ -286,6 +327,8 @@ class ElhandelManager:
         )
 
     async def async_refresh_consumption(self, reason: str = "manual_debug", _generation: int | None = None) -> None:
+        if getattr(self, "_site_binding", True) is None:
+            return
         refresh_generation = self.lifecycle.generation if _generation is None else _generation
         config = self._config()
         if not GreenelyProvider.is_configured(config):
@@ -323,6 +366,8 @@ class ElhandelManager:
             self.hass.bus.async_fire(ELECTRICITY_PROVIDER_UPDATE_EVENT)
 
     async def async_refresh(self, reason: str = "manual_debug", _generation: int | None = None) -> dict[str, Any]:
+        if getattr(self, "_site_binding", True) is None:
+            return self.public_state()
         refresh_generation = self.lifecycle.generation if _generation is None else _generation
         config = self._config()
         if not GreenelyProvider.is_configured(config):

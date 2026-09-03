@@ -80,6 +80,8 @@ class SolarWeatherManager:
         self._sensor_entities: dict[str, str] = {}
         self._watched_entity_ids: set[str] = set()
         self._state: dict[str, Any] = self._unavailable_state("unavailable")
+        self._site_id: str | None = None
+        self._site_context_enabled = False
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
         self._sun_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_sun_changed)
 
@@ -97,6 +99,36 @@ class SolarWeatherManager:
     async def async_load(self) -> None:
         self._discover()
         await self._refresh()
+
+    def discovered_binding(self) -> dict[str, Any] | None:
+        """Return the explicit weather resource selected by discovery."""
+        if not self._entity_id:
+            return None
+        entries = self.hass.config_entries.async_entries(SMHI_DOMAIN)
+        if len(entries) != 1:
+            return None
+        return {
+            "config_entry_id": entries[0].entry_id,
+            "weather_entity": self._entity_id,
+            "sensor_entities": dict(self._sensor_entities),
+            "source": "smhi",
+        }
+
+    async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
+        """Switch live weather reads to one explicit site resource."""
+        self._site_id = site_id if isinstance(binding, dict) else None
+        self._site_context_enabled = True
+        if self._site_id is None:
+            self._entity_id = None
+            self._sensor_entities = {}
+            self._watched_entity_ids = set()
+            self._state = self._unavailable_state("site_unconfigured")
+            return
+        self._entity_id = binding.get("weather_entity")
+        self._sensor_entities = dict(binding.get("sensor_entities", {}))
+        self._watched_entity_ids = {self._entity_id, *self._sensor_entities.values()}
+        await self._refresh()
+        self._state["site_id"] = self._site_id
 
     async def async_shutdown(self) -> None:
         if self._state_unsub:
@@ -202,10 +234,14 @@ class SolarWeatherManager:
             self.hass.bus.async_fire(WEATHER_UPDATE_EVENT)
 
     async def _async_state_changed(self, event: Event) -> None:
+        if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
+            return
         if event.data.get("entity_id") in self._watched_entity_ids:
             await self._refresh()
 
     async def _async_sun_changed(self, event: Event) -> None:
+        if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
+            return
         if event.data.get("entity_id") == "sun.sun":
             self.hass.bus.async_fire(WEATHER_UPDATE_EVENT)
 

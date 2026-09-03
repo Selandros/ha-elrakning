@@ -71,6 +71,9 @@ POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
 SITE_IDENTITY_COMMAND = f"{DOMAIN}/site_identity"
+SITE_RENAME_COMMAND = f"{DOMAIN}/site_rename"
+SITE_CREATE_COMMAND = f"{DOMAIN}/site_create"
+SITE_ACTIVATE_COMMAND = f"{DOMAIN}/site_activate"
 SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
 SOLAR_EVIDENCE_STATE_COMMAND = f"{DOMAIN}/solar_evidence_state"
 UPDATE_EVENT = "elrakning_price_update"
@@ -121,6 +124,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
     websocket_api.async_register_command(hass, websocket_site_identity)
+    websocket_api.async_register_command(hass, websocket_site_rename)
+    websocket_api.async_register_command(hass, websocket_site_create)
+    websocket_api.async_register_command(hass, websocket_site_activate)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -132,6 +138,9 @@ async def websocket_get_price_data(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
     """Return cached periods and discovered Nord Pool sensor values."""
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"error": "site_unconfigured", "periods": []})
+        return
     entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
     coordinator: ElrakningCoordinator | None = entry.runtime_data if entry else None
     data = None
@@ -304,6 +313,12 @@ def _elhandel_manager(hass: HomeAssistant) -> ElhandelManager | None:
     return manager if isinstance(manager, ElhandelManager) else None
 
 
+def _site_is_configured(hass: HomeAssistant) -> bool:
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    checker = getattr(manager, "active_site_is_configured", None)
+    return manager is None or checker is None or checker()
+
+
 def _electricity_provider_state(manager: ElhandelManager | None) -> dict:
     state = manager.public_state() if manager else serialize_provider_state(ProviderData())
     return {
@@ -318,6 +333,9 @@ def _electricity_provider_state(manager: ElhandelManager | None) -> dict:
 @websocket_api.websocket_command({vol.Required("type"): ELECTRICITY_PROVIDER_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_electricity_provider_state(hass, connection, msg):
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": True, **_electricity_provider_state(None), "site_status": "unconfigured"})
+        return
     manager = _elhandel_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "electricity_manager_unavailable"})
@@ -376,6 +394,9 @@ async def websocket_grid_providers(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): GRID_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_grid_state(hass, connection, msg):
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
+        return
     manager = _grid_manager(hass)
     connection.send_result(msg["id"], {"success": True, **(manager.public_state() if manager else {"configured": False})})
 
@@ -409,6 +430,9 @@ async def websocket_grid_login(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): GRID_SOURCE_DATA_COMMAND})
 @websocket_api.async_response
 async def websocket_grid_source_data(hass, connection, msg):
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured"})
+        return
     manager = _grid_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "grid_unavailable"})
@@ -449,6 +473,9 @@ async def websocket_grid_web_handoff_start(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): EON_GRID_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_eon_grid_state(hass, connection, msg):
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
+        return
     manager = _grid_manager(hass)
     connection.send_result(msg["id"], {"success": True, **(manager.public_state() if manager else {"configured": False})})
 
@@ -465,6 +492,10 @@ async def websocket_eon_grid_save(hass, connection, msg):
         return
     try:
         state = await manager.async_save_cookie_header(msg["cookie_header"])
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        if site_manager and state.get("facility"):
+            await site_manager.async_bind_grid_runtime(manager)
+            manager.async_start_refresh()
     except Exception as err:
         connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "configuration_failed")})
         return
@@ -489,6 +520,10 @@ async def websocket_eon_grid_app_save(hass, connection, msg):
         return
     try:
         state = await manager.async_save_app_credentials(account_id.strip(), password)
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        if site_manager and state.get("facility"):
+            await site_manager.async_bind_grid_runtime(manager)
+            manager.async_start_refresh()
     except Exception as err:
         connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "configuration_failed")})
         return
@@ -518,6 +553,9 @@ async def websocket_eon_grid_web_save(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): EON_GRID_SOURCE_DATA_COMMAND})
 @websocket_api.async_response
 async def websocket_eon_grid_source_data(hass, connection, msg):
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured"})
+        return
     manager = _grid_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
@@ -543,6 +581,9 @@ async def websocket_eon_grid_remove(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): ELECTRICITY_HISTORY_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_electricity_history_state(hass, connection, msg):
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": True, "history": [], "site_status": "unconfigured"})
+        return
     manager = _elhandel_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "electricity_manager_unavailable"})
@@ -595,6 +636,10 @@ async def websocket_electricity_provider_save(hass, connection, msg):
         return
     try:
         state = await manager.async_save_config(email.strip(), password, facility_id.strip())
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        if site_manager:
+            await site_manager.async_bind_provider_runtime(manager)
+            manager.async_start_refresh("site_binding")
     except GreenelyError as err:
         _LOGGER.warning("Greenely save failed: %s", err.code)
         connection.send_result(msg["id"], {"success": False, "error": err.code})
@@ -893,6 +938,9 @@ async def websocket_meter_power_history(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_billing_history(hass, connection, msg):
     """Return canonical current-month meter and price history for billing."""
+    if not _site_is_configured(hass):
+        connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured", "points": []})
+        return
     meter = _meter_manager(hass)
     billing = await meter.async_billing_history() if meter else {
         "success": False,
@@ -1006,15 +1054,15 @@ async def websocket_power_history(hass, connection, msg):
         "error": "power_unavailable",
     }
     forecast_manager = _solar_forecast_manager(hass)
-    forecast = forecast_manager.public_state() if forecast_manager else SolarForecastManager._unavailable_facts()
+    forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
     result["solar_forecast"] = forecast
     result["solar_forecast_baselines"] = forecast.get("baselines", {})
     shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
-    result["solar_shadow"] = shadow.public_state() if shadow else {"available": False, "snapshots": []}
+    result["solar_shadow"] = shadow.public_state() if shadow and _site_is_configured(hass) else {"available": False, "snapshots": []}
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
     result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
-    result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager else {"available": False, "source": "jrc_pvgis"}
+    result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
     result["solar_sun"] = build_sun_context(hass)
     connection.send_result(msg["id"], result)
 
@@ -1023,14 +1071,14 @@ async def websocket_power_history(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_solar_forecast_state(hass, connection, msg):
     """Return current Forecast.Solar facts and stored daily baselines."""
-    manager = _solar_forecast_manager(hass)
+    manager = _solar_forecast_manager(hass) if _site_is_configured(hass) else None
     connection.send_result(msg["id"], manager.public_state() if manager else SolarForecastManager._unavailable_facts())
 
 
 @websocket_api.websocket_command({vol.Required("type"): SOLAR_EVIDENCE_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_solar_evidence_state(hass, connection, msg):
-    manager = hass.data.get(DOMAIN, {}).get("solar_evidence_manager")
+    manager = hass.data.get(DOMAIN, {}).get("solar_evidence_manager") if _site_is_configured(hass) else None
     connection.send_result(msg["id"], manager.public_state() if manager else {"available": False, "days": []})
 
 
@@ -1040,6 +1088,71 @@ async def websocket_site_identity(hass, connection, msg):
     """Return current site identity and configured source generations."""
     manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     connection.send_result(msg["id"], manager.public_state() if manager else {"site_id": None, "logical_roles": [], "source_ledger": []})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): SITE_RENAME_COMMAND,
+        vol.Required("site_id"): str,
+        vol.Required("name"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_site_rename(hass, connection, msg):
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "site_manager_unavailable"})
+        return
+    try:
+        state = await manager.async_rename_site(msg["site_id"], msg["name"])
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): SITE_CREATE_COMMAND,
+        vol.Required("name"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_site_create(hass, connection, msg):
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "site_manager_unavailable"})
+        return
+    try:
+        state = await manager.async_create_site(msg["name"])
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): SITE_ACTIVATE_COMMAND,
+        vol.Required("site_id"): str,
+        vol.Required("confirm"): bool,
+    }
+)
+@websocket_api.async_response
+async def websocket_site_activate(hass, connection, msg):
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "site_manager_unavailable"})
+        return
+    if msg["confirm"] is not True:
+        connection.send_result(msg["id"], {"success": False, "error": "confirmation_required"})
+        return
+    try:
+        state = await manager.async_activate_site(msg["site_id"])
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
 
 
 def _solar_forecast_manager(hass) -> SolarForecastManager | None:
@@ -1114,8 +1227,15 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
         ],
     }
     if data.area:
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        bound_price = site_manager.active_binding("nord_pool") if site_manager else None
+        bound_entry_id = bound_price.get("config_entry_id") if isinstance(bound_price, dict) else None
         nord_pool_entry = next(
-            iter(hass.config_entries.async_entries(NORD_POOL_DOMAIN)), None
+            (
+                entry for entry in hass.config_entries.async_entries(NORD_POOL_DOMAIN)
+                if bound_entry_id and entry.entry_id == bound_entry_id
+            ),
+            None,
         )
         if nord_pool_entry:
             registry = er.async_get(hass)

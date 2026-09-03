@@ -45,13 +45,10 @@ async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> No
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
     coordinator = ElrakningCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
     await manager.async_load()
     hass.data.setdefault(DOMAIN, {})["elhandel_manager"] = manager
-    if manager.state["configured"]:
-        manager.async_start_refresh()
     meter_manager = MeterManager(hass, manager.async_diagnostic)
     await meter_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["meter_manager"] = meter_manager
@@ -64,6 +61,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
+    grid_manager = GridManager(hass, entry)
+    await grid_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
+    await site_identity_manager.async_prepare_runtime_bindings(manager, grid_manager, coordinator)
+    await coordinator.async_config_entry_first_refresh()
+    if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):
+        manager.async_start_refresh()
     solar_forecast_manager = SolarForecastManager(hass, manager.async_diagnostic)
     await solar_forecast_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_forecast_manager"] = solar_forecast_manager
@@ -88,13 +92,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})["solar_shadow_manager"] = solar_shadow_manager
     solar_evidence_manager = SolarEvidenceManager(hass, power_manager, solar_forecast_manager)
     await solar_evidence_manager.async_load()
+    await site_identity_manager.async_prepare_solar_contexts({
+        "forecast": solar_forecast_manager,
+        "weather": solar_weather_manager,
+        "pvgis": solar_pvgis_manager,
+        "open_meteo": solar_open_meteo_manager,
+        "shadow": solar_shadow_manager,
+        "evidence": solar_evidence_manager,
+    })
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())
-    grid_manager = GridManager(hass, entry)
-    await grid_manager.async_load()
-    hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
     async_register_eon_handoff_views(hass)
-    if grid_manager.configured:
+    if grid_manager.configured and site_identity_manager.active_binding("grid"):
         grid_manager.async_start_refresh()
 
     integration_dir = Path(__file__).parent

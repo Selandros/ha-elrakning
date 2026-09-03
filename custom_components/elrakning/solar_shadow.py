@@ -10,6 +10,8 @@ from typing import Any
 
 from homeassistant.core import Event
 from homeassistant.helpers.storage import Store
+
+from .site_context import async_load_site_store
 from homeassistant.util import dt as dt_util
 
 
@@ -185,6 +187,8 @@ class SolarShadowManager:
         self._capture_lock = None
         self._last_enrichment_date = None
         self._frames = {"forecast": {}, "weather": {}, "sun": {}, "pvgis": {}, "open_meteo": {}}
+        self._site_id: str | None = None
+        self._site_context_enabled = False
         self._unsubs = [
             hass.bus.async_listen("elrakning_solar_forecast_update", self._async_trigger),
             hass.bus.async_listen("elrakning_solar_weather_update", self._async_trigger),
@@ -203,6 +207,32 @@ class SolarShadowManager:
                 }
         await self._capture("startup")
 
+    def discovered_binding(self) -> dict[str, Any]:
+        """Return the site-local shadow context marker."""
+        return {"source": "solar_shadow"}
+
+    async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
+        """Switch shadow snapshots and immutable frames to one site namespace."""
+        self._site_id = site_id if isinstance(binding, dict) else None
+        self._site_context_enabled = True
+        if self._site_id is None:
+            self._snapshots = []
+            self._frames = {"forecast": {}, "weather": {}, "sun": {}, "pvgis": {}, "open_meteo": {}}
+            self._last_capture_at = None
+            return
+        legacy = {"frames": self._frames, "snapshots": self._snapshots}
+        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id, legacy)
+        if cached:
+            self._snapshots = [item for item in cached.get("snapshots", []) if isinstance(item, dict)]
+            for snapshot in self._snapshots:
+                snapshot.setdefault("site_id", self._site_id)
+            frames = cached.get("frames")
+            if isinstance(frames, dict):
+                self._frames = {
+                    kind: dict(frames.get(kind, {})) if isinstance(frames.get(kind), dict) else {}
+                    for kind in ("forecast", "weather", "sun", "pvgis", "open_meteo")
+                }
+
     async def async_shutdown(self) -> None:
         for unsubscribe in self._unsubs:
             unsubscribe()
@@ -210,6 +240,8 @@ class SolarShadowManager:
 
     async def async_enrich_completed_day(self, target_date: str, actual_final_kwh: float, quality: str) -> int:
         """Attach ground truth to snapshots without changing captured inputs."""
+        if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
+            return 0
         actual = _number(actual_final_kwh)
         if actual is None or quality not in {"valid", "insufficient_data", "possible_curtailment", "possible_outage", "unknown_quality"}:
             return 0
@@ -234,6 +266,8 @@ class SolarShadowManager:
         await self._capture("event")
 
     async def _capture(self, trigger: str) -> None:
+        if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
+            return
         if self._capture_lock is None:
             import asyncio
             self._capture_lock = asyncio.Lock()
@@ -281,6 +315,7 @@ class SolarShadowManager:
                 if open_meteo.get("available") and isinstance(open_meteo.get("profile"), dict):
                     frame_ids["open_meteo"] = self._store_frame("open_meteo", open_meteo)
                 snapshot = {
+                    "site_id": getattr(self, "_site_id", None),
                     "timestamp": now.isoformat(),
                     "target_date": target_date.isoformat(),
                     "capture_type": capture_type,

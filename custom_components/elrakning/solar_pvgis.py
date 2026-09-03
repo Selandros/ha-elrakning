@@ -11,6 +11,18 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+try:
+    from .site_context import async_load_site_store
+except ImportError:  # pragma: no cover - supports direct helper-module loading
+    async def async_load_site_store(hass, store_key, version, site_id, legacy_data=None):
+        """Load a site store when this module is tested outside its package."""
+        store = Store(hass, version, f"{store_key}.{site_id}")
+        cached = await store.async_load()
+        if cached is None and isinstance(legacy_data, dict):
+            await store.async_save(legacy_data)
+            cached = legacy_data
+        return store, cached if isinstance(cached, dict) else None
+
 
 PVGIS_API_VERSION = "6"
 PVGIS_SOURCE = "jrc_pvgis_power_broadband_multiple_surfaces"
@@ -133,6 +145,7 @@ class SolarPvgisManager:
         self.store = Store(hass, 1, STORE_KEY)
         self._state: dict[str, Any] = {"available": False, "source": PVGIS_SOURCE, "api_version": PVGIS_API_VERSION}
         self._profile: dict[str, Any] | None = None
+        self._site_id: str | None = None
 
     async def async_load(self) -> None:
         power_state = await self.power_manager.async_state()
@@ -151,6 +164,31 @@ class SolarPvgisManager:
             self._state = {**cached.get("state", {}), "available": True, "installation": installation}
             return
         await self._async_fetch(installation)
+
+    def discovered_binding(self) -> dict[str, Any] | None:
+        """Return the current installation fingerprint for explicit site binding."""
+        installation = self._state.get("installation")
+        if not isinstance(installation, dict) or not installation.get("fingerprint"):
+            return None
+        return {
+            "source": PVGIS_SOURCE,
+            "installation_fingerprint": installation["fingerprint"],
+        }
+
+    async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
+        """Switch the PVGIS cache to one site namespace."""
+        self._site_id = site_id if isinstance(binding, dict) else None
+        if self._site_id is None:
+            self._profile = None
+            self._state = {"available": False, "source": PVGIS_SOURCE, "api_version": PVGIS_API_VERSION, "reason": "site_unconfigured"}
+            return
+        legacy = {"cache_version": _CACHE_VERSION, "state": self._state, "installation": self._state.get("installation"), "profile": self._profile}
+        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id, legacy)
+        if not cached:
+            return
+        self._profile = cached.get("profile") if isinstance(cached.get("profile"), dict) else None
+        self._state = cached.get("state") if isinstance(cached.get("state"), dict) else self._state
+        self._state["site_id"] = self._site_id
 
     async def _async_fetch(self, installation: dict[str, Any]) -> None:
         params: list[tuple[str, str]] = [
@@ -193,6 +231,8 @@ class SolarPvgisManager:
 
     async def async_refresh_for_power_state(self, power_state: dict[str, Any]) -> None:
         """Refresh only when the PV-card installation fingerprint changes."""
+        if self._site_id is None:
+            return
         installation = build_installation(self.hass, power_state)
         current = self._state.get("installation", {}).get("fingerprint")
         if installation is None:

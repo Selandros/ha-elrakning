@@ -254,6 +254,32 @@ class PowerManager:
             self.mapping[field] = _clean_entity(cached.get(field))
         self.mapping["invert_battery_power"] = cached.get("invert_battery_power") is True
 
+    async def async_restore_mapping(self, mapping: dict[str, Any] | None) -> None:
+        """Restore a previously validated site mapping without rediscovering sources."""
+        for task in self._history_inflight.values():
+            task.cancel()
+        self._history_inflight.clear()
+        mapping = mapping if isinstance(mapping, dict) else {}
+        solar = mapping.get("solar_entities", [])
+        solar = solar if isinstance(solar, list) else []
+        selected_solar = list(dict.fromkeys(_clean_entity(value) for value in solar))
+        selected_solar = [value for value in selected_solar if value]
+        selected = {
+            "solar_entities": selected_solar,
+            SOLAR_ARRAY_METADATA_KEY: _normalize_solar_array_metadata(
+                mapping.get(SOLAR_ARRAY_METADATA_KEY), selected_solar
+            ),
+            **{field: _clean_entity(mapping.get(field)) for field in POWER_FIELDS},
+            "invert_battery_power": mapping.get("invert_battery_power") is True,
+        }
+        if selected["battery_power_entity"]:
+            selected["charging_entity"] = None
+            selected["discharging_entity"] = None
+        else:
+            selected["battery_power_entity"] = None
+        self.mapping = selected
+        await self.store.async_save(self.mapping)
+
     async def async_save_mapping(self, mapping: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(mapping, dict):
             raise ValueError("invalid_mapping")

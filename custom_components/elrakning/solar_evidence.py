@@ -10,6 +10,8 @@ from typing import Any
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
+
+from .site_context import async_load_site_store
 from homeassistant.util import dt as dt_util
 
 from .solar_pvgis import build_installation
@@ -140,6 +142,8 @@ class SolarEvidenceManager:
         self._days: dict[str, dict[str, Any]] = {}
         self._task = None
         self._unsub = None
+        self._site_id: str | None = None
+        self._site_context_enabled = False
 
     async def async_load(self) -> None:
         try:
@@ -152,6 +156,27 @@ class SolarEvidenceManager:
             self._unsub = async_track_time_change(self.hass, self._daily_update, hour=12, minute=0, second=0)
         except Exception:
             self._unsub = None
+
+    def discovered_binding(self) -> dict[str, Any]:
+        """Return the site-local evidence context marker."""
+        return {"source": "solar_evidence", "protocol_version": PROTOCOL_VERSION}
+
+    async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
+        """Switch evidence days to one site namespace."""
+        self._site_id = site_id if isinstance(binding, dict) else None
+        self._site_context_enabled = True
+        if self._site_id is None:
+            self._days = {}
+            return
+        legacy = {"protocol_version": PROTOCOL_VERSION, "days": self._days}
+        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id, legacy)
+        if cached and isinstance(cached.get("days"), dict):
+            self._days = {
+                key: value for key, value in cached["days"].items()
+                if isinstance(key, str) and isinstance(value, dict)
+            }
+            for day in self._days.values():
+                day.setdefault("site_id", self._site_id)
 
     async def async_shutdown(self) -> None:
         if self._unsub:
@@ -183,6 +208,8 @@ class SolarEvidenceManager:
             return
 
     async def async_collect_completed_day(self, target_date: date) -> dict[str, Any]:
+        if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
+            return {"date": target_date.isoformat(), "audit_complete": False, "exclusion_reasons": ["site_unconfigured"]}
         key = target_date.isoformat()
         existing = self._days.get(key)
         if (isinstance(existing, dict) and existing.get("audit_complete") is True
@@ -194,7 +221,7 @@ class SolarEvidenceManager:
         start = dt_util.start_of_local_day(datetime.combine(target_date, datetime.min.time(), tzinfo=dt_util.now().tzinfo))
         end = dt_util.start_of_local_day(start + timedelta(days=1))
         query_end = end + timedelta(hours=12)
-        record: dict[str, Any] = {"date": key, "protocol_version": PROTOCOL_VERSION, "collected_at": dt_util.now().isoformat(), "pv_entity_count": len(entities), "actual_kwh": None}
+        record: dict[str, Any] = {"site_id": self._site_id, "date": key, "protocol_version": PROTOCOL_VERSION, "collected_at": dt_util.now().isoformat(), "pv_entity_count": len(entities), "actual_kwh": None}
         if not entities:
             record["exclusion_reasons"] = ["no_solar_entities"]
             record["audit_complete"] = False

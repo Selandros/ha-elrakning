@@ -49,6 +49,7 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         self._active_price_date: date | None = None
         self._next_day_last_attempt: tuple[date, datetime] | None = None
         self._midnight_recovery_task: asyncio.Task | None = None
+        self._site_binding: dict[str, Any] | None = None
         super().__init__(
             hass,
             logger=_LOGGER,
@@ -111,17 +112,18 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
 
     async def _async_fetch_date(self, target_date: date) -> PriceData:
         """Fetch and normalize one local Nord Pool date."""
+        binding = self._site_binding
+        if not binding:
+            return PriceData(None, None, target_date, (), "site_unconfigured")
         nord_pool_entries = self.hass.config_entries.async_entries(NORD_POOL_DOMAIN)
         if not nord_pool_entries:
             return PriceData(None, None, target_date, (), "missing_integration")
-
-        nord_pool_entry = nord_pool_entries[0]
-        area = self._get_config_value(nord_pool_entry, "areas")
-        if not area:
-            area = self._get_config_value(nord_pool_entry, "area")
-        currency = self._get_config_value(nord_pool_entry, "currency") or "SEK"
-        if isinstance(area, list):
-            area = area[0] if area else None
+        entry_id = binding.get("config_entry_id")
+        nord_pool_entry = next((entry for entry in nord_pool_entries if entry.entry_id == entry_id), None)
+        if nord_pool_entry is None:
+            return PriceData(None, None, target_date, (), "data_unavailable")
+        area = binding.get("area")
+        currency = binding.get("currency") or "SEK"
         if not area:
             return PriceData(None, currency, target_date, (), "data_unavailable")
 
@@ -148,6 +150,35 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         if not periods:
             return PriceData(area, currency, target_date, (), "data_unavailable")
         return PriceData(area, currency, target_date, periods)
+
+    def discovered_binding(self) -> dict[str, Any] | None:
+        """Describe the currently discovered Nord Pool resource for first-site migration."""
+        entries = self.hass.config_entries.async_entries(NORD_POOL_DOMAIN)
+        if not entries:
+            return None
+        entry = entries[0]
+        area = self._get_config_value(entry, "areas") or self._get_config_value(entry, "area")
+        if isinstance(area, list):
+            area = area[0] if area else None
+        if not area:
+            return None
+        return {
+            "config_entry_id": entry.entry_id,
+            "area": area,
+            "currency": self._get_config_value(entry, "currency") or "SEK",
+            "configured_at": dt_util.now().isoformat(),
+        }
+
+    def set_site_binding(self, binding: dict[str, Any] | None) -> None:
+        """Switch the explicit price context and invalidate site-local cached data."""
+        normalized = dict(binding) if isinstance(binding, dict) else None
+        current_fingerprint = self._site_binding.get("binding_fingerprint") if self._site_binding else None
+        fingerprint = normalized.get("binding_fingerprint") if normalized else None
+        if fingerprint == current_fingerprint and normalized == self._site_binding:
+            return
+        self._site_binding = normalized
+        self._price_data_by_date.clear()
+        self._active_price_date = None
 
     async def async_prefetch_next_day(self) -> None:
         """Cache tomorrow's prices once before the local day changes."""

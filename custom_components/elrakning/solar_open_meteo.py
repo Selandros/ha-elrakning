@@ -11,6 +11,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .site_context import async_load_site_store
+
 from .solar_pvgis import build_installation
 
 
@@ -98,6 +100,7 @@ class SolarOpenMeteoManager:
         self._installation: dict[str, Any] | None = None
         self._frame: dict[str, Any] | None = None
         self._frame_id: str | None = None
+        self._site_id: str | None = None
 
     async def async_load(self) -> None:
         try:
@@ -119,7 +122,37 @@ class SolarOpenMeteoManager:
                 "reason": "startup_unavailable",
             }
 
+    def discovered_binding(self) -> dict[str, Any] | None:
+        """Return the current installation fingerprint for explicit site binding."""
+        if not isinstance(self._installation, dict) or not self._installation.get("fingerprint"):
+            return None
+        return {
+            "source": OPEN_METEO_SOURCE,
+            "installation_fingerprint": self._installation["fingerprint"],
+        }
+
+    async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
+        """Switch the Open-Meteo frame to one site namespace."""
+        self._site_id = site_id if isinstance(binding, dict) else None
+        if self._site_id is None:
+            self._installation = None
+            self._frame = None
+            self._frame_id = None
+            self._state = {"available": False, "source": OPEN_METEO_SOURCE, "model": OPEN_METEO_MODEL, "reason": "site_unconfigured"}
+            return
+        legacy = {"cache_version": _CACHE_VERSION, "state": self._state, "installation": self._installation, "frame_id": self._frame_id, "frame": self._frame}
+        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id, legacy)
+        if not cached:
+            return
+        self._installation = cached.get("installation") if isinstance(cached.get("installation"), dict) else None
+        self._frame = cached.get("frame") if isinstance(cached.get("frame"), dict) else None
+        self._frame_id = cached.get("frame_id") if isinstance(cached.get("frame_id"), str) else None
+        self._state = cached.get("state") if isinstance(cached.get("state"), dict) else self._state
+        self._state["site_id"] = self._site_id
+
     async def async_refresh_for_power_state(self, power_state: dict[str, Any]) -> None:
+        if self._site_id is None:
+            return
         installation = build_installation(self.hass, power_state)
         if installation is None:
             self._installation = None

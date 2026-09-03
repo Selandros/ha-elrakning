@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from ..const import EON_GRID_CONFIG_KEY, GRID_CONFIG_KEY
@@ -17,6 +18,7 @@ class GridManager:
         definition = configured_grid_provider(entry)
         self.definition = definition
         self.provider = definition.manager_factory(hass, entry) if definition else None
+        self._site_binding: dict[str, Any] | None = None
 
     @property
     def configured(self) -> bool:
@@ -44,8 +46,24 @@ class GridManager:
         self.hass.config_entries.async_update_entry(self.entry, data=data)
 
     def async_start_refresh(self) -> None:
-        if self.provider:
+        if self.provider and self._site_binding:
             self.provider.async_start_refresh()
+
+    async def async_apply_site_binding(
+        self, binding: dict[str, Any] | None, state: dict[str, Any] | None = None
+    ) -> None:
+        """Apply explicit site context without duplicating shared credentials."""
+        self._site_binding = dict(binding) if isinstance(binding, dict) else None
+        if not self.provider:
+            return
+        if self._refresh_unsub:
+            self._refresh_unsub()
+            self._refresh_unsub = None
+        self.provider._cancel_web_refresh()
+        if not self._site_binding:
+            self.provider.state = self.provider._empty_state()
+            return
+        self.provider.state = deepcopy(state) if isinstance(state, dict) else self.provider._empty_state()
 
     async def async_refresh(self) -> dict[str, Any]:
         return await self.provider.async_refresh() if self.provider else {"configured": False}

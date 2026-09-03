@@ -248,6 +248,20 @@ class MeterManager:
                 self.mapping[field] = value.strip() if isinstance(value, str) and value.strip() else None
             self.mapping[METER_INVERT_FIELD] = cached.get(METER_INVERT_FIELD) is True
 
+    async def async_restore_mapping(self, mapping: dict[str, Any] | None) -> None:
+        """Restore a previously validated site mapping without validating live states."""
+        for task in self._history_inflight.values():
+            task.cancel()
+        self._history_inflight.clear()
+        mapping = mapping if isinstance(mapping, dict) else {}
+        selected = {
+            field: _text(mapping.get(field)) or None for field in METER_FIELDS
+        }
+        selected[METER_INVERT_FIELD] = mapping.get(METER_INVERT_FIELD) is True
+        self.mapping = selected
+        self._history_summary = None
+        await self.store.async_save(self.mapping)
+
     async def async_clear(self) -> dict[str, Any]:
         self.mapping = {field: None for field in METER_FIELDS}
         self.mapping[METER_INVERT_FIELD] = False
