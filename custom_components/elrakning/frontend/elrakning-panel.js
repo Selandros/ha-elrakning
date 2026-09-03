@@ -3987,7 +3987,6 @@ class ElrakningPanel {
         }
 
         .live-power-tile.invoice-estimate-card {
-          align-self: start;
           grid-template-rows: auto auto auto minmax(0, auto);
           min-height: 0;
         }
