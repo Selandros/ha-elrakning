@@ -2144,9 +2144,10 @@ class ElrakningPanel {
     this._powerStateRequestGeneration = 0;
     this._powerStateMutationGeneration = 0;
     this._powerStateLifecycleGeneration = 0;
-    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._powerHistoryRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
+    this._solarEvidenceEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
@@ -2365,6 +2366,13 @@ class ElrakningPanel {
             <button type="button" class="card-source-action" data-card-source="solar-history" hidden>Visa data</button>
           </article>
         </div>
+
+        <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
+          <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
+          <div data-solar-evidence-summary></div>
+          <div data-solar-evidence-status></div>
+          <div class="solar-evidence-list" data-solar-evidence-list></div>
+        </section>
 
         <div class="daily-energy-row phase-history-row">
           <article class="card phase-history-card" data-phase-history-card hidden aria-labelledby="phase-history-title">
@@ -3058,6 +3066,14 @@ class ElrakningPanel {
         .solar-history-day.hovered .solar-history-reference-bar {
           fill-opacity: .32;
         }
+
+        .solar-evidence-card { margin-top: 16px; }
+        .solar-evidence-summary, .solar-evidence-status { line-height: 1.45; }
+        .solar-evidence-status { font-weight: 600; margin-top: 4px; }
+        .solar-evidence-list { display: grid; gap: 8px; margin-top: 12px; }
+        .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 8px 10px; }
+        .solar-evidence-day strong { color: var(--primary-text-color); }
+        .solar-evidence-day small { color: var(--secondary-text-color); display: block; line-height: 1.4; margin-top: 3px; }
 
         .daily-energy-row {
           align-items: stretch;
@@ -6975,6 +6991,30 @@ class ElrakningPanel {
     svg.addEventListener("pointercancel", clear);
   }
 
+  _renderSolarEvidence() {
+    const card = this.host.querySelector("[data-solar-evidence-card]");
+    const summary = this.host.querySelector("[data-solar-evidence-summary]");
+    const status = this.host.querySelector("[data-solar-evidence-status]");
+    const list = this.host.querySelector("[data-solar-evidence-list]");
+    const evidence = this._powerHistory?.solar_evidence;
+    if (!card || !summary || !status || !list) return;
+    const days = Array.isArray(evidence?.days) ? evidence.days : [];
+    card.hidden = !evidence?.available;
+    if (!evidence?.available) return;
+    summary.textContent = `Open-Meteo complete ${evidence.progress?.open_meteo_complete || 0} / ${evidence.progress?.open_meteo_target || 21} · Forecast.Solar common ${evidence.progress?.forecast_solar_common || 0} / ${evidence.progress?.forecast_solar_target || 14} · Protocol ${evidence.protocol_version || "evidence-v1"} · LOCKED`;
+    status.textContent = evidence.status || "INSUFFICIENT – KEEP COLLECTING";
+    list.innerHTML = days.map((day) => {
+      const actual = Number.isFinite(Number(day.actual_kwh)) ? this._formatNumber(day.actual_kwh) : "—";
+      const openMeteo = Number.isFinite(Number(day.open_meteo_nominal_kwh)) ? this._formatNumber(day.open_meteo_nominal_kwh) : "—";
+      const omError = Number.isFinite(Number(day.open_meteo_nominal_kwh)) && Number.isFinite(Number(day.actual_kwh)) ? this._formatNumber(Math.abs(Number(day.actual_kwh) - Number(day.open_meteo_nominal_kwh))) : "—";
+      const forecast = Number.isFinite(Number(day.forecast_solar_frozen_kwh)) ? this._formatNumber(day.forecast_solar_frozen_kwh) : "—";
+      const forecastError = Number.isFinite(Number(day.forecast_solar_frozen_kwh)) && Number.isFinite(Number(day.actual_kwh)) ? this._formatNumber(Math.abs(Number(day.actual_kwh) - Number(day.forecast_solar_frozen_kwh))) : "—";
+      const state = day.audit_complete ? "✅ Godkänd" : "❌ Exkluderad";
+      const reasons = Array.isArray(day.exclusion_reasons) && day.exclusion_reasons.length ? ` · Orsak: ${day.exclusion_reasons.join(", ")}` : "";
+      return `<div class="solar-evidence-day"><strong>${day.date || "—"} · ${state}</strong><small>Actual ${actual} kWh · OM ${openMeteo} kWh · OM-fel ${omError} kWh · Forecast.Solar ${forecast} kWh · FS-fel ${forecastError} kWh · ${day.merged_points || 0} punkter · max gap ${this._formatNumber(day.max_internal_gap_minutes || 0)} min${reasons}</small></div>`;
+    }).join("");
+  }
+
   _renderSocChart() {
     const card = this.host.querySelector("[data-soc-card]");
     const chart = this.host.querySelector("[data-soc-chart]");
@@ -7120,15 +7160,17 @@ class ElrakningPanel {
         solar_forecast: response?.solar_forecast || { available: false },
         solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
         solar_shadow: response?.solar_shadow || { available: false, days: [] },
+        solar_evidence: response?.solar_evidence || { available: false, days: [] },
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: response?.solar_sun || { available: false },
       };
       this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
+      this._renderSolarEvidence();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
-      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
       this._refreshPowerEnergyState();
     }
   }
@@ -7146,6 +7188,18 @@ class ElrakningPanel {
       this._renderSolarHistoryCard();
     } catch {
       // Keep actual solar history available when forecast transport is unavailable.
+    }
+  }
+
+  async loadSolarEvidence() {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/solar_evidence_state" });
+      if (response?.available === false) return;
+      this._powerHistory = { ...this._powerHistory, solar_evidence: response };
+      this._renderSolarEvidence();
+    } catch {
+      // Evidence is optional and must not affect the other cards.
     }
   }
 
@@ -8438,6 +8492,10 @@ class ElrakningPanel {
         () => this.loadPowerHistory(),
         "elrakning_solar_weather_update",
       );
+      this._solarEvidenceEventUnsubscribePromise = hass.connection.subscribeEvents(
+        () => this.loadSolarEvidence(),
+        "elrakning_solar_evidence_update",
+      );
       this._diagnosticsEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this._loadDiagnosticsState?.(),
         "elrakning_diagnostics_update",
@@ -8499,6 +8557,11 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._solarEvidenceEventUnsubscribePromise) {
+      Promise.resolve(this._solarEvidenceEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
     if (this._diagnosticsEventUnsubscribePromise) {
       Promise.resolve(this._diagnosticsEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -8520,6 +8583,7 @@ class ElrakningPanel {
     this._powerEventUnsubscribePromise = null;
     this._solarForecastEventUnsubscribePromise = null;
     this._solarWeatherEventUnsubscribePromise = null;
+    this._solarEvidenceEventUnsubscribePromise = null;
     this._diagnosticsEventUnsubscribePromise = null;
     this._readyEventUnsubscribePromise = null;
     this._connectionReadyListener = null;
@@ -8553,6 +8617,7 @@ class ElrakningPanel {
       this.loadMeterState(loadHistory),
       this.loadPowerState(loadHistory),
       this.loadBillingHistory(),
+      this.loadSolarEvidence(),
       this._loadDebugPreference(),
       this._loadChartPreferences(),
     ]).finally(() => {

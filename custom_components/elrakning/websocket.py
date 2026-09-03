@@ -69,6 +69,7 @@ POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
 SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
+SOLAR_EVIDENCE_STATE_COMMAND = f"{DOMAIN}/solar_evidence_state"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
+    websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
 
 
@@ -1005,6 +1007,13 @@ async def websocket_solar_forecast_state(hass, connection, msg):
     """Return current Forecast.Solar facts and stored daily baselines."""
     manager = _solar_forecast_manager(hass)
     connection.send_result(msg["id"], manager.public_state() if manager else SolarForecastManager._unavailable_facts())
+
+
+@websocket_api.websocket_command({vol.Required("type"): SOLAR_EVIDENCE_STATE_COMMAND})
+@websocket_api.async_response
+async def websocket_solar_evidence_state(hass, connection, msg):
+    manager = hass.data.get(DOMAIN, {}).get("solar_evidence_manager")
+    connection.send_result(msg["id"], manager.public_state() if manager else {"available": False, "days": []})
 
 
 def _solar_forecast_manager(hass) -> SolarForecastManager | None:

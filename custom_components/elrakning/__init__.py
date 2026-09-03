@@ -20,6 +20,7 @@ from .solar_forecast import SolarForecastManager
 from .solar_open_meteo import SolarOpenMeteoManager
 from .solar_pvgis import SolarPvgisManager
 from .solar_shadow import SolarShadowManager
+from .solar_evidence import SolarEvidenceManager
 from .solar_weather import SolarWeatherManager
 from .websocket import async_register_websocket_commands
 
@@ -78,6 +79,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await solar_shadow_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_shadow_manager"] = solar_shadow_manager
+    solar_evidence_manager = SolarEvidenceManager(hass, power_manager, solar_forecast_manager)
+    await solar_evidence_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
+    solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())
     grid_manager = GridManager(hass, entry)
     await grid_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
@@ -169,6 +174,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await solar_weather_manager.async_shutdown()
     if solar_shadow_manager := frontend_data.pop("solar_shadow_manager", None):
         await solar_shadow_manager.async_shutdown()
+    if solar_evidence_manager := frontend_data.pop("solar_evidence_manager", None):
+        await solar_evidence_manager.async_shutdown()
     if solar_pvgis_manager := frontend_data.pop("solar_pvgis_manager", None):
         await solar_pvgis_manager.async_shutdown()
     if solar_open_meteo_manager := frontend_data.pop("solar_open_meteo_manager", None):
