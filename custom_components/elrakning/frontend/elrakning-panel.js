@@ -1257,6 +1257,28 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   };
 }
 
+export function buildInvoiceTodayVariableCost(rows, now = new Date()) {
+  const current = new Date(now);
+  const nowMs = current.getTime();
+  if (!Number.isFinite(nowMs)) return null;
+  const todayStartMs = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime();
+  let total = 0;
+  let includedRows = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.forecast === true) continue;
+    const startMs = new Date(row?.start).getTime();
+    const endMs = Math.min(new Date(row?.end).getTime(), nowMs);
+    const cost = Number(row?.trade_cost_sek) + Number(row?.grid_cost_sek);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs || !Number.isFinite(cost)) continue;
+    const overlapStartMs = Math.max(startMs, todayStartMs);
+    const overlapEndMs = endMs;
+    if (overlapEndMs <= overlapStartMs) continue;
+    total += cost * (overlapEndMs - overlapStartMs) / (endMs - startMs);
+    includedRows += 1;
+  }
+  return includedRows ? total : null;
+}
+
 export function buildCostAnalysisSeries(estimate, previousActual = null, now = new Date()) {
   const current = new Date(now);
   const year = current.getFullYear();
@@ -2266,6 +2288,7 @@ class ElrakningPanel {
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
             <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span><span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span></div>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
+            <span class="invoice-estimate-today" data-invoice-estimate-today hidden></span>
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="invoice" hidden>Visa data</button></div>
           </article>
         </section>
@@ -3987,7 +4010,7 @@ class ElrakningPanel {
 
         .live-power-tile.invoice-estimate-card {
           align-self: start;
-          grid-template-rows: auto auto minmax(0, auto);
+          grid-template-rows: auto auto auto minmax(0, auto);
           min-height: 0;
         }
 
@@ -4002,6 +4025,13 @@ class ElrakningPanel {
 
         .invoice-estimate-card .live-power-value {
           grid-row: 2;
+        }
+
+        .invoice-estimate-today {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          grid-row: 3;
+          line-height: 1.2;
         }
 
         .provider-invoice-cost span {
@@ -8147,7 +8177,8 @@ class ElrakningPanel {
     const card = this.host.querySelector("[data-invoice-estimate-card]");
     const month = this.host.querySelector("[data-invoice-estimate-month]");
     const total = this.host.querySelector("[data-invoice-estimate-total]");
-    if (!card || !month || !total) return;
+    const today = this.host.querySelector("[data-invoice-estimate-today]");
+    if (!card || !month || !total || !today) return;
     const billingHistory = this._billingHistory;
     const estimate = buildInvoiceEstimate(
       billingHistory?.price_periods,
@@ -8158,6 +8189,8 @@ class ElrakningPanel {
     const configured = this._meterState?.configured === true;
     card.hidden = !configured || !billingHistory;
     if (!configured || !billingHistory) {
+      today.hidden = true;
+      today.textContent = "";
       this._invoiceEstimateRaw = null;
       card._livePowerRaw = null;
       this._renderInvoiceCardCosts();
@@ -8166,6 +8199,8 @@ class ElrakningPanel {
     month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month).split(" ")[0] : "";
     if (!estimate) {
       total.textContent = "–";
+      today.hidden = true;
+      today.textContent = "";
       this._invoiceEstimateRaw = null;
       card._livePowerRaw = null;
       this._renderInvoiceCardCosts();
@@ -8174,6 +8209,9 @@ class ElrakningPanel {
     total.textContent = estimate.estimated_month_total_sek == null || !Number.isFinite(Number(estimate.estimated_month_total_sek))
       ? "–"
       : this._formatSek(Number(estimate.estimated_month_total_sek));
+    const todayVariableCostSek = buildInvoiceTodayVariableCost(estimate.rows);
+    today.hidden = !Number.isFinite(todayVariableCostSek);
+    today.textContent = today.hidden ? "" : `+${this._formatSek(todayVariableCostSek)} idag`;
     const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(
       billingHistory.invoice_sources || {
         trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
