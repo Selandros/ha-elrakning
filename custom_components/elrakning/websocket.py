@@ -316,6 +316,15 @@ def _site_is_configured(hass: HomeAssistant) -> bool:
     return manager is None or checker is None or checker()
 
 
+def _site_binding_is_configured(hass: HomeAssistant, service: str) -> bool:
+    """Check one site-scoped service without requiring physical mappings."""
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if manager is None:
+        return True
+    binding = getattr(manager, "active_binding", lambda _service: None)(service)
+    return isinstance(binding, dict) and bool(binding)
+
+
 def _runtime_status(hass: HomeAssistant) -> str:
     """Return the setup lifecycle state exposed by the control plane."""
     return hass.data.get(DOMAIN, {}).get("runtime_status", "unavailable")
@@ -342,7 +351,7 @@ def _electricity_provider_state(manager: ElhandelManager | None) -> dict:
 @websocket_api.websocket_command({vol.Required("type"): ELECTRICITY_PROVIDER_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_electricity_provider_state(hass, connection, msg):
-    if not _site_is_configured(hass):
+    if not _site_binding_is_configured(hass, "elhandel"):
         connection.send_result(msg["id"], {"success": True, **_electricity_provider_state(None), "site_status": "unconfigured"})
         return
     manager = _elhandel_manager(hass)
@@ -403,7 +412,7 @@ async def websocket_grid_providers(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): GRID_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_grid_state(hass, connection, msg):
-    if not _site_is_configured(hass):
+    if not _site_binding_is_configured(hass, "grid"):
         connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
         return
     manager = _grid_manager(hass)
@@ -482,7 +491,7 @@ async def websocket_grid_web_handoff_start(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): EON_GRID_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_eon_grid_state(hass, connection, msg):
-    if not _site_is_configured(hass):
+    if not _site_binding_is_configured(hass, "grid"):
         connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
         return
     manager = _grid_manager(hass)
