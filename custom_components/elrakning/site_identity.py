@@ -405,6 +405,24 @@ class SiteIdentityManager:
             self.active_binding("grid"), deepcopy(state)
         )
 
+    async def async_unbind_grid_runtime(self) -> bool:
+        """Remove only the active site's grid binding and return whether another remains."""
+        active_site_id = self.state.get("active_site_id")
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            active_site_id, self._empty_site_config()
+        )
+        bindings = config.setdefault("bindings", {})
+        bindings.pop("grid", None)
+        config.get("runtime", {}).pop("grid_state", None)
+        await self.store.async_save(self.state)
+        return any(
+            isinstance(site_config, dict)
+            and isinstance(site_config.get("bindings"), dict)
+            and isinstance(site_config["bindings"].get("grid"), dict)
+            for site_id, site_config in self.state.get("site_configs", {}).items()
+            if site_id != active_site_id
+        )
+
     async def async_prepare_solar_contexts(self, managers: dict[str, Any]) -> None:
         """Migrate and apply explicit site context for solar and weather managers."""
         self._solar_managers = {name: manager for name, manager in managers.items() if manager is not None}

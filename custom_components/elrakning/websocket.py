@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    EON_GRID_UPDATE_EVENT,
     GREENELY_PROVIDER,
     NORD_POOL_DOMAIN,
     SUPPORTED_ELECTRICITY_PROVIDERS,
@@ -592,6 +593,19 @@ async def websocket_eon_grid_remove(hass, connection, msg):
     manager = _grid_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
+        return
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if site_manager is not None:
+        if site_manager.active_binding("grid") is None:
+            connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
+            return
+        has_other_binding = await site_manager.async_unbind_grid_runtime()
+        await manager.async_apply_site_binding(None)
+        if not has_other_binding:
+            await manager.async_remove()
+        else:
+            hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
+        connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
         return
     connection.send_result(msg["id"], {"success": True, **await manager.async_remove()})
 
