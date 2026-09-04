@@ -9623,6 +9623,7 @@ class ElrakningPanel {
     this._eonGridState = state;
     this._eonGridPrice = state?.grid_price || state?.tariff?.grid_price || null;
     const configured = state?.configured === true;
+    this._updatePriceComparisonControls();
     const status = this.host.querySelector("[data-eon-grid-status]");
     const provider = this.host.querySelector('[data-provider-name="elnet"]');
     const summary = this.host.querySelector("[data-eon-grid-summary]");
@@ -9790,6 +9791,7 @@ class ElrakningPanel {
       const parseButton = this.host.querySelector("[data-greenely-parse]");
       if (parseButton) parseButton.hidden = true;
     }
+    this._updatePriceComparisonControls();
   }
 
   _applyProviderCard(type, data) {
@@ -10003,15 +10005,34 @@ class ElrakningPanel {
       && this.priceData.periods.every((period) => Number.isFinite(Number(period.grid_cost_ex_vat)));
   }
 
+  _hasTradePriceData() {
+    return this._providerConfigured === true
+      && this.priceData.periods.length > 0
+      && this.priceData.periods.every((period) => Number.isFinite(Number(period.electricity_cost_ex_vat)));
+  }
+
   _updatePriceComparisonControls() {
-    const control = this.host.querySelector('[data-price-layer="grid"]');
-    const input = control?.querySelector("[data-price-toggle]");
-    if (!control || !input) return;
-    const available = this._hasGridPriceData();
-    input.disabled = !available;
-    input.checked = this._priceComparisonVisible.grid;
-    control.title = available ? "Visa elnätskostnad i prisjämförelsen" : "Elnätspris saknas";
-    control.classList.toggle("is-disabled", !available);
+    const availability = {
+      electricity: this._hasTradePriceData(),
+      grid: this._eonGridState?.configured === true && this._hasGridPriceData(),
+    };
+    const titles = {
+      electricity: "Visa elhandelskostnad i prisjämförelsen",
+      grid: "Visa elnätskostnad i prisjämförelsen",
+    };
+    const unavailableTitles = {
+      electricity: "Elhandel saknas",
+      grid: "Elnätspris saknas",
+    };
+    for (const [layer, available] of Object.entries(availability)) {
+      const control = this.host.querySelector(`[data-price-layer="${layer}"]`);
+      const input = control?.querySelector("[data-price-toggle]");
+      if (!control || !input) continue;
+      input.disabled = !available;
+      input.checked = available && this._priceComparisonVisible[layer];
+      control.title = available ? titles[layer] : unavailableTitles[layer];
+      control.classList.toggle("is-disabled", !available);
+    }
   }
 
   _syncPriceComparisonControls() {

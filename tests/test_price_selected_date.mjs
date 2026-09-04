@@ -29,6 +29,9 @@ assert.match(websocketSource, /target_date = date\.fromisoformat\(requested_date
 assert.match(websocketSource, /current_data = coordinator\.data/);
 assert.match(websocketSource, /current_data\.date == target_date/);
 assert.match(websocketSource, /await coordinator\.async_get_price_data\(target_date\)/);
+const priceHandler = websocketSource.slice(websocketSource.indexOf("async def websocket_get_price_data"), websocketSource.indexOf("async def websocket_greenely_test"));
+assert.doesNotMatch(priceHandler, /_site_is_configured\(hass\)/);
+assert.match(websocketSource, /site_manager\.global_binding\("nord_pool"\)/);
 assert.match(websocketSource, /else:\n\s+data = coordinator\.data/);
 
 console.log("selected hourly price date regression passed");

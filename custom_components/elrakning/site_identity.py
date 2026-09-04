@@ -18,7 +18,7 @@ from .power import POWER_FIELDS
 
 STORE_KEY = "elrakning.site_identity"
 STORE_VERSION = 1
-SITE_BINDING_SERVICES = ("elhandel", "grid", "nord_pool")
+SITE_BINDING_SERVICES = ("elhandel", "grid")
 
 ROLE_MAP = {
     "consumption_entity": "house.consumption",
@@ -142,6 +142,7 @@ class SiteIdentityManager:
                 "sites": [dict(item) for item in sites if isinstance(item, dict)],
                 "active_site_id": cached.get("active_site_id") or site.get("site_id"),
                 "site_configs": deepcopy(cached.get("site_configs", {})) if isinstance(cached.get("site_configs"), dict) else {},
+                "global_bindings": deepcopy(cached.get("global_bindings", {})) if isinstance(cached.get("global_bindings"), dict) else {},
                 "ledger": list(cached.get("ledger", [])) if isinstance(cached.get("ledger", []), list) else [],
                 "migration_complete": cached.get("migration_complete", bool(cached.get("ledger"))),
             }
@@ -160,6 +161,15 @@ class SiteIdentityManager:
             for config in self.state["site_configs"].values():
                 if isinstance(config, dict):
                     config.setdefault("bindings", {})
+            migrated_global_price = False
+            for config in self.state["site_configs"].values():
+                bindings = config.get("bindings", {}) if isinstance(config, dict) else {}
+                legacy_binding = bindings.pop("nord_pool", None) if isinstance(bindings, dict) else None
+                if not self.state["global_bindings"].get("nord_pool") and isinstance(legacy_binding, dict):
+                    self.state["global_bindings"]["nord_pool"] = legacy_binding
+                    migrated_global_price = True
+            if migrated_global_price:
+                await self.store.async_save(self.state)
             await self._restore_active_config()
             return
         site = {
@@ -175,6 +185,7 @@ class SiteIdentityManager:
             "sites": [site],
             "active_site_id": site["site_id"],
             "site_configs": {site["site_id"]: {**self._current_mapping_config(), "bindings": {}}},
+            "global_bindings": {},
             "ledger": [],
             "migration_complete": False,
         }
@@ -284,6 +295,11 @@ class SiteIdentityManager:
         binding = bindings.get(service) if isinstance(bindings, dict) else None
         return dict(binding) if isinstance(binding, dict) else None
 
+    def global_binding(self, service: str) -> dict[str, Any] | None:
+        """Return a global binding shared by all sites."""
+        binding = self.state.get("global_bindings", {}).get(service)
+        return dict(binding) if isinstance(binding, dict) else None
+
     def _set_binding(self, service: str, binding: dict[str, Any]) -> None:
         config = self.state.setdefault("site_configs", {}).setdefault(
             self.state["active_site_id"], self._empty_site_config()
@@ -323,11 +339,15 @@ class SiteIdentityManager:
                     "configured_at": _now(),
                 })
                 config.setdefault("runtime", {})["grid_state"] = deepcopy(grid_state)
-        if legacy_site_migration and not config["bindings"].get("nord_pool"):
+        global_bindings = self.state.setdefault("global_bindings", {})
+        if not global_bindings.get("nord_pool") and legacy_site_migration:
             discover = getattr(coordinator, "discovered_binding", None)
             binding = discover() if discover else None
             if binding:
-                self._set_binding("nord_pool", binding)
+                global_bindings["nord_pool"] = {
+                    **deepcopy(binding),
+                    "binding_fingerprint": self.binding_fingerprint(binding),
+                }
         await self.store.async_save(self.state)
         await self.async_apply_runtime_context(provider_manager, grid_manager, coordinator)
 
@@ -335,7 +355,7 @@ class SiteIdentityManager:
         """Apply the active site's explicit provider, grid and price context."""
         provider_binding = self.active_binding("elhandel")
         grid_binding = self.active_binding("grid")
-        price_binding = self.active_binding("nord_pool")
+        price_binding = self.global_binding("nord_pool")
         config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
         runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
         if hasattr(provider_manager, "async_apply_site_binding"):
@@ -517,6 +537,7 @@ class SiteIdentityManager:
                 or any(self.state.get("site_configs", {}).get(active_site_id, {}).get("meter", {}).get(field) for field in METER_FIELDS)
             ),
             "bindings": deepcopy(self.state.get("site_configs", {}).get(active_site_id, {}).get("bindings", {})),
+            "global_bindings": deepcopy(self.state.get("global_bindings", {})),
             "logical_roles": [item for item in ledger if item.get("site_id") == active_site_id and item.get("effective_to") is None],
             "source_ledger": [
                 item for item in ledger

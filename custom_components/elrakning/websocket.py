@@ -138,9 +138,6 @@ async def websocket_get_price_data(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
     """Return cached periods and discovered Nord Pool sensor values."""
-    if not _site_is_configured(hass):
-        connection.send_result(msg["id"], {"error": "site_unconfigured", "periods": []})
-        return
     entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
     coordinator: ElrakningCoordinator | None = entry.runtime_data if entry else None
     data = None
@@ -1249,7 +1246,7 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     }
     if data.area:
         site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
-        bound_price = site_manager.active_binding("nord_pool") if site_manager else None
+        bound_price = site_manager.global_binding("nord_pool") if site_manager else None
         bound_entry_id = bound_price.get("config_entry_id") if isinstance(bound_price, dict) else None
         nord_pool_entry = next(
             (

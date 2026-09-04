@@ -154,7 +154,7 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
             SiteIdentityManager.binding_fingerprint({**binding, "binding_fingerprint": "old"}),
         )
 
-    async def test_switching_to_empty_site_clears_provider_grid_and_price_context(self):
+    async def test_switching_to_empty_site_clears_site_adjustments_but_keeps_global_price(self):
         power = _MappingManager({"consumption_entity": "sensor.load_a"})
         meter = _MappingManager({"power_entity": "sensor.import_a"})
         hass = types.SimpleNamespace(
@@ -175,9 +175,17 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         await manager.async_activate_site(site_b)
         self.assertIsNone(provider.applied)
-        self.assertIsNone(coordinator.binding)
+        self.assertEqual(coordinator.binding, manager.global_binding("nord_pool"))
         self.assertEqual(grid.provider.state, {})
         self.assertEqual(power.mapping, {})
         self.assertEqual(meter.mapping, {})
         self.assertEqual(manager.state["site_configs"][site_b]["bindings"], {})
-        self.assertTrue(manager.state["site_configs"][site_a]["bindings"]["nord_pool"])
+        self.assertEqual(manager.global_binding("nord_pool"), {
+            "config_entry_id": "nord-entry",
+            "area": "SE2",
+            "currency": "SEK",
+            "binding_fingerprint": SiteIdentityManager.binding_fingerprint({
+                "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK"
+            }),
+        })
+        self.assertEqual(coordinator.binding, manager.global_binding("nord_pool"))
