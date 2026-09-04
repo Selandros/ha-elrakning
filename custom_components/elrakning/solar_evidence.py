@@ -207,6 +207,16 @@ class SolarEvidenceManager:
         except Exception:
             return
 
+    async def async_startup_catch_up(self) -> None:
+        """Finalize yesterday through the normal evidence audit path."""
+        yesterday = dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
+        try:
+            await self.async_collect_completed_day(yesterday)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+
     async def async_collect_completed_day(self, target_date: date) -> dict[str, Any]:
         if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
             return {"date": target_date.isoformat(), "audit_complete": False, "exclusion_reasons": ["site_unconfigured"]}

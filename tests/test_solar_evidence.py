@@ -30,6 +30,19 @@ def _state(value, timestamp, unit="W"):
 
 
 class SolarEvidenceTests(unittest.TestCase):
+    def test_startup_catch_up_uses_yesterday_through_normal_audit(self):
+        manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+        calls = []
+
+        async def collect(target_date):
+            calls.append(target_date)
+
+        manager.async_collect_completed_day = collect
+        import asyncio
+        asyncio.run(manager.async_startup_catch_up())
+
+        self.assertEqual(len(calls), 1)
+
     def test_async_load_schedules_daily_finalization_after_local_midnight(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
         calls = []

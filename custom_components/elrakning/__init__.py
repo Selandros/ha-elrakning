@@ -156,6 +156,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "evidence": solar_evidence_manager,
     })
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
+    await solar_evidence_manager.async_startup_catch_up()
     solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())
     async_register_eon_handoff_views(hass)
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
