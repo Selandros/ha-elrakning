@@ -30,6 +30,28 @@ def _state(value, timestamp, unit="W"):
 
 
 class SolarEvidenceTests(unittest.TestCase):
+    def test_async_load_schedules_daily_finalization_after_local_midnight(self):
+        manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+        calls = []
+
+        def track_time_change(*args, **kwargs):
+            calls.append(kwargs)
+            return lambda: None
+
+        import custom_components.elrakning.solar_evidence as solar_evidence
+        original = solar_evidence.async_track_time_change
+        solar_evidence.async_track_time_change = track_time_change
+        try:
+            import asyncio
+            asyncio.run(manager.async_load())
+        finally:
+            solar_evidence.async_track_time_change = original
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["hour"], 0)
+        self.assertEqual(calls[0]["minute"], 5)
+        self.assertEqual(calls[0]["second"], 0)
+
     def test_common_progress_requires_open_meteo_eligibility(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
         manager._days = {

@@ -153,7 +153,7 @@ class SolarEvidenceManager:
         if isinstance(cached, dict) and isinstance(cached.get("days"), dict):
             self._days = {key: value for key, value in cached["days"].items() if isinstance(key, str) and isinstance(value, dict)}
         try:
-            self._unsub = async_track_time_change(self.hass, self._daily_update, hour=12, minute=0, second=0)
+            self._unsub = async_track_time_change(self.hass, self._daily_update, hour=0, minute=5, second=0)
         except Exception:
             self._unsub = None
 
