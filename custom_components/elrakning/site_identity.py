@@ -32,6 +32,49 @@ ROLE_MAP = {
     "capacity_entity": "battery.capacity",
 }
 
+ROLE_CANONICALIZATION = {
+    "house.consumption": {
+        "unit": "W",
+        "sign_convention": "positive_consumption",
+        "aggregation": "time_weighted_mean",
+        "classification": "measured",
+        "max_hold_seconds": None,
+        "absolute_value": True,
+    },
+    "solar.production": {
+        "unit": "W",
+        "sign_convention": "positive_production",
+        "aggregation": "time_weighted_mean",
+        "classification": "measured",
+        "max_hold_seconds": None,
+        "absolute_value": True,
+    },
+    "grid.power/import": {
+        "unit": "W",
+        "sign_convention": "positive_import_negative_export",
+        "aggregation": "time_weighted_mean",
+        "classification": "measured",
+        "max_hold_seconds": None,
+        "absolute_value": False,
+    },
+    "battery.power": {
+        "unit": "W",
+        "sign_convention": "positive_discharge_negative_charge",
+        "aggregation": "time_weighted_mean",
+        "classification": "measured",
+        "max_hold_seconds": None,
+        "absolute_value": False,
+    },
+    "battery.soc": {
+        "unit": "%",
+        "sign_convention": "unsigned_0_100",
+        "aggregation": "last_valid",
+        "classification": "measured",
+        "max_hold_seconds": 900,
+        "absolute_value": False,
+    },
+}
+
 
 def _now() -> str:
     return dt_util.now().isoformat()
@@ -561,6 +604,11 @@ class SiteIdentityManager:
                         match.setdefault("address_history", []).append({"entity_id": entity_id, "updated_at": _now()})
                         match["entity_id"] = entity_id
                     match["source_identity"] = identity
+                    if match.get("canonicalization") is None:
+                        semantics = ROLE_CANONICALIZATION.get(role)
+                        if semantics:
+                            match["canonicalization"] = deepcopy(semantics)
+                            match.setdefault("provenance", {})["canonicalization_source"] = "logical_role_contract_v1"
                     continue
                 ledger.append({
                     "generation_id": str(uuid.uuid4()),
@@ -574,10 +622,12 @@ class SiteIdentityManager:
                         "migration_origin": "existing_configuration" if initial_migration else "mapping_change",
                         "effective_from_status": "unknown_unattributed" if initial_migration else "verified_mapping_change",
                     },
-                    "classification": None,
-                    "canonicalization": None,
+                    "classification": ROLE_CANONICALIZATION.get(role, {}).get("classification"),
+                    "canonicalization": deepcopy(ROLE_CANONICALIZATION.get(role)),
                     "created_at": _now(),
                 })
+                if role in ROLE_CANONICALIZATION:
+                    ledger[-1]["provenance"]["canonicalization_source"] = "logical_role_contract_v1"
             for index, old in enumerate(active):
                 if index not in matched and old.get("effective_to") is None:
                     old["effective_to"] = _now()

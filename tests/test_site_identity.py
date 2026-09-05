@@ -86,6 +86,12 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(generations[0]["effective_from"])
         self.assertEqual(generations[0]["provenance"]["migration_origin"], "existing_configuration")
         self.assertEqual(generations[0]["provenance"]["effective_from_status"], "unknown_unattributed")
+        self.assertEqual(generations[0]["canonicalization"]["unit"], "W")
+        self.assertEqual(generations[0]["canonicalization"]["aggregation"], "time_weighted_mean")
+        self.assertEqual(
+            generations[0]["provenance"]["canonicalization_source"],
+            "logical_role_contract_v1",
+        )
 
         restarted = SiteIdentityManager(hass, power, meter)
         restarted.store = _Store(manager.store.data)
