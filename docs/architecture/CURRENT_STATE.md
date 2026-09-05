@@ -73,6 +73,17 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - OPEN (P0-STORAGE-1B): real killed-process/power-loss testing, large
   multi-year migration timing, actual filesystem/NAS behavior, and final
   physical schema acceptance remain before storage selection can be closed.
+- VERIFIED (isolated process/filesystem gate, 2026-09-05):
+  `tools/p0_storage_durability_gate.py` passed a real `SIGKILL` writer test,
+  reopening and integrity-checking the database, proving the uncommitted
+  partial transaction was absent and replay was idempotent. It also passed
+  migration/reopen/query checks over 350,400 synthetic 15-minute rows (2 sites
+  x 5 years), migration rollback, local backup/restore, target unavailability
+  without blocking local writes, backup resumption, and the measured WAL/
+  `synchronous=FULL`/foreign-key/busy-timeout profile.
+- OPEN (P0-STORAGE-1B2): this is not an actual host power-cut or NAS-hardware
+  test, and the physical schema, hardware budget, and production backup
+  policy are still not frozen.
 
 ## Verified data limitations
 
