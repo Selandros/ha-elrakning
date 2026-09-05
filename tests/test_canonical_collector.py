@@ -3,6 +3,7 @@ import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
 
@@ -83,6 +84,16 @@ def _target(site, role, entity, generation, mapping=None):
 
 
 class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_finalizes_previous_quarter_before_scheduling_next(self):
+        with tempfile.TemporaryDirectory() as directory:
+            collector = CanonicalCollector(
+                _StartHass(), _Identity([]), Path(directory) / "canonical.sqlite"
+            )
+            collector._async_close_previous_quarter = AsyncMock()
+            await collector.async_start()
+            collector._async_close_previous_quarter.assert_awaited_once()
+            await collector.async_shutdown()
+
     async def test_state_reported_subscription_is_filtered_to_ready_sources(self):
         with tempfile.TemporaryDirectory() as directory:
             target = _target("site-a", "house.consumption", "sensor.load", "gen-a")

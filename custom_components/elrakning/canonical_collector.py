@@ -58,13 +58,14 @@ class CanonicalCollector:
             self._async_state_reported,
             event_filter=self._state_reported_filter,
         )
+        self._started = True
+        await self._async_close_previous_quarter(dt_util.now())
         self._quarter_unsub = async_track_time_change(
             self.hass,
             self._async_close_previous_quarter,
             minute=[0, 15, 30, 45],
             second=5,
         )
-        self._started = True
 
     async def async_shutdown(self) -> None:
         if self._state_unsub:
