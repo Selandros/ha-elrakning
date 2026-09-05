@@ -16,6 +16,7 @@ from custom_components.elrakning.site_economic_frames import (
     build_eon_grid_economic_frames,
     persist_eon_grid_economic_snapshot,
     resolve_grid_binding_site_id,
+    schedule_eon_grid_economic_capture,
 )
 
 
@@ -112,6 +113,31 @@ class SiteEconomicFrameTests(unittest.TestCase):
     def tearDown(self):
         self.storage.close()
         self.directory.cleanup()
+
+    def test_scheduler_hands_task_creation_to_home_assistant_loop(self):
+        class _Loop:
+            def __init__(self):
+                self.callback = None
+
+            def call_soon_threadsafe(self, callback):
+                self.callback = callback
+
+        class _Hass:
+            def __init__(self):
+                self.loop = _Loop()
+                self.tasks = []
+
+            def async_create_task(self, coroutine):
+                self.tasks.append(coroutine)
+                coroutine.close()
+
+        hass = _Hass()
+        schedule_eon_grid_economic_capture(hass)
+
+        self.assertEqual(hass.tasks, [])
+        self.assertIsNotNone(hass.loop.callback)
+        hass.loop.callback()
+        self.assertEqual(len(hass.tasks), 1)
 
     def test_active_eon_snapshot_round_trips_with_separate_economic_roles(self):
         inserted = persist_eon_grid_economic_snapshot(

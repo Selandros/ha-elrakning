@@ -326,6 +326,12 @@ async def _async_capture_eon_grid_economic_snapshot(hass: Any, captured_at: date
 
 
 def schedule_eon_grid_economic_capture(hass: Any) -> None:
-    """Schedule one provider-update snapshot without blocking Home Assistant's loop."""
+    """Schedule one provider-update snapshot on Home Assistant's event-loop thread."""
     captured_at = datetime.now(UTC)
-    hass.async_create_task(_async_capture_eon_grid_economic_snapshot(hass, captured_at))
+
+    def _schedule() -> None:
+        hass.async_create_task(
+            _async_capture_eon_grid_economic_snapshot(hass, captured_at)
+        )
+
+    hass.loop.call_soon_threadsafe(_schedule)
