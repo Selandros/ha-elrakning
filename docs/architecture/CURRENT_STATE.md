@@ -1,6 +1,6 @@
 # Elräkning – Current State
 
-Updated: 2026-09-04
+Updated: 2026-09-05
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
@@ -51,7 +51,47 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - UNKNOWN (architecture/runtime audit required): Separate background collector
   for inactive sites.
 - UNKNOWN (runtime semantics audit required): Exact battery/PV-normalized
-  physical meaning of `sensor.total_consumption`.
+  physical meaning of `sensor.total_consumption` as a universal canonical
+  source outside the observed regimes and source provenance per site.
+
+## New read-only data-foundation evidence
+
+- VERIFIED (runtime Recorder audit, 2026-09-05): A 24-hour sample of
+  `sensor.total_consumption` contained 830 states; all 830 had the required
+  attributes and satisfied `state_w = pv_w + grid_w + batt_w` with zero
+  residual in the observed charging, discharging, PV-producing, and
+  low/no-PV regimes.
+- VERIFIED (runtime Recorder audit, 2026-09-05): In that normalized sample,
+  grid power was positive for import and negative for export; battery power
+  was positive while supplying the house and negative while charging.
+- VERIFIED (current audit): The result makes `sensor.total_consumption` a
+  valid battery-independent gross-house-load candidate for the observed
+  regimes. It does not by itself establish long-term retention, source
+  provenance, or universal semantics across sites.
+- UNKNOWN (read-only audit required): Exact source entity IDs behind
+  `sensor.total_consumption` and their long-term-statistics coverage.
+- UNKNOWN (read-only audit required): Long-term statistics and common overlap
+  for load, PV, grid import/export, battery power, SOC, phase data, and
+  outdoor temperature.
+
+## Permanent data-foundation risks and gates
+
+- IRREVERSIBLE DATA RISK (P0): Recorder/raw model-relevant history is currently
+  short-retained or unverified beyond the observed window. Load, PV, grid,
+  battery, SOC, price, and forecast history needed for future replay must be
+  captured with provenance before it expires.
+- MEMORY UPDATE REQUIRED: The canonical foundation must explicitly preserve
+  source generation, sign convention, meter reset/rollover, quality states,
+  schema version, `known_at`, DST-safe timestamps, and dataset-specific
+  deduplication.
+- MEMORY UPDATE REQUIRED: Backtest acceptance must include event replay,
+  price-publication state, missing/stale data, DST, source changes, and
+  reproducible dataset/model/calibration/parameter identities.
+- MEMORY UPDATE REQUIRED: Safety acceptance must include zero-write shadow
+  enforcement, hard limits, stale-input rejection, safe fallback,
+  acknowledgement/timeout, command deduplication, and wrong-site prevention.
+- MEMORY UPDATE REQUIRED: Evaluation must compare rule baselines and oracle,
+  and separate forecast-driven regret from optimizer-driven regret.
 
 ## Current storage observations
 

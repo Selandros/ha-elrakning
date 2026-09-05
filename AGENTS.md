@@ -108,3 +108,16 @@ levels separate. Update CURRENT_STATE when implementation or a milestone
 changes; update ARCHITECTURE_DECISIONS for an accepted durable decision; update
 the masterplan when roadmap or vision changes. A memory regression or
 irreversible data risk must be prominent, not hidden in a report conclusion.
+
+### External architecture material
+
+When external studies or planning documents are supplied, compare them against
+the four permanent files and promote only durable, accepted requirements.
+Keep recommendations, runtime findings, and implementation unknowns separate;
+never turn an unverified proposal into a verified current-state claim.
+
+For data-foundation work, the memory review must explicitly cover canonical
+record fields, source generations, quality/provenance, retention, `known_at`,
+replay/backtest integrity, safe fallback, hardware limits, and irreversible
+data risk. A checklist is incomplete if it names a component but omits the
+evidence and safety gates required to trust it.

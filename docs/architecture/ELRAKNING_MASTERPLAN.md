@@ -280,3 +280,40 @@ survive NAS unavailability.
 
 Peak/fuse safety work may proceed in parallel earlier, but physical control is
 still gated on its completion and verification.
+
+## Completeness gates for the data and control foundation
+
+The following are required acceptance details, not optional implementation
+decoration:
+
+- Every canonical observation preserves role, source generation, installation
+  fingerprint, unit, sign convention, interval, timezone/DST-safe timestamps,
+  quality, provenance, and schema version.
+- Cumulative meters track generation, reset, rollover, and source changes;
+  source replacement never rewrites historical observations.
+- Forecast and price frames preserve publication/availability state and
+  `known_at`; later corrected provider data must not replace the frame used by
+  an earlier decision.
+- Replay tests cover missing/stale data, DST, source changes, meter resets,
+  price publication timing, and `known_at <= decision_at`.
+- Optimizer evaluation includes rule-based baselines and a hindsight oracle;
+  forecast regret and optimizer regret are reported separately.
+- Forecast evaluation is segmented by normal days, cold days, weekends, and
+  anomalies, with uncertainty represented as intervals or scenarios rather
+  than a single unexplained value.
+- Battery evaluation includes degradation-adjusted savings, SOH/health trend,
+  throughput/EFC, reserve violations, and command stability.
+- Shadow mode rejects every physical write. Any future control adapter must
+  validate capabilities, hard limits, stale state, acknowledgement, timeout,
+  communication health, site identity, and safe fallback before acting.
+- Flexible loads require explicit roles, availability, deadlines, interruption
+  limits, manual override, actuator safety, and failsafe behavior.
+- Storage implementation is chosen using measured growth, query performance,
+  backup/restore behavior, and provenance needs; JSON is not assumed suitable
+  for every multi-year time series.
+
+These gates preserve the distinction between architecture direction,
+implementation details, and runtime evidence. Unknown database format,
+collector implementation, solver, or Recorder coverage may remain open when
+the contract and safety invariants are fixed; an unknown that would force
+incompatible architecture choices is a memory blocker.

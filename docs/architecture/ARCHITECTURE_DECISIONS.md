@@ -139,3 +139,52 @@ Future read-only diagnostics may expose store/site identity, record and byte
 counts, oldest/newest timestamps, growth, retention, schema, quality/gaps,
 largest datasets, warnings, and Recorder size separately. Credentials and
 secrets must not be exposed.
+
+## AD-017 Data-foundation acceptance gates
+
+No forecast, optimizer, shadow, or backtest implementation may be treated as
+trustworthy until the model data has a versioned canonical contract,
+source/site identity, sign convention, quality/provenance, retention policy,
+and explicit `known_at` semantics. The foundation must distinguish measured,
+derived, estimated, forecast, unavailable, stale, gapped, duplicate, and
+interpolated values.
+
+The first data gate is a read-only audit of real source entity IDs, Recorder
+coverage, long-term-statistics coverage, common overlap, and physical
+semantics. Runtime evidence must remain separate from static inference. The
+verified `sensor.total_consumption` balance is a gross-load candidate for the
+observed regimes, but its source provenance and long-term retention still need
+explicit documentation before it becomes a universal canonical source.
+
+## AD-018 Replay, safety, and reproducibility gates
+
+Backtest/replay infrastructure precedes optimizer quality claims. Replay must
+be chronological and expose only frames satisfying `known_at <= decision_at`.
+Timezone/DST transitions, price-publication state, missing data, source
+changes, and meter resets are explicit test cases. Runs retain dataset,
+source/site, calibration, model, parameter, schema, and deterministic-seed
+identities so results can be reproduced and rolled back.
+
+Shadow mode is contractually zero-write: any attempted physical write is an
+error. Future real-control paths require deterministic hard limits,
+stale/invalid-input rejection, safe fallback, command acknowledgement and
+timeout handling, deduplication/hysteresis, and proof that no command can
+target the wrong site. Flexible loads must define role, availability,
+deadlines, interruption limits, manual override, and a failsafe state before
+they enter optimization.
+
+## AD-019 Evaluation and information preservation
+
+Optimizer evaluation must include no-battery, self-consumption-only,
+cheapest-hours/threshold, MPC, and perfect-hindsight-oracle baselines. Report
+cost/savings, import/export, peak/tariff impact, throughput/EFC,
+degradation-adjusted savings, self-sufficiency, reserve/constraint
+violations, command reversals, and regret. Forecast-driven regret must be
+separated from optimizer-driven regret.
+
+Model-relevant raw/detail data may be retained generously while growth is
+measured, then downsampled only after its value is understood. Canonical
+15-minute and daily/event data are long-lived targets; price, forecast,
+quality, calibration, health, command, and source-change events retain their
+provenance and effective/known times. This is an explicit P0 concern while
+Recorder retention remains short or unverified.
