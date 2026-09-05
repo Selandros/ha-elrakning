@@ -151,6 +151,12 @@ class _Provider:
         self.state = self._empty_state()
         return self.public_state()
 
+    async def async_source_data(self):
+        return {
+            "provider": "eon",
+            "facility": copy.deepcopy(self.state.get("facility")),
+        }
+
     def async_start_refresh(self):
         self.refresh_starts += 1
 
@@ -308,14 +314,14 @@ class GridMultiSiteControlPlaneTests(unittest.IsolatedAsyncioTestCase):
             site_b, binding_b, ACTIVE_GRID_STATE, captured
         )
         transfer_a = next(
-            frame
-            for frame in frames_a
-            if frame["logical_role"] == "economic.grid.import.transfer"
+            item["frame"]
+            for item in frames_a
+            if item["frame"]["logical_role"] == "economic.grid.import.transfer"
         )
         transfer_b = next(
-            frame
-            for frame in frames_b
-            if frame["logical_role"] == "economic.grid.import.transfer"
+            item["frame"]
+            for item in frames_b
+            if item["frame"]["logical_role"] == "economic.grid.import.transfer"
         )
         self.assertNotEqual(
             transfer_a["source_generation_id"],
@@ -383,4 +389,35 @@ class GridMultiSiteControlPlaneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reloaded_grid._site_binding, binding_a)
         self.assertEqual(
             reloaded_grid.provider.state["facility"], ACTIVE_GRID_STATE["facility"]
+        )
+
+    async def test_grid_source_data_uses_grid_binding_not_physical_site_mapping(self):
+        hass, sites, _grid, _entry, _site_a, site_b = await self._runtime()
+        self.assertFalse(sites.active_site_is_configured())
+
+        await self._login(hass)
+        self.assertIsNotNone(sites.active_binding("grid"))
+        connection = _Connection()
+        await websocket_module.websocket_grid_source_data(
+            hass,
+            connection,
+            {"id": 3, "type": websocket_module.GRID_SOURCE_DATA_COMMAND},
+        )
+        self.assertTrue(connection.last["success"])
+        self.assertEqual(
+            connection.last["facility"]["address"]["street"], "Fiskvik 218"
+        )
+
+        await sites.async_activate_site(site_b)
+        self.assertFalse(sites.active_site_is_configured())
+        self.assertIsNone(sites.active_binding("grid"))
+        connection = _Connection()
+        await websocket_module.websocket_grid_source_data(
+            hass,
+            connection,
+            {"id": 4, "type": websocket_module.GRID_SOURCE_DATA_COMMAND},
+        )
+        self.assertEqual(
+            connection.last,
+            {"success": False, "error": "site_unconfigured"},
         )

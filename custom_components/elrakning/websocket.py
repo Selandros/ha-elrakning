@@ -454,7 +454,7 @@ async def websocket_grid_login(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): GRID_SOURCE_DATA_COMMAND})
 @websocket_api.async_response
 async def websocket_grid_source_data(hass, connection, msg):
-    if not _site_is_configured(hass):
+    if not _site_binding_is_configured(hass, "grid"):
         connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured"})
         return
     manager = _grid_manager(hass)
