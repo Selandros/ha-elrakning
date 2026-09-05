@@ -243,6 +243,25 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
             self.assertEqual(row, (None, "unknown", "gap"))
 
+    async def test_stale_last_valid_source_uses_schema_valid_quality_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "battery.soc", "sensor.soc", "gen-s")
+            collector = CanonicalCollector(
+                _Hass(), _Identity([target]), Path(directory) / "canonical.sqlite"
+            )
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            key = ("site-a", "battery.soc", "gen-s", start)
+            collector._buffers[key]["target"] = target
+            collector._buffers[key]["samples"] = [(start, 57.0)]
+            await collector.async_flush(start, start + timedelta(seconds=900))
+            row = collector.storage._connection().execute(
+                "SELECT value, quality_status, gap_status FROM energy_observations"
+            ).fetchone()
+            self.assertEqual(row, (57.0, "partial", "stale"))
+            collector.storage.close()
+
     async def test_target_without_source_semantics_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             target = _target("site-a", "house.consumption", "sensor.load", "gen-a")

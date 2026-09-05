@@ -260,7 +260,7 @@ class CanonicalCollector:
                     quality_status = "invalid" if buffer["invalid"] else "unknown"
                     gap_status = "unavailable" if buffer["invalid"] else "gap"
                 elif semantics["aggregation"] == "last_valid" and coverage < 1:
-                    quality_status, gap_status = "stale", "stale"
+                    quality_status, gap_status = "partial", "stale"
                 elif semantics["aggregation"] == "last_valid":
                     quality_status, gap_status = "good", "none"
                 else:
