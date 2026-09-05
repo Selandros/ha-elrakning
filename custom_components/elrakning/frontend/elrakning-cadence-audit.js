@@ -32,7 +32,9 @@ function formatTimestamp(value) {
 
 function formatSeconds(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? `${number.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} s` : "–";
+  return Number.isFinite(number)
+    ? `${number.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} s`
+    : "–";
 }
 
 function statusLabel(status) {
@@ -47,7 +49,9 @@ function statusLabel(status) {
 }
 
 function downloadJson(filename, value) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify(value, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -151,10 +155,18 @@ class CadenceAuditPanel {
     if (diagnostics) main.insertBefore(section, diagnostics);
     else main.append(section);
     this.section = section;
-    section.querySelector("[data-cadence-start-button]").addEventListener("click", () => this._command(START_COMMAND));
-    section.querySelector("[data-cadence-stop-button]").addEventListener("click", () => this._command(STOP_COMMAND));
-    section.querySelector("[data-cadence-cleanup-button]").addEventListener("click", () => this._command(CLEANUP_COMMAND));
-    section.querySelector("[data-cadence-export-button]").addEventListener("click", () => this._export());
+    section
+      .querySelector("[data-cadence-start-button]")
+      .addEventListener("click", () => this._command(START_COMMAND));
+    section
+      .querySelector("[data-cadence-stop-button]")
+      .addEventListener("click", () => this._command(STOP_COMMAND));
+    section
+      .querySelector("[data-cadence-cleanup-button]")
+      .addEventListener("click", () => this._command(CLEANUP_COMMAND));
+    section
+      .querySelector("[data-cadence-export-button]")
+      .addEventListener("click", () => this._export());
     this._render();
   }
 
@@ -167,7 +179,7 @@ class CadenceAuditPanel {
       this.state = state;
       this._render();
       this._syncTimers();
-    } catch (error) {
+    } catch {
       if (this._destroyed || generation !== this._requestGeneration) return;
       this._message("Audit-state kunde inte hämtas.", true);
     }
@@ -213,7 +225,10 @@ class CadenceAuditPanel {
       this._refreshTimer = null;
     }
     if (running && !this._countdownTimer) {
-      this._countdownTimer = window.setInterval(() => this._renderCountdown(), 1000);
+      this._countdownTimer = window.setInterval(
+        () => this._renderCountdown(),
+        1000,
+      );
     }
     if (!running && this._countdownTimer) {
       window.clearInterval(this._countdownTimer);
@@ -235,24 +250,35 @@ class CadenceAuditPanel {
       output.textContent = "–";
       return;
     }
-    const remaining = Math.max(0, (new Date(this.state.planned_end_at).getTime() - Date.now()) / 1000);
+    const remaining = Math.max(
+      0,
+      (new Date(this.state.planned_end_at).getTime() - Date.now()) / 1000,
+    );
     output.textContent = formatDuration(remaining);
   }
 
   _render() {
     if (!this.section) return;
     const state = this.state || { status: "idle", signals: [] };
-    this.section.querySelector("[data-cadence-status]").textContent = statusLabel(state.status);
-    this.section.querySelector("[data-cadence-start]").textContent = formatTimestamp(state.started_at);
-    this.section.querySelector("[data-cadence-end]").textContent = formatTimestamp(state.completed_at || state.planned_end_at);
-    this.section.querySelector("[data-cadence-restarts]").textContent = String(state.restart_count || 0);
+    this.section.querySelector("[data-cadence-status]").textContent = statusLabel(
+      state.status,
+    );
+    this.section.querySelector("[data-cadence-start]").textContent =
+      formatTimestamp(state.started_at);
+    this.section.querySelector("[data-cadence-end]").textContent =
+      formatTimestamp(state.completed_at || state.planned_end_at);
+    this.section.querySelector("[data-cadence-restarts]").textContent = String(
+      state.restart_count || 0,
+    );
     this._renderCountdown();
 
     const running = state.status === "running";
     this.section.querySelector("[data-cadence-start-button]").disabled = running;
     this.section.querySelector("[data-cadence-stop-button]").disabled = !running;
-    this.section.querySelector("[data-cadence-export-button]").disabled = state.status === "idle";
-    this.section.querySelector("[data-cadence-cleanup-button]").disabled = running || state.status === "idle";
+    this.section.querySelector("[data-cadence-export-button]").disabled =
+      state.status === "idle";
+    this.section.querySelector("[data-cadence-cleanup-button]").disabled =
+      running || state.status === "idle";
 
     const tbody = this.section.querySelector("[data-cadence-signals]");
     tbody.replaceChildren();
@@ -262,7 +288,8 @@ class CadenceAuditPanel {
       const source = document.createElement("td");
       source.className = "cadence-source";
       const role = document.createElement("strong");
-      role.textContent = ROLE_LABELS[signal.logical_role] || signal.logical_role || "Okänd roll";
+      role.textContent =
+        ROLE_LABELS[signal.logical_role] || signal.logical_role || "Okänd roll";
       const entity = document.createElement("small");
       entity.textContent = signal.entity_id || "Ingen entity";
       source.append(role, entity);
@@ -277,11 +304,14 @@ class CadenceAuditPanel {
         formatSeconds(gap.max),
         formatDuration(signal.unavailable?.duration_seconds || 0),
       ];
-      row.append(source, ...cells.map((value) => {
-        const cell = document.createElement("td");
-        cell.textContent = String(value);
-        return cell;
-      }));
+      row.append(
+        source,
+        ...cells.map((value) => {
+          const cell = document.createElement("td");
+          cell.textContent = String(value);
+          return cell;
+        }),
+      );
       tbody.append(row);
     }
 
@@ -292,8 +322,21 @@ class CadenceAuditPanel {
     if (state.runtime_gap_seconds > 0) {
       notes.push(`Runtime-gap: ${formatDuration(state.runtime_gap_seconds)}.`);
     }
-    notes.push("WebSocket-reconnects är ej tillämpliga: collectorn kör lokalt på HA event bus.");
-    notes.push("Stale klassas inte av auditen; stale_after är source-generation-specifikt och fastställs först från observation.");
+    if (state.observation_homogeneous === false) {
+      notes.push(
+        "Source identity ändrades eller blev overifierbar under auditen; berörd signal blandas inte vidare och resultatet är inte homogent.",
+      );
+    } else if (state.observation_homogeneous == null && state.status !== "idle") {
+      notes.push(
+        "Minst en source identity är inte stark nog för att fysisk kontinuitet ska kunna garanteras.",
+      );
+    }
+    notes.push(
+      "WebSocket-reconnects är ej tillämpliga: collectorn kör lokalt på HA event bus.",
+    );
+    notes.push(
+      "Stale klassas inte av auditen; stale_after är source-generation-specifikt och fastställs först från observation.",
+    );
     this.section.querySelector("[data-cadence-note]").textContent = notes.join(" ");
   }
 
