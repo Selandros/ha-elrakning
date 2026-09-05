@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
+from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
 from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
@@ -28,6 +29,7 @@ from .websocket import async_register_websocket_commands
 PANEL_PATH = DOMAIN
 PANEL_LOADER_PATH = f"/{DOMAIN}/elrakning-loader.js"
 PANEL_RESOURCE_PATH = f"/{DOMAIN}/elrakning-panel.js"
+PANEL_CADENCE_AUDIT_PATH = f"/{DOMAIN}/elrakning-cadence-audit.js"
 PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
 
 
@@ -57,6 +59,11 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                 StaticPathConfig(
                     PANEL_RESOURCE_PATH,
                     str(integration_dir / "frontend" / "elrakning-panel.js"),
+                    cache_headers=False,
+                ),
+                StaticPathConfig(
+                    PANEL_CADENCE_AUDIT_PATH,
+                    str(integration_dir / "frontend" / "elrakning-cadence-audit.js"),
                     cache_headers=False,
                 ),
                 StaticPathConfig(
@@ -91,6 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await _async_register_frontend(hass)
         async_register_websocket_commands(hass)
+        async_register_cadence_audit_websocket(hass)
         return await _async_setup_entry(hass, entry)
     except Exception:
         frontend_data["runtime_status"] = "failed"
@@ -116,6 +124,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
+    cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
+    await cadence_audit_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager
     grid_manager = GridManager(hass, entry)
     await grid_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
@@ -204,6 +215,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if unsubscribe := frontend_data.pop("solar_weather_unsub", None):
         unsubscribe()
+    if cadence_audit_manager := frontend_data.pop("cadence_audit_manager", None):
+        await cadence_audit_manager.async_shutdown()
     if solar_weather_manager := frontend_data.pop("solar_weather_manager", None):
         await solar_weather_manager.async_shutdown()
     if solar_shadow_manager := frontend_data.pop("solar_shadow_manager", None):
