@@ -442,8 +442,18 @@ class ElhandelManager:
         selected = provider_config["facility"]
         self.lifecycle.invalidate_generation()
         # Configuration succeeds after auth, facility selection, and credential save; secondary sync is scheduled below.
-        old_facility_id = GreenelyProvider.facility_id(self._config())
-        facility_changed = old_facility_id is not None and old_facility_id != facility_id
+        binding = getattr(self, "_site_binding", None)
+        bound_facility_id = binding.get("facility_id") if isinstance(binding, dict) else None
+        current_facility_id = (
+            bound_facility_id
+            if isinstance(bound_facility_id, str) and bound_facility_id
+            else self.state.get("facility_id")
+        )
+        facility_changed = (
+            isinstance(current_facility_id, str)
+            and bool(current_facility_id)
+            and current_facility_id != facility_id
+        )
         invoices = [] if facility_changed else self.state.get("invoices", [])
         restored_samples: list[dict[str, Any]] = []
         stored_state: dict[str, Any] | None = None

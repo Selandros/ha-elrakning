@@ -803,6 +803,46 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.state["provider"], "greenely")
         start_refresh.assert_called_once_with("manual_debug")
 
+    async def test_save_config_detects_facility_change_from_site_context_not_global_config(self):
+        manager = _manager()
+        manager.entry.data[ELECTRICITY_PROVIDER_CONFIG_DATA_KEY] = {
+            "email": "user@example.test",
+            "password": "password",
+            "facility_id": "facility-b",
+        }
+        manager._site_binding = {"provider": "greenely", "facility_id": "facility-a"}
+        manager.state.update({
+            "configured": True,
+            "provider": "greenely",
+            "facility_id": "facility-a",
+            "summary": {"marker": "site-a"},
+            "consumption": {"month": "2026-09", "month_to_date_kwh": 42.0},
+            "consumption_error": {"error": "site-a-error"},
+            "source": {
+                "facility": {"id": "facility-a"},
+                "contracts": [{"id": "contract-a"}],
+                "invoices": [],
+                "consumption": {"samples": [{"timestamp": "2026-09-01", "value": 42.0}]},
+            },
+        })
+
+        with patch(
+            "custom_components.elrakning.elhandel.manager.GreenelyProvider",
+            return_value=_SaveClient(),
+        ), patch.object(manager, "async_start_refresh"):
+            result = await manager.async_save_config(
+                "user@example.test", "password", "facility-b"
+            )
+
+        self.assertTrue(result["configured"])
+        self.assertEqual(manager.state["facility_id"], "facility-b")
+        self.assertIsNone(manager.state["summary"])
+        self.assertIsNone(manager.state["consumption"])
+        self.assertIsNone(manager.state["consumption_error"])
+        self.assertEqual(manager.state["source"]["facility"]["id"], "facility-b")
+        self.assertEqual(manager.state["source"]["contracts"], [])
+        self.assertEqual(manager.state["source"]["consumption"]["samples"], [])
+
     async def test_async_save_config_failure_does_not_activate_provider(self):
         manager = _manager()
         manager.entry.data = {}
