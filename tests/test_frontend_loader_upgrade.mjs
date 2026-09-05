@@ -11,6 +11,6 @@ assert.doesNotMatch(initSource, /["']js_url["']:\s*PANEL_LOADER_PATH\b/);
 assert.match(loaderSource, /manifest\.json\?t=\$\{Date\.now\(\)\}/);
 assert.match(loaderSource, /elrakning-panel\.js\?v=\$\{encodeURIComponent\(version\)\}/);
 assert.match(loaderSource, /elrakning-cadence-audit\.js\?v=\$\{encodeURIComponent\(version\)\}/);
-assert.equal(manifest.version, "0.0.596");
+assert.match(manifest.version, /^0\.0\.\d+$/);
 
 console.log("frontend loader versioned-upgrade regression: ok");

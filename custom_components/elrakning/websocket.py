@@ -443,6 +443,11 @@ async def websocket_grid_login(hass, connection, msg):
     except Exception as err:
         connection.send_result(msg["id"], {"success": False, "error": getattr(err, "code", "configuration_failed")})
         return
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    provider = getattr(manager, "provider", None)
+    if result.get("configured") and site_manager and provider and isinstance(provider.state.get("facility"), dict):
+        await site_manager.async_bind_grid_runtime(manager)
+        manager.async_start_refresh()
     connection.send_result(msg["id"], {"success": result.get("status") not in {"browser_attestation_required", "invalid_input"}, **result})
 
 
@@ -468,6 +473,19 @@ async def websocket_grid_remove(hass, connection, msg):
     manager = _grid_manager(hass)
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "grid_unavailable"})
+        return
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if site_manager is not None:
+        if site_manager.active_binding("grid") is None:
+            connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
+            return
+        has_other_binding = await site_manager.async_unbind_grid_runtime()
+        await manager.async_apply_site_binding(None)
+        if not has_other_binding:
+            await manager.async_remove()
+        else:
+            hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
+        connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
         return
     connection.send_result(msg["id"], {"success": True, **await manager.async_remove()})
 
