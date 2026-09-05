@@ -1,3 +1,4 @@
+(() => {
 class ElrakningPanel extends HTMLElement {
   set hass(value) {
     this._hass = value;
@@ -85,3 +86,4 @@ class ElrakningPanel extends HTMLElement {
 if (!customElements.get("elrakning-panel")) {
   customElements.define("elrakning-panel", ElrakningPanel);
 }
+})();
