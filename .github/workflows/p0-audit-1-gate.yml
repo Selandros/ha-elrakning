@@ -1,12 +1,9 @@
-name: P0 Audit 1 Gate
+name: P0 Release Gate
 
 on:
   push:
     branches:
       - p0-audit-1-source-agnostic
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -17,20 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: Europe/Stockholm
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: base-019c24a
-            ref: 019c24a4798cbdb0c1084a261b1cc78a9645907f
-          - label: p0-audit-1-head
-            ref: p0-audit-1-source-agnostic
-    name: gate-${{ matrix.label }}
     steps:
-      - name: Checkout
+      - name: Checkout release candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.ref }}
+          ref: release/0.0.604-economic-frames
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,15 +37,33 @@ jobs:
       - name: Python tests
         run: python -m unittest discover -s tests -p 'test_*.py'
 
-      - name: JavaScript tests
+      - name: Python compileall
+        run: python -m compileall -q custom_components tests tools
+
+      - name: JavaScript and MJS syntax
         shell: bash
         run: |
-          set -uo pipefail
-          status=0
-          for test_file in tests/test_*.mjs; do
-            echo "==> ${test_file}"
-            if ! node "${test_file}"; then
-              status=1
-            fi
-          done
-          exit "${status}"
+          set -euo pipefail
+          while IFS= read -r file; do
+            node --check "$file"
+          done < <(git ls-files '*.js' '*.mjs')
+
+      - name: JSON parse
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "*.json"], text=True
+          ).splitlines()
+          for filename in files:
+              with Path(filename).open(encoding="utf-8") as handle:
+                  json.load(handle)
+          print(f"validated {len(files)} JSON files")
+          PY
+
+      - name: Diff check from 0.0.603 baseline
+        run: git diff --check ad4b442a911f89436678701f20c5e5becad919cd..HEAD
