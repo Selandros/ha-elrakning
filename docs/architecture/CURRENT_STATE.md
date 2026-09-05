@@ -61,6 +61,18 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   times; this is not yet a production storage selection because crash/restart,
   migration, backup/restore, partial-write, and NAS-unavailable gates remain
   open.
+- VERIFIED (isolated recovery gate, 2026-09-05): P0-STORAGE-1B candidate
+  checks pass in `tools/p0_storage_recovery_gate.py` and
+  `tests/test_p0_storage_recovery_gate.py`. The temporary normalized SQLite
+  candidate passed transaction rollback, duplicate replay idempotency,
+  immutable revision/supersedes, source replacement without history rewrite,
+  transactional schema migration and rollback, SQLite backup/restore,
+  global-frame and `known_at` preservation, integrity/corruption detection,
+  and local-write continuity when the backup target is unavailable. WAL,
+  `synchronous=FULL`, and foreign keys are measured candidate settings only.
+- OPEN (P0-STORAGE-1B): real killed-process/power-loss testing, large
+  multi-year migration timing, actual filesystem/NAS behavior, and final
+  physical schema acceptance remain before storage selection can be closed.
 
 ## Verified data limitations
 
