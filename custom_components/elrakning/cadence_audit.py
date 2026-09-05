@@ -15,6 +15,7 @@ from homeassistant.helpers import event as event_helper
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
+from .site_identity import resolve_source_identity
 
 STORE_KEY = "elrakning.cadence_audit"
 STORE_VERSION = 1
@@ -69,7 +70,11 @@ def _seconds_between(start: str | None, end: str | None) -> float | None:
 
 
 def _quantile(values: list[float], fraction: float) -> float | None:
-    clean = sorted(value for value in values if isinstance(value, (int, float)) and math.isfinite(value))
+    clean = sorted(
+        value
+        for value in values
+        if isinstance(value, (int, float)) and math.isfinite(value)
+    )
     if not clean:
         return None
     if len(clean) == 1:
@@ -84,7 +89,11 @@ def _quantile(values: list[float], fraction: float) -> float | None:
 
 
 def _distribution(values: list[float]) -> dict[str, Any]:
-    clean = sorted(value for value in values if isinstance(value, (int, float)) and math.isfinite(value))
+    clean = sorted(
+        value
+        for value in values
+        if isinstance(value, (int, float)) and math.isfinite(value)
+    )
     return {
         "count": len(clean),
         "min": float(clean[0]) if clean else None,
@@ -120,6 +129,7 @@ def _empty_signal_metrics() -> dict[str, Any]:
         "state_reported_count": 0,
         "state_changed_count": 0,
         "state_value_change_count": 0,
+        "state_changed_without_state_value_change_count": 0,
         "same_value_report_count": 0,
         "event_gaps_seconds": [],
         "last_event_at": None,
@@ -131,6 +141,23 @@ def _empty_signal_metrics() -> dict[str, Any]:
         "event_minus_last_changed_seconds": [],
         "unavailable_periods": [],
         "open_unavailable": None,
+    }
+
+
+def _initial_continuity(identity: dict[str, Any]) -> dict[str, Any]:
+    strength = identity.get("identity_strength")
+    fingerprint = identity.get("fingerprint")
+    if strength in {"strong", "medium"} and fingerprint:
+        status = "verified_at_start"
+    elif fingerprint:
+        status = "not_guaranteed"
+    else:
+        status = "unknown"
+    return {
+        "status": status,
+        "detected_at": None,
+        "current_fingerprint": fingerprint,
+        "current_identity_strength": strength,
     }
 
 
@@ -191,36 +218,45 @@ class CadenceAuditManager:
             return
 
         now = _utcnow()
-        last_checkpoint = _parse(self.state.get("last_checkpoint_at"))
-        if last_checkpoint is not None and now > last_checkpoint:
-            self.state.setdefault("runtime_gaps", []).append(
-                {
-                    "started_at": _iso(last_checkpoint),
-                    "ended_at": _iso(now),
-                    "duration_seconds": (now - last_checkpoint).total_seconds(),
-                    "reason": "ha_restart_or_runtime_unavailable",
-                    "basis": "last_persisted_checkpoint",
-                }
-            )
-            self.state["restart_count"] = int(self.state.get("restart_count", 0)) + 1
-
         planned_end = _parse(self.state.get("planned_end_at"))
         if planned_end is None:
             self.state["status"] = "error"
             self.state["completed_at"] = _iso(now)
             await self.store.async_save(self.state)
             return
+
+        last_checkpoint = _parse(self.state.get("last_checkpoint_at"))
+        gap_end = min(now, planned_end)
+        if (
+            last_checkpoint is not None
+            and gap_end > last_checkpoint
+            and last_checkpoint < planned_end
+        ):
+            self.state.setdefault("runtime_gaps", []).append(
+                {
+                    "started_at": _iso(last_checkpoint),
+                    "ended_at": _iso(gap_end),
+                    "duration_seconds": (gap_end - last_checkpoint).total_seconds(),
+                    "reason": "ha_restart_or_runtime_unavailable",
+                    "basis": "last_persisted_checkpoint",
+                }
+            )
+            self.state["restart_count"] = int(self.state.get("restart_count", 0)) + 1
+
         if now >= planned_end:
             await self._async_finalize(now)
             return
 
+        self._refresh_all_source_continuity(now)
         self._subscribe()
         self._schedule_finish()
         self._schedule_checkpoint()
         self.state["last_checkpoint_at"] = _iso(now)
         await self.store.async_save(self.state)
 
-    def _build_source_snapshot(self) -> tuple[dict[str, Any], list[str], str | None, str | None]:
+    def _build_source_snapshot(
+        self,
+    ) -> tuple[dict[str, Any], list[str], str | None, str | None]:
         public_state = self.site_identity_manager.public_state()
         site_id = public_state.get("site_id")
         current_site = public_state.get("current_site") or public_state.get("site") or {}
@@ -238,20 +274,31 @@ class CadenceAuditManager:
             generation_id = entry.get("generation_id")
             if role not in AUDITED_LOGICAL_ROLES:
                 continue
-            if not isinstance(entity_id, str) or not entity_id or not isinstance(generation_id, str) or not generation_id:
+            if (
+                not isinstance(entity_id, str)
+                or not entity_id
+                or not isinstance(generation_id, str)
+                or not generation_id
+            ):
                 continue
-            identity = entry.get("source_identity") if isinstance(entry.get("source_identity"), dict) else {}
+            identity = (
+                entry.get("source_identity")
+                if isinstance(entry.get("source_identity"), dict)
+                else {}
+            )
+            public_identity = {
+                "fingerprint": _identity_fingerprint(identity),
+                "identity_strength": identity.get("identity_strength"),
+                "identity_provenance": identity.get("identity_provenance"),
+                "platform": identity.get("platform"),
+            }
             signals[generation_id] = {
                 "signal_id": generation_id,
                 "logical_role": role,
                 "source_generation_id": generation_id,
                 "entity_id": entity_id,
-                "source_identity": {
-                    "fingerprint": _identity_fingerprint(identity),
-                    "identity_strength": identity.get("identity_strength"),
-                    "identity_provenance": identity.get("identity_provenance"),
-                    "platform": identity.get("platform"),
-                },
+                "source_identity": public_identity,
+                "source_continuity": _initial_continuity(public_identity),
                 "metrics": _empty_signal_metrics(),
             }
             observed_roles.add(role)
@@ -268,7 +315,6 @@ class CadenceAuditManager:
             raise ValueError("no_auditable_sources")
 
         now = _utcnow()
-        end = now + AUDIT_DURATION
         self.state = self._empty_state()
         self.state.update(
             {
@@ -277,7 +323,7 @@ class CadenceAuditManager:
                 "site_id": site_id,
                 "site_name": site_name,
                 "started_at": _iso(now),
-                "planned_end_at": _iso(end),
+                "planned_end_at": _iso(now + AUDIT_DURATION),
                 "last_checkpoint_at": _iso(now),
                 "signals": signals,
                 "missing_roles": missing_roles,
@@ -307,9 +353,8 @@ class CadenceAuditManager:
 
     def _subscribe(self) -> None:
         self._unsubscribe_events()
-        signals = self.state.get("signals", {})
         self._signal_ids_by_entity = {}
-        for signal_id, signal in signals.items():
+        for signal_id, signal in self.state.get("signals", {}).items():
             entity_id = signal.get("entity_id")
             if isinstance(entity_id, str) and entity_id:
                 self._signal_ids_by_entity.setdefault(entity_id, []).append(signal_id)
@@ -317,8 +362,12 @@ class CadenceAuditManager:
         if not entity_ids:
             return
         self._event_unsubs = [
-            event_helper.async_track_state_report_event(self.hass, entity_ids, self._on_state_reported),
-            event_helper.async_track_state_change_event(self.hass, entity_ids, self._on_state_changed),
+            event_helper.async_track_state_report_event(
+                self.hass, entity_ids, self._on_state_reported
+            ),
+            event_helper.async_track_state_change_event(
+                self.hass, entity_ids, self._on_state_changed
+            ),
         ]
 
     def _unsubscribe_events(self) -> None:
@@ -346,7 +395,9 @@ class CadenceAuditManager:
         if planned_end is None:
             return
         delay = max(0.0, (planned_end - _utcnow()).total_seconds())
-        self._finish_unsub = event_helper.async_call_later(self.hass, delay, self._finish_timer)
+        self._finish_unsub = event_helper.async_call_later(
+            self.hass, delay, self._finish_timer
+        )
 
     def _schedule_checkpoint(self) -> None:
         if self._checkpoint_unsub:
@@ -364,7 +415,9 @@ class CadenceAuditManager:
         self._checkpoint_unsub = None
         if self.state.get("status") != "running":
             return
-        self.state["last_checkpoint_at"] = _iso(_utcnow())
+        now = _utcnow()
+        self._refresh_all_source_continuity(now)
+        self.state["last_checkpoint_at"] = _iso(now)
         await self.store.async_save(self.state)
         self._schedule_checkpoint()
 
@@ -383,6 +436,62 @@ class CadenceAuditManager:
     def _on_state_changed(self, event) -> None:
         self._record_event(event, "state_changed")
 
+    def _source_is_usable(self, signal: dict[str, Any], observed_at: datetime) -> bool:
+        continuity = signal.setdefault(
+            "source_continuity", _initial_continuity(signal.get("source_identity", {}))
+        )
+        if continuity.get("status") in {"changed", "unverifiable_after_start"}:
+            return False
+
+        entity_id = signal.get("entity_id")
+        if not isinstance(entity_id, str) or not entity_id:
+            continuity.update(
+                {
+                    "status": "unverifiable_after_start",
+                    "detected_at": _iso(observed_at),
+                    "current_fingerprint": None,
+                    "current_identity_strength": "uncertain",
+                }
+            )
+            return False
+
+        snapshot = signal.get("source_identity", {})
+        snapshot_fp = snapshot.get("fingerprint")
+        snapshot_strength = snapshot.get("identity_strength")
+        current = resolve_source_identity(self.hass, entity_id)
+        current_fp = _identity_fingerprint(current)
+        current_strength = current.get("identity_strength")
+        continuity["current_fingerprint"] = current_fp
+        continuity["current_identity_strength"] = current_strength
+
+        if snapshot_strength not in {"strong", "medium"} or not snapshot_fp:
+            continuity["status"] = "not_guaranteed"
+            return True
+        if current_strength not in {"strong", "medium"} or not current_fp:
+            continuity.update(
+                {
+                    "status": "unverifiable_after_start",
+                    "detected_at": continuity.get("detected_at") or _iso(observed_at),
+                }
+            )
+            return False
+        if current_fp != snapshot_fp:
+            continuity.update(
+                {
+                    "status": "changed",
+                    "detected_at": continuity.get("detected_at") or _iso(observed_at),
+                }
+            )
+            return False
+
+        continuity["status"] = "verified_unchanged"
+        return True
+
+    def _refresh_all_source_continuity(self, observed_at: datetime) -> None:
+        for signal in self.state.get("signals", {}).values():
+            if isinstance(signal, dict):
+                self._source_is_usable(signal, observed_at)
+
     def _record_event(self, event, event_kind: str) -> None:
         if self.state.get("status") != "running":
             return
@@ -399,30 +508,57 @@ class CadenceAuditManager:
         old_state = data.get("old_state")
         for signal_id in signal_ids:
             signal = self.state.get("signals", {}).get(signal_id)
-            if not isinstance(signal, dict):
+            if not isinstance(signal, dict) or not self._source_is_usable(signal, event_time):
                 continue
             metrics = signal.get("metrics")
             if not isinstance(metrics, dict):
                 continue
-            self._record_signal_event(metrics, event_time, event_kind, old_state, new_state)
+            self._record_signal_event(
+                metrics, event_time, event_kind, old_state, new_state
+            )
 
-    def _record_signal_event(self, metrics: dict[str, Any], event_time: datetime, event_kind: str, old_state, new_state) -> None:
+    def _record_signal_event(
+        self,
+        metrics: dict[str, Any],
+        event_time: datetime,
+        event_kind: str,
+        old_state,
+        new_state,
+    ) -> None:
         event_iso = _iso(event_time)
         previous = _parse(metrics.get("last_event_at"))
         if previous is not None and event_time >= previous:
-            metrics.setdefault("event_gaps_seconds", []).append((event_time - previous).total_seconds())
+            metrics.setdefault("event_gaps_seconds", []).append(
+                (event_time - previous).total_seconds()
+            )
         metrics["last_event_at"] = event_iso
         metrics["report_count"] = int(metrics.get("report_count", 0)) + 1
 
         if event_kind == "state_reported":
-            metrics["state_reported_count"] = int(metrics.get("state_reported_count", 0)) + 1
-            metrics["same_value_report_count"] = int(metrics.get("same_value_report_count", 0)) + 1
+            metrics["state_reported_count"] = int(
+                metrics.get("state_reported_count", 0)
+            ) + 1
+            metrics["same_value_report_count"] = int(
+                metrics.get("same_value_report_count", 0)
+            ) + 1
         else:
-            metrics["state_changed_count"] = int(metrics.get("state_changed_count", 0)) + 1
+            metrics["state_changed_count"] = int(
+                metrics.get("state_changed_count", 0)
+            ) + 1
             old_value = getattr(old_state, "state", None)
             new_value = getattr(new_state, "state", None)
-            if old_state is not None and new_state is not None and old_value != new_value:
-                metrics["state_value_change_count"] = int(metrics.get("state_value_change_count", 0)) + 1
+            if old_state is not None and new_state is not None:
+                if old_value != new_value:
+                    metrics["state_value_change_count"] = int(
+                        metrics.get("state_value_change_count", 0)
+                    ) + 1
+                else:
+                    metrics["state_changed_without_state_value_change_count"] = int(
+                        metrics.get("state_changed_without_state_value_change_count", 0)
+                    ) + 1
+                    metrics["same_value_report_count"] = int(
+                        metrics.get("same_value_report_count", 0)
+                    ) + 1
 
         for attribute, output_field in (
             ("last_reported", "event_minus_last_reported_seconds"),
@@ -433,12 +569,16 @@ class CadenceAuditManager:
             metrics[attribute] = timestamp
             parsed = _parse(timestamp)
             if parsed is not None:
-                metrics.setdefault(output_field, []).append((event_time - parsed).total_seconds())
+                metrics.setdefault(output_field, []).append(
+                    (event_time - parsed).total_seconds()
+                )
 
         self._update_unavailable(metrics, event_iso, new_state)
 
     @staticmethod
-    def _update_unavailable(metrics: dict[str, Any], event_iso: str | None, new_state) -> None:
+    def _update_unavailable(
+        metrics: dict[str, Any], event_iso: str | None, new_state
+    ) -> None:
         if event_iso is None or new_state is None:
             return
         value = str(getattr(new_state, "state", "")).lower()
@@ -457,7 +597,9 @@ class CadenceAuditManager:
                 {
                     **open_period,
                     "ended_at": event_iso,
-                    "duration_seconds": _seconds_between(open_period.get("started_at"), event_iso),
+                    "duration_seconds": _seconds_between(
+                        open_period.get("started_at"), event_iso
+                    ),
                 }
             )
             metrics["open_unavailable"] = None
@@ -467,16 +609,21 @@ class CadenceAuditManager:
             return
         planned_end = _parse(self.state.get("planned_end_at"))
         effective_end = planned_end if planned_end is not None and now >= planned_end else now
+        self._refresh_all_source_continuity(effective_end)
         end_iso = _iso(effective_end)
         for signal in self.state.get("signals", {}).values():
             metrics = signal.get("metrics") if isinstance(signal, dict) else None
-            if isinstance(metrics, dict) and isinstance(metrics.get("open_unavailable"), dict):
+            if isinstance(metrics, dict) and isinstance(
+                metrics.get("open_unavailable"), dict
+            ):
                 open_period = metrics["open_unavailable"]
                 metrics.setdefault("unavailable_periods", []).append(
                     {
                         **open_period,
                         "ended_at": end_iso,
-                        "duration_seconds": _seconds_between(open_period.get("started_at"), end_iso),
+                        "duration_seconds": _seconds_between(
+                            open_period.get("started_at"), end_iso
+                        ),
                         "open_at_end": True,
                     }
                 )
@@ -484,9 +631,11 @@ class CadenceAuditManager:
         self._unsubscribe_events()
         self._cancel_timers()
         self.state["completed_at"] = end_iso
-        self.state["last_checkpoint_at"] = _iso(now)
+        self.state["last_checkpoint_at"] = _iso(min(now, planned_end) if planned_end else now)
         self.state["status"] = (
-            "completed_with_runtime_gap" if self.state.get("runtime_gaps") else "completed"
+            "completed_with_runtime_gap"
+            if self.state.get("runtime_gaps")
+            else "completed"
         )
         await self.store.async_save(self.state)
 
@@ -494,6 +643,7 @@ class CadenceAuditManager:
         if self.state.get("status") != "running":
             return await self.async_state()
         now = _utcnow()
+        self._refresh_all_source_continuity(now)
         self._unsubscribe_events()
         self._cancel_timers()
         self.state["status"] = "cancelled"
@@ -517,12 +667,25 @@ class CadenceAuditManager:
 
     async def async_shutdown(self) -> None:
         if self.state.get("status") == "running":
-            self.state["last_checkpoint_at"] = _iso(_utcnow())
+            now = _utcnow()
+            self._refresh_all_source_continuity(now)
+            self.state["last_checkpoint_at"] = _iso(now)
             await self.store.async_save(self.state)
         self._unsubscribe_events()
         self._cancel_timers()
 
-    def _signal_public_state(self, signal: dict[str, Any], end_at: str) -> dict[str, Any]:
+    @staticmethod
+    def _homogeneity_status(signal: dict[str, Any]) -> bool | None:
+        status = signal.get("source_continuity", {}).get("status")
+        if status in {"changed", "unverifiable_after_start"}:
+            return False
+        if status in {"not_guaranteed", "unknown"}:
+            return None
+        return True
+
+    def _signal_public_state(
+        self, signal: dict[str, Any], end_at: str
+    ) -> dict[str, Any]:
         metrics = signal.get("metrics", {}) if isinstance(signal, dict) else {}
         periods = deepcopy(metrics.get("unavailable_periods", []))
         open_period = metrics.get("open_unavailable")
@@ -531,7 +694,9 @@ class CadenceAuditManager:
                 {
                     **deepcopy(open_period),
                     "ended_at": end_at,
-                    "duration_seconds": _seconds_between(open_period.get("started_at"), end_at),
+                    "duration_seconds": _seconds_between(
+                        open_period.get("started_at"), end_at
+                    ),
                     "open_at_export": True,
                 }
             )
@@ -546,13 +711,24 @@ class CadenceAuditManager:
             "source_generation_id": signal.get("source_generation_id"),
             "entity_id": signal.get("entity_id"),
             "source_identity": deepcopy(signal.get("source_identity", {})),
+            "source_continuity": deepcopy(signal.get("source_continuity", {})),
+            "observation_homogeneous": self._homogeneity_status(signal),
             "report_count": int(metrics.get("report_count", 0)),
             "state_reported_count": int(metrics.get("state_reported_count", 0)),
             "state_changed_count": int(metrics.get("state_changed_count", 0)),
-            "state_value_change_count": int(metrics.get("state_value_change_count", 0)),
-            "same_value_report_count": int(metrics.get("same_value_report_count", 0)),
+            "state_value_change_count": int(
+                metrics.get("state_value_change_count", 0)
+            ),
+            "state_changed_without_state_value_change_count": int(
+                metrics.get("state_changed_without_state_value_change_count", 0)
+            ),
+            "same_value_report_count": int(
+                metrics.get("same_value_report_count", 0)
+            ),
             "cadence": {
-                "observed_event_gap_seconds": _distribution(metrics.get("event_gaps_seconds", [])),
+                "observed_event_gap_seconds": _distribution(
+                    metrics.get("event_gaps_seconds", [])
+                ),
                 "classification": "observed_source_generation_only",
                 "universal_cadence_assumed": False,
             },
@@ -560,9 +736,15 @@ class CadenceAuditManager:
                 "last_reported": metrics.get("last_reported"),
                 "last_updated": metrics.get("last_updated"),
                 "last_changed": metrics.get("last_changed"),
-                "event_minus_last_reported": _distribution(metrics.get("event_minus_last_reported_seconds", [])),
-                "event_minus_last_updated": _distribution(metrics.get("event_minus_last_updated_seconds", [])),
-                "event_minus_last_changed": _distribution(metrics.get("event_minus_last_changed_seconds", [])),
+                "event_minus_last_reported": _distribution(
+                    metrics.get("event_minus_last_reported_seconds", [])
+                ),
+                "event_minus_last_updated": _distribution(
+                    metrics.get("event_minus_last_updated_seconds", [])
+                ),
+                "event_minus_last_changed": _distribution(
+                    metrics.get("event_minus_last_changed_seconds", [])
+                ),
             },
             "unavailable": {
                 "period_count": len(periods),
@@ -579,8 +761,15 @@ class CadenceAuditManager:
     async def async_state(self) -> dict[str, Any]:
         now = _utcnow()
         planned_end = _parse(self.state.get("planned_end_at"))
-        if self.state.get("status") == "running" and planned_end is not None and now >= planned_end:
+        if (
+            self.state.get("status") == "running"
+            and planned_end is not None
+            and now >= planned_end
+        ):
             await self._async_finalize(now)
+        elif self.state.get("status") == "running":
+            self._refresh_all_source_continuity(now)
+
         end_at = self.state.get("completed_at") or _iso(now)
         started = _parse(self.state.get("started_at"))
         effective_end = _parse(end_at)
@@ -604,6 +793,14 @@ class CadenceAuditManager:
             for signal in self.state.get("signals", {}).values()
             if isinstance(signal, dict)
         ]
+        homogeneous_values = [item.get("observation_homogeneous") for item in signals]
+        if any(value is False for value in homogeneous_values):
+            overall_homogeneous = False
+        elif homogeneous_values and all(value is True for value in homogeneous_values):
+            overall_homogeneous = True
+        else:
+            overall_homogeneous = None
+
         return {
             "success": True,
             "status": self.state.get("status", "idle"),
@@ -615,7 +812,9 @@ class CadenceAuditManager:
             "completed_at": self.state.get("completed_at"),
             "remaining_seconds": remaining_seconds,
             "observed_window_seconds": observed_seconds,
-            "minimum_24h_window_met": observed_seconds >= AUDIT_DURATION.total_seconds(),
+            "minimum_24h_window_met": observed_seconds
+            >= AUDIT_DURATION.total_seconds(),
+            "observation_homogeneous": overall_homogeneous,
             "restart_count": int(self.state.get("restart_count", 0)),
             "runtime_gap_seconds": runtime_gap_seconds,
             "runtime_gaps": deepcopy(self.state.get("runtime_gaps", [])),
@@ -656,7 +855,9 @@ def async_register_cadence_audit_websocket(hass) -> None:
 async def websocket_cadence_audit_state(hass, connection, msg):
     manager = _audit_manager(hass)
     if manager is None:
-        connection.send_result(msg["id"], {"success": False, "error": "cadence_audit_unavailable"})
+        connection.send_result(
+            msg["id"], {"success": False, "error": "cadence_audit_unavailable"}
+        )
         return
     connection.send_result(msg["id"], await manager.async_state())
 
@@ -666,7 +867,9 @@ async def websocket_cadence_audit_state(hass, connection, msg):
 async def websocket_cadence_audit_start(hass, connection, msg):
     manager = _audit_manager(hass)
     if manager is None:
-        connection.send_result(msg["id"], {"success": False, "error": "cadence_audit_unavailable"})
+        connection.send_result(
+            msg["id"], {"success": False, "error": "cadence_audit_unavailable"}
+        )
         return
     try:
         result = await manager.async_start()
@@ -681,7 +884,9 @@ async def websocket_cadence_audit_start(hass, connection, msg):
 async def websocket_cadence_audit_stop(hass, connection, msg):
     manager = _audit_manager(hass)
     if manager is None:
-        connection.send_result(msg["id"], {"success": False, "error": "cadence_audit_unavailable"})
+        connection.send_result(
+            msg["id"], {"success": False, "error": "cadence_audit_unavailable"}
+        )
         return
     connection.send_result(msg["id"], await manager.async_stop())
 
@@ -691,7 +896,9 @@ async def websocket_cadence_audit_stop(hass, connection, msg):
 async def websocket_cadence_audit_cleanup(hass, connection, msg):
     manager = _audit_manager(hass)
     if manager is None:
-        connection.send_result(msg["id"], {"success": False, "error": "cadence_audit_unavailable"})
+        connection.send_result(
+            msg["id"], {"success": False, "error": "cadence_audit_unavailable"}
+        )
         return
     try:
         result = await manager.async_cleanup()
