@@ -149,7 +149,14 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         periods = tuple(period for period in periods if period is not None)
         if not periods:
             return PriceData(area, currency, target_date, (), "data_unavailable")
-        return PriceData(area, currency, target_date, periods)
+        data = PriceData(area, currency, target_date, periods)
+        collector = getattr(self.hass, "data", {}).get("elrakning", {}).get("canonical_collector")
+        if collector is not None:
+            try:
+                await collector.async_persist_nord_pool_frame(data, binding, dt_util.now())
+            except (ValueError, OSError):
+                _LOGGER.debug("Unable to persist canonical Nord Pool frame", exc_info=True)
+        return data
 
     def discovered_binding(self) -> dict[str, Any] | None:
         """Describe the currently discovered Nord Pool resource for first-site migration."""

@@ -18,6 +18,7 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from .canonical_storage import CanonicalStorage, quarter_start
+from .external_input_frames import persist_nord_pool_frame
 from .meter import _power_kw
 
 
@@ -47,6 +48,13 @@ class CanonicalCollector:
         self._finalized_intervals: set[datetime] = set()
         self._flush_lock = asyncio.Lock()
         self._started = False
+
+    async def async_persist_nord_pool_frame(self, data, binding, captured_at) -> bool:
+        """Persist one global price frame without changing collection context."""
+        async with self._flush_lock:
+            return await self.hass.async_add_executor_job(
+                persist_nord_pool_frame, self.storage, data, binding, captured_at
+            )
 
     async def async_start(self) -> None:
         if self._started:

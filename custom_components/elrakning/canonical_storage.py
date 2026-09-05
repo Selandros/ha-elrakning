@@ -149,6 +149,176 @@ class CanonicalStorage:
             ),
         )
 
+    def ensure_global_source_generation(self, target: dict[str, Any], now: datetime) -> None:
+        """Ensure one deterministic global external-source generation exists."""
+        identity = target.get("source_identity") or {}
+        identity_key = identity.get("identity_key")
+        fingerprint = hashlib.sha256(identity_key.encode()).hexdigest() if identity_key else None
+        strength = identity.get("identity_strength", "uncertain")
+        if strength not in {"strong", "medium", "weak", "uncertain"}:
+            strength = "uncertain"
+        provenance = identity.get("identity_provenance") or "runtime_source_binding"
+        connection = self._connection()
+        connection.execute(
+            """INSERT OR IGNORE INTO source_generations(
+                source_generation_id, schema_version, source_scope, owner_site_id,
+                logical_role, source_identity_fingerprint, source_identity_strength,
+                source_identity_provenance, source_resolution_kind,
+                source_resolution_seconds, timezone_state, valid_from_us,
+                valid_to_us, created_at_us
+            ) VALUES (?, ?, 'global', NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)""",
+            (
+                target["generation_id"], SCHEMA_VERSION, target["logical_role"],
+                fingerprint, strength, provenance,
+                target.get("source_resolution_kind", "native_bucket"),
+                target.get("source_resolution_seconds"),
+                target.get("timezone_state", "verified"),
+                None,
+                timestamp_us(now),
+            ),
+        )
+
+    def insert_external_frame(self, frame: dict[str, Any], points: list[dict[str, Any]]) -> bool:
+        """Insert an immutable external frame and its points atomically."""
+        connection = self._connection()
+        scope = frame["source_scope"]
+        site_id = frame.get("site_id")
+        if scope == "global" and site_id is not None:
+            raise ValueError("global_frame_site_id")
+        if scope == "site" and not site_id:
+            raise ValueError("site_frame_site_id")
+        revision = int(frame.get("revision", 1))
+        semantic_key = frame["semantic_key"]
+        existing = connection.execute(
+            "SELECT frame_id, revision FROM external_input_frames WHERE semantic_key = ? AND revision = ?",
+            (semantic_key, revision),
+        ).fetchone()
+        if existing:
+            if self._external_frame_matches(connection, frame, points):
+                return False
+            raise ValueError("canonical_frame_revision_conflict")
+        generation = connection.execute(
+            "SELECT source_scope, owner_site_id FROM source_generations WHERE source_generation_id = ?",
+            (frame["source_generation_id"],),
+        ).fetchone()
+        if generation is None:
+            raise ValueError("external_frame_source_generation_missing")
+        if generation[0] != scope or (scope == "site" and generation[1] != site_id):
+            raise ValueError("external_frame_source_scope_mismatch")
+        supersedes = frame.get("supersedes_frame_id")
+        if supersedes:
+            predecessor = connection.execute(
+                "SELECT semantic_key, revision FROM external_input_frames WHERE frame_id = ?",
+                (supersedes,),
+            ).fetchone()
+            if predecessor != (semantic_key, revision - 1):
+                raise ValueError("external_frame_revision_chain")
+        values = (
+            frame["frame_id"], int(frame.get("schema_version", SCHEMA_VERSION)),
+            int(frame.get("dataset_version", DATASET_VERSION)), semantic_key, revision,
+            supersedes, frame["source_generation_id"], scope, site_id,
+            frame["logical_role"], frame["classification"],
+            self._timestamp_optional(frame.get("published_at")),
+            self._timestamp_optional(frame.get("fetched_at")), timestamp_us(frame["known_at"]),
+            timestamp_us(frame["captured_at"]), self._timestamp_optional(frame.get("valid_from")),
+            self._timestamp_optional(frame.get("valid_to")), frame["quality_status"],
+            json.dumps(frame.get("quality", {}), sort_keys=True),
+            json.dumps(frame.get("provenance", {}), sort_keys=True), frame["payload_schema"],
+        )
+        try:
+            connection.execute(
+                """INSERT INTO external_input_frames(
+                    frame_id, schema_version, dataset_version, semantic_key, revision,
+                    supersedes_frame_id, source_generation_id, source_scope, site_id,
+                    logical_role, classification, published_at_us, fetched_at_us,
+                    known_at_us, captured_at_us, valid_from_us, valid_to_us,
+                    quality_status, quality_json, provenance_json, payload_schema
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                values,
+            )
+            valid_from = self._timestamp_optional(frame.get("valid_from"))
+            valid_to = self._timestamp_optional(frame.get("valid_to"))
+            for point in points:
+                value = point.get("value")
+                if value is not None and not math.isfinite(float(value)):
+                    raise ValueError("nonfinite_external_point")
+                valid_at = timestamp_us(point["valid_at"])
+                if valid_from is not None and valid_at < valid_from:
+                    raise ValueError("external_point_before_frame")
+                if valid_to is not None and valid_at >= valid_to:
+                    raise ValueError("external_point_after_frame")
+                connection.execute(
+                    """INSERT INTO external_input_points(
+                        point_id, frame_id, point_key, valid_at_us, value, unit,
+                        quality_status, point_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        point["point_id"], frame["frame_id"], point["point_key"], valid_at,
+                        float(value) if value is not None else None, point["unit"],
+                        point["quality_status"], json.dumps(point.get("point", {}), sort_keys=True),
+                    ),
+                )
+            connection.commit()
+            return True
+        except Exception:
+            connection.rollback()
+            raise
+
+    def latest_external_frame(self, semantic_key: str) -> tuple[str, int, str | None] | None:
+        """Return the newest immutable revision for one semantic frame."""
+        return self._connection().execute(
+            "SELECT frame_id, revision, supersedes_frame_id FROM external_input_frames WHERE semantic_key = ? ORDER BY revision DESC LIMIT 1",
+            (semantic_key,),
+        ).fetchone()
+
+    @staticmethod
+    def _timestamp_optional(value: datetime | None) -> int | None:
+        return timestamp_us(value) if value is not None else None
+
+    def _external_frame_matches(self, connection, frame: dict[str, Any], points: list[dict[str, Any]]) -> bool:
+        row = connection.execute(
+            """SELECT frame_id, schema_version, dataset_version, semantic_key, revision,
+                      supersedes_frame_id, source_generation_id, source_scope, site_id,
+                      logical_role, classification, published_at_us, fetched_at_us,
+                      known_at_us, captured_at_us, valid_from_us, valid_to_us,
+                      quality_status, quality_json, provenance_json, payload_schema
+                 FROM external_input_frames WHERE semantic_key = ? AND revision = ?""",
+            (frame["semantic_key"], int(frame.get("revision", 1))),
+        ).fetchone()
+        if row is None:
+            return False
+        expected = (
+            int(frame.get("schema_version", SCHEMA_VERSION)),
+            int(frame.get("dataset_version", DATASET_VERSION)), frame["semantic_key"],
+            int(frame.get("revision", 1)), frame.get("supersedes_frame_id"),
+            frame["source_generation_id"], frame["source_scope"], frame.get("site_id"),
+            frame["logical_role"], frame["classification"],
+            self._timestamp_optional(frame.get("published_at")),
+            self._timestamp_optional(frame.get("valid_from")),
+            self._timestamp_optional(frame.get("valid_to")), frame["quality_status"],
+            json.dumps(frame.get("quality", {}), sort_keys=True),
+            json.dumps(frame.get("provenance", {}), sort_keys=True), frame["payload_schema"],
+        )
+        comparable = row[1:11] + (row[11], row[15], row[16], row[17], row[18], row[19], row[20])
+        if comparable != expected:
+            return False
+        stored = connection.execute(
+            "SELECT point_id, point_key, valid_at_us, value, unit, quality_status, point_json FROM external_input_points WHERE frame_id = ? ORDER BY point_key",
+            (frame["frame_id"],),
+        ).fetchall()
+        expected_points = sorted(
+            (
+                point["point_id"], point["point_key"], timestamp_us(point["valid_at"]),
+                float(point["value"]) if point.get("value") is not None else None, point["unit"],
+                point["quality_status"], json.dumps(point.get("point", {}), sort_keys=True),
+            )
+            for point in points
+        )
+        return stored == expected_points
+
+    def count_external_frames(self) -> int:
+        return int(self._connection().execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0])
+
     def insert_observation(self, observation: dict[str, Any]) -> bool:
         """Insert one immutable revision; return false for an exact replay."""
         connection = self._connection()
