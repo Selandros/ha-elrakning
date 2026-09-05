@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from ..const import EON_GRID_CONFIG_KEY, GRID_CONFIG_KEY
+from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
 from .provider_registry import configured_grid_provider, get_grid_provider
 
 
@@ -76,11 +76,23 @@ class GridManager:
         return await self.provider.async_save_web_credentials(account_id, password)
 
     async def async_login(self, provider_id: str, auth_method: str, account_id: str, password: str) -> dict[str, Any]:
-        """Dispatch login to the selected provider and auth method."""
+        """Dispatch login and bind a verified E.ON facility to the active site."""
         definition = get_grid_provider(provider_id)
         if not definition or not self.provider or definition is not self.definition:
             return {"status": "unsupported_provider", "error": "unsupported_provider"}
-        return await self.provider.async_login(auth_method, account_id, password)
+        result = await self.provider.async_login(auth_method, account_id, password)
+        site_manager = self.hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        if (
+            getattr(definition, "provider_id", None) == "eon"
+            and isinstance(result, dict)
+            and result.get("configured") is True
+            and isinstance(result.get("facility"), dict)
+            and bool(result["facility"])
+            and site_manager is not None
+        ):
+            await site_manager.async_bind_grid_runtime(self)
+            self.async_start_refresh()
+        return result
 
     async def async_save_cookie_header(self, cookie_header: str) -> dict[str, Any]:
         return await self.provider.async_save_cookie_header(cookie_header)
@@ -101,6 +113,14 @@ class GridManager:
         return await self.provider.async_source_data()
 
     async def async_remove(self) -> dict[str, Any]:
+        site_manager = self.hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        if site_manager is not None:
+            has_other_binding = await site_manager.async_unbind_grid_runtime()
+            await self.async_apply_site_binding(None)
+            if has_other_binding:
+                if getattr(self.definition, "provider_id", None) == "eon":
+                    self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
+                return {"configured": False, "site_status": "unconfigured"}
         return await self.provider.async_remove()
 
     async def async_shutdown(self) -> None:
