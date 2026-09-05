@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - p0-audit-1-source-agnostic
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
