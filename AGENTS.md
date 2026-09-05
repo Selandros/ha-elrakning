@@ -27,6 +27,33 @@ merely to match current implementation.
 - Do not claim runtime or physical verification without direct evidence.
 - Keep secrets and credentials out of repository documentation.
 
+### Source/provider agnosticism — hard rule
+
+- Never hardcode a runtime dependency on a specific sensor/entity ID, hardware
+  vendor, Home Assistant integration/platform, electricity retailer, grid
+  company, tariff provider, forecast provider, meter, inverter, battery, or
+  other replaceable external source into shared Elräkning logic.
+- Core logic and UI must address stable logical roles/capabilities and resolve
+  the current source through explicit site/source bindings, mappings,
+  registries, adapters, or equivalent runtime configuration.
+- Vendor/provider-specific behavior is allowed only inside a clearly isolated
+  adapter/provider boundary. It must not leak into generic collection,
+  history, diagnostics, forecasting, optimization, model, or presentation
+  contracts.
+- Entity IDs, unique IDs, device IDs, config-entry IDs, provider names, and
+  vendor-specific identifiers are observations/configuration, never durable
+  architecture keys unless their scope explicitly requires that exact adapter.
+- A source may be renamed, replaced, removed, split, combined, or migrated to
+  another vendor/provider without breaking unrelated Elräkning functionality.
+  Missing or changed sources must degrade explicitly and safely rather than
+  silently switching semantics or crashing shared functionality.
+- New work must actively check for hidden assumptions about today's sources.
+  Tests for generic functionality must cover source replacement/rebinding and
+  at least one materially different provider/integration shape where relevant.
+- Current installations such as FusionSolar/Huawei, Growatt, HomeWizard, a
+  particular electricity retailer, or a particular grid company are runtime
+  examples, not permanent product assumptions.
+
 ## Release and verification gates
 
 - An observable change requires a patch-version bump.
@@ -61,18 +88,21 @@ Read `AGENTS.md`, `docs/architecture/ELRAKNING_MASTERPLAN.md`,
 `docs/architecture/ARCHITECTURE_DECISIONS.md`, and
 `docs/architecture/CURRENT_STATE.md`. Identify applicable locked decisions,
 current implementation, blockers, verified assumptions, UNKNOWN items,
-retention/data risks, and roadmap dependencies. Do not use old conversation
-memory as authority over repository memory.
+retention/data risks, roadmap dependencies, and any source/provider-specific
+assumptions that could violate the source-agnostic architecture rule. Do not
+use old conversation memory as authority over repository memory.
 
 ### During and after work
 
 Check continuously whether a new architecture dependency, data requirement,
 sensor or physical semantic, invariant, safety rule, lifecycle rule,
 backtest/provenance constraint, health/degradation/calibration fact, economic
-rule, performance constraint, or model data-retention need should become
-permanent knowledge. After the task, compare what was known before with what
-was learned, whether CURRENT_STATE changed, whether an UNKNOWN became VERIFIED,
-and whether a new risk or decision was found.
+rule, performance constraint, source/provider assumption, or model
+data-retention need should become permanent knowledge. After the task, compare
+what was known before with what was learned, whether CURRENT_STATE changed,
+whether an UNKNOWN became VERIFIED, whether a new risk or decision was found,
+and whether any new code accidentally couples generic behavior to today's
+entity IDs, vendors, integrations, retailers, grid companies, or providers.
 
 Use these statuses when relevant:
 
@@ -83,9 +113,10 @@ Use these statuses when relevant:
   wording. Do not promote speculation to a decision.
 - `MEMORY INCOMPLETE FOR SAFE IMPLEMENTATION CONTINUITY`: a missing or
   contradictory contract could cause incompatible implementation, site/source
-  mixing, backtest leakage, unsafe control, or premature physical storage
-  decisions. Flag it near the beginning, describe the missing information and
-  required decision/verification, and do not implement across the gap.
+  mixing, backtest leakage, unsafe control, premature physical storage
+  decisions, or hard coupling to a replaceable source/provider. Flag it near
+  the beginning, describe the missing information and required
+  decision/verification, and do not implement across the gap.
 - `IRREVERSIBLE DATA RISK`: relevant data is not collected, short-retained,
   in-memory only, overwritten, missing provenance/`known_at`, or otherwise at
   risk of permanent loss. Report data, source, retention, value, whether it can
@@ -118,6 +149,7 @@ never turn an unverified proposal into a verified current-state claim.
 
 For data-foundation work, the memory review must explicitly cover canonical
 record fields, source generations, quality/provenance, retention, `known_at`,
-replay/backtest integrity, safe fallback, hardware limits, and irreversible
-data risk. A checklist is incomplete if it names a component but omits the
-evidence and safety gates required to trust it.
+replay/backtest integrity, safe fallback, hardware limits, source/provider
+agnosticism, source replacement/rebinding, and irreversible data risk. A
+checklist is incomplete if it names a component but omits the evidence and
+safety gates required to trust it.
