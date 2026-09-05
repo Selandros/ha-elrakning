@@ -244,3 +244,24 @@ This decision closes the design gate P0-DATA-1 only. It does not select a
 physical storage backend or implement collection; the P0 data gate and its
 irreversible-data risk remain open until those decisions and the collector are
 implemented and verified.
+
+## AD-022 Canonical physical storage v1
+
+P0 canonical long-term storage is normalized SQLite in one installation-owned
+database containing multiple site-scoped records and global shared frames.
+The physical v1 mapping is defined by
+`docs/architecture/contracts/p0_storage_schema_v1.sql` and its mapping file.
+It is selected after the P0-STORAGE-1A benchmark, logical recovery gate,
+process/filesystem durability gate, and schema round-trip/constraint gate.
+
+The operating profile is WAL, `synchronous=FULL`, foreign keys enabled, and a
+5-second busy timeout. Canonical local SQLite is live truth; NAS/backup is
+optional and outside the write transaction. Native canonical observations,
+truthful historical bootstrap observations, and immutable external input
+frames remain semantically separate. Source replacement creates a new
+generation, revisions are immutable, and `active_site_id` is never collection
+identity.
+
+This decision does not claim an actual host power cut, NAS hardware semantics,
+or a production backup calendar. P0-COLLECT-1 remains gated on using this
+schema without semantic loss and on restoring the missing test dependency.

@@ -1,0 +1,45 @@
+{
+  "schema_name": "elrakning.canonical_storage",
+  "schema_version": 1,
+  "encoding": {
+    "identifiers": "TEXT opaque identifiers; UUID-shaped values remain readable and non-UUID source IDs are supported",
+    "timestamps": "INTEGER UTC microseconds since Unix epoch; null means unavailable/not applicable",
+    "values": "REAL with explicit unit/sign_convention",
+    "quality": "quality_status plus quality_json",
+    "provenance": "provenance_json with source identity fields normalized in source_generations"
+  },
+  "datasets": {
+    "energy_observation": "energy_observations",
+    "historical_energy_observation": "historical_energy_observations",
+    "external_input_frame": "external_input_frames",
+    "external_input_point": "external_input_points"
+  },
+  "fields": {
+    "site_id": ["energy_observations.site_id", "historical_energy_observations.site_id", "external_input_frames.site_id"],
+    "logical_role": ["energy_observations.logical_role", "historical_energy_observations.logical_role", "external_input_frames.logical_role"],
+    "source_generation_id": ["source_generations.source_generation_id", "energy_observations.source_generation_id", "historical_energy_observations.source_generation_id", "external_input_frames.source_generation_id"],
+    "source_identity_fingerprint": ["source_generations.source_identity_fingerprint"],
+    "source_identity_strength": ["source_generations.source_identity_strength"],
+    "source_identity_provenance": ["source_generations.source_identity_provenance"],
+    "interval_start": ["energy_observations.interval_start_us", "historical_energy_observations.interval_start_us"],
+    "interval_end": ["energy_observations.interval_end_us", "historical_energy_observations.interval_end_us"],
+    "resolution_seconds": ["energy_observations.resolution_seconds", "historical_energy_observations.resolution_seconds"],
+    "source_resolution_kind": ["energy_observations.source_resolution_kind", "historical_energy_observations.source_resolution_kind"],
+    "source_resolution_seconds": ["energy_observations.source_resolution_seconds", "historical_energy_observations.source_resolution_seconds"],
+    "observed_at": ["energy_observations.observed_at_us", "historical_energy_observations.observed_at_us"],
+    "captured_at": ["energy_observations.captured_at_us", "historical_energy_observations.captured_at_us", "external_input_frames.captured_at_us"],
+    "fetched_at": ["energy_observations.fetched_at_us", "historical_energy_observations.fetched_at_us", "external_input_frames.fetched_at_us"],
+    "known_at": ["energy_observations.known_at_us", "historical_energy_observations.known_at_us", "external_input_frames.known_at_us"],
+    "value": ["energy_observations.value", "historical_energy_observations.value", "external_input_points.value"],
+    "unit": ["energy_observations.unit", "historical_energy_observations.unit", "external_input_points.unit"],
+    "sign_convention": ["energy_observations.sign_convention", "historical_energy_observations.sign_convention"],
+    "classification": ["energy_observations.classification", "historical_energy_observations.classification", "external_input_frames.classification"],
+    "quality": ["energy_observations.quality_status", "energy_observations.quality_json", "historical_energy_observations.quality_status", "historical_energy_observations.quality_json", "external_input_frames.quality_status", "external_input_frames.quality_json"],
+    "provenance": ["energy_observations.provenance_json", "historical_energy_observations.provenance_json", "external_input_frames.provenance_json"],
+    "revision": ["energy_observations.revision", "historical_energy_observations.revision", "external_input_frames.revision"],
+    "supersedes": ["energy_observations.supersedes_record_id", "historical_energy_observations.supersedes_record_id", "external_input_frames.supersedes_frame_id"],
+    "external_frame_points": ["external_input_points.frame_id", "external_input_points.point_key", "external_input_points.valid_at_us"]
+  },
+  "not_stored": ["active_site_id"],
+  "decision": "Normalized SQLite is selected as canonical P0 storage v1 candidate only after the 1C gate passes; this file is the physical mapping tested by that gate."
+}

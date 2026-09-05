@@ -51,16 +51,13 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   `known_at <= decision_at`, quality/gap semantics, immutable revisions,
   timezone/DST rules, global shared external frames, and active-site versus
   collection separation.
-- OPEN (P0 data gate): No canonical long-term collector or physical storage
-  backend has been implemented or selected. The irreversible-data risk remains
-  P0 until collection starts and storage/recovery acceptance passes.
+- OPEN (P0 data gate): No canonical long-term collector has been implemented.
+  The irreversible-data risk remains P0 until collection starts.
 - VERIFIED (design/benchmark, 2026-09-05): P0-STORAGE-1 benchmark harness is
   present in `tools/p0_storage_benchmark.py` with results recorded in
   `docs/architecture/P0_STORAGE_BENCHMARK.md`. A normalized SQLite candidate
   had the smallest measured one-site/year footprint and indexed range-query
-  times; this is not yet a production storage selection because crash/restart,
-  migration, backup/restore, partial-write, and NAS-unavailable gates remain
-  open.
+  times; it is the leading candidate pending the later schema gate.
 - VERIFIED (isolated recovery gate, 2026-09-05): P0-STORAGE-1B candidate
   checks pass in `tools/p0_storage_recovery_gate.py` and
   `tests/test_p0_storage_recovery_gate.py`. The temporary normalized SQLite
@@ -70,9 +67,10 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   global-frame and `known_at` preservation, integrity/corruption detection,
   and local-write continuity when the backup target is unavailable. WAL,
   `synchronous=FULL`, and foreign keys are measured candidate settings only.
-- OPEN (P0-STORAGE-1B): real killed-process/power-loss testing, large
-  multi-year migration timing, actual filesystem/NAS behavior, and final
-  physical schema acceptance remain before storage selection can be closed.
+- VERIFIED (isolated process/filesystem gate, 2026-09-05): real killed-process,
+  multi-year migration timing, local backup/restore, and NAS-unavailable
+  behavior passed in the temporary test harness. Actual host power-cut and NAS
+  hardware semantics remain unverified.
 - VERIFIED (isolated process/filesystem gate, 2026-09-05):
   `tools/p0_storage_durability_gate.py` passed a real `SIGKILL` writer test,
   reopening and integrity-checking the database, proving the uncommitted
@@ -81,9 +79,14 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   x 5 years), migration rollback, local backup/restore, target unavailability
   without blocking local writes, backup resumption, and the measured WAL/
   `synchronous=FULL`/foreign-key/busy-timeout profile.
-- OPEN (P0-STORAGE-1B2): this is not an actual host power-cut or NAS-hardware
-  test, and the physical schema, hardware budget, and production backup
-  policy are still not frozen.
+- VERIFIED (physical schema gate, 2026-09-05): normalized SQLite is selected
+  for canonical P0 storage v1. The SQL schema, field mapping, round-trip
+  fixtures, source replacement, revisions, shared global frames, constraints,
+  immutable triggers, integer UTC timestamp encoding, and operating profile
+  pass `tools/p0_storage_schema_gate.py`. The physical contract is recorded in
+  `docs/architecture/P0_STORAGE_SCHEMA_V1.md` and AD-022. Actual host power
+  cut, NAS hardware semantics, hardware budget, and backup calendar remain
+  operationally unverified/open.
 
 ## Verified data limitations
 
