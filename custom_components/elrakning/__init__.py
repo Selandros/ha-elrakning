@@ -25,6 +25,7 @@ from .solar_pvgis import SolarPvgisManager
 from .solar_shadow import SolarShadowManager
 from .solar_evidence import SolarEvidenceManager
 from .solar_weather import SolarWeatherManager
+from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
 
@@ -40,6 +41,12 @@ PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
 def _schedule_price_update(hass: HomeAssistant) -> None:
     """Schedule the existing price update event on Home Assistant's loop."""
     hass.loop.call_soon_threadsafe(hass.bus.async_fire, "elrakning_price_update")
+
+
+def _schedule_eon_grid_update(hass: HomeAssistant) -> None:
+    """Keep the existing price refresh and snapshot verified site economics."""
+    _schedule_price_update(hass)
+    schedule_eon_grid_economic_capture(hass)
 
 
 async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> None:
@@ -190,7 +197,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     frontend_data["eon_grid_unsub"] = hass.bus.async_listen(
         EON_GRID_UPDATE_EVENT,
-        lambda _: _schedule_price_update(hass),
+        lambda _: _schedule_eon_grid_update(hass),
     )
     frontend_data["solar_weather_unsub"] = hass.bus.async_listen(
         SOLAR_WEATHER_UPDATE_EVENT,
