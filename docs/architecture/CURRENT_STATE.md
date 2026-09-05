@@ -94,8 +94,24 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - VERIFIED (runtime LTS audit, 2026-09-05): All 16 requested statistic IDs
   were present with mean metadata and the audited LTS boundaries/coverage had
   no reported hard gaps.
-- UNKNOWN (runtime audit detail): The exact shared common-overlap interval
-  across every audited signal has not yet been recorded in permanent memory.
+- VERIFIED (runtime LTS common-overlap audit, 2026-09-05): The minimum
+  critical replay/training contract uses house load
+  `sensor.total_consumption`, physical PV1/PV2, grid power, battery power,
+  and battery SOC.
+- VERIFIED (runtime LTS common-overlap audit, 2026-09-05): Critical boundary
+  overlap is `2026-01-16T08:00:00Z` through `2026-09-05T12:00:00Z`, with 5,573
+  expected hourly buckets. The all-critical usable intersection contains
+  5,406 buckets (97.00%); 167 boundary buckets have at least one missing
+  critical signal.
+- VERIFIED (runtime LTS common-overlap audit, 2026-09-05): The longest fully
+  contiguous all-critical interval is
+  `2026-01-24T10:00:00Z` through `2026-03-03T04:00:00Z`, containing 907
+  hourly buckets without a missing critical bucket.
+- VERIFIED (runtime LTS common-overlap audit, 2026-09-05): Phase current,
+  voltage, and active-power series are not minimum replay requirements and are
+  classified as P1 data for peak/fuse, phase-balance, diagnostics, and future
+  safety-controller work. Their audited coverage was approximately 5,408/5,573
+  buckets (97.04%) with 15 gaps.
 
 ## Point 7 planning status
 
@@ -113,6 +129,11 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   gross-load evidence or block planning, but any future canonical collector
   must record explicit source identity and provenance from the point it begins
   collecting.
+
+- PLANNING STATUS: The common-overlap audit completes the read-only point 7
+  data audit for planning. It does not remove the P0 risk: Elräkning still
+  lacks its own canonical long-term 15-minute collection with provenance,
+  quality, and `known_at`.
 
 ## Permanent data-foundation risks and gates
 
