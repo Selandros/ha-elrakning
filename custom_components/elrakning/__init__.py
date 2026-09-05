@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
 from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
+from .canonical_collector import CanonicalCollector
 from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
@@ -134,6 +135,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await grid_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
     await site_identity_manager.async_prepare_runtime_bindings(manager, grid_manager, coordinator)
+    canonical_collector = CanonicalCollector(hass, site_identity_manager)
+    await canonical_collector.async_start()
+    hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
     await coordinator.async_config_entry_first_refresh()
     if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):
         manager.async_start_refresh()
@@ -220,6 +224,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if cadence_audit_manager := frontend_data.pop("cadence_audit_manager", None):
         await cadence_audit_manager.async_shutdown()
+    if canonical_collector := frontend_data.pop("canonical_collector", None):
+        await canonical_collector.async_shutdown()
     if solar_weather_manager := frontend_data.pop("solar_weather_manager", None):
         await solar_weather_manager.async_shutdown()
     if solar_shadow_manager := frontend_data.pop("solar_shadow_manager", None):

@@ -8,13 +8,14 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (static, 2026-09-05): Current repository manifest: `0.0.596`
+- VERIFIED (static, 2026-09-05): Current repository manifest: `0.0.597`
 - VERIFIED (static, 2026-09-04): Branch: `main`
 - VERIFIED (recorded 2026-09-05): Branch is `main`; HEAD matched `origin/main`
   at the audit point. The current HEAD must be read from Git at audit time;
   this file does not duplicate a self-invalidating commit SHA.
-- VERIFIED (static): This documentation change does not change production code
-  or release version.
+- VERIFIED (static, 2026-09-05): This release includes the P0 collector
+  implementation and schema-versioned storage; runtime verification remains
+  required.
 
 ## Implemented and observed in the current codebase
 
@@ -51,13 +52,27 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   `known_at <= decision_at`, quality/gap semantics, immutable revisions,
   timezone/DST rules, global shared external frames, and active-site versus
   collection separation.
-- OPEN (P0 data gate): No canonical long-term collector has been implemented.
-  The irreversible-data risk remains P0 until collection starts.
+- IMPLEMENTED LOCALLY, RUNTIME VERIFICATION REQUIRED (P0-COLLECT-1A,
+  2026-09-05): The first site-independent canonical collector is now present
+  locally. It listens to HA state events, resolves explicit site/source
+  generations from the source ledger, separates concurrent sites and source
+  generations, writes only future native 900-second UTC observations to the
+  packaged schema-v1 SQLite store, and uses `collection_enabled` rather than
+  `active_site_id` as its collection filter. Aggregation and classification are
+  source-declared; missing source semantics fail closed. Report/change pairs
+  are deduplicated, silent sources finalize as explicit gap rows, and each
+  quarter batch is committed atomically. Missing, invalid and partial coverage
+  remain explicit quality/gap states and are never zero-filled or interpolated.
+  Local tests cover multi-site isolation, restart/idempotent replay, source
+  replacement inside one quarter, report/change deduplication, silent-source
+  finalization, sign/unit validation, UTC quarter alignment and no fabricated
+  values. No HA runtime verification has occurred yet; the irreversible-data
+  risk remains P0 until that gate passes.
 - VERIFIED (design/benchmark, 2026-09-05): P0-STORAGE-1 benchmark harness is
   present in `tools/p0_storage_benchmark.py` with results recorded in
   `docs/architecture/P0_STORAGE_BENCHMARK.md`. A normalized SQLite candidate
   had the smallest measured one-site/year footprint and indexed range-query
-  times; it is the leading candidate pending the later schema gate.
+  times; it is the selected physical schema-v1 implementation.
 - VERIFIED (isolated recovery gate, 2026-09-05): P0-STORAGE-1B candidate
   checks pass in `tools/p0_storage_recovery_gate.py` and
   `tests/test_p0_storage_recovery_gate.py`. The temporary normalized SQLite

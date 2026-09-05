@@ -26,9 +26,12 @@ shared sources. `active_site_id` is not stored as collection identity.
 - `external_input_frames` stores immutable price/tariff/weather/forecast
   vintages, and `external_input_points` stores their time-valued points.
 
-The SQL definition is in
-`docs/architecture/contracts/p0_storage_schema_v1.sql`. The field-level
-mapping is in `p0_storage_schema_v1.mapping.json`.
+The runtime SQL definition is the packaged asset
+`custom_components/elrakning/p0_storage_schema_v1.sql`; the schema gate reads
+that same asset. The older documentation path
+`docs/architecture/contracts/p0_storage_schema_v1.sql` remains a design
+reference for the initial schema review. The field-level mapping is in
+`p0_storage_schema_v1.mapping.json`.
 
 ## Encoding and invariants
 

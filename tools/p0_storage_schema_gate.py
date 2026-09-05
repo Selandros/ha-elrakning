@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SQL_PATH = ROOT / "docs/architecture/contracts/p0_storage_schema_v1.sql"
+SQL_PATH = ROOT / "custom_components/elrakning/p0_storage_schema_v1.sql"
 MAPPING_PATH = ROOT / "docs/architecture/contracts/p0_storage_schema_v1.mapping.json"
 CONTRACT_PATH = ROOT / "docs/architecture/contracts/p0_data_contract_v1.contract.json"
 

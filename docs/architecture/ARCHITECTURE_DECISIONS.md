@@ -250,7 +250,8 @@ implemented and verified.
 P0 canonical long-term storage is normalized SQLite in one installation-owned
 database containing multiple site-scoped records and global shared frames.
 The physical v1 mapping is defined by
-`docs/architecture/contracts/p0_storage_schema_v1.sql` and its mapping file.
+the packaged runtime asset `custom_components/elrakning/p0_storage_schema_v1.sql`
+and its mapping file.
 It is selected after the P0-STORAGE-1A benchmark, logical recovery gate,
 process/filesystem durability gate, and schema round-trip/constraint gate.
 

@@ -92,6 +92,22 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
         await restarted.async_load()
         self.assertEqual(restarted.state["site"]["site_id"], first_site_id)
 
+    async def test_existing_site_migration_persists_collection_enabled(self):
+        hass = _hass({})
+        power, meter = _managers({})
+        data = {
+            "site": {"site_id": "site-a", "name": "A", "current": True},
+            "sites": [{"site_id": "site-a", "name": "A", "current": True}],
+            "active_site_id": "site-a",
+            "site_configs": {"site-a": {"power": {}, "meter": {}, "bindings": {}}},
+            "ledger": [],
+        }
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store(data)
+        await manager.async_load()
+        self.assertTrue(manager.state["site_configs"]["site-a"]["collection_enabled"])
+        self.assertTrue(manager.store.data["site_configs"]["site-a"]["collection_enabled"])
+
     async def test_initial_migration_covers_power_meter_and_solar_roles(self):
         entries = {
             entity: _Entity(f"registry-{entity}", entity)
@@ -186,7 +202,7 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.state["site_configs"][site_a]["power"]["consumption_entity"], "sensor.load")
         self.assertEqual(
             manager.state["site_configs"][site_b],
-            {"power": {}, "meter": {}, "bindings": {}},
+            {"power": {}, "meter": {}, "bindings": {}, "collection_enabled": False},
         )
         await manager.async_activate_site(site_b)
         self.assertEqual(manager.public_state()["site_id"], site_b)

@@ -2,8 +2,13 @@ import types
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
+from tests._elrakning_test_bootstrap import (
+    install_elrakning_package_stub,
+    install_homeassistant_stubs,
+    install_optional_dependency_stubs,
+)
 
+install_optional_dependency_stubs()
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 

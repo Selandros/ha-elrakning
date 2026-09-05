@@ -158,9 +158,13 @@ class SiteIdentityManager:
                 }
             for item in self.state["sites"]:
                 self.state["site_configs"].setdefault(item["site_id"], self._empty_site_config())
+            collection_enabled_migrated = False
             for config in self.state["site_configs"].values():
                 if isinstance(config, dict):
                     config.setdefault("bindings", {})
+                    if "collection_enabled" not in config:
+                        config["collection_enabled"] = True
+                        collection_enabled_migrated = True
             migrated_global_price = False
             for config in self.state["site_configs"].values():
                 bindings = config.get("bindings", {}) if isinstance(config, dict) else {}
@@ -169,6 +173,8 @@ class SiteIdentityManager:
                     self.state["global_bindings"]["nord_pool"] = legacy_binding
                     migrated_global_price = True
             if migrated_global_price:
+                await self.store.async_save(self.state)
+            elif collection_enabled_migrated:
                 await self.store.async_save(self.state)
             await self._restore_active_config()
             return
@@ -184,7 +190,13 @@ class SiteIdentityManager:
             "site": site,
             "sites": [site],
             "active_site_id": site["site_id"],
-            "site_configs": {site["site_id"]: {**self._current_mapping_config(), "bindings": {}}},
+            "site_configs": {
+                site["site_id"]: {
+                    **self._current_mapping_config(),
+                    "bindings": {},
+                    "collection_enabled": True,
+                }
+            },
             "global_bindings": {},
             "ledger": [],
             "migration_complete": False,
@@ -271,7 +283,43 @@ class SiteIdentityManager:
 
     @staticmethod
     def _empty_site_config() -> dict[str, Any]:
-        return {"power": {}, "meter": {}, "bindings": {}}
+        return {"power": {}, "meter": {}, "bindings": {}, "collection_enabled": False}
+
+    def collection_targets(self) -> list[dict[str, Any]]:
+        """Return explicit site/source targets for background collection."""
+        targets = []
+        ledger = self.state.get("ledger", [])
+        configs = self.state.get("site_configs", {})
+        for site in self.state.get("sites", []):
+            site_id = site.get("site_id") if isinstance(site, dict) else None
+            if not site_id:
+                continue
+            config = configs.get(site_id, {})
+            if not isinstance(config, dict) or config.get("collection_enabled", True) is not True:
+                continue
+            for item in ledger:
+                if (
+                    isinstance(item, dict)
+                    and item.get("site_id") == site_id
+                    and item.get("effective_to") is None
+                    and item.get("entity_id")
+                    and item.get("logical_role")
+                    and item.get("generation_id")
+                ):
+                    targets.append({
+                        "site_id": site_id,
+                        "logical_role": item["logical_role"],
+                        "entity_id": item["entity_id"],
+                        "generation_id": item["generation_id"],
+                        "source_identity": deepcopy(item.get("source_identity", {})),
+                        "provenance": deepcopy(item.get("provenance", {})),
+                        "site": deepcopy(site),
+                        "effective_from": item.get("effective_from"),
+                        "classification": item.get("classification"),
+                        "mapping": deepcopy(config.get("power", {})) | deepcopy(config.get("meter", {})),
+                        "canonicalization": deepcopy(item.get("canonicalization")),
+                    })
+        return targets
 
     def _current_mapping_config(self) -> dict[str, Any]:
         return {
@@ -526,6 +574,8 @@ class SiteIdentityManager:
                         "migration_origin": "existing_configuration" if initial_migration else "mapping_change",
                         "effective_from_status": "unknown_unattributed" if initial_migration else "verified_mapping_change",
                     },
+                    "classification": None,
+                    "canonicalization": None,
                     "created_at": _now(),
                 })
             for index, old in enumerate(active):
