@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -13,7 +14,9 @@ install_elrakning_package_stub()
 from custom_components.elrakning.canonical_storage import CanonicalStorage
 from custom_components.elrakning.external_input_frames import persist_nord_pool_frame
 from custom_components.elrakning.site_economic_frames import (
+    _async_capture_eon_grid_economic_snapshot,
     build_eon_grid_economic_frames,
+    matching_grid_binding_targets,
     persist_eon_grid_economic_snapshot,
     resolve_grid_binding_site_id,
     schedule_eon_grid_economic_capture,
@@ -113,6 +116,81 @@ class SiteEconomicFrameTests(unittest.TestCase):
     def tearDown(self):
         self.storage.close()
         self.directory.cleanup()
+
+    def test_matching_targets_fan_out_shared_source_without_active_site_identity(self):
+        binding_a = _binding(fingerprint="a")
+        binding_b = _binding(fingerprint="b")
+        state = {
+            "active_site_id": "site-disabled",
+            "site_configs": {
+                "site-a": {
+                    "collection_enabled": True,
+                    "bindings": {"grid": binding_a},
+                },
+                "site-b": {
+                    "collection_enabled": True,
+                    "bindings": {"grid": binding_b},
+                },
+                "site-disabled": {
+                    "collection_enabled": False,
+                    "bindings": {"grid": _binding(fingerprint="disabled")},
+                },
+                "site-other-facility": {
+                    "collection_enabled": True,
+                    "bindings": {"grid": _binding(fingerprint="other", street="Street 2")},
+                },
+                "site-other-entry": {
+                    "collection_enabled": True,
+                    "bindings": {"grid": {**_binding(fingerprint="entry"), "config_entry_id": "other-entry"}},
+                },
+            },
+        }
+
+        targets = matching_grid_binding_targets(state, _state(), "grid-entry")
+
+        self.assertEqual([site_id for site_id, _binding_value in targets], ["site-a", "site-b"])
+        self.assertEqual(
+            {binding_value["binding_fingerprint"] for _site_id, binding_value in targets},
+            {"a", "b"},
+        )
+
+    def test_capture_scheduler_uses_all_matching_bindings_not_active_runtime_binding(self):
+        binding_a = _binding(fingerprint="a")
+        binding_b = _binding(fingerprint="b")
+        site_state = {
+            "active_site_id": "site-b",
+            "site_configs": {
+                "site-a": {"collection_enabled": True, "bindings": {"grid": binding_a}},
+                "site-b": {"collection_enabled": True, "bindings": {"grid": binding_b}},
+            },
+        }
+
+        class _Hass:
+            def __init__(self):
+                self.calls = []
+                self.data = {
+                    "elrakning": {
+                        "site_identity_manager": SimpleNamespace(state=site_state),
+                        "grid_manager": SimpleNamespace(
+                            _site_binding=None,
+                            provider=SimpleNamespace(state=_state()),
+                            entry=SimpleNamespace(entry_id="grid-entry"),
+                        ),
+                        "canonical_collector": SimpleNamespace(
+                            storage=SimpleNamespace(path=Path("/tmp/canonical.sqlite"))
+                        ),
+                    }
+                }
+
+            async def async_add_executor_job(self, function, *args):
+                self.calls.append((function, args))
+                return 0
+
+        hass = _Hass()
+        asyncio.run(_async_capture_eon_grid_economic_snapshot(hass, self.captured))
+
+        self.assertEqual([call[1][1] for call in hass.calls], ["site-a", "site-b"])
+        self.assertEqual([call[1][2]["binding_fingerprint"] for call in hass.calls], ["a", "b"])
 
     def test_scheduler_hands_task_creation_to_home_assistant_loop(self):
         class _Loop:

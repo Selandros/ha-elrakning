@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from copy import deepcopy
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,40 @@ def _normalized_facility_context(facility: Any) -> dict[str, Any] | None:
 def _facility_context_hash(context: dict[str, Any]) -> str:
     payload = json.dumps(context, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def matching_grid_binding_targets(
+    site_identity_state: Any,
+    runtime_state: Any,
+    config_entry_id: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return all collection-enabled sites bound to the exact runtime E.ON source."""
+    if (
+        not isinstance(site_identity_state, dict)
+        or not isinstance(runtime_state, dict)
+        or not isinstance(config_entry_id, str)
+        or not config_entry_id
+    ):
+        return []
+    runtime_context = _normalized_facility_context(runtime_state.get("facility"))
+    configs = site_identity_state.get("site_configs")
+    if runtime_context is None or not isinstance(configs, dict):
+        return []
+    targets: list[tuple[str, dict[str, Any]]] = []
+    for site_id, config in configs.items():
+        if not isinstance(config, dict) or config.get("collection_enabled") is not True:
+            continue
+        bindings = config.get("bindings")
+        binding = bindings.get("grid") if isinstance(bindings, dict) else None
+        if (
+            not isinstance(binding, dict)
+            or binding.get("provider") != "eon"
+            or binding.get("config_entry_id") != config_entry_id
+            or _normalized_facility_context(binding.get("facility")) != runtime_context
+        ):
+            continue
+        targets.append((str(site_id), deepcopy(binding)))
+    return sorted(targets, key=lambda item: item[0])
 
 
 def resolve_grid_binding_site_id(site_identity_state: Any, binding: Any) -> str | None:
@@ -303,26 +338,37 @@ async def _async_capture_eon_grid_economic_snapshot(hass: Any, captured_at: date
     collector = domain_data.get("canonical_collector")
     if site_identity is None or grid_manager is None or collector is None:
         return
-    binding = getattr(grid_manager, "_site_binding", None)
     provider = getattr(grid_manager, "provider", None)
     state = getattr(provider, "state", None)
-    site_id = resolve_grid_binding_site_id(getattr(site_identity, "state", None), binding)
-    if site_id is None or not isinstance(binding, dict) or not isinstance(state, dict):
+    entry = getattr(grid_manager, "entry", None)
+    config_entry_id = getattr(entry, "entry_id", None)
+    if not isinstance(state, dict) or not isinstance(config_entry_id, str):
+        return
+    state_snapshot = deepcopy(state)
+    targets = matching_grid_binding_targets(
+        getattr(site_identity, "state", None), state_snapshot, config_entry_id
+    )
+    if not targets:
         return
     storage_path = getattr(getattr(collector, "storage", None), "path", None)
     if storage_path is None:
         return
-    try:
-        await hass.async_add_executor_job(
-            persist_eon_grid_economic_snapshot_path,
-            storage_path,
-            site_id,
-            dict(binding),
-            dict(state),
-            captured_at,
-        )
-    except (OSError, ValueError):
-        _LOGGER.debug("Unable to persist site economic frame", exc_info=True)
+    for site_id, binding in targets:
+        try:
+            await hass.async_add_executor_job(
+                persist_eon_grid_economic_snapshot_path,
+                storage_path,
+                site_id,
+                binding,
+                state_snapshot,
+                captured_at,
+            )
+        except (OSError, ValueError):
+            _LOGGER.debug(
+                "Unable to persist site economic frame for site_id=%s",
+                site_id,
+                exc_info=True,
+            )
 
 
 def schedule_eon_grid_economic_capture(hass: Any) -> None:
