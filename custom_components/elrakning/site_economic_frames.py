@@ -97,7 +97,7 @@ def build_eon_grid_economic_frames(
         raise ValueError("economic_site_id_missing")
     if not isinstance(binding, dict) or binding.get("provider") != "eon":
         return []
-    if not isinstance(state, dict) or state.get("configured") is not True:
+    if not isinstance(state, dict):
         return []
 
     agreement = state.get("agreement")
