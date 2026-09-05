@@ -8,7 +8,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (static, 2026-09-04): Current repository manifest: `0.0.594`
+- VERIFIED (static, 2026-09-05): Current repository manifest: `0.0.595`
 - VERIFIED (static, 2026-09-04): Branch: `main`
 - VERIFIED (recorded 2026-09-05): Branch is `main`; HEAD matched `origin/main`
   at the audit point. The current HEAD must be read from Git at audit time;
@@ -34,6 +34,11 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   meter, phase, solar, battery, and SOC history paths
 - INFERRED (current-codebase statement): Deterministic, read-only shadow
   calculations; no physical battery write path
+- VERIFIED (static, 2026-09-05): P0-AUDIT-1 provides a temporary, source-agnostic
+  24-hour cadence audit for the configured logical roles. It snapshots active
+  source generations from SiteIdentity, passively observes report/change events,
+  and exposes state/start/stop/cleanup diagnostics without writing physical
+  device state or becoming the canonical long-term collector.
 
 ## Verified data limitations
 
@@ -54,7 +59,13 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - VERIFIED (runtime audit, 2026-09-05): All 16 audited signal IDs had matching
   HA long-term-statistics metadata with mean statistics. LTS provides a
   longer-lived hourly path than the approximately seven-day raw Recorder
-  window. Exact common-overlap interval still needs to be recorded explicitly.
+  window.
+- VERIFIED (runtime LTS common-overlap audit, 2026-09-05): The critical
+  boundary overlap is 2026-01-16T08:00:00Z through 2026-09-05T12:00:00Z,
+  with 5,573 expected hourly buckets and 5,406 simultaneously usable across
+  house load, PV1, PV2, grid, battery power, and SOC. The longest fully
+  contiguous all-critical interval is 907 hourly buckets from
+  2026-01-24T10:00:00Z through 2026-03-03T04:00:00Z. Phase data remains P1.
 - UNKNOWN (architecture/runtime audit required): Separate background collector
   for inactive sites.
 - VERIFIED (runtime audit, 2026-09-05): `sensor.total_consumption` is a
