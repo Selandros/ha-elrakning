@@ -190,6 +190,40 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(coordinator.binding, manager.global_binding("nord_pool"))
 
+    async def test_provider_bindings_unbind_only_active_site(self):
+        power = _MappingManager({})
+        meter = _MappingManager({})
+        hass = types.SimpleNamespace(
+            config=types.SimpleNamespace(latitude=59.3, longitude=18.1),
+            config_entries=types.SimpleNamespace(async_entries=lambda _domain: []),
+        )
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store({
+            "site": {"site_id": "site-b", "name": "B"},
+            "sites": [
+                {"site_id": "site-a", "name": "A", "is_current": False},
+                {"site_id": "site-b", "name": "B", "is_current": True},
+            ],
+            "active_site_id": "site-b",
+            "site_configs": {
+                "site-a": {"power": {}, "meter": {}, "bindings": {"elhandel": {"provider": "greenely", "facility_id": "164313"}}},
+                "site-b": {"power": {}, "meter": {}, "bindings": {"elhandel": {"provider": "greenely", "facility_id": "624281"}}},
+            },
+            "global_bindings": {},
+            "ledger": [],
+            "migration_complete": True,
+        })
+        await manager.async_load()
+
+        has_other_binding = await manager.async_unbind_provider_runtime()
+
+        self.assertTrue(has_other_binding)
+        self.assertNotIn("elhandel", manager.state["site_configs"]["site-b"]["bindings"])
+        self.assertEqual(
+            manager.state["site_configs"]["site-a"]["bindings"]["elhandel"]["facility_id"],
+            "164313",
+        )
+
     async def test_grid_bindings_can_share_external_source_and_unbind_only_active_site(self):
         power = _MappingManager({})
         meter = _MappingManager({})

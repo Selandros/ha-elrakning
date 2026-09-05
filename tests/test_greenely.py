@@ -35,6 +35,7 @@ from custom_components.elrakning.websocket import (
     _electricity_provider_state,
     _safe_key_name,
     _summarize_consumption,
+    websocket_electricity_provider_remove,
     websocket_electricity_provider_source_data,
 )
 
@@ -553,6 +554,22 @@ class _RefreshClient:
         }
 
 
+class _CapturingRefreshClient:
+    def __init__(self):
+        self.config = None
+
+    async def async_get_refresh_data(self, config):
+        self.config = dict(config)
+        facility_id = config["facility_id"]
+        return {
+            "facility_id": facility_id,
+            "facility": {"id": facility_id, "name": "Bound site"},
+            "contracts": [],
+            "invoices": [],
+            "failed_contracts": [],
+        }
+
+
 class _SaveClient:
     async def async_login(self, email, password):
         return None
@@ -927,6 +944,60 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(state["consumption"])
         self.assertEqual(state["invoice_count"], 0)
         self.assertIsNone(state["latest_invoice"])
+
+    async def test_refresh_uses_active_site_binding_facility_over_global_config(self):
+        manager = _manager()
+        manager._site_binding = {"provider": "greenely", "facility_id": "facility-a"}
+        manager.async_process_latest_invoice_if_needed = AsyncMock()
+        manager.async_refresh_consumption = AsyncMock()
+        client = _CapturingRefreshClient()
+
+        with patch(
+            "custom_components.elrakning.elhandel.manager.GreenelyProvider",
+            return_value=client,
+        ):
+            await manager.async_refresh("site_switch")
+
+        self.assertEqual(client.config["facility_id"], "facility-a")
+        self.assertEqual(manager.state["facility_id"], "facility-a")
+        self.assertEqual(
+            manager.entry.data[ELECTRICITY_PROVIDER_CONFIG_DATA_KEY]["facility_id"],
+            "facility-1",
+        )
+
+    async def test_remove_one_site_keeps_shared_greenely_credentials(self):
+        manager = _manager()
+        manager._site_binding = {"provider": "greenely", "facility_id": "facility-b"}
+        manager.async_disconnect = AsyncMock()
+        manager.async_apply_site_binding = AsyncMock()
+        manager.storage.async_remove_provider = AsyncMock()
+        site_manager = SimpleNamespace(
+            active_binding=lambda service: (
+                {"provider": "greenely", "facility_id": "facility-b"}
+                if service == "elhandel" else None
+            ),
+            async_unbind_provider_runtime=AsyncMock(return_value=True),
+        )
+        manager.hass.data[DOMAIN]["elhandel_manager"] = manager
+        manager.hass.data[DOMAIN]["site_identity_manager"] = site_manager
+        connection = _Connection()
+
+        await websocket_electricity_provider_remove(
+            manager.hass,
+            connection,
+            {
+                "id": 9,
+                "type": "elrakning/electricity_provider_remove",
+                "provider": "greenely",
+                "purge_history": False,
+            },
+        )
+
+        site_manager.async_unbind_provider_runtime.assert_awaited_once()
+        manager.async_apply_site_binding.assert_awaited_once_with(None)
+        manager.async_disconnect.assert_not_awaited()
+        self.assertIn(ELECTRICITY_PROVIDER_CONFIG_DATA_KEY, manager.entry.data)
+        self.assertTrue(connection.result[1]["success"])
 
     async def test_refresh_success_updates_state_and_fires_update_event(self):
         manager = _manager()

@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
     EON_GRID_UPDATE_EVENT,
+    ELECTRICITY_PROVIDER_UPDATE_EVENT,
     GREENELY_PROVIDER,
     NORD_POOL_DOMAIN,
     SUPPORTED_ELECTRICITY_PROVIDERS,
@@ -381,8 +382,28 @@ async def websocket_electricity_provider_remove(hass, connection, msg):
     if provider != GREENELY_PROVIDER or provider != state["provider"]:
         connection.send_result(msg["id"], {"success": False, "error": "unsupported_provider"})
         return
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     try:
-        await manager.async_disconnect(purge_history=purge_history)
+        if site_manager is not None:
+            binding = site_manager.active_binding("elhandel")
+            if binding is None:
+                connection.send_result(msg["id"], {"success": True, **_electricity_provider_state(None), "site_status": "unconfigured"})
+                return
+            facility_id = binding.get("facility_id")
+            binding_provider = binding.get("provider") or GREENELY_PROVIDER
+            has_other_binding = await site_manager.async_unbind_provider_runtime()
+            if has_other_binding:
+                if purge_history and isinstance(facility_id, str) and facility_id:
+                    await manager.storage.async_remove_provider(
+                        facility_id, binding_provider, purge_history=True
+                    )
+                await manager.async_apply_site_binding(None)
+                hass.bus.async_fire(ELECTRICITY_PROVIDER_UPDATE_EVENT)
+            else:
+                await manager.async_disconnect(purge_history=purge_history)
+                await manager.async_apply_site_binding(None)
+        else:
+            await manager.async_disconnect(purge_history=purge_history)
     except GreenelyError as err:
         connection.send_result(msg["id"], {"success": False, "error": err.code})
         return
@@ -590,7 +611,7 @@ async def websocket_eon_grid_web_save(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): EON_GRID_SOURCE_DATA_COMMAND})
 @websocket_api.async_response
 async def websocket_eon_grid_source_data(hass, connection, msg):
-    if not _site_is_configured(hass):
+    if not _site_binding_is_configured(hass, "grid"):
         connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured"})
         return
     manager = _grid_manager(hass)

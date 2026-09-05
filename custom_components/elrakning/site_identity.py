@@ -474,6 +474,22 @@ class SiteIdentityManager:
         await self.store.async_save(self.state)
         await provider_manager.async_apply_site_binding(self.active_binding("elhandel"))
 
+    async def async_unbind_provider_runtime(self) -> bool:
+        """Remove only the active site's provider binding and report other users."""
+        active_site_id = self.state.get("active_site_id")
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            active_site_id, self._empty_site_config()
+        )
+        config.setdefault("bindings", {}).pop("elhandel", None)
+        await self.store.async_save(self.state)
+        return any(
+            isinstance(site_config, dict)
+            and isinstance(site_config.get("bindings"), dict)
+            and isinstance(site_config["bindings"].get("elhandel"), dict)
+            for site_id, site_config in self.state.get("site_configs", {}).items()
+            if site_id != active_site_id
+        )
+
     async def async_bind_grid_runtime(self, grid_manager) -> None:
         """Record the selected grid facility while keeping credentials global."""
         if not grid_manager or not grid_manager.provider:

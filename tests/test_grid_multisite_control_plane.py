@@ -391,6 +391,34 @@ class GridMultiSiteControlPlaneTests(unittest.IsolatedAsyncioTestCase):
             reloaded_grid.provider.state["facility"], ACTIVE_GRID_STATE["facility"]
         )
 
+    async def test_legacy_eon_source_data_uses_grid_binding_not_physical_site_mapping(self):
+        hass, sites, _grid, _entry, _site_a, site_b = await self._runtime()
+        self.assertFalse(sites.active_site_is_configured())
+        await self._login(hass)
+
+        connection = _Connection()
+        await websocket_module.websocket_eon_grid_source_data(
+            hass,
+            connection,
+            {"id": 5, "type": websocket_module.EON_GRID_SOURCE_DATA_COMMAND},
+        )
+        self.assertTrue(connection.last["success"])
+        self.assertEqual(
+            connection.last["facility"]["address"]["street"], "Fiskvik 218"
+        )
+
+        await sites.async_activate_site(site_b)
+        connection = _Connection()
+        await websocket_module.websocket_eon_grid_source_data(
+            hass,
+            connection,
+            {"id": 6, "type": websocket_module.EON_GRID_SOURCE_DATA_COMMAND},
+        )
+        self.assertEqual(
+            connection.last,
+            {"success": False, "error": "site_unconfigured"},
+        )
+
     async def test_grid_source_data_uses_grid_binding_not_physical_site_mapping(self):
         hass, sites, _grid, _entry, _site_a, site_b = await self._runtime()
         self.assertFalse(sites.active_site_is_configured())

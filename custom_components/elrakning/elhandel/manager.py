@@ -175,6 +175,16 @@ class ElhandelManager:
         config = self.entry.data.get(ELECTRICITY_PROVIDER_CONFIG_DATA_KEY, {})
         return config if isinstance(config, dict) else {}
 
+    def _runtime_config(self) -> dict[str, Any]:
+        """Use shared credentials with the active site's explicit facility."""
+        config = dict(self._config())
+        binding_value = getattr(self, "_site_binding", None)
+        binding = binding_value if isinstance(binding_value, dict) else None
+        facility_id = binding.get("facility_id") if binding else None
+        if isinstance(facility_id, str) and facility_id:
+            config["facility_id"] = facility_id
+        return config
+
     async def async_diagnostic(self, level: str, component: str, event: str, message: str) -> None:
         append_diagnostic(self.diagnostics, level, component, event, message)
         await self.diagnostics_store.async_save(self.diagnostics)
@@ -330,7 +340,7 @@ class ElhandelManager:
         if getattr(self, "_site_binding", True) is None:
             return
         refresh_generation = self.lifecycle.generation if _generation is None else _generation
-        config = self._config()
+        config = self._runtime_config()
         if not GreenelyProvider.is_configured(config):
             return
         today = datetime.now().date()
@@ -369,7 +379,7 @@ class ElhandelManager:
         if getattr(self, "_site_binding", True) is None:
             return self.public_state()
         refresh_generation = self.lifecycle.generation if _generation is None else _generation
-        config = self._config()
+        config = self._runtime_config()
         if not GreenelyProvider.is_configured(config):
             self.state["configured"] = False
             return self.public_state()
