@@ -10,8 +10,9 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - VERIFIED (static, 2026-09-04): Current repository manifest: `0.0.594`
 - VERIFIED (static, 2026-09-04): Branch: `main`
-- VERIFIED (static, 2026-09-05): HEAD: `f720d75` (`docs: complete elrakning architecture memory`)
-- VERIFIED (recorded 2026-09-05): HEAD matched `origin/main`
+- VERIFIED (recorded 2026-09-05): Branch is `main`; HEAD matched `origin/main`
+  at the audit point. The current HEAD must be read from Git at audit time;
+  this file does not duplicate a self-invalidating commit SHA.
 - VERIFIED (static): This documentation change does not change production code
   or release version.
 
@@ -95,6 +96,23 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   no reported hard gaps.
 - UNKNOWN (runtime audit detail): The exact shared common-overlap interval
   across every audited signal has not yet been recorded in permanent memory.
+
+## Point 7 planning status
+
+- VERIFIED (read-only audit closure, 2026-09-05): Point 7B is closed for the
+  planning phase. Site A source mapping, Recorder raw availability, Elräkning
+  reader availability, HA long-term-statistics metadata/boundaries/coverage,
+  and observed `sensor.total_consumption` runtime semantics are verified.
+- LIMITATION (non-blocking for planning): The original Jinja/template body and
+  direct template dependency provenance for `sensor.total_consumption` and
+  `sensor.pv_power_now_kw` are not recoverable from the current persisted HA
+  configuration through the available read-only methods. No source IDs were
+  inferred from numerical matching.
+- PLANNING CONSEQUENCE: The template provenance limitation must not be
+  presented as verified dependencies. It does not invalidate the runtime
+  gross-load evidence or block planning, but any future canonical collector
+  must record explicit source identity and provenance from the point it begins
+  collecting.
 
 ## Permanent data-foundation risks and gates
 
