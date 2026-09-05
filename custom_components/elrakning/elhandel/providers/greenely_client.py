@@ -19,11 +19,12 @@ BACKEND_BASE_URL = "https://backend.greenely.com/v1"
 
 
 class GreenelyError(Exception):
-    """A normalized Greenely request error."""
+    """A normalized Greenely request error with optional non-sensitive diagnostics."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, diagnostics: dict[str, Any] | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.diagnostics = dict(diagnostics) if isinstance(diagnostics, dict) else None
 
 
 class GreenelyClient:

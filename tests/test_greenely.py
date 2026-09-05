@@ -25,6 +25,9 @@ from custom_components.elrakning.elhandel import models as electricity_models
 from custom_components.elrakning.elhandel.manager import ElhandelManager
 from custom_components.elrakning.elhandel.lifecycle import LifecycleManager
 from custom_components.elrakning.elhandel.providers.greenely import GreenelyProvider
+from custom_components.elrakning.elhandel.providers.greenely_consumption import (
+    greenely_consumption_payload_shape,
+)
 from custom_components.elrakning.elhandel.providers.greenely_invoice import (
     GreenelyInvoiceError,
     GreenelyInvoiceProcessor,
@@ -120,6 +123,36 @@ class GreenelyClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.code, "invalid_auth")
 
 
+class GreenelyConsumptionDiagnosticsTests(unittest.TestCase):
+    def test_payload_shape_reports_structure_without_values(self):
+        payload = {
+            "data": [
+                {
+                    "localtime": "SECRET_TIME",
+                    "usage": 12345,
+                    "metering_point": "SECRET_ID",
+                }
+            ],
+            "request_id": "SECRET_REQUEST",
+        }
+
+        shape = greenely_consumption_payload_shape(payload, "2026-09")
+        rendered = repr(shape)
+
+        self.assertEqual(shape["payload_type"], "dict")
+        self.assertEqual(shape["data_type"], "list")
+        self.assertEqual(shape["raw_item_count"], 1)
+        self.assertEqual(shape["normalized_count"], 1)
+        self.assertEqual(shape["month_match_count"], 0)
+        self.assertEqual(
+            shape["item_keys"], ["localtime", "metering_point", "usage"]
+        )
+        self.assertNotIn("SECRET_TIME", rendered)
+        self.assertNotIn("SECRET_ID", rendered)
+        self.assertNotIn("SECRET_REQUEST", rendered)
+        self.assertNotIn("12345", rendered)
+
+
 class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_creates_config_for_selected_facility(self):
         client = SimpleNamespace(
@@ -140,6 +173,51 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
             {"email": "user@example.test", "password": "password", "facility_id": "facility-1"},
         )
         self.assertEqual(result["facility"], {"id": "facility-1", "name": "Home"})
+
+    async def test_no_consumption_error_carries_only_sanitized_response_shape(self):
+        payload = {
+            "data": [
+                {
+                    "timestamp": "SECRET_TIMESTAMP",
+                    "value": 42,
+                    "unit": "SECRET_UNIT",
+                }
+            ],
+            "request_id": "SECRET_REQUEST",
+        }
+        client = SimpleNamespace(
+            async_login=AsyncMock(),
+            async_get_consumption=AsyncMock(return_value=payload),
+        )
+
+        with patch(
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
+            return_value=client,
+        ):
+            provider = GreenelyProvider(_Hass())
+            with self.assertRaises(GreenelyError) as raised:
+                await provider.async_get_consumption_data(
+                    {
+                        "email": "user@example.test",
+                        "password": "password",
+                        "facility_id": "facility-1",
+                    },
+                    date(2026, 9, 1),
+                    date(2026, 9, 5),
+                    "2026-09",
+                )
+
+        self.assertEqual(raised.exception.code, "no_consumption")
+        self.assertEqual(raised.exception.diagnostics["raw_item_count"], 1)
+        self.assertEqual(raised.exception.diagnostics["normalized_count"], 0)
+        self.assertEqual(
+            raised.exception.diagnostics["item_keys"],
+            ["timestamp", "unit", "value"],
+        )
+        rendered = repr(raised.exception.diagnostics)
+        self.assertNotIn("SECRET_TIMESTAMP", rendered)
+        self.assertNotIn("SECRET_UNIT", rendered)
+        self.assertNotIn("SECRET_REQUEST", rendered)
 
     async def test_provider_rejects_invalid_credentials_before_login(self):
         client = SimpleNamespace(async_login=AsyncMock())

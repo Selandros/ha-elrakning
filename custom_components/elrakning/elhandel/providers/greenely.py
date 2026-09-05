@@ -6,7 +6,11 @@ from datetime import date
 from typing import Any
 
 from ...const import GREENELY_EMAIL, GREENELY_FACILITY_ID, GREENELY_PASSWORD
-from .greenely_consumption import normalize_greenely_consumption, summarize_greenely_consumption
+from .greenely_consumption import (
+    greenely_consumption_payload_shape,
+    normalize_greenely_consumption,
+    summarize_greenely_consumption,
+)
 from .greenely_source import sanitize_greenely_source
 from .greenely_client import GreenelyClient, GreenelyError
 from .greenely_invoice import GreenelyInvoiceError, GreenelyInvoiceProcessor
@@ -114,7 +118,10 @@ class GreenelyProvider:
         samples = normalize_greenely_consumption(payload)
         summary = summarize_greenely_consumption(payload, month)
         if summary is None:
-            raise GreenelyError("no_consumption")
+            raise GreenelyError(
+                "no_consumption",
+                greenely_consumption_payload_shape(payload, month),
+            )
         return {"samples": samples, "summary": summary}
 
     async def async_process_invoice(

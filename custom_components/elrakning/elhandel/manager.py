@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -371,7 +372,14 @@ class ElhandelManager:
             if not self.lifecycle.is_current(refresh_generation):
                 return
             self.state["consumption_error"] = {"error": err.code, "at": datetime.now(timezone.utc).isoformat()}
-            await self.async_diagnostic("ERROR", "consumption", "consumption_failed", "Consumption refresh failed")
+            diagnostic_message = "Consumption refresh failed"
+            if isinstance(getattr(err, "diagnostics", None), dict):
+                diagnostic_message += " · Response shape: " + json.dumps(
+                    err.diagnostics, sort_keys=True, separators=(",", ":")
+                )
+            await self.async_diagnostic(
+                "ERROR", "consumption", "consumption_failed", diagnostic_message
+            )
             await self.storage.async_save(self.state)
             self.hass.bus.async_fire(ELECTRICITY_PROVIDER_UPDATE_EVENT)
 
