@@ -8,21 +8,25 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (static, 2026-09-05): Current repository manifest: `0.0.597`
+- VERIFIED (runtime, 2026-09-05): `0.0.603` is the released and runtime-verified
+  baseline. Its canonical runtime store contained site energy observations and
+  immutable global Nord Pool frames without changing schema v1.
+- IMPLEMENTED, RELEASE/RUNTIME VERIFICATION REQUIRED (2026-09-05): The next
+  patch candidate is `0.0.604`, limited to site-scoped economic tariff frames
+  and their E.ON runtime event wiring. The manifest bump is performed only at
+  the final release-candidate commit.
 - VERIFIED (static, 2026-09-04): Branch: `main`
 - VERIFIED (recorded 2026-09-05): Branch is `main`; HEAD matched `origin/main`
   at the audit point. The current HEAD must be read from Git at audit time;
   this file does not duplicate a self-invalidating commit SHA.
-- VERIFIED (static, 2026-09-05): This release includes the P0 collector
-  implementation and schema-versioned storage; runtime verification remains
-  required.
 
 ## Implemented and observed in the current codebase
 
 - INFERRED (current-codebase statement; evidence not embedded): Persistent
   multi-site identity and site-scoped source bindings
-- INFERRED (current-codebase statement): Global Nord Pool source with
-  site-specific provider/grid layers
+- VERIFIED (static/runtime baseline, 2026-09-05): Global Nord Pool source is
+  persisted as immutable global external input frames and remains separate
+  from site-specific provider/grid economic layers.
 - INFERRED (current-codebase statement): Site-scoped Forecast.Solar,
   Open-Meteo, PVGIS, Solar Shadow, and Solar Evidence namespaces
 - INFERRED (current-codebase statement): Solar Evidence `evidence-v1` and daily
@@ -52,22 +56,24 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   `known_at <= decision_at`, quality/gap semantics, immutable revisions,
   timezone/DST rules, global shared external frames, and active-site versus
   collection separation.
-- IMPLEMENTED LOCALLY, RUNTIME VERIFICATION REQUIRED (P0-COLLECT-1A,
-  2026-09-05): The first site-independent canonical collector is now present
-  locally. It listens to HA state events, resolves explicit site/source
-  generations from the source ledger, separates concurrent sites and source
-  generations, writes only future native 900-second UTC observations to the
-  packaged schema-v1 SQLite store, and uses `collection_enabled` rather than
-  `active_site_id` as its collection filter. Aggregation and classification are
-  source-declared; missing source semantics fail closed. Report/change pairs
-  are deduplicated, silent sources finalize as explicit gap rows, and each
-  quarter batch is committed atomically. Missing, invalid and partial coverage
-  remain explicit quality/gap states and are never zero-filled or interpolated.
-  Local tests cover multi-site isolation, restart/idempotent replay, source
-  replacement inside one quarter, report/change deduplication, silent-source
-  finalization, sign/unit validation, UTC quarter alignment and no fabricated
-  values. No HA runtime verification has occurred yet; the irreversible-data
-  risk remains P0 until that gate passes.
+- VERIFIED (runtime baseline, 2026-09-05): The site-independent canonical
+  collector is deployed and runtime-verified through release `0.0.603`. It
+  resolves explicit site/source generations, uses source-declared semantics,
+  writes schema-v1 900-second UTC observations, finalizes silent sources as
+  explicit gaps, deduplicates report/change pairs and preserves source
+  generations without using `active_site_id` as collection identity.
+- IMPLEMENTED, RUNTIME VERIFICATION REQUIRED (0.0.604 candidate, 2026-09-05):
+  E.ON grouped-contract economics can be persisted as immutable site-scoped
+  external input frames on `EON_GRID_UPDATE_EVENT`. Only an explicitly bound
+  facility with an active grouped contract, explicit gross/VAT semantics and
+  an aware UTC source snapshot timestamp is accepted. Import transfer charge,
+  import energy tax and fixed monthly subscription are separate roles. Missing
+  components remain unavailable; export, demand/peak fees and a summed customer
+  price are not fabricated. Provider date-only start/end validity is preserved
+  as provenance and is not converted to UTC until site timezone semantics are
+  verified. Source replacement creates a new generation; exact replay is
+  idempotent and corrections use immutable revisions. Global Nord Pool frames
+  are not modified by this producer.
 - VERIFIED (design/benchmark, 2026-09-05): P0-STORAGE-1 benchmark harness is
   present in `tools/p0_storage_benchmark.py` with results recorded in
   `docs/architecture/P0_STORAGE_BENCHMARK.md`. A normalized SQLite candidate
