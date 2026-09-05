@@ -38,6 +38,20 @@ class _Hass:
         return callback(*args)
 
 
+class _Bus:
+    def __init__(self):
+        self.listeners = []
+
+    def async_listen(self, event_type, action, **kwargs):
+        self.listeners.append((event_type, action, kwargs))
+        return lambda: None
+
+
+class _StartHass(_Hass):
+    def __init__(self):
+        self.bus = _Bus()
+
+
 def _target(site, role, entity, generation, mapping=None):
     power_semantics = {
         "house.consumption": ("W", "positive_consumption", "time_weighted_mean"),
@@ -69,6 +83,21 @@ def _target(site, role, entity, generation, mapping=None):
 
 
 class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_state_reported_subscription_is_filtered_to_ready_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            hass = _StartHass()
+            collector = CanonicalCollector(
+                hass, _Identity([target]), Path(directory) / "canonical.sqlite"
+            )
+            await collector.async_start()
+            reported = hass.bus.listeners[1]
+            self.assertIn("event_filter", reported[2])
+            event_filter = reported[2]["event_filter"]
+            self.assertTrue(event_filter(types.SimpleNamespace(data={"entity_id": "sensor.load"})))
+            self.assertFalse(event_filter(types.SimpleNamespace(data={"entity_id": "sensor.other"})))
+            await collector.async_shutdown()
+
     async def test_event_stream_is_site_explicit_and_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             target_a = _target("site-a", "house.consumption", "sensor.load", "gen-a")

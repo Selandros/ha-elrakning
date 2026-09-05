@@ -53,7 +53,11 @@ class CanonicalCollector:
             return
         await self.hass.async_add_executor_job(self.storage.open)
         self._state_unsub = self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
-        self._reported_unsub = self.hass.bus.async_listen(EVENT_STATE_REPORTED, self._async_state_reported)
+        self._reported_unsub = self.hass.bus.async_listen(
+            EVENT_STATE_REPORTED,
+            self._async_state_reported,
+            event_filter=self._state_reported_filter,
+        )
         self._quarter_unsub = async_track_time_change(
             self.hass,
             self._async_close_previous_quarter,
@@ -78,6 +82,15 @@ class CanonicalCollector:
         if self._started:
             await self.hass.async_add_executor_job(self.storage.close)
         self._started = False
+
+    def _state_reported_filter(self, event: Event) -> bool:
+        """Accept reported events only for currently bound collection sources."""
+        entity_id = event.data.get("entity_id")
+        return any(
+            target.get("entity_id") == entity_id
+            and self._canonicalization_ready(target)
+            for target in self.site_identity_manager.collection_targets()
+        )
 
     async def _async_state_changed(self, event: Event) -> None:
         await self._async_observation_event(event, reported=False)
