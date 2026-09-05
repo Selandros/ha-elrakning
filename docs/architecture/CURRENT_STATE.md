@@ -10,8 +10,8 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - VERIFIED (static, 2026-09-04): Current repository manifest: `0.0.594`
 - VERIFIED (static, 2026-09-04): Branch: `main`
-- VERIFIED (static, 2026-09-04): HEAD: `aee4254a6cf8ccc8a8c4c4aad5795fb177b3d00b`
-- VERIFIED (recorded 2026-09-04): HEAD matched `origin/main`
+- VERIFIED (static, 2026-09-05): HEAD: `f720d75` (`docs: complete elrakning architecture memory`)
+- VERIFIED (recorded 2026-09-05): HEAD matched `origin/main`
 - VERIFIED (static): This documentation change does not change production code
   or release version.
 
@@ -46,13 +46,24 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   series of its own.
 - VERIFIED (static audit, 2026-09-04): `known_at` is not consistently
   persisted for forecast, price, and weather inputs.
-- UNKNOWN (runtime/storage audit required): Exact per-entity Recorder
-  retention and long-term-statistics coverage.
+- VERIFIED (runtime audit, 2026-09-05): The Site A source mapping, Recorder
+  raw availability, Elräkning reader availability, and HA long-term-statistics
+  metadata/boundaries/coverage audit passed for the audited load, PV, grid,
+  battery, SOC, and phase signals.
+- VERIFIED (runtime audit, 2026-09-05): All 16 audited signal IDs had matching
+  HA long-term-statistics metadata with mean statistics. LTS provides a
+  longer-lived hourly path than the approximately seven-day raw Recorder
+  window. Exact common-overlap interval still needs to be recorded explicitly.
 - UNKNOWN (architecture/runtime audit required): Separate background collector
   for inactive sites.
-- UNKNOWN (runtime semantics audit required): Exact battery/PV-normalized
-  physical meaning of `sensor.total_consumption` as a universal canonical
-  source outside the observed regimes and source provenance per site.
+- VERIFIED (runtime audit, 2026-09-05): `sensor.total_consumption` is a
+  battery-independent gross-house-load candidate for the four observed
+  charging, discharging, PV-producing, and low/no-PV regimes.
+- NOT RECOVERABLE (current persisted HA configuration): The original
+  historical/current Jinja/template body and its direct template provenance
+  for `sensor.total_consumption` and `sensor.pv_power_now_kw` could not be
+  recovered through the available read-only methods. No source IDs were
+  inferred from numerical matching alone.
 
 ## New read-only data-foundation evidence
 
@@ -68,11 +79,22 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   valid battery-independent gross-house-load candidate for the observed
   regimes. It does not by itself establish long-term retention, source
   provenance, or universal semantics across sites.
-- UNKNOWN (read-only audit required): Exact source entity IDs behind
-  `sensor.total_consumption` and their long-term-statistics coverage.
-- UNKNOWN (read-only audit required): Long-term statistics and common overlap
-  for load, PV, grid import/export, battery power, SOC, phase data, and
-  outdoor temperature.
+- VERIFIED (runtime reader audit, 2026-09-05): Site A mappings used by
+  Elräkning were identified as `sensor.total_consumption`; PV1/PV2
+  `sensor.fsp_ne_130170834_pv_1_input_power` and
+  `sensor.fsp_ne_130170834_pv_2_input_power`; battery
+  `sensor.fsp_ne_175846905_charge_discharge_power`; SOC
+  `sensor.fsp_ne_175846905_state_of_charge`; grid
+  `sensor.fsp_ne_175849203_active_power`; and discovered phase current,
+  voltage, and active-power entities for L1-L3 under the same meter device.
+- VERIFIED (runtime reader audit, 2026-09-05): Elräkning could read its mapped
+  power history for up to seven local days and its meter/phase reader could
+  read the current local day.
+- VERIFIED (runtime LTS audit, 2026-09-05): All 16 requested statistic IDs
+  were present with mean metadata and the audited LTS boundaries/coverage had
+  no reported hard gaps.
+- UNKNOWN (runtime audit detail): The exact shared common-overlap interval
+  across every audited signal has not yet been recorded in permanent memory.
 
 ## Permanent data-foundation risks and gates
 
