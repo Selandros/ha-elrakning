@@ -1,5 +1,6 @@
 """The Elräkning integration."""
 
+import json
 from functools import partial
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from .websocket import async_register_websocket_commands
 
 PANEL_PATH = DOMAIN
 PANEL_LOADER_PATH = f"/{DOMAIN}/elrakning-loader.js"
+PANEL_LOADER_VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
+PANEL_LOADER_URL = f"{PANEL_LOADER_PATH}?v={PANEL_LOADER_VERSION}"
 PANEL_RESOURCE_PATH = f"/{DOMAIN}/elrakning-panel.js"
 PANEL_CADENCE_AUDIT_PATH = f"/{DOMAIN}/elrakning-cadence-audit.js"
 PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
@@ -84,7 +87,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
             config={
                 "_panel_custom": {
                     "name": "elrakning-panel",
-                    "js_url": PANEL_LOADER_PATH,
+                    "js_url": PANEL_LOADER_URL,
                     "embed_iframe": False,
                 }
             },
