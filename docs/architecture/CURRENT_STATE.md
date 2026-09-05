@@ -8,7 +8,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (static, 2026-09-05): Current repository manifest: `0.0.595`
+- VERIFIED (static, 2026-09-05): Current repository manifest: `0.0.596`
 - VERIFIED (static, 2026-09-04): Branch: `main`
 - VERIFIED (recorded 2026-09-05): Branch is `main`; HEAD matched `origin/main`
   at the audit point. The current HEAD must be read from Git at audit time;
@@ -39,6 +39,21 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   source generations from SiteIdentity, passively observes report/change events,
   and exposes state/start/stop/cleanup diagnostics without writing physical
   device state or becoming the canonical long-term collector.
+
+- VERIFIED (design, 2026-09-05): P0-DATA-1 canonical data contract v1 is
+  frozen in `docs/architecture/P0_DATA_CONTRACT_V1.md` with a machine-readable
+  contract and pure standard-library fixtures/validator. The minimum critical
+  roles are house load, physical PV1/PV2, grid, battery power, and SOC.
+  Prospective canonical data is 15-minute UTC-aligned data; historical
+  Recorder/LTS bootstrap preserves truthful source resolution and never
+  expands hourly data into synthetic quarters. The contract defines
+  site/source-generation identity, provenance and identity strength,
+  `known_at <= decision_at`, quality/gap semantics, immutable revisions,
+  timezone/DST rules, global shared external frames, and active-site versus
+  collection separation.
+- OPEN (P0 data gate): No canonical long-term collector or physical storage
+  backend has been implemented or selected. The irreversible-data risk remains
+  P0 until collection starts and storage/recovery acceptance passes.
 
 ## Verified data limitations
 

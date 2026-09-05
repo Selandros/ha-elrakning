@@ -221,3 +221,26 @@ shapes.
 Current installations and providers, including FusionSolar/Huawei, Growatt,
 HomeWizard, current electricity retailers, and current grid companies, are
 runtime examples only. They are not permanent Elräkning product assumptions.
+
+## AD-021 P0 canonical data contract
+
+P0 long-term model data uses the storage-neutral contract in
+`docs/architecture/P0_DATA_CONTRACT_V1.md` and its machine-readable contract
+and fixtures. The minimum critical roles are house load, physical PV sources,
+grid power, battery power, and battery SOC. The prospective canonical interval
+is 15 minutes; historical bootstrap preserves the source resolution and must
+not create false 15-minute precision.
+
+The contract makes site identity, logical role, source generation,
+identity-strength/provenance, UTC and site-timezone state, capture/fetch/known
+times, quality, gaps, revisions, and forecast/input frames explicit. The
+backtest invariant is `known_at <= decision_at`. Missing data is not silently
+zero-filled, interpolated, fabricated, or forward-filled. `active_site_id`
+does not control collection; explicit `collection_enabled` and site identity
+do. Global external sources may be shared by multiple sites while
+site-specific economic layers remain isolated.
+
+This decision closes the design gate P0-DATA-1 only. It does not select a
+physical storage backend or implement collection; the P0 data gate and its
+irreversible-data risk remain open until those decisions and the collector are
+implemented and verified.

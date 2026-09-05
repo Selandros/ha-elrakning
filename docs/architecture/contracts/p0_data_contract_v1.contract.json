@@ -1,0 +1,38 @@
+{
+  "contract_id": "elrakning.p0_data_contract",
+  "contract_version": 1,
+  "schema_name": "elrakning.canonical_data",
+  "schema_version": 1,
+  "timestamp_contract": {"canonical_timezone": "UTC", "interval_alignment_seconds": 900},
+  "timezone_contract": {"statuses": ["verified", "migrated_unverified", "unknown"], "unknown_allows_utc_collection": true},
+  "identity_contract": {"source_identity_strength": ["strong", "medium", "weak", "uncertain"], "fingerprint_nullable_only_when": "uncertain"},
+  "source_generation_contract": {"replacement_is_new_generation": true, "global_owner_site_id": null},
+  "enums": {"scope": ["site", "global"], "classification": ["measured", "derived", "estimated", "forecast", "published"], "source_resolution_kind": ["event_stream", "native_bucket", "unknown"], "quality_status": ["good", "partial", "invalid", "unknown"]},
+  "logical_roles": {
+    "house.consumption": {"unit": "W", "sign": "positive_consumption", "aggregation": "time_weighted_mean"},
+    "solar.production": {"unit": "W", "sign": "positive_production", "aggregation": "time_weighted_mean"},
+    "grid.power/import": {"unit": "W", "sign": "positive_import_negative_export", "aggregation": "time_weighted_mean"},
+    "battery.power": {"unit": "W", "sign": "positive_discharge_negative_charge", "aggregation": "time_weighted_mean"},
+    "battery.soc": {"unit": "%", "sign": "unsigned_0_100", "aggregation": "last_valid"}
+  },
+  "datasets": {
+    "energy_observation": {"scope": "site", "resolution_seconds": 900, "allowed_classes": ["measured", "derived"]},
+    "historical_energy_observation": {"scope": "site", "resolution_is_source_truth": true, "allowed_classes": ["measured", "derived"]},
+    "external_input_frame": {"scope": ["site", "global"], "allowed_classes": ["measured", "derived", "estimated", "forecast", "published"]}
+  },
+  "invariants": [
+    {"id": "INV-ID-001", "rule": "site_id is immutable"}, {"id": "INV-ID-002", "rule": "logical role is independent of provider and address"},
+    {"id": "INV-SRC-001", "rule": "source_generation_id is required"}, {"id": "INV-SRC-002", "rule": "fingerprint is required for strong/medium/weak identity"},
+    {"id": "INV-SRC-003", "rule": "replacement creates generation, not revision"}, {"id": "INV-SRC-004", "rule": "global generation has no owning site"},
+    {"id": "INV-TIME-001", "rule": "canonical timestamps are UTC or offset-aware"}, {"id": "INV-TZ-001", "rule": "site timezone state is explicit"},
+    {"id": "INV-TZ-002", "rule": "unknown timezone forbids local-time inference"}, {"id": "INV-INT-001", "rule": "live canonical energy interval is 900 seconds"},
+    {"id": "INV-ROLE-001", "rule": "role determines canonical unit sign and aggregation"}, {"id": "INV-KNOWN-001", "rule": "known_at is not earlier than captured_at or fetched_at"},
+    {"id": "INV-KNOWN-002", "rule": "decision input requires known_at <= decision_at"}, {"id": "INV-CLASS-001", "rule": "classification is allowed for dataset"},
+    {"id": "INV-QUAL-001", "rule": "unknown is not zero"}, {"id": "INV-QUAL-002", "rule": "unavailable gap and stale remain distinct"},
+    {"id": "INV-FAB-001", "rule": "canonical actual data is never fabricated"}, {"id": "INV-FAB-002", "rule": "canonical actual data is never interpolated"},
+    {"id": "INV-BACKFILL-001", "rule": "historical source resolution is preserved"}, {"id": "INV-BACKFILL-002", "rule": "native aggregate is never upsampled"},
+    {"id": "INV-REV-001", "rule": "records are immutable revisions"}, {"id": "INV-REV-002", "rule": "supersedes only same semantic identity"},
+    {"id": "INV-FRAME-001", "rule": "new forecast vintage is a new frame"}, {"id": "INV-FRAME-002", "rule": "correction preserves the old frame"},
+    {"id": "INV-SITE-001", "rule": "active_site_id is never collection identity"}
+  ]
+}

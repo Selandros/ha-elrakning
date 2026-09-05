@@ -83,6 +83,13 @@ model/protocol versions. Timestamp storage must remain reproducible over
 timezone and DST changes. Deduplication is defined per dataset semantics, not
 by a universal key.
 
+The normative P0-DATA-1 design is recorded in
+`docs/architecture/P0_DATA_CONTRACT_V1.md`. It freezes the storage-neutral
+record envelope, source-generation and provenance semantics, UTC/timezone/DST
+rules, quality and no-fabrication rules, truthful Recorder/LTS bootstrap, and
+the `known_at <= decision_at` backtest gate. It closes contract design only;
+storage selection and the long-term collector remain subsequent gates.
+
 ## Forecast engines
 
 ### Load
