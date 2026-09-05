@@ -266,3 +266,28 @@ identity.
 This decision does not claim an actual host power cut, NAS hardware semantics,
 or a production backup calendar. P0-COLLECT-1 remains gated on using this
 schema without semantic loss and on restoring the missing test dependency.
+
+## AD-023 Site economic frames do not infer tariff validity
+
+Site-specific grid/provider economics are immutable, site-scoped external
+input frames and remain separate from shared global market-price frames. A
+provider-specific adapter may persist an economic component only when its site
+binding, source identity, value, unit/sign semantics, VAT/tax basis and
+availability timestamps are explicit enough to satisfy the canonical v1
+contract. Missing or ambiguous components remain unavailable; they are not
+zero-filled or reconstructed from a derived customer-price total.
+
+When a provider exposes tariff validity only as local calendar dates and the
+site timezone is not verified, Elräkning must not invent UTC boundaries. A
+verified provider `active` status may instead be recorded as an
+`active_snapshot_at_fetched_at`: the source dates are preserved as provenance,
+`valid_from`/`valid_to` remain unresolved, the point is valid only at the
+observed UTC snapshot instant, and `known_at` is no earlier than Elräkning's
+capture time. This prevents DST/local-time inference and look-ahead.
+
+Economic components remain separate semantic roles. In particular, import
+transfer charge, import energy tax, fixed subscription fee, export economics
+and any future demand/peak tariff are independent facts. A summed customer
+price is derived at read/model time and is not a second source of truth. Source
+replacement creates a new site-scoped source generation; corrections to the
+same semantic snapshot use immutable revisions.
