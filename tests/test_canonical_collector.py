@@ -94,8 +94,8 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
             reported = hass.bus.listeners[1]
             self.assertIn("event_filter", reported[2])
             event_filter = reported[2]["event_filter"]
-            self.assertTrue(event_filter(types.SimpleNamespace(data={"entity_id": "sensor.load"})))
-            self.assertFalse(event_filter(types.SimpleNamespace(data={"entity_id": "sensor.other"})))
+            self.assertTrue(event_filter({"entity_id": "sensor.load"}))
+            self.assertFalse(event_filter({"entity_id": "sensor.other"}))
             await collector.async_shutdown()
 
     async def test_event_stream_is_site_explicit_and_idempotent(self):

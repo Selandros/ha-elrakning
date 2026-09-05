@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from homeassistant.core import EVENT_STATE_CHANGED, Event
+from homeassistant.core import EVENT_STATE_CHANGED, Event, callback
 try:
     from homeassistant.core import EVENT_STATE_REPORTED
 except ImportError:
@@ -83,9 +83,10 @@ class CanonicalCollector:
             await self.hass.async_add_executor_job(self.storage.close)
         self._started = False
 
-    def _state_reported_filter(self, event: Event) -> bool:
+    @callback
+    def _state_reported_filter(self, event_data: dict[str, Any]) -> bool:
         """Accept reported events only for currently bound collection sources."""
-        entity_id = event.data.get("entity_id")
+        entity_id = event_data.get("entity_id")
         return any(
             target.get("entity_id") == entity_id
             and self._canonicalization_ready(target)

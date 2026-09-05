@@ -46,6 +46,7 @@ def install_homeassistant_stubs() -> None:
     core = sys.modules.get("homeassistant.core") or _module("homeassistant.core")
     core.EVENT_STATE_CHANGED = "state_changed"
     core.Event = object
+    core.callback = lambda function: function
     core.State = object
     core.HomeAssistant = object
     core.valid_entity_id = lambda value: isinstance(value, str) and "." in value
