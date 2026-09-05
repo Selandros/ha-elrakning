@@ -54,6 +54,13 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - OPEN (P0 data gate): No canonical long-term collector or physical storage
   backend has been implemented or selected. The irreversible-data risk remains
   P0 until collection starts and storage/recovery acceptance passes.
+- VERIFIED (design/benchmark, 2026-09-05): P0-STORAGE-1 benchmark harness is
+  present in `tools/p0_storage_benchmark.py` with results recorded in
+  `docs/architecture/P0_STORAGE_BENCHMARK.md`. A normalized SQLite candidate
+  had the smallest measured one-site/year footprint and indexed range-query
+  times; this is not yet a production storage selection because crash/restart,
+  migration, backup/restore, partial-write, and NAS-unavailable gates remain
+  open.
 
 ## Verified data limitations
 
