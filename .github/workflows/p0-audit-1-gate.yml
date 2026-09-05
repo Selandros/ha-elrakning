@@ -15,9 +15,20 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-019c24a
+            ref: 019c24a4798cbdb0c1084a261b1cc78a9645907f
+          - label: p0-audit-1-head
+            ref: p0-audit-1-source-agnostic
+    name: gate-${{ matrix.label }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,8 +49,12 @@ jobs:
       - name: JavaScript tests
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          status=0
           for test_file in tests/test_*.mjs; do
             echo "==> ${test_file}"
-            node "${test_file}"
+            if ! node "${test_file}"; then
+              status=1
+            fi
           done
+          exit "${status}"
