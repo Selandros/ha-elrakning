@@ -985,6 +985,32 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["invoice_count"], 0)
         self.assertIsNone(state["latest_invoice"])
 
+    async def test_consumption_refresh_never_queries_future_end_date(self):
+        manager = _manager()
+        provider = SimpleNamespace(
+            async_get_consumption_data=AsyncMock(return_value={
+                "samples": [{"localtime": "2026-09-04 00:00", "usage_kwh": 1.0}],
+                "summary": {
+                    "month": "2026-09",
+                    "month_to_date_kwh": 1.0,
+                    "latest_sample_at": "2026-09-04 00:00",
+                },
+            })
+        )
+
+        with patch(
+            "custom_components.elrakning.elhandel.manager.GreenelyProvider",
+            return_value=provider,
+        ):
+            await manager.async_refresh_consumption("test")
+
+        args = provider.async_get_consumption_data.await_args.args
+        queried_start, queried_end, queried_month = args[1], args[2], args[3]
+        today = date.today()
+        self.assertEqual(queried_start, today.replace(day=1))
+        self.assertEqual(queried_end, today)
+        self.assertEqual(queried_month, today.strftime("%Y-%m"))
+
     async def test_refresh_uses_active_site_binding_facility_over_global_config(self):
         manager = _manager()
         manager._site_binding = {"provider": "greenely", "facility_id": "facility-a"}

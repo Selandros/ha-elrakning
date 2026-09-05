@@ -345,7 +345,7 @@ class ElhandelManager:
             return
         today = datetime.now().date()
         month_start = today.replace(day=1)
-        month_end = today + timedelta(days=1)
+        month_end = today
         await self.async_diagnostic("INFO", "consumption", "consumption_refresh_start", f"Consumption refresh started · Provider: {GREENELY_PROVIDER} · Reason: {reason}")
         try:
             provider = GreenelyProvider(self.hass)
