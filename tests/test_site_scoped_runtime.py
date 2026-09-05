@@ -190,6 +190,113 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(coordinator.binding, manager.global_binding("nord_pool"))
 
+    async def test_prepare_runtime_prefers_and_persists_newer_matching_grid_provider_state(self):
+        power = _MappingManager({})
+        meter = _MappingManager({})
+        hass = types.SimpleNamespace(
+            config=types.SimpleNamespace(latitude=59.3, longitude=18.1),
+            config_entries=types.SimpleNamespace(async_entries=lambda _domain: []),
+        )
+        manager = SiteIdentityManager(hass, power, meter)
+        facility = {"address": {"street": "Fiskvik 218"}, "grid_area": "MEL"}
+        binding = {
+            "config_entry_id": "grid-entry",
+            "provider": "eon",
+            "facility": facility,
+        }
+        cached = {
+            "updated_at": "2026-09-05T21:23:38+00:00",
+            "facility": facility,
+            "agreement": {"status": "future"},
+        }
+        newer = {
+            "updated_at": "2026-09-05T21:48:57+00:00",
+            "facility": facility,
+            "agreement": {"status": "active"},
+        }
+        manager.state = {
+            "site": {"site_id": "site-a", "name": "A"},
+            "sites": [
+                {"site_id": "site-a", "name": "A"},
+                {"site_id": "site-b", "name": "B"},
+            ],
+            "active_site_id": "site-a",
+            "site_configs": {
+                "site-a": {
+                    "power": {},
+                    "meter": {},
+                    "bindings": {"grid": binding},
+                    "runtime": {"grid_state": cached},
+                    "collection_enabled": True,
+                },
+                "site-b": {"power": {}, "meter": {}, "bindings": {}, "collection_enabled": True},
+            },
+            "global_bindings": {},
+            "ledger": [],
+            "migration_complete": True,
+        }
+        manager.store = _Store()
+        provider = _ProviderManager()
+        grid = _GridManager()
+        grid.provider.state = newer
+        coordinator = _Coordinator()
+
+        await manager.async_prepare_runtime_bindings(provider, grid, coordinator)
+
+        self.assertEqual(grid.provider.state, newer)
+        self.assertEqual(
+            manager.state["site_configs"]["site-a"]["runtime"]["grid_state"],
+            newer,
+        )
+        self.assertEqual(
+            manager.store.data["site_configs"]["site-a"]["runtime"]["grid_state"],
+            newer,
+        )
+
+    async def test_runtime_context_never_replaces_target_cache_with_older_or_other_facility_state(self):
+        power = _MappingManager({})
+        meter = _MappingManager({})
+        manager = object.__new__(SiteIdentityManager)
+        manager.power_manager = power
+        manager.meter_manager = meter
+        facility_b = {"address": {"street": "Site B"}, "grid_area": "B"}
+        cached = {
+            "updated_at": "2026-09-05T22:00:00+00:00",
+            "facility": facility_b,
+            "agreement": {"status": "active"},
+        }
+        binding = {"config_entry_id": "grid-entry", "provider": "eon", "facility": facility_b}
+        manager.state = {
+            "site": {"site_id": "site-b", "name": "B"},
+            "sites": [{"site_id": "site-b", "name": "B"}],
+            "active_site_id": "site-b",
+            "site_configs": {
+                "site-b": {"power": {}, "meter": {}, "bindings": {"grid": binding}, "runtime": {"grid_state": cached}}
+            },
+            "global_bindings": {},
+            "ledger": [],
+        }
+        provider = _ProviderManager()
+        grid = _GridManager()
+        coordinator = _Coordinator()
+
+        grid.provider.state = {
+            "updated_at": "2026-09-05T23:00:00+00:00",
+            "facility": {"address": {"street": "Other"}, "grid_area": "A"},
+        }
+        changed = await manager.async_apply_runtime_context(provider, grid, coordinator)
+        self.assertFalse(changed)
+        self.assertEqual(grid.provider.state, cached)
+
+        grid.provider.state = {
+            "updated_at": "2026-09-05T21:00:00+00:00",
+            "facility": facility_b,
+            "agreement": {"status": "future"},
+        }
+        changed = await manager.async_apply_runtime_context(provider, grid, coordinator)
+        self.assertFalse(changed)
+        self.assertEqual(grid.provider.state, cached)
+
     async def test_provider_bindings_unbind_only_active_site(self):
         power = _MappingManager({})
         meter = _MappingManager({})

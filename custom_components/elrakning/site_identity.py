@@ -6,6 +6,7 @@ import hashlib
 import json
 import uuid
 from copy import deepcopy
+from datetime import datetime
 from typing import Any
 
 from homeassistant.helpers import entity_registry as er
@@ -440,24 +441,76 @@ class SiteIdentityManager:
                     "binding_fingerprint": self.binding_fingerprint(binding),
                 }
         await self.store.async_save(self.state)
-        await self.async_apply_runtime_context(provider_manager, grid_manager, coordinator)
+        if await self.async_apply_runtime_context(provider_manager, grid_manager, coordinator):
+            await self.store.async_save(self.state)
 
-    async def async_apply_runtime_context(self, provider_manager, grid_manager, coordinator) -> None:
+    @staticmethod
+    def _runtime_updated_at(state: Any) -> datetime | None:
+        if not isinstance(state, dict):
+            return None
+        value = state.get("updated_at")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else None
+
+    @classmethod
+    def _preferred_grid_runtime_state(
+        cls,
+        binding: dict[str, Any] | None,
+        cached_state: Any,
+        grid_manager: Any,
+    ) -> dict[str, Any] | None:
+        cached = deepcopy(cached_state) if isinstance(cached_state, dict) else None
+        if not isinstance(binding, dict) or grid_manager is None:
+            return cached
+        provider = getattr(grid_manager, "provider", None)
+        provider_state = getattr(provider, "state", None)
+        entry = getattr(grid_manager, "entry", None)
+        definition = getattr(grid_manager, "definition", None)
+        if (
+            not isinstance(provider_state, dict)
+            or binding.get("config_entry_id") != getattr(entry, "entry_id", None)
+            or binding.get("provider") != getattr(definition, "provider_id", None)
+            or binding.get("facility") != provider_state.get("facility")
+        ):
+            return cached
+        provider_updated = cls._runtime_updated_at(provider_state)
+        cached_updated = cls._runtime_updated_at(cached)
+        if provider_updated is None:
+            return cached
+        if cached_updated is not None and provider_updated < cached_updated:
+            return cached
+        return deepcopy(provider_state)
+
+    async def async_apply_runtime_context(self, provider_manager, grid_manager, coordinator) -> bool:
         """Apply the active site's explicit provider, grid and price context."""
         provider_binding = self.active_binding("elhandel")
         grid_binding = self.active_binding("grid")
         price_binding = self.global_binding("nord_pool")
         config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
         runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
+        cached_grid_state = runtime.get("grid_state") if isinstance(runtime, dict) else None
+        grid_state = self._preferred_grid_runtime_state(
+            grid_binding, cached_grid_state, grid_manager
+        )
+        runtime_changed = (
+            isinstance(config, dict)
+            and isinstance(grid_state, dict)
+            and grid_state != cached_grid_state
+        )
+        if runtime_changed:
+            config.setdefault("runtime", {})["grid_state"] = deepcopy(grid_state)
         if hasattr(provider_manager, "async_apply_site_binding"):
             await provider_manager.async_apply_site_binding(provider_binding)
         if grid_manager and hasattr(grid_manager, "async_apply_site_binding"):
-            await grid_manager.async_apply_site_binding(
-                grid_binding,
-                deepcopy(runtime.get("grid_state")) if isinstance(runtime, dict) else None,
-            )
+            await grid_manager.async_apply_site_binding(grid_binding, grid_state)
         if hasattr(coordinator, "set_site_binding"):
             coordinator.set_site_binding(price_binding)
+        return runtime_changed
 
     async def async_bind_provider_runtime(self, provider_manager) -> None:
         """Record an explicit provider facility selection for the active site."""
