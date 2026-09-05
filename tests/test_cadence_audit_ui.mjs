@@ -19,6 +19,8 @@ assert.match(audit, /data-cadence-signals/);
 assert.match(audit, /same_value_report_count/);
 assert.match(audit, /observed_event_gap_seconds/);
 assert.match(audit, /runtime_gap_seconds/);
+assert.match(audit, /observation_homogeneous/);
+assert.match(audit, /Source identity ändrades eller blev overifierbar/);
 assert.match(audit, /stale_after/);
 assert.match(audit, /source generation/);
 assert.match(audit, /insertBefore\(section, diagnostics\)/);
@@ -30,6 +32,9 @@ assert.match(loader, /this\._cadenceAudit\?\.destroy\?\.\(\)/);
 
 assert.match(backend, /AUDITED_LOGICAL_ROLES/);
 assert.match(backend, /source_generation_id/);
+assert.match(backend, /source_continuity/);
+assert.match(backend, /observation_homogeneous/);
+assert.match(backend, /state_changed_without_state_value_change_count/);
 assert.match(backend, /async_track_state_report_event/);
 assert.match(backend, /async_track_state_change_event/);
 assert.match(backend, /stale_after_seconds.*None/);
