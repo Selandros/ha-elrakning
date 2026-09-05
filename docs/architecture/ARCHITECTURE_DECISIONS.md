@@ -188,3 +188,36 @@ measured, then downsampled only after its value is understood. Canonical
 quality, calibration, health, command, and source-change events retain their
 provenance and effective/known times. This is an explicit P0 concern while
 Recorder retention remains short or unverified.
+
+## AD-020 Source/provider agnosticism
+
+Elräkning's shared architecture is source- and provider-agnostic. Generic
+logic must never depend directly on today's sensor/entity IDs, hardware vendor,
+Home Assistant integration/platform, electricity retailer, grid company,
+tariff provider, forecast provider, inverter, battery, meter, or other
+replaceable external source.
+
+Stable logical roles and capabilities are the contract. The current source for
+a role is resolved through explicit site/source bindings, mappings,
+registries, adapters, or equivalent runtime configuration. Vendor- or
+provider-specific handling is permitted only behind an isolated adapter or
+provider boundary and must not leak into generic collection, diagnostics,
+history, forecasting, optimization, model, or presentation contracts.
+
+Entity IDs, unique IDs, device IDs, config-entry IDs, provider names, and
+vendor-specific identifiers are provenance/configuration observations, not
+permanent architecture keys. A source may be renamed, replaced, removed,
+split, combined, or migrated to another vendor/provider without breaking
+unrelated functionality. Source changes must either preserve semantic
+continuity explicitly or create a new source generation; they must never be
+silently merged because an entity name happens to remain stable.
+
+Generic functionality must fail or degrade explicitly when a required role is
+missing or incompatible. It must not silently substitute another source with
+unknown semantics. Tests for generic functionality must cover replacement or
+rebinding and, where relevant, materially different provider/integration
+shapes.
+
+Current installations and providers, including FusionSolar/Huawei, Growatt,
+HomeWizard, current electricity retailers, and current grid companies, are
+runtime examples only. They are not permanent Elräkning product assumptions.
