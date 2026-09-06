@@ -3,7 +3,6 @@ class ElrakningPanel extends HTMLElement {
   set hass(value) {
     this._hass = value;
     if (this._panel) this._panel.setHass(value);
-    if (this._cadenceAudit) this._cadenceAudit.setHass(value);
   }
 
   get hass() {
@@ -17,8 +16,6 @@ class ElrakningPanel extends HTMLElement {
 
   disconnectedCallback() {
     this._stopVersionWatch();
-    this._cadenceAudit?.destroy?.();
-    this._cadenceAudit = null;
     this._panel?.destroy?.();
     this._panel = null;
     this._loadedVersion = null;
@@ -45,20 +42,15 @@ class ElrakningPanel extends HTMLElement {
   async _checkAndLoad() {
     const version = await this._getInstalledVersion();
     if (version === this._loadedVersion) return;
-    this._cadenceAudit?.destroy?.();
-    this._cadenceAudit = null;
     this._panel?.destroy?.();
     this._panel = null;
-    const [{ mountElrakningPanel }, { mountCadenceAudit }] = await Promise.all([
-      import(`/elrakning/elrakning-panel.js?v=${encodeURIComponent(version)}`),
-      import(`/elrakning/elrakning-cadence-audit.js?v=${encodeURIComponent(version)}`),
-    ]);
+    const { mountElrakningPanel } = await import(
+      `/elrakning/elrakning-panel.js?v=${encodeURIComponent(version)}`
+    );
     this._panel = mountElrakningPanel(this, { version });
-    this._cadenceAudit = mountCadenceAudit(this, { version });
     this._loadedVersion = version;
     if (this._hass) {
       this._panel.setHass(this._hass);
-      this._cadenceAudit.setHass(this._hass);
     }
   }
 

@@ -25,10 +25,9 @@ assert.match(audit, /stale_after/);
 assert.match(audit, /source generation/);
 assert.match(audit, /insertBefore\(section, diagnostics\)/);
 
-assert.match(loader, /elrakning-cadence-audit\.js/);
-assert.match(loader, /mountCadenceAudit/);
-assert.match(loader, /this\._cadenceAudit\.setHass\(this\._hass\)/);
-assert.match(loader, /this\._cadenceAudit\?\.destroy\?\.\(\)/);
+assert.doesNotMatch(loader, /elrakning-cadence-audit\.js/);
+assert.doesNotMatch(loader, /mountCadenceAudit/);
+assert.doesNotMatch(loader, /_cadenceAudit/);
 
 assert.match(backend, /AUDITED_LOGICAL_ROLES/);
 assert.match(backend, /source_generation_id/);
