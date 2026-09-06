@@ -71,6 +71,7 @@ def test_extract_facilities_rejects_invalid_format():
 def test_untrusted_legacy_history_is_not_accepted_as_site_history():
     legacy = {
         "invoices": [],
+        "summary": {"latest_period": {"month": "2026-07"}},
         "source": {"consumption": {"samples": [{"timestamp": "2026-09-01", "value": 42.0}]}},
     }
     attributed = {
@@ -80,6 +81,12 @@ def test_untrusted_legacy_history_is_not_accepted_as_site_history():
 
     assert _has_untrusted_legacy_history(legacy)
     assert not _has_untrusted_legacy_history(attributed)
+
+
+def test_stale_summary_without_invoice_history_is_untrusted():
+    state = {"invoices": [], "summary": {"tariff": {"fixed_fee": 39}}, "source": {"consumption": {"samples": []}}}
+
+    assert _has_untrusted_legacy_history(state)
 
 
 class _Response:

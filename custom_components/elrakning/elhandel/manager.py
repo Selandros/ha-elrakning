@@ -719,10 +719,15 @@ def _summary_has_attribution(state: dict[str, Any]) -> bool:
 def _has_untrusted_legacy_history(state: dict[str, Any]) -> bool:
     """Reject legacy provider history that has no invoice/facility provenance."""
     invoices = state.get("invoices") if isinstance(state.get("invoices"), list) else []
+    summary = state.get("summary")
     source = state.get("source") if isinstance(state.get("source"), dict) else {}
     consumption = source.get("consumption") if isinstance(source.get("consumption"), dict) else {}
     samples = consumption.get("samples") if isinstance(consumption.get("samples"), list) else []
-    if invoices or not samples:
+    if invoices:
+        return False
+    if isinstance(summary, dict) and summary:
+        return True
+    if not samples:
         return False
     return any(
         not isinstance(sample, dict) or not isinstance(sample.get("facility_id"), str)
