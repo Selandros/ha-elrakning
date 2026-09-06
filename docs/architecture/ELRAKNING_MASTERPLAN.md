@@ -23,10 +23,41 @@ must remain read-only to the development system.
 ### Fiskvik
 
 Future operating site. P1 and smartplugs arrive before PV/battery. It should
-collect load data from day one and later reuse the shared engines with a local
-site profile and calibration.
+collect the basic P0 load, grid, price, tariff, weather and quality context
+from day one when the relevant sources exist. P1 and smartplug expansion is a
+later scope; it must not be interpreted as a date before which basic
+collection may wait. It later reuses the shared engines with a local site
+profile and calibration.
 
 The UI-active site and collection-enabled sites are separate concepts.
+
+### Site-independent background collection
+
+`active_site_id` selects UI and configuration context only. Explicit
+`collection_enabled` state controls background collection. A collector receives
+the site ID explicitly, iterates all enabled sites, is restart-safe and
+idempotent, and never reads the mutable UI-active site as its collection
+identity. This applies to both site telemetry (load, PV, grid, battery, SOC,
+phase and later smartplugs) and external/model inputs (price, tariff, provider
+economics, weather, solar forecast and evidence). Switching the active site
+must not stop, reassign or rewrite another enabled site's history.
+
+An identical external source may use a shared read cache, but bindings,
+configured state, provenance, source generations, toggles and history remain
+site-scoped. Removing or changing a binding on one site must not alter another
+site that references the same external facility.
+
+### Fiskvik day-one dataset
+
+When Fiskvik sources are available, P0 collection starts immediately. The
+initial pre-solar/pre-battery dataset should include total load, import/export
+power and energy, phase current/voltage/active power where exposed,
+availability/stale state, outdoor temperature, calendar/holiday context, and
+price/tariff frames. P1 Wizard data and later smartplugs add device power,
+energy, state, commands, identity, role/category, priority and constraints.
+The future solar/battery can be represented by virtual hardware once its
+physical specifications are known; waiting for step 13 is not allowed to
+delay basic history.
 
 Site identity is immutable while site names are mutable metadata. Physical
 source replacement creates a new logical generation with explicit provenance
@@ -89,6 +120,46 @@ record envelope, source-generation and provenance semantics, UTC/timezone/DST
 rules, quality and no-fabrication rules, truthful Recorder/LTS bootstrap, and
 the `known_at <= decision_at` backtest gate. It closes contract design only;
 storage selection and the long-term collector remain subsequent gates.
+
+### Unit and sign invariants
+
+A numeric value and its unit must originate from the same unit domain. Unit
+conversion happens exactly once. Native metadata must never be combined with a
+value that has already been converted to a requested or display unit. The
+required path is:
+
+```text
+native value + native unit -> one explicit Elräkning conversion -> canonical unit
+```
+
+Each logical role also has a canonical source sign convention. A derived
+energy-balance equation may use a different contribution sign, but that
+derived sign must be explicit and must not be used to silently change the
+source contract or its binding inversion setting.
+
+### External input frames
+
+Time-dependent external inputs are immutable, source-explicit frames. At
+minimum, the P0 frame families are Nord Pool price/publication frames,
+provider/electricity-contract economics, grid tariff/economic frames,
+Forecast.Solar, Open-Meteo/weather, and other forecast inputs actually used by
+the optimizer or replay. A frame preserves target/effective time, `known_at`,
+captured/fetched time where applicable, source fingerprint, publication or
+availability state, unit/currency/VAT semantics, schema/version, and revision
+or supersedes identity. Later provider corrections must coexist with the
+earlier frame when the earlier frame was the information available at the
+decision time.
+
+### General history service
+
+`energy_history` is a site-scoped history service, not a price-chart feature.
+The price graph is one consumer. One canonical history path must be reusable
+by Hour, Day, Month, Year, and future cards for load, solar, grid,
+import/export, battery, SOC, phase and other supported roles. It combines
+canonical observations with truthful HA LTS fallback, source generations,
+quality, provenance and actual source resolution. It must not manufacture
+finer resolution from hourly data or make price data the owner of energy
+history.
 
 ## Forecast engines
 
@@ -236,6 +307,15 @@ retention. Every dataset must later declare owner, resolution, retention,
 aggregation/downsampling, provenance, and whether Recorder is sufficient.
 Do not irreversibly downsample before the original value is understood.
 
+### Cadence and stale-data gate
+
+Cadence is source-generation-specific; no universal sensor cadence may be
+assumed. A completed cadence audit must define expected cadence, stale
+threshold or policy, maximum hold, unavailable/gap semantics, and the model
+value of the retained resolution. These results are data-contract inputs, not
+only diagnostic UI. A source that stops changing must not be treated as fresh
+without an explicit policy.
+
 ## Battery Health, prices, and calibration
 
 Battery Health is a first-class dataset. Where available, preserve reported and
@@ -244,11 +324,26 @@ EFC, SoC exposure, C-rate, temperature, efficiencies, cell spread, BMS
 limits/derating, cycle counters, balancing observations, warnings, source,
 site/product identity, quality, and estimator version.
 
+Battery Health also includes usable-capacity estimates, time at high/low SoC,
+calibration observations and events, BMS limits/derating, and the method or
+estimator version. Calibration is need-driven: signals such as narrow SoC
+range, divergence between integrated and BMS SoC, low capacity confidence,
+cell delta or derating can trigger a recommendation. The optimizer chooses a
+cost-aware opportunity; there is no blind fixed full-cycle schedule.
+
 Replacement prices are global, immutable, versioned product metadata. Actual
 purchase price is site/install-specific. V1 degradation cost is a documented
 positive approximation such as replacement value divided by expected lifetime
 throughput; it is not an exact physical degradation model. Calibration is
 need-driven and may be simulated/recommended in shadow only.
+
+The product catalog retains manufacturer/model/module, chemistry,
+nominal/usable capacity, warranty, expected throughput/cycles, currency,
+VAT-status, source, effective interval, `known_at`, and append-only price
+revisions. Site economics retains actual purchase price, installation cost,
+purchase date, installed capacity/modules and site-specific discounts.
+Backtests use the product-price revision that was known at the decision time,
+not today's replacement price.
 
 ## Model lifecycle and diagnostics
 
@@ -263,6 +358,15 @@ size separately without secrets.
 NAS is optional archival/backup infrastructure and never live truth. The local
 HA storage remains the normal runtime/model store while practical; runtime must
 survive NAS unavailability.
+
+The storage decision is driven by measured growth, query latency for one day,
+30 days and one year, restart/crash recovery, backup/restore and migration
+behavior. As an initial budget reference, one signal at 100 bytes per point is
+approximately 52.6 MiB/year at one-minute, 10.5 MiB/year at five-minute and
+3.5 MiB/year at fifteen-minute resolution. These are planning estimates, not
+runtime measurements. Debug/Storage must report Elräkning-owned storage and
+Recorder separately, including bytes, records, oldest/newest data, growth and
+retention.
 
 ## Implementation order
 
@@ -287,6 +391,43 @@ survive NAS unavailability.
 
 Peak/fuse safety work may proceed in parallel earlier, but physical control is
 still gated on its completion and verification.
+
+## Model-value dataset catalogue
+
+The following catalogue is the minimum long-term target. It is a planning
+contract, not a claim that every dataset is implemented today.
+
+| Dataset | Minimum long-term form | Required identity/provenance |
+| --- | --- | --- |
+| House load | 15-minute | site/source, quality, observed time, sign/unit |
+| Grid import/export power | 15-minute | sign convention, phase when relevant |
+| Grid import/export energy | 15-minute or daily delta | meter generation, reset/rollover/change |
+| PV power/energy | 15-minute | installation fingerprint, section/source |
+| Battery power | 15-minute | charge/discharge sign, limits |
+| SOC | 15-minute | source/BMS identity, stale state |
+| SOH/capacity | daily/change | battery product, estimator/version |
+| Battery temperature | 15-minute | min/max/mean and sensor identity |
+| Cell delta/BMS limits | 15-minute/event | quality and derating reason |
+| Throughput/EFC | 15-minute plus daily | method/model version |
+| Forecast.Solar | immutable frames | `known_at`, target, source fingerprint |
+| Open-Meteo/weather | immutable frames | `known_at`, target, model/source |
+| PVGIS | config/model-change frames | installation fingerprint |
+| Nord Pool | persistent 15-minute frames | publication/availability, area/currency, `known_at` |
+| Provider/grid economics | event/effective-period frames | effective time, `known_at`, source, VAT/unit |
+| Battery price revisions | immutable events | product, price/currency/VAT, effective time, `known_at` |
+| Smartplug power/energy | 15-minute | role, availability, source |
+| Smartplug state/commands | immutable events | manual/optimizer, acknowledgement, reason |
+| Shadow plans | one record per plan | input-frame IDs, model/version, decision time |
+| Quality summaries | daily | completeness, gaps, source changes |
+| Calibration events | immutable events | reason, pre/post metrics, cost, outcome |
+
+The generic model-data principle is not "save everything for AI". Preserve
+every model-relevant observation or input that cannot later be reconstructed,
+with truthful resolution, provenance and `known_at`, so the same data can
+support forecasting, calibration, digital-twin identification, health
+analysis, replay, shadow comparison and optimizer evaluation. Battery
+optimization itself remains deterministic MPC/LP/MILP; ML/AI is primarily for
+forecasting, calibration, health and uncertainty estimation.
 
 ## Completeness gates for the data and control foundation
 
@@ -318,6 +459,16 @@ decoration:
 - Storage implementation is chosen using measured growth, query performance,
   backup/restore behavior, and provenance needs; JSON is not assumed suitable
   for every multi-year time series.
+- `active_site_id` changes are tested without stopping collection for any
+  `collection_enabled` site, including telemetry and external/model inputs.
+- A source-generation cadence audit produces stale, hold, gap and unavailable
+  policy before its data is trusted by models.
+- Native value/unit pairs are kept together through statistics reads and are
+  converted exactly once before entering canonical history.
+- General history consumers do not depend on the price graph or a price-data
+  request as their ownership boundary.
+- Fiskvik P0 collection starts when sources become available; its P1/smartplug
+  expansion is a later roadmap step, not a prerequisite for day-one history.
 
 These gates preserve the distinction between architecture direction,
 implementation details, and runtime evidence. Unknown database format,

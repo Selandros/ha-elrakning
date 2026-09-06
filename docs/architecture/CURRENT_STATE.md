@@ -8,18 +8,23 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (repository/runtime activation, 2026-09-06): `0.0.619` is released
-  on `main`, deployed to Home Assistant, and served by the runtime static
-  manifest after a Core restart. Deployed `energy_history.py` and `manifest.json`
+- VERIFIED (repository/runtime activation, 2026-09-06): `0.0.620` is released
+  in commit `f250a01` on `main`, deployed to Home Assistant, and served by the
+  runtime static manifest after a Core restart. Deployed `energy_history.py`
+  and `manifest.json`
   SHA-256 hashes matched the release files.
-- VERIFIED (static, 2026-09-06): The `0.0.619` history-hardening scope passes
-  277 Python tests, 27 frontend Node tests, `compileall`, manifest JSON parsing,
+- VERIFIED (static, 2026-09-06): The `0.0.620` native-statistics-unit fix passes
+  278 Python tests, 27 frontend Node tests, `compileall`, manifest JSON parsing,
   and `git diff --check`.
-- LIMITATION (runtime semantic readback, 2026-09-06): Runtime activation is
-  verified, but the authenticated `energy_history` WebSocket payload was not
-  directly captured in this audit. The existing Safari HA session could not be
-  scripted because JavaScript from Apple Events is disabled; no debug logging,
-  credential extraction, or temporary runtime API was added to bypass that gate.
+- VERIFIED (runtime semantic readback, 2026-09-06): The authenticated 30 August
+  `energy_history` payload now contains plausible hourly battery values,
+  including `3.7472135248561114 kW` discharge and
+  `1.9403342397427776 kW` charge, with `resolution_seconds=3600` and preserved
+  original source intervals. The previous 1000x error is absent.
+- LIMITATION (runtime probe metadata, 2026-09-06): The browser probe returned
+  `version: null` because it searched panel text rather than the manifest. The
+  served manifest separately returned `0.0.620`; no cache clearing, credential
+  extraction, debug logging, or temporary runtime API was used.
 
 ## Implemented and observed in the current codebase
 
@@ -38,11 +43,11 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   installation context
 - INFERRED (current-codebase statement): Read-only Recorder-backed power,
   meter, phase, solar, battery, and SOC history paths
-- VERIFIED (static; runtime activation verified, semantic payload readback not
-  directly captured, 0.0.619, 2026-09-06): Price-period `energy_history` merges
+- VERIFIED (static/runtime, 0.0.620, 2026-09-06): Price-period `energy_history` merges
   canonical observations with Home Assistant hourly long-term statistics.
-  Power/energy display-unit requests use HA unit classes, configured grid/battery
-  sign inversion is preserved, and import/export energy counters outrank
+  LTS statistics are requested in their native unit domain (`units=None`) so
+  returned values and metadata remain paired; Elräkning converts exactly once.
+  Configured grid/battery sign inversion is preserved, and import/export energy counters outrank
   net-power fallback. When higher-fidelity canonical data overlaps an hourly LTS
   bucket, the display fallback is clipped around canonical data while retaining
   the original hourly source interval and `resolution_seconds=3600`; no synthetic
@@ -145,8 +150,10 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   house load, PV1, PV2, grid, battery power, and SOC. The longest fully
   contiguous all-critical interval is 907 hourly buckets from
   2026-01-24T10:00:00Z through 2026-03-03T04:00:00Z. Phase data remains P1.
-- UNKNOWN (architecture/runtime audit required): Separate background collector
-  for inactive sites.
+- UNKNOWN (architecture/runtime audit required): Complete external/model-input
+  collection for inactive sites. Canonical telemetry collection for explicit
+  inactive `collection_enabled` sites is implemented and statically verified;
+  full external-input collection remains not fully runtime-verified.
 - VERIFIED (runtime audit, 2026-09-05): `sensor.total_consumption` is a
   battery-independent gross-house-load candidate for the four observed
   charging, discharging, PV-producing, and low/no-PV regimes.
@@ -224,6 +231,23 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   data audit for planning. It does not remove the P0 risk: Elräkning still
   lacks its own canonical long-term 15-minute collection with provenance,
   quality, and `known_at`.
+
+## Plan 2.0 reconciliation
+
+- VERIFIED (repository architecture, 2026-09-06): The current masterplan now
+  explicitly preserves Plan 2.0 requirements for global shared intelligence,
+  site-independent collection, source generations, shared external sources,
+  Fiskvik day-one P0 collection, P1/smartplug expansion, Battery Health/SOH,
+  historical product prices, deterministic MPC/LP/MILP, zero-write shadow,
+  replay safety, storage diagnostics, NAS boundaries, and the full dataset
+  catalogue.
+- INFERRED (roadmap): `energy_history` is currently exposed through the price
+  data WebSocket and is not yet a general Hour/Day/Month/Year history service.
+  A later history-service scope must preserve canonical/LTS provenance and
+  truthful source resolution while making price only one consumer.
+- UNKNOWN (runtime gate): source-generation-specific cadence/stale thresholds
+  and complete inactive-site external-input collection are not yet fully
+  runtime-verified.
 
 ## Permanent data-foundation risks and gates
 
