@@ -59,6 +59,15 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   source generations from SiteIdentity, passively observes report/change events,
   and exposes state/start/stop/cleanup diagnostics without writing physical
   device state or becoming the canonical long-term collector.
+- VERIFIED (runtime, audit `3f79c0ac-404e-4f4c-a02f-ad1addde158d`): The
+  24-hour cadence audit completed with `success=true` and
+  `status=completed_with_runtime_gap`. It met the minimum 24-hour window,
+  observed homogeneous source generations, had no missing roles or unavailable
+  periods, and observed 27 restarts with a separate 1,396.690983-second
+  runtime gap. This evidence applies only to the current source generations;
+  no universal cadence, jitter, stale threshold, maximum hold, or availability
+  policy was inferred. Every new source generation requires separate
+  characterization.
 
 - VERIFIED (design, 2026-09-05): P0-DATA-1 canonical data contract v1 is
   frozen in `docs/architecture/P0_DATA_CONTRACT_V1.md` with a machine-readable
@@ -228,9 +237,10 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   collecting.
 
 - PLANNING STATUS: The common-overlap audit completes the read-only point 7
-  data audit for planning. It does not remove the P0 risk: Elräkning still
-  lacks its own canonical long-term 15-minute collection with provenance,
-  quality, and `known_at`.
+  data audit for planning. The canonical site-independent collector now exists
+  and is runtime-verified for telemetry, but the P0 risk remains for complete
+  long-term coverage, source-generation-specific quality/cadence policy, and
+  inactive-site external/model-input collection with provenance and `known_at`.
 
 ## Plan 2.0 reconciliation
 
@@ -251,10 +261,12 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Permanent data-foundation risks and gates
 
-- IRREVERSIBLE DATA RISK (P0): Recorder/raw model-relevant history is currently
-  short-retained or unverified beyond the observed window. Load, PV, grid,
-  battery, SOC, price, and forecast history needed for future replay must be
-  captured with provenance before it expires.
+- IRREVERSIBLE DATA RISK (P0): Recorder/raw model-relevant history remains
+  short-retained, while complete external/model-input coverage and
+  source-generation-specific quality/cadence policy are not yet fully verified.
+  Load, PV, grid, battery, SOC, price, tariff, provider, weather and forecast
+  history needed for future replay must be captured with provenance before it
+  expires.
 - MEMORY UPDATE REQUIRED: The canonical foundation must explicitly preserve
   source generation, sign convention, meter reset/rollover, quality states,
   schema version, `known_at`, DST-safe timestamps, and dataset-specific
