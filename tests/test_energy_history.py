@@ -83,8 +83,13 @@ class EnergyHistoryTests(unittest.TestCase):
         self.assertEqual(len(series["consumption"]), 2)
         self.assertEqual(series["consumption"][0]["source"], "canonical")
         self.assertEqual(series["consumption"][0]["value_kw"], 2.0)
+        self.assertEqual(series["consumption"][0]["resolution_seconds"], 900)
         self.assertEqual(series["consumption"][1]["source"], "home_assistant_long_term_statistics")
-        self.assertEqual(series["consumption"][1]["resolution_seconds"], 2700)
+        self.assertEqual(series["consumption"][1]["start"], (start + timedelta(minutes=15)).isoformat())
+        self.assertEqual(series["consumption"][1]["end"], (start + timedelta(hours=1)).isoformat())
+        self.assertEqual(series["consumption"][1]["resolution_seconds"], 3600)
+        self.assertEqual(series["consumption"][1]["source_interval_start"], start.isoformat())
+        self.assertEqual(series["consumption"][1]["source_interval_end"], (start + timedelta(hours=1)).isoformat())
 
     def test_energy_counters_override_net_power_for_import_and_export(self):
         start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
@@ -103,7 +108,15 @@ class EnergyHistoryTests(unittest.TestCase):
             "sensor.grid_import": [{"start": start.timestamp(), "change": 1.0}],
             "sensor.grid_export": [{"start": start.timestamp(), "change": 0.5}],
         }
-        series = merge_contributions(long_term_contributions(targets, metadata, statistics))
+        canonical = [
+            {"series": "import", "start": start, "end": start + timedelta(minutes=15),
+             "value_kw": 0.0, "priority": 30, "source": "canonical", "generation_id": "power-gen",
+             "quality_status": "good", "coverage_ratio": 1.0},
+            {"series": "export", "start": start, "end": start + timedelta(minutes=15),
+             "value_kw": 0.0, "priority": 30, "source": "canonical", "generation_id": "power-gen",
+             "quality_status": "good", "coverage_ratio": 1.0},
+        ]
+        series = merge_contributions(canonical + long_term_contributions(targets, metadata, statistics))
         self.assertEqual(series["import"][0]["value_kw"], 1.0)
         self.assertEqual(series["export"][0]["value_kw"], 0.5)
         self.assertEqual(series["import"][0]["source"], "home_assistant_long_term_statistics_energy")
@@ -127,8 +140,8 @@ class EnergyHistoryTests(unittest.TestCase):
             _ledger("site-a", "grid.energy_import", "sensor.import", "import-gen"),
         ]
         self.assertEqual(_statistics_request_units(targets), {
-            "sensor.load": "W",
-            "sensor.import": "kWh",
+            "power": "W",
+            "energy": "kWh",
         })
 
     def test_long_term_keeps_hourly_mean_and_energy_counter_fallback(self):

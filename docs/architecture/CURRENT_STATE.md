@@ -1,6 +1,6 @@
 # Elräkning – Current State
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
@@ -8,17 +8,16 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (runtime, 2026-09-05): `0.0.603` is the released and runtime-verified
-  baseline. Its canonical runtime store contained site energy observations and
-  immutable global Nord Pool frames without changing schema v1.
-- IMPLEMENTED, RELEASE/RUNTIME VERIFICATION REQUIRED (2026-09-05): The next
-  patch candidate is `0.0.604`, limited to site-scoped economic tariff frames
-  and their E.ON runtime event wiring. The manifest bump is performed only at
-  the final release-candidate commit.
-- VERIFIED (static, 2026-09-04): Branch: `main`
-- VERIFIED (recorded 2026-09-05): Branch is `main`; HEAD matched `origin/main`
-  at the audit point. The current HEAD must be read from Git at audit time;
-  this file does not duplicate a self-invalidating commit SHA.
+- VERIFIED (repository, 2026-09-06): `0.0.618` is the current `origin/main`
+  baseline before the active history-hardening scope. Runtime activation of
+  `0.0.618` was not re-verified in this audit.
+- IMPLEMENTED, RELEASE/RUNTIME VERIFICATION REQUIRED (2026-09-06): `0.0.619`
+  is the current patch candidate, limited to long-term energy-history unit,
+  sign, source-priority, and source-resolution semantics. Static gates pass:
+  277 Python tests, 27 frontend Node tests, `compileall`, and `git diff --check`.
+- VERIFIED (static, 2026-09-06): Branch is `main`; local HEAD matched
+  `origin/main` at the start of this scope. The working tree contains the
+  intentional `0.0.619` candidate changes until release completion.
 
 ## Implemented and observed in the current codebase
 
@@ -37,6 +36,14 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   installation context
 - INFERRED (current-codebase statement): Read-only Recorder-backed power,
   meter, phase, solar, battery, and SOC history paths
+- IMPLEMENTED, RELEASE/RUNTIME VERIFICATION REQUIRED (0.0.619 candidate,
+  2026-09-06): Price-period `energy_history` merges canonical observations with
+  Home Assistant hourly long-term statistics. Power/energy display-unit requests
+  use HA unit classes, configured grid/battery sign inversion is preserved, and
+  import/export energy counters outrank net-power fallback. When higher-fidelity
+  canonical data overlaps an hourly LTS bucket, the display fallback is clipped
+  around canonical data while retaining the original hourly source interval and
+  `resolution_seconds=3600`; no synthetic 15-minute LTS records are created.
 - INFERRED (current-codebase statement): Deterministic, read-only shadow
   calculations; no physical battery write path
 - VERIFIED (static, 2026-09-05): P0-AUDIT-1 provides a temporary, source-agnostic
@@ -62,7 +69,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   writes schema-v1 900-second UTC observations, finalizes silent sources as
   explicit gaps, deduplicates report/change pairs and preserves source
   generations without using `active_site_id` as collection identity.
-- IMPLEMENTED, RUNTIME VERIFICATION REQUIRED (0.0.604 candidate, 2026-09-05):
+- IMPLEMENTED (current codebase; runtime not re-verified in this audit):
   E.ON grouped-contract economics can be persisted as immutable site-scoped
   external input frames on `EON_GRID_UPDATE_EVENT`. Only an explicitly bound
   facility with an active grouped contract, explicit gross/VAT semantics and

@@ -106,7 +106,8 @@ def _role_values(role: str, value_kw: float) -> dict[str, float]:
 
 def _contribution(series: str, start: datetime, end: datetime, value_kw: float, *,
                   priority: int, source: str, generation_id: str, quality: str = "good",
-                  coverage: float | None = None) -> dict[str, Any]:
+                  coverage: float | None = None,
+                  source_resolution_seconds: int | None = None) -> dict[str, Any]:
     return {
         "series": series,
         "start": start.astimezone(timezone.utc),
@@ -117,6 +118,7 @@ def _contribution(series: str, start: datetime, end: datetime, value_kw: float, 
         "generation_id": generation_id,
         "quality_status": quality,
         "coverage_ratio": coverage,
+        "source_resolution_seconds": source_resolution_seconds or int((end - start).total_seconds()),
     }
 
 
@@ -145,6 +147,7 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
                 series, start, end, value, priority=priority, source=source,
                 generation_id=generation_id, quality=str(row.get("quality_status")),
                 coverage=row.get("coverage_ratio"),
+                source_resolution_seconds=row.get("source_resolution_seconds"),
             ))
     return result
 
@@ -176,18 +179,17 @@ def _target_canonicalization(target: dict[str, Any], field: str) -> bool:
 
 
 def _statistics_request_units(targets: list[dict[str, Any]]) -> dict[str, str]:
-    units = {}
+    unit_classes = set()
     for target in targets:
         entity_id = str(target.get("entity_id") or "")
         role = str(target.get("logical_role") or "")
         if not entity_id:
             continue
         if role in _POWER_ROLES:
-            canonicalization = target.get("canonicalization") or {}
-            units[entity_id] = str(canonicalization.get("unit") or "W")
+            unit_classes.add("power")
         elif role in _ENERGY_COUNTER_ROLES:
-            units[entity_id] = "kWh"
-    return units
+            unit_classes.add("energy")
+    return {unit_class: ("W" if unit_class == "power" else "kWh") for unit_class in unit_classes}
 
 
 def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, Any],
@@ -233,7 +235,7 @@ def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, A
                 continue
             series = "import" if role == "grid.energy_import" else "export"
             result.append(_contribution(
-                series, start, end, energy_kwh / duration_hours, priority=25,
+                series, start, end, energy_kwh / duration_hours, priority=40,
                 source="home_assistant_long_term_statistics_energy",
                 generation_id=generation_id,
             ))
@@ -241,7 +243,10 @@ def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, A
 
 
 def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Prefer higher-fidelity intervals and sum only concurrent sources at equal priority."""
+    """Prefer higher-fidelity intervals without inventing finer source resolution."""
+    def resolution_seconds(item: dict[str, Any]) -> int:
+        return int(item.get("source_resolution_seconds") or (item["end"] - item["start"]).total_seconds())
+
     grouped: dict[tuple[str, datetime, datetime, int, str], list[dict[str, Any]]] = {}
     for item in contributions:
         key = (item["series"], item["start"], item["end"], item["priority"], item["source"])
@@ -262,6 +267,9 @@ def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[d
                 default=None,
             ),
             "source_count": len({item["generation_id"] for item in items}),
+            "source_resolution_seconds": max(resolution_seconds(item) for item in items),
+            "source_interval_start": start,
+            "source_interval_end": end,
         })
 
     accepted: dict[str, list[dict[str, Any]]] = {}
@@ -286,7 +294,7 @@ def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[d
         for segment_start, segment_end in segments:
             if segment_start >= segment_end:
                 continue
-            accepted[candidate["series"]].append({
+            existing.append({
                 **candidate,
                 "start": segment_start,
                 "end": segment_end,
@@ -300,7 +308,9 @@ def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[d
                 "start": item["start"].isoformat(),
                 "end": item["end"].isoformat(),
                 "value_kw": item["value_kw"],
-                "resolution_seconds": int((item["end"] - item["start"]).total_seconds()),
+                "resolution_seconds": int(item["source_resolution_seconds"]),
+                "source_interval_start": item["source_interval_start"].isoformat(),
+                "source_interval_end": item["source_interval_end"].isoformat(),
                 "source": item["source"],
                 "quality_status": item["quality_status"],
                 "coverage_ratio": item["coverage_ratio"],
