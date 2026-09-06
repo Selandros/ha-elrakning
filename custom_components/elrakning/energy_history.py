@@ -178,20 +178,6 @@ def _target_canonicalization(target: dict[str, Any], field: str) -> bool:
     return value is True
 
 
-def _statistics_request_units(targets: list[dict[str, Any]]) -> dict[str, str]:
-    unit_classes = set()
-    for target in targets:
-        entity_id = str(target.get("entity_id") or "")
-        role = str(target.get("logical_role") or "")
-        if not entity_id:
-            continue
-        if role in _POWER_ROLES:
-            unit_classes.add("power")
-        elif role in _ENERGY_COUNTER_ROLES:
-            unit_classes.add("energy")
-    return {unit_class: ("W" if unit_class == "power" else "kWh") for unit_class in unit_classes}
-
-
 def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, Any],
                             statistics: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Convert Home Assistant hourly long-term statistics without inventing finer resolution."""
@@ -321,13 +307,12 @@ def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[d
     return result
 
 
-def _load_long_term_statistics(hass: Any, statistic_ids: set[str], units: dict[str, str],
-                               start: datetime, end: datetime):
+def _load_long_term_statistics(hass: Any, statistic_ids: set[str], start: datetime, end: datetime):
     from homeassistant.components.recorder.statistics import get_metadata, statistics_during_period
 
     metadata = get_metadata(hass, statistic_ids=statistic_ids)
     statistics = statistics_during_period(
-        hass, start, end, statistic_ids, "hour", units, {"mean", "change"}
+        hass, start, end, statistic_ids, "hour", None, {"mean", "change"}
     )
     return metadata, statistics
 
@@ -358,7 +343,7 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
 
             recorder = get_instance(hass)
             metadata, statistics = await recorder.async_add_executor_job(
-                _load_long_term_statistics, hass, statistic_ids, _statistics_request_units(targets), start, end
+                _load_long_term_statistics, hass, statistic_ids, start, end
             )
             contributions.extend(long_term_contributions(targets, metadata, statistics))
         except Exception:  # Long-term fallback must never break price data.

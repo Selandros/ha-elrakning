@@ -1,4 +1,5 @@
 import tempfile
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from custom_components.elrakning.energy_history import (
     history_targets,
     long_term_contributions,
     merge_contributions,
-    _statistics_request_units,
+    _load_long_term_statistics,
 )
 
 UTC = timezone.utc
@@ -133,16 +134,46 @@ class EnergyHistoryTests(unittest.TestCase):
         self.assertEqual(series["charging"][0]["value_kw"], 1.0)
         self.assertEqual(series["discharging"][0]["value_kw"], 0.0)
 
-    def test_statistics_are_requested_in_canonical_units(self):
-        targets = [
-            _ledger("site-a", "house.consumption", "sensor.load", "load-gen",
-                    canonicalization={"unit": "W"}),
-            _ledger("site-a", "grid.energy_import", "sensor.import", "import-gen"),
-        ]
-        self.assertEqual(_statistics_request_units(targets), {
-            "power": "W",
-            "energy": "kWh",
-        })
+    def test_long_term_power_uses_native_statistics_unit_without_double_conversion(self):
+        start = datetime(2026, 8, 30, 10, 0, tzinfo=UTC)
+        targets = [_ledger("site-a", "battery.power", "sensor.battery", "battery-gen")]
+        metadata = {"sensor.battery": (1, {"unit_of_measurement": "kW"})}
+        statistics = {
+            "sensor.battery": [
+                {"start": start.timestamp(), "mean": 3.7472135248561114},
+                {"start": (start + timedelta(hours=1)).timestamp(), "mean": -1.9403342397427776},
+            ],
+        }
+
+        series = merge_contributions(long_term_contributions(targets, metadata, statistics))
+
+        self.assertEqual(series["discharging"][0]["value_kw"], 3.7472135248561114)
+        self.assertEqual(series["discharging"][1]["value_kw"], 0.0)
+        self.assertEqual(series["charging"][0]["value_kw"], 0.0)
+        self.assertEqual(series["charging"][1]["value_kw"], 1.9403342397427776)
+
+    def test_long_term_statistics_request_keeps_native_units_and_metadata_together(self):
+        calls = []
+        statistics_module = type(sys)("homeassistant.components.recorder.statistics")
+        statistics_module.get_metadata = lambda hass, statistic_ids: {
+            "sensor.battery": (1, {"unit_of_measurement": "kW"}),
+        }
+
+        def statistics_during_period(*args):
+            calls.append(args)
+            return {"sensor.battery": [{"start": 0, "mean": 3.7472135248561114}]}
+
+        statistics_module.statistics_during_period = statistics_during_period
+        sys.modules["homeassistant.components.recorder.statistics"] = statistics_module
+        try:
+            _load_long_term_statistics(
+                object(), {"sensor.battery"}, datetime(2026, 8, 30, tzinfo=UTC),
+                datetime(2026, 8, 31, tzinfo=UTC),
+            )
+        finally:
+            sys.modules.pop("homeassistant.components.recorder.statistics", None)
+
+        self.assertEqual(calls[0][5], None)
 
     def test_long_term_keeps_hourly_mean_and_energy_counter_fallback(self):
         start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
