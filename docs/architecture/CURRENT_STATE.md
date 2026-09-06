@@ -8,16 +8,18 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-- VERIFIED (repository, 2026-09-06): `0.0.618` is the current `origin/main`
-  baseline before the active history-hardening scope. Runtime activation of
-  `0.0.618` was not re-verified in this audit.
-- IMPLEMENTED, RELEASE/RUNTIME VERIFICATION REQUIRED (2026-09-06): `0.0.619`
-  is the current patch candidate, limited to long-term energy-history unit,
-  sign, source-priority, and source-resolution semantics. Static gates pass:
-  277 Python tests, 27 frontend Node tests, `compileall`, and `git diff --check`.
-- VERIFIED (static, 2026-09-06): Branch is `main`; local HEAD matched
-  `origin/main` at the start of this scope. The working tree contains the
-  intentional `0.0.619` candidate changes until release completion.
+- VERIFIED (repository/runtime activation, 2026-09-06): `0.0.619` is released
+  on `main`, deployed to Home Assistant, and served by the runtime static
+  manifest after a Core restart. Deployed `energy_history.py` and `manifest.json`
+  SHA-256 hashes matched the release files.
+- VERIFIED (static, 2026-09-06): The `0.0.619` history-hardening scope passes
+  277 Python tests, 27 frontend Node tests, `compileall`, manifest JSON parsing,
+  and `git diff --check`.
+- LIMITATION (runtime semantic readback, 2026-09-06): Runtime activation is
+  verified, but the authenticated `energy_history` WebSocket payload was not
+  directly captured in this audit. The existing Safari HA session could not be
+  scripted because JavaScript from Apple Events is disabled; no debug logging,
+  credential extraction, or temporary runtime API was added to bypass that gate.
 
 ## Implemented and observed in the current codebase
 
@@ -36,14 +38,15 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   installation context
 - INFERRED (current-codebase statement): Read-only Recorder-backed power,
   meter, phase, solar, battery, and SOC history paths
-- IMPLEMENTED, RELEASE/RUNTIME VERIFICATION REQUIRED (0.0.619 candidate,
-  2026-09-06): Price-period `energy_history` merges canonical observations with
-  Home Assistant hourly long-term statistics. Power/energy display-unit requests
-  use HA unit classes, configured grid/battery sign inversion is preserved, and
-  import/export energy counters outrank net-power fallback. When higher-fidelity
-  canonical data overlaps an hourly LTS bucket, the display fallback is clipped
-  around canonical data while retaining the original hourly source interval and
-  `resolution_seconds=3600`; no synthetic 15-minute LTS records are created.
+- VERIFIED (static; runtime activation verified, semantic payload readback not
+  directly captured, 0.0.619, 2026-09-06): Price-period `energy_history` merges
+  canonical observations with Home Assistant hourly long-term statistics.
+  Power/energy display-unit requests use HA unit classes, configured grid/battery
+  sign inversion is preserved, and import/export energy counters outrank
+  net-power fallback. When higher-fidelity canonical data overlaps an hourly LTS
+  bucket, the display fallback is clipped around canonical data while retaining
+  the original hourly source interval and `resolution_seconds=3600`; no synthetic
+  15-minute LTS records are created.
 - INFERRED (current-codebase statement): Deterministic, read-only shadow
   calculations; no physical battery write path
 - VERIFIED (static, 2026-09-05): P0-AUDIT-1 provides a temporary, source-agnostic
