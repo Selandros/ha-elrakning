@@ -32,6 +32,30 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   behavior is runtime verified. Distinct multi-facility X/Y isolation is
   test-verified only because the current real configuration uses one shared
   facility; it is not claimed as runtime verified.
+- VERIFIED (runtime, 0.0.627, 2026-09-06): Step C.1 external-frame
+  integrity and decision-time replay reader are complete on the real
+  canonical SQLite database. Additive integrity migration 2 is present,
+  `external_input_points` UPDATE/DELETE immutability triggers are active,
+  SQLite integrity is `ok`, and the existing 38 real global frames with 3,648
+  points remain readable after restart.
+- VERIFIED (runtime, 0.0.627, 2026-09-06): The global replay path reads real
+  Nord Pool frames, filters by `decision_at`, excludes frames with
+  `known_at > decision_at`, survives reopen/restart, and uses the replay
+  indexes. The current E.ON `FUTURE` contract correctly produces no current
+  economic frames; this is expected fail-closed runtime semantics.
+- TEST VERIFIED (0.0.627, 2026-09-06): Site-scoped replay selection against a
+  real E.ON economic frame is covered by tests, but is not runtime-verified
+  because no legitimate site-scoped E.ON frame exists while the contract is
+  `FUTURE`. This is an evidence limitation, not a C.1 implementation blocker.
+- FUTURE VERIFICATION NOTE: When a legitimate site-scoped economic frame
+  first exists in runtime, verify the `decision_at` reader against it without
+  changing the C.1 implementation.
+- VERIFIED (scope boundary, 0.0.627, 2026-09-06): Step C.1 is complete.
+  Global path is runtime verified; site-scoped real-frame path is test
+  verified with runtime evidence pending. Step C.2 begins with a read-only
+  design/audit of Forecast.Solar and Open-Meteo immutable capture plus
+  site-independent `collection_enabled` semantics. No C.2 implementation is
+  included here.
 - VERIFIED (release, 0.0.626, 2026-09-06): E.ON facility-state indexing,
   site-explicit runtime resolution, unique legacy-binding reconciliation,
   active-site websocket/public-state resolution, and site-scoped economic
