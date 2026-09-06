@@ -94,6 +94,7 @@ class SolarForecastManager:
         self._facts: dict[str, Any] = self._unavailable_facts()
         self._site_id: str | None = None
         self._site_context_enabled = False
+        self._context_generation = 0
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     @staticmethod
@@ -142,16 +143,16 @@ class SolarForecastManager:
 
     async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
         """Switch baselines and live discovery to one explicit site."""
+        self._context_generation += 1
         self._site_id = site_id if isinstance(binding, dict) else None
         self._site_context_enabled = True
+        self._baselines = {}
+        self._entities = {}
+        self._facts = self._unavailable_facts()
         if self._site_id is None:
-            self._baselines = {}
-            self._entities = {}
-            self._facts = self._unavailable_facts()
             return
-        legacy = {"days": self._baselines}
         self.store, cached = await async_load_site_store(
-            self.hass, STORE_KEY, 1, self._site_id, legacy
+            self.hass, STORE_KEY, 1, self._site_id
         )
         if cached and isinstance(cached.get("days", cached), dict):
             self._baselines = {
@@ -198,15 +199,16 @@ class SolarForecastManager:
         if any(len(entity_ids) > 1 for entity_ids in candidates.values()):
             self._entities = {}
 
-    def _read_facts(self) -> dict[str, Any]:
+    def _read_facts(self, entities: dict[str, str] | None = None) -> dict[str, Any]:
         facts = self._unavailable_facts()
-        if not self._entities:
+        selected_entities = self._entities if entities is None else entities
+        if not selected_entities:
             return facts
         facts.update({
             "source": "forecast_solar",
             **{
                 role: normalize_forecast_value(self.hass.states.get(entity_id), role)
-                for role, entity_id in self._entities.items()
+                for role, entity_id in selected_entities.items()
             },
         })
         facts["available"] = any(value is not None for key, value in facts.items() if key not in {"available", "source"})
@@ -222,8 +224,12 @@ class SolarForecastManager:
         return len(self._baselines) != original
 
     async def _refresh(self, *, capture: bool) -> bool:
+        context_generation = self._context_generation
+        context_site_id = self._site_id
+        context_entities = dict(self._entities)
+        context_store = self.store
         previous_facts = self._facts
-        self._facts = self._read_facts()
+        self._facts = self._read_facts(context_entities)
         changed = self._facts != previous_facts
         today = dt_util.as_local(dt_util.now()).date()
         baselines_changed = self._trim_baselines(today)
@@ -235,8 +241,10 @@ class SolarForecastManager:
             if today.isoformat() not in self._baselines and isinstance(current, (int, float)) and current >= 0:
                 baselines_changed |= self._capture(today, current, "first_today")
         if baselines_changed:
-            await self.store.async_save({"days": self._baselines})
-        if changed or baselines_changed:
+            if context_generation != self._context_generation or context_site_id != self._site_id:
+                return False
+            await context_store.async_save({"days": self._baselines})
+        if (changed or baselines_changed) and context_generation == self._context_generation and context_site_id == self._site_id:
             self.hass.bus.async_fire(UPDATE_EVENT)
         return changed or baselines_changed
 
@@ -260,7 +268,8 @@ class SolarForecastManager:
     async def _async_state_changed(self, event: Event) -> None:
         if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
             return
-        if event.data.get("entity_id") not in self._entities.values():
+        context_entities = dict(self._entities)
+        if event.data.get("entity_id") not in context_entities.values():
             return
         await self._refresh(capture=True)
 

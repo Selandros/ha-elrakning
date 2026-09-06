@@ -197,6 +197,48 @@ class ForecastSolarTests(unittest.TestCase):
         asyncio.run(manager.async_load())
         self.assertFalse(manager.public_state()["available"])
 
+    def test_missing_site_store_does_not_migrate_previous_site_baselines(self):
+        hass, manager = self._manager({}, [])
+        manager._site_id = "site-a"
+        manager._site_context_enabled = True
+        manager._baselines = {"2026-08-29": {"forecast_kwh": 5}}
+
+        class EmptyStore:
+            async def async_save(self, _data):
+                pass
+
+        async def load_site_store(*_args, **_kwargs):
+            return EmptyStore(), None
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            asyncio.run(manager.async_apply_site_context("site-b", {"entities": {}}))
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        self.assertEqual(manager._site_id, "site-b")
+        self.assertEqual(manager.public_state()["baselines"], {})
+
+    def test_existing_site_store_is_loaded_without_cross_site_copy(self):
+        hass, manager = self._manager({}, [])
+
+        class ExistingStore:
+            async def async_save(self, _data):
+                pass
+
+        async def load_site_store(*_args, **_kwargs):
+            return ExistingStore(), {"days": {"2026-08-30": {"forecast_kwh": 12}}}
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            asyncio.run(manager.async_apply_site_context("site-b", {"entities": {}}))
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        self.assertEqual(manager.public_state()["baselines"], {"2026-08-30": 12})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -101,6 +101,8 @@ class SolarOpenMeteoManager:
         self._frame: dict[str, Any] | None = None
         self._frame_id: str | None = None
         self._site_id: str | None = None
+        self._context_generation = 0
+        self._request_generation = 0
 
     async def async_load(self) -> None:
         try:
@@ -133,28 +135,39 @@ class SolarOpenMeteoManager:
 
     async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
         """Switch the Open-Meteo frame to one site namespace."""
+        self._context_generation += 1
+        self._request_generation += 1
         self._site_id = site_id if isinstance(binding, dict) else None
+        self._installation = None
+        self._frame = None
+        self._frame_id = None
+        self._state = {"available": False, "source": OPEN_METEO_SOURCE, "model": OPEN_METEO_MODEL}
         if self._site_id is None:
-            self._installation = None
-            self._frame = None
-            self._frame_id = None
             self._state = {"available": False, "source": OPEN_METEO_SOURCE, "model": OPEN_METEO_MODEL, "reason": "site_unconfigured"}
             return
-        legacy = {"cache_version": _CACHE_VERSION, "state": self._state, "installation": self._installation, "frame_id": self._frame_id, "frame": self._frame}
-        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id, legacy)
-        if not cached:
-            return
-        self._installation = cached.get("installation") if isinstance(cached.get("installation"), dict) else None
-        self._frame = cached.get("frame") if isinstance(cached.get("frame"), dict) else None
-        self._frame_id = cached.get("frame_id") if isinstance(cached.get("frame_id"), str) else None
-        self._state = cached.get("state") if isinstance(cached.get("state"), dict) else self._state
+        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id)
+        if isinstance(cached, dict):
+            self._installation = cached.get("installation") if isinstance(cached.get("installation"), dict) else None
+            self._frame = cached.get("frame") if isinstance(cached.get("frame"), dict) else None
+            self._frame_id = cached.get("frame_id") if isinstance(cached.get("frame_id"), str) else None
+            self._state = cached.get("state") if isinstance(cached.get("state"), dict) else self._state
         self._state["site_id"] = self._site_id
 
     async def async_refresh_for_power_state(self, power_state: dict[str, Any]) -> None:
         if self._site_id is None:
             return
+        context_generation = self._context_generation
+        request_generation = self._request_generation = self._request_generation + 1
+        context = {
+            "site_id": self._site_id,
+            "context_generation": context_generation,
+            "request_generation": request_generation,
+            "store": self.store,
+        }
         installation = build_installation(self.hass, power_state)
         if installation is None:
+            if context_generation != self._context_generation or context["site_id"] != self._site_id:
+                return
             self._installation = None
             self._frame = None
             self._frame_id = None
@@ -166,9 +179,9 @@ class SolarOpenMeteoManager:
             and self._frame and fetched_at and dt_util.now() - fetched_at < _CACHE_TTL
         ):
             return
-        await self._async_fetch(installation)
+        await self._async_fetch(installation, context)
 
-    async def _async_fetch(self, installation: dict[str, Any]) -> None:
+    async def _async_fetch(self, installation: dict[str, Any], context: dict[str, Any]) -> None:
         sections = []
         session = async_get_clientsession(self.hass)
         for section in installation["sections"]:
@@ -208,6 +221,12 @@ class SolarOpenMeteoManager:
             "api_metadata": sections[0].get("api_metadata", {}) if sections else {},
             "energy_semantics": "unadjusted_dc_potential",
         }
+        if (
+            context["context_generation"] != self._context_generation
+            or context["request_generation"] != self._request_generation
+            or context["site_id"] != self._site_id
+        ):
+            return
         self._installation = installation
         self._frame = frame
         self._frame_id = _frame_id(frame)
@@ -217,7 +236,7 @@ class SolarOpenMeteoManager:
             "frame_id": self._frame_id, "installation": installation,
             "energy_semantics": "unadjusted_dc_potential",
         }
-        await self.store.async_save({
+        await context["store"].async_save({
             "cache_version": _CACHE_VERSION, "state": self._state,
             "installation": installation, "frame_id": self._frame_id, "frame": frame,
         })
