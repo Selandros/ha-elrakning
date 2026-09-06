@@ -135,6 +135,7 @@ class EonGridManager:
             "facility_states": self.facility_states,
         }
         await self.store.async_save(self.state)
+        await self._async_reconcile_site_bindings()
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
 
@@ -265,6 +266,7 @@ class EonGridManager:
             state = next(iter(states.values()), self._empty_state())
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
+            await self._async_reconcile_site_bindings()
             await self._persist_web_session(config, session)
             self._schedule_web_refresh(session)
         except (EonAuthError, ValueError) as err:
@@ -288,6 +290,7 @@ class EonGridManager:
             state = self._state_for_active_binding(states) or self._build_app_state(sources, locations)
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
+            await self._async_reconcile_site_bindings()
         except ValueError as err:
             self.state.update({"app_authenticated": True, "reauth_required": False, "error": str(err)})
             await self.store.async_save(self.state)
@@ -382,6 +385,12 @@ class EonGridManager:
             return None
         identity = facility_identity(binding.get("facility"))
         return deepcopy(states.get(identity)) if identity else None
+
+    async def _async_reconcile_site_bindings(self) -> None:
+        site_manager = self.hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        reconcile = getattr(site_manager, "async_reconcile_grid_bindings", None)
+        if reconcile:
+            await reconcile(self.hass.data.get(DOMAIN, {}).get("grid_manager"))
 
     def set_active_binding(self, binding: dict[str, Any] | None) -> None:
         """Track presentation context without changing shared account sources."""

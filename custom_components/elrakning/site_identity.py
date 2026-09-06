@@ -535,6 +535,28 @@ class SiteIdentityManager:
             coordinator.set_site_binding(price_binding)
         return runtime_changed
 
+    async def async_reconcile_grid_bindings(self, grid_manager) -> int:
+        """Backfill native E.ON identity only for a unique provider match."""
+        provider = getattr(grid_manager, "provider", None)
+        reconcile = getattr(provider, "binding_reconciliation", None)
+        if reconcile is None:
+            return 0
+        changed = 0
+        for config in self.state.get("site_configs", {}).values():
+            if not isinstance(config, dict):
+                continue
+            binding = config.get("bindings", {}).get("grid")
+            if not isinstance(binding, dict) or binding.get("provider") != "eon":
+                continue
+            result = reconcile(binding)
+            enriched = result.get("binding") if isinstance(result, dict) else None
+            if result.get("status") == "legacy_unique" and isinstance(enriched, dict) and enriched != binding:
+                config.setdefault("bindings", {})["grid"] = enriched
+                changed += 1
+        if changed:
+            await self.store.async_save(self.state)
+        return changed
+
     async def async_bind_provider_runtime(self, provider_manager) -> None:
         """Record an explicit provider facility selection for the active site."""
         state = provider_manager.state
