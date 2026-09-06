@@ -18,6 +18,25 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - VERIFIED (scope boundary, 2026-09-06): The separate E.ON global
   multi-facility/facility-selection risk is not resolved by this release and
   remains a follow-up scope.
+- VERIFIED (runtime, 0.0.626, 2026-09-06): E.ON shared-facility acceptance
+  passed on authenticated Home Assistant runtime through A→B→A→B. Both sites
+  retained the same explicit strong binding to installation `40093679` and
+  POD `735999114000851039`, with
+  `identity_provenance=legacy_context_reconciled_unique` and
+  `identity_strength=strong`. Restart persistence also passed.
+- VERIFIED (runtime, 0.0.626, 2026-09-06): Vikarbodarna retained its 51
+  Greenely invoices and `electricity_cost_ex_vat=0.17`; Fiskvik remained at
+  zero invoices, null Greenely summary/consumption/current cost; E.ON remained
+  `FUTURE` with `grid_cost_ex_vat=null` across the switch sequence.
+- VERIFIED (scope boundary, 0.0.626, 2026-09-06): Shared-facility E.ON
+  behavior is runtime verified. Distinct multi-facility X/Y isolation is
+  test-verified only because the current real configuration uses one shared
+  facility; it is not claimed as runtime verified.
+- VERIFIED (release, 0.0.626, 2026-09-06): E.ON facility-state indexing,
+  site-explicit runtime resolution, unique legacy-binding reconciliation,
+  active-site websocket/public-state resolution, and site-scoped economic
+  frame provenance are released and runtime accepted. The unrelated global
+  multi-facility selection risk remains outside this scope.
 - VERIFIED (repository/runtime activation, 2026-09-06): `0.0.620` is released
   in commit `f250a01` on `main`, deployed to Home Assistant, and served by the
   runtime static manifest after a Core restart. Deployed `energy_history.py`
