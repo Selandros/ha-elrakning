@@ -83,6 +83,30 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   in-flight race is observed. The next scope is Step C.2.1: producer-contract
   fixtures/design for immutable Forecast.Solar and Open-Meteo frames. No C.2.1
   implementation is included here.
+- VERIFIED (design/fixtures, 2026-09-06): Step C.2.1 is complete and the
+  external-input contract is locked in
+  `docs/architecture/C2_1_EXTERNAL_INPUT_CONTRACT_V1.md` and its fixture/test
+  files. C.1 schema v1 is sufficient; no migration is required. Forecast.Solar
+  canonical observations are separate from the Evidence-v1 day-ahead
+  consumer-freeze policy. Open-Meteo manager forecasts and the Evidence
+  `previous_day1` path have separate dataset identities and revision chains;
+  no canonical producer was added for the Evidence path. Unsupported
+  Forecast.Solar roles fail closed, aggregate 12/24-hour roles are never
+  expanded into fabricated hourly points, and GTI is not conflated with
+  derived potential DC.
+- VERIFIED (design/fixtures, 2026-09-06): C.2.1 fixtures cover source
+  generation versus semantic target versus revision identity, explicit
+  `known_at`/`captured_at`/target separation, null `published_at` when no
+  provider publication timestamp exists, site provenance under cache
+  deduplication, and Europe/Stockholm 23-hour/25-hour local-day conversion.
+  The fixtures are pure standard-library tests and do not write HA, Store, or
+  canonical runtime data.
+- VERIFIED (scope boundary, 2026-09-06): Solar Evidence non-regression is a
+  hard C.2 requirement. The evidence-v1 Store, frozen baselines, historical
+  rows, `previous_day1` fetch, consumers, and counters are untouched; counts
+  must not decrease from Open-Meteo 8/21 and Forecast.Solar common 7/14.
+  The next scope is Step C.2.2: Forecast.Solar immutable canonical producer.
+  C.2.2 is not started.
 - VERIFIED (release, 0.0.626, 2026-09-06): E.ON facility-state indexing,
   site-explicit runtime resolution, unique legacy-binding reconciliation,
   active-site websocket/public-state resolution, and site-scoped economic

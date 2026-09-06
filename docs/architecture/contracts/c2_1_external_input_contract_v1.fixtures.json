@@ -1,0 +1,30 @@
+{
+  "fixture_suite": "elrakning.c2_1_external_input_contract.v1",
+  "contract_version": 1,
+  "source_matrix": [
+    {"id":"forecast_solar_observed","dataset":"forecast_solar.observed_facts.v1","evidence_usage":"indirect_underlay","share_revision_chain":"same_dataset_generation_target_only"},
+    {"id":"forecast_solar_evidence_day_ahead","dataset":"forecast_solar.observed_facts.v1","evidence_usage":"evidence_v1_frozen_selection","share_revision_chain":"no_evidence_row_chain"},
+    {"id":"open_meteo_manager","dataset":"open_meteo.manager_forecast.v1","evidence_usage":"none","share_revision_chain":"manager_dataset_only"},
+    {"id":"open_meteo_evidence_previous_day1","dataset":"open_meteo.evidence_previous_day1.v1","evidence_usage":"direct_evidence_v1","share_revision_chain":"never_with_manager"}
+  ],
+  "forecast_solar_roles": [
+    {"role":"today_kwh","status":"safe","unit":"kWh","target":"local_calendar_day","capture_relative":false},
+    {"role":"tomorrow_kwh","status":"safe","unit":"kWh","target":"next_local_calendar_day","capture_relative":false},
+    {"role":"remaining_today_kwh","status":"safe_capture_relative","unit":"kWh","target":"local_day_remainder","capture_relative":true},
+    {"role":"power_now_kw","status":"safe","unit":"kW","target":"instant_at_capture","capture_relative":true},
+    {"role":"peak_time_today","status":"safe_timestamp","unit":"timestamp","target":"local_calendar_day","capture_relative":false},
+    {"role":"peak_time_tomorrow","status":"safe_timestamp","unit":"timestamp","target":"next_local_calendar_day","capture_relative":false},
+    {"role":"this_hour_kwh","status":"unknown_unsafe","unit":"kWh","target":"unproven_provider_bucket"},
+    {"role":"next_hour_kwh","status":"unknown_unsafe","unit":"kWh","target":"unproven_provider_bucket"},
+    {"role":"power_next_hour_kw","status":"unknown_unsafe","unit":"kW","target":"unproven_aggregate_interval"},
+    {"role":"power_next_12_hours_kw","status":"unknown_unsafe","unit":"kW","target":"unproven_aggregate_interval"},
+    {"role":"power_next_24_hours_kw","status":"unknown_unsafe","unit":"kW","target":"unproven_aggregate_interval"}
+  ],
+  "open_meteo": {
+    "manager": {"dataset":"open_meteo.manager_forecast.v1","endpoint":"https://api.open-meteo.com/v1/metno","model":"metno","variables":["global_tilted_irradiance"],"forecast_days":3,"timezone":"auto"},
+    "evidence": {"dataset":"open_meteo.evidence_previous_day1.v1","endpoint":"https://previous-runs-api.open-meteo.com/v1/forecast","model":"metno_seamless","variables":["global_tilted_irradiance_previous_day1"],"target":"completed_local_day","timezone":"Europe/Stockholm","previous_day1":true}
+  },
+  "non_regression": {"evidence_store_untouched":true,"minimum_open_meteo_count":8,"minimum_forecast_solar_common_count":7,"no_backfill":true,"no_counter_reset":true},
+  "generation_excludes": ["captured_at", "fetched_at", "known_at", "values", "evidence_counters"],
+  "semantic_key_excludes": ["captured_at", "fetched_at", "known_at", "value", "revision"]
+}
