@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -36,11 +36,13 @@ from custom_components.elrakning.elhandel.storage import StorageManager
 from custom_components.elrakning.elhandel.storage import _sanitize_storage_state, record_from_state
 from custom_components.elrakning.websocket import (
     _electricity_provider_state,
+    _serialize_price_data,
     _safe_key_name,
     _summarize_consumption,
     websocket_electricity_provider_remove,
     websocket_electricity_provider_source_data,
 )
+from custom_components.elrakning.coordinator import PriceData, PricePeriod
 
 GreenelyClient = ProviderGreenelyClient
 GreenelyError = ProviderGreenelyError
@@ -761,6 +763,41 @@ def test_cached_state_contains_no_credentials_or_raw_invoice_fields():
 
 
 class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    def test_price_serializer_uses_internal_provider_snapshot(self):
+        manager = _manager()
+        manager.state["summary"].update({
+            "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+            "_source_kind": "invoice",
+            "_facility_id": "facility-1",
+            "_contract_id": "contract-1",
+            "_invoice_key": "invoice-1",
+        })
+        manager.state["invoices"][0].update({
+            "_contract_id": "contract-1",
+            "_invoice_key": "invoice-1",
+        })
+        manager.state["source"]["contracts"] = [{
+            "_contract_id": "contract-1",
+            "status": "OPERATIONAL",
+        }]
+        manager.hass.data[DOMAIN]["elhandel_manager"] = manager
+        manager.hass.config_entries.async_entries = lambda _domain: []
+        data = PriceData(
+            area="SE2",
+            currency="SEK",
+            date=date(2026, 9, 5),
+            periods=(PricePeriod(
+                start=datetime(2026, 9, 5, tzinfo=timezone.utc),
+                end=datetime(2026, 9, 5, 0, 15, tzinfo=timezone.utc),
+                price=0.1,
+            ),),
+        )
+
+        result = _serialize_price_data(manager.hass, data)
+
+        self.assertEqual(result["mode"], "customer_price")
+        self.assertAlmostEqual(result["adjustments"]["electricity_cost_ex_vat"], 0.17)
+
     def test_provider_state_endpoint_preserves_full_public_state(self):
         manager = _manager()
 

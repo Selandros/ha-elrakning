@@ -694,6 +694,10 @@ class ElhandelManager:
         """Build an internal ProviderData snapshot without changing public state."""
         return provider_data_from_state(self.state.get("provider"), self.state)
 
+    def provider_data(self) -> ProviderData:
+        """Return the internal provider snapshot for backend calculations."""
+        return self._provider_data()
+
     async def async_shutdown(self) -> None:
         await self.lifecycle.async_shutdown()
 

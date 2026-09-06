@@ -1255,8 +1255,8 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
         return {"error": "integration_unavailable", "periods": []}
 
     manager = _elhandel_manager(hass)
-    provider_state = manager.public_state() if manager else None
-    customer_price_data = build_customer_price_data(data.periods, provider_state)
+    provider_data = manager.provider_data() if manager else None
+    customer_price_data = build_customer_price_data(data.periods, provider_data)
     grid_manager = _grid_manager(hass)
     grid_state = grid_manager.public_state() if grid_manager else None
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None

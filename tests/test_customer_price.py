@@ -33,6 +33,9 @@ _MODULE = module_from_spec(_SPEC)
 assert _SPEC and _SPEC.loader
 sys.modules[_SPEC.name] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
+from custom_components.elrakning.elhandel.models import serialize_provider_state
+from custom_components.elrakning.elhandel.providers.greenely_adapter import provider_data_from_greenely_state
+
 build_customer_price_data = _MODULE.build_customer_price_data
 grid_variable_cost_ex_vat = _MODULE.grid_variable_cost_ex_vat
 grid_price_is_current = _MODULE.grid_price_is_current
@@ -126,6 +129,34 @@ class CustomerPriceTests(unittest.TestCase):
 
         self.assertEqual(provider_result, provider_result_from_state)
 
+    def test_backend_price_path_keeps_internal_attribution_out_of_public_state(self) -> None:
+        state = {
+            "configured": True,
+            "provider": "greenely",
+            "facility_id": "facility-a",
+            "source": {
+                "contracts": [{"_contract_id": "contract-a", "status": "OPERATIONAL"}],
+            },
+            "invoices": [{"_contract_id": "contract-a", "_invoice_key": "invoice-a"}],
+            "summary": {
+                "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+                "_source_kind": "invoice",
+                "_facility_id": "facility-a",
+                "_contract_id": "contract-a",
+                "_invoice_key": "invoice-a",
+            },
+        }
+        internal = provider_data_from_greenely_state(state)
+        public = serialize_provider_state(internal)
+
+        internal_result = build_customer_price_data(_periods(), internal)
+        public_result = build_customer_price_data(_periods(), public)
+
+        self.assertTrue(internal.active_data["customer_price_eligible"])
+        self.assertAlmostEqual(internal_result.electricity_cost_ex_vat, 0.17)
+        self.assertEqual(public_result.mode, "spot_price")
+        self.assertIsNone(public_result.electricity_cost_ex_vat)
+
     def test_provider_data_without_provider_tariff_keeps_spot_price(self) -> None:
         data = build_customer_price_data(
             _periods(),
@@ -152,3 +183,39 @@ class CustomerPriceTests(unittest.TestCase):
     def test_future_grid_price_is_preview_only(self) -> None:
         self.assertFalse(grid_price_is_current({"contract_source_status": "FUTURE"}))
         self.assertTrue(grid_price_is_current({"contract_source_status": "ACTIVE"}))
+
+    def test_provider_and_grid_contract_statuses_are_independent(self) -> None:
+        current_provider = {
+            "configured": True,
+            "provider": "greenely",
+            "facility_id": "facility-a",
+            "summary": {
+                "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+                "_source_kind": "invoice",
+                "_facility_id": "facility-a",
+                "_contract_id": "provider-current",
+                "_invoice_key": "invoice-a",
+            },
+            "invoices": [{"_contract_id": "provider-current", "_invoice_key": "invoice-a"}],
+            "source": {"contracts": [{"_contract_id": "provider-current", "status": "OPERATIONAL"}]},
+        }
+        future_provider = {
+            **current_provider,
+            "summary": {**current_provider["summary"], "_contract_id": "provider-future"},
+            "invoices": [{"_contract_id": "provider-future", "_invoice_key": "invoice-a"}],
+            "source": {"contracts": [{"_contract_id": "provider-future", "status": "FUTURE", "start_date": "4102444800"}]},
+        }
+        future_grid = {"contract_source_status": "FUTURE"}
+        current_grid = {
+            "contract_source_status": "ACTIVE",
+            "vat_included": True,
+            "variable_total_ore_per_kwh_gross": 142,
+        }
+
+        self.assertAlmostEqual(
+            build_customer_price_data(_periods(), current_provider).electricity_cost_ex_vat,
+            0.17,
+        )
+        self.assertIsNone(grid_variable_cost_ex_vat(future_grid))
+        self.assertEqual(build_customer_price_data(_periods(), future_provider).mode, "spot_price")
+        self.assertAlmostEqual(grid_variable_cost_ex_vat(current_grid), 1.136)
