@@ -15,6 +15,7 @@ from custom_components.elrakning.energy_history import (
     history_targets,
     long_term_contributions,
     merge_contributions,
+    _statistics_request_units,
 )
 
 UTC = timezone.utc
@@ -79,9 +80,56 @@ class EnergyHistoryTests(unittest.TestCase):
             "generation_id": "gen", "quality_status": "good", "coverage_ratio": None,
         }]
         series = merge_contributions(canonical + long_term)
-        self.assertEqual(len(series["consumption"]), 1)
+        self.assertEqual(len(series["consumption"]), 2)
         self.assertEqual(series["consumption"][0]["source"], "canonical")
         self.assertEqual(series["consumption"][0]["value_kw"], 2.0)
+        self.assertEqual(series["consumption"][1]["source"], "home_assistant_long_term_statistics")
+        self.assertEqual(series["consumption"][1]["resolution_seconds"], 2700)
+
+    def test_energy_counters_override_net_power_for_import_and_export(self):
+        start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
+        targets = [
+            _ledger("site-a", "grid.power/import", "sensor.grid_power", "power-gen"),
+            _ledger("site-a", "grid.energy_import", "sensor.grid_import", "import-gen"),
+            _ledger("site-a", "grid.energy_export", "sensor.grid_export", "export-gen"),
+        ]
+        metadata = {
+            "sensor.grid_power": (1, {"unit_of_measurement": "W"}),
+            "sensor.grid_import": (2, {"unit_of_measurement": "kWh"}),
+            "sensor.grid_export": (3, {"unit_of_measurement": "kWh"}),
+        }
+        statistics = {
+            "sensor.grid_power": [{"start": start.timestamp(), "mean": 0.0}],
+            "sensor.grid_import": [{"start": start.timestamp(), "change": 1.0}],
+            "sensor.grid_export": [{"start": start.timestamp(), "change": 0.5}],
+        }
+        series = merge_contributions(long_term_contributions(targets, metadata, statistics))
+        self.assertEqual(series["import"][0]["value_kw"], 1.0)
+        self.assertEqual(series["export"][0]["value_kw"], 0.5)
+        self.assertEqual(series["import"][0]["source"], "home_assistant_long_term_statistics_energy")
+
+    def test_long_term_power_applies_configured_sign_inversion(self):
+        start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
+        targets = [_ledger(
+            "site-a", "battery.power", "sensor.battery", "battery-gen",
+            mapping={"invert_battery_power": True},
+        )]
+        metadata = {"sensor.battery": (1, {"unit_of_measurement": "W"})}
+        statistics = {"sensor.battery": [{"start": start.timestamp(), "mean": 1000.0}]}
+        series = merge_contributions(long_term_contributions(targets, metadata, statistics))
+        self.assertEqual(series["charging"][0]["value_kw"], 1.0)
+        self.assertEqual(series["discharging"][0]["value_kw"], 0.0)
+
+    def test_statistics_are_requested_in_canonical_units(self):
+        targets = [
+            _ledger("site-a", "house.consumption", "sensor.load", "load-gen",
+                    canonicalization={"unit": "W"}),
+            _ledger("site-a", "grid.energy_import", "sensor.import", "import-gen"),
+        ]
+        self.assertEqual(_statistics_request_units(targets), {
+            "sensor.load": "W",
+            "sensor.import": "kWh",
+        })
 
     def test_long_term_keeps_hourly_mean_and_energy_counter_fallback(self):
         start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)

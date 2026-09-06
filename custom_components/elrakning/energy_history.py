@@ -167,6 +167,29 @@ def _statistics_start(row: dict[str, Any]) -> datetime | None:
         return None
 
 
+def _target_canonicalization(target: dict[str, Any], field: str) -> bool:
+    canonicalization = target.get("canonicalization") or {}
+    value = canonicalization.get(field)
+    if value is None:
+        value = (target.get("mapping") or {}).get(field)
+    return value is True
+
+
+def _statistics_request_units(targets: list[dict[str, Any]]) -> dict[str, str]:
+    units = {}
+    for target in targets:
+        entity_id = str(target.get("entity_id") or "")
+        role = str(target.get("logical_role") or "")
+        if not entity_id:
+            continue
+        if role in _POWER_ROLES:
+            canonicalization = target.get("canonicalization") or {}
+            units[entity_id] = str(canonicalization.get("unit") or "W")
+        elif role in _ENERGY_COUNTER_ROLES:
+            units[entity_id] = "kWh"
+    return units
+
+
 def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, Any],
                             statistics: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Convert Home Assistant hourly long-term statistics without inventing finer resolution."""
@@ -189,6 +212,12 @@ def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, A
                 value_kw = _power_to_kw(row.get("mean"), unit)
                 if value_kw is None:
                     continue
+                if role in {"grid.power/import", "battery.power"}:
+                    if _target_canonicalization(
+                        target,
+                        "invert_power" if role == "grid.power/import" else "invert_battery_power",
+                    ):
+                        value_kw = -value_kw
                 for series, value in _role_values(role, value_kw).items():
                     result.append(_contribution(
                         series, start, end, value, priority=20,
@@ -199,9 +228,12 @@ def long_term_contributions(targets: list[dict[str, Any]], metadata: dict[str, A
             energy_kwh = _energy_to_kwh(row.get("change"), unit)
             if energy_kwh is None:
                 continue
+            duration_hours = (end - start).total_seconds() / 3600
+            if duration_hours <= 0:
+                continue
             series = "import" if role == "grid.energy_import" else "export"
             result.append(_contribution(
-                series, start, end, energy_kwh, priority=10,
+                series, start, end, energy_kwh / duration_hours, priority=25,
                 source="home_assistant_long_term_statistics_energy",
                 generation_id=generation_id,
             ))
@@ -235,9 +267,30 @@ def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[d
     accepted: dict[str, list[dict[str, Any]]] = {}
     for candidate in sorted(candidates, key=lambda item: (-item["priority"], item["start"], item["end"])):
         existing = accepted.setdefault(candidate["series"], [])
-        if any(item["start"] < candidate["end"] and candidate["start"] < item["end"] for item in existing):
-            continue
-        existing.append(candidate)
+        segments = [(candidate["start"], candidate["end"])]
+        for blocker in existing:
+            if blocker["priority"] < candidate["priority"]:
+                continue
+            remaining = []
+            for segment_start, segment_end in segments:
+                if blocker["start"] >= segment_end or blocker["end"] <= segment_start:
+                    remaining.append((segment_start, segment_end))
+                    continue
+                if segment_start < blocker["start"]:
+                    remaining.append((segment_start, blocker["start"]))
+                if blocker["end"] < segment_end:
+                    remaining.append((blocker["end"], segment_end))
+            segments = remaining
+            if not segments:
+                break
+        for segment_start, segment_end in segments:
+            if segment_start >= segment_end:
+                continue
+            accepted[candidate["series"]].append({
+                **candidate,
+                "start": segment_start,
+                "end": segment_end,
+            })
 
     result: dict[str, list[dict[str, Any]]] = {}
     for series in ("import", "export", "solar", "consumption", "charging", "discharging"):
@@ -258,12 +311,13 @@ def merge_contributions(contributions: list[dict[str, Any]]) -> dict[str, list[d
     return result
 
 
-def _load_long_term_statistics(hass: Any, statistic_ids: set[str], start: datetime, end: datetime):
+def _load_long_term_statistics(hass: Any, statistic_ids: set[str], units: dict[str, str],
+                               start: datetime, end: datetime):
     from homeassistant.components.recorder.statistics import get_metadata, statistics_during_period
 
     metadata = get_metadata(hass, statistic_ids=statistic_ids)
     statistics = statistics_during_period(
-        hass, start, end, statistic_ids, "hour", None, {"mean", "change"}
+        hass, start, end, statistic_ids, "hour", units, {"mean", "change"}
     )
     return metadata, statistics
 
@@ -294,7 +348,7 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
 
             recorder = get_instance(hass)
             metadata, statistics = await recorder.async_add_executor_job(
-                _load_long_term_statistics, hass, statistic_ids, start, end
+                _load_long_term_statistics, hass, statistic_ids, _statistics_request_units(targets), start, end
             )
             contributions.extend(long_term_contributions(targets, metadata, statistics))
         except Exception:  # Long-term fallback must never break price data.
