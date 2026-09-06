@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { energyHistoryToMeterStepPoints, energyIntervalsToStepPoints, integrateEnergyIntervalsKwh, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildThresholdClippedSegments, energyHistoryToMeterStepPoints, energyIntervalsToStepPoints, integrateEnergyIntervalsKwh, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const websocketSource = readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
@@ -21,6 +21,10 @@ const hourlyStep = energyIntervalsToStepPoints(hourlyIntervals);
 assert.equal(hourlyStep.length, 2);
 assert.equal(hourlyStep[0].value_kw, 2);
 assert.equal(hourlyStep[0].source_resolution_seconds, 3600);
+assert.equal(hourlyStep[0].history_interval_id, hourlyStep[1].history_interval_id);
+const historicalSegments = buildThresholdClippedSegments(hourlyStep, "value_kw");
+assert.equal(historicalSegments.length, 1);
+assert.equal(historicalSegments[0].length, 2);
 assert.equal(integrateEnergyIntervalsKwh(hourlyIntervals, "2026-08-30T10:00:00+02:00", "2026-08-30T11:00:00+02:00"), 2);
 const meterStep = energyHistoryToMeterStepPoints({ series: {
   import: hourlyIntervals,

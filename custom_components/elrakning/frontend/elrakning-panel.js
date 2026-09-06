@@ -1119,6 +1119,7 @@ export function energyIntervalsToStepPoints(intervals, valueField = "value_kw") 
       value_kw: interval.value,
       source_resolution_seconds: Number.isFinite(interval.resolution_seconds) ? interval.resolution_seconds : null,
       history_source: interval.source,
+      history_interval_id: `${interval.start}:${interval.end}:${interval.source || "history"}`,
     };
     points.push({ ...base, timestamp: interval.start, gap_before: gapBefore });
     points.push({ ...base, timestamp: interval.end - 1, gap_before: false });
@@ -1135,8 +1136,12 @@ export function energyHistoryToMeterStepPoints(history) {
         timestamp: point.timestamp, raw_timestamp: point.raw_timestamp,
         import_kw: null, export_kw: null, gap_before: point.gap_before,
         history_source: point.history_source,
+        history_interval_id: point.history_interval_id,
+        source_resolution_seconds: point.source_resolution_seconds,
       };
       current[key] = point.value_kw;
+      current.history_interval_id ||= point.history_interval_id;
+      current.source_resolution_seconds ||= point.source_resolution_seconds;
       current.gap_before = current.gap_before || point.gap_before;
       byTimestamp.set(point.timestamp, current);
     }
@@ -1984,14 +1989,16 @@ export function buildThresholdClippedSegments(points, key) {
     const previousValue = normalizeMeterValue(previous?.[key]);
     const previousTime = new Date(previous?.timestamp).getTime();
     const currentTime = new Date(point.timestamp).getTime();
+    const sameHistoryInterval = Boolean(previous?.history_interval_id)
+      && previous.history_interval_id === point.history_interval_id;
     const contiguous = previous
       && Number.isFinite(previousValue)
       && Number.isFinite(previousTime)
       && Number.isFinite(currentTime)
       && previous.raw_timestamp != null
       && point.raw_timestamp != null
-      && currentTime - previousTime === 5 * 60 * 1000
-      && !point.gap_before;
+      && ((currentTime - previousTime === 5 * 60 * 1000 && !point.gap_before)
+        || sameHistoryInterval);
     if (!contiguous) {
       appendSegment();
       if (isVisiblePowerValue(value)) segment.push(point);
@@ -10210,6 +10217,11 @@ class ElrakningPanel {
         import_kw: Number.isFinite(importKw) ? importKw : null,
         export_kw: Number.isFinite(exportKw) ? exportKw : null,
         gap_before: Boolean(point.gap_before),
+        history_source: point.history_source || null,
+        history_interval_id: point.history_interval_id || null,
+        source_resolution_seconds: Number.isFinite(Number(point.source_resolution_seconds))
+          ? Number(point.source_resolution_seconds)
+          : null,
       });
     });
     return [...latestByTimestamp.values()].sort((a, b) => (
