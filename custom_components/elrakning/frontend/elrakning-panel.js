@@ -1098,6 +1098,71 @@ export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 *
   return canonical;
 }
 
+export function energyIntervalsToStepPoints(intervals, valueField = "value_kw") {
+  const rows = (Array.isArray(intervals) ? intervals : []).map((interval) => ({
+    start: new Date(interval?.start).getTime(),
+    end: new Date(interval?.end).getTime(),
+    value: Number(interval?.[valueField]),
+    resolution_seconds: Number(interval?.resolution_seconds),
+    source: interval?.source || null,
+  })).filter((interval) => Number.isFinite(interval.start)
+    && Number.isFinite(interval.end)
+    && interval.end > interval.start
+    && Number.isFinite(interval.value))
+    .sort((left, right) => left.start - right.start);
+  const points = [];
+  let previousEnd = null;
+  for (const interval of rows) {
+    const gapBefore = previousEnd !== null && interval.start > previousEnd + 1;
+    const base = {
+      raw_timestamp: new Date(interval.start).toISOString(),
+      value_kw: interval.value,
+      source_resolution_seconds: Number.isFinite(interval.resolution_seconds) ? interval.resolution_seconds : null,
+      history_source: interval.source,
+    };
+    points.push({ ...base, timestamp: interval.start, gap_before: gapBefore });
+    points.push({ ...base, timestamp: interval.end - 1, gap_before: false });
+    previousEnd = interval.end;
+  }
+  return points;
+}
+
+export function energyHistoryToMeterStepPoints(history) {
+  const byTimestamp = new Map();
+  const add = (series, key) => {
+    for (const point of energyIntervalsToStepPoints(history?.series?.[series])) {
+      const current = byTimestamp.get(point.timestamp) || {
+        timestamp: point.timestamp, raw_timestamp: point.raw_timestamp,
+        import_kw: null, export_kw: null, gap_before: point.gap_before,
+        history_source: point.history_source,
+      };
+      current[key] = point.value_kw;
+      current.gap_before = current.gap_before || point.gap_before;
+      byTimestamp.set(point.timestamp, current);
+    }
+  };
+  add("import", "import_kw");
+  add("export", "export_kw");
+  return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
+}
+
+export function integrateEnergyIntervalsKwh(intervals, start, end) {
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
+  let total = 0;
+  let covered = false;
+  for (const interval of Array.isArray(intervals) ? intervals : []) {
+    const left = Math.max(startMs, new Date(interval?.start).getTime());
+    const right = Math.min(endMs, new Date(interval?.end).getTime());
+    const value = Number(interval?.value_kw);
+    if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(value) || right <= left) continue;
+    total += value * ((right - left) / 3600000);
+    covered = true;
+  }
+  return covered ? total : null;
+}
+
 export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Date(), slotMs = 5 * 60 * 1000) {
   const canonical = buildCanonicalMeterPoints(
     (Array.isArray(points) ? points : []).map((point) => ({
@@ -10538,14 +10603,22 @@ class ElrakningPanel {
       return start <= now && now < end;
     });
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime()) / dayDuration) * plotWidth;
-    const meterPoints = Array.isArray(this._meterPowerHistory?.points)
+    const energyHistory = this.priceSnapshot?.energy_history || {};
+    const rawMeterPoints = Array.isArray(this._meterPowerHistory?.points)
       ? this._meterPowerHistory.points.filter((point) => {
         const timestamp = new Date(point.timestamp).getTime();
         return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
       })
       : [];
+    const historicalMeterPoints = energyHistoryToMeterStepPoints(energyHistory).filter((point) => (
+      point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+    ));
+    const useHistoricalMeter = rawMeterPoints.length === 0 && historicalMeterPoints.length > 0;
+    const meterPoints = useHistoricalMeter ? historicalMeterPoints : rawMeterPoints;
     this._meterTooltipPoints = meterPoints;
-    const meterCanonicalPoints = this.buildCanonicalMeterPoints(meterPoints, dayStart, dayEnd);
+    const meterCanonicalPoints = useHistoricalMeter
+      ? meterPoints
+      : this.buildCanonicalMeterPoints(meterPoints, dayStart, dayEnd);
     this._meterCanonicalPoints = meterCanonicalPoints;
     this._meterCanonicalPointMap = new Map(
       meterCanonicalPoints
@@ -10563,7 +10636,12 @@ class ElrakningPanel {
           return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
         })
         : [];
-      powerCanonicalPoints[key] = this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
+      const historicalPoints = energyIntervalsToStepPoints(energyHistory?.series?.[key]).filter((point) => (
+        point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+      ));
+      powerCanonicalPoints[key] = rawPoints.length > 0
+        ? this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd)
+        : historicalPoints;
       powerDisplayPoints[key] = powerCanonicalPoints[key].map((point) => ({
         ...point,
         value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,

@@ -403,6 +403,62 @@ class CanonicalStorage:
             raise ValueError("canonical_revision_conflict") from error
         return cursor.rowcount == 1
 
+    def read_site_energy_history(self, site_id: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """Read immutable site energy rows through a dedicated read-only WAL connection."""
+        if not site_id or start.tzinfo is None or end.tzinfo is None or end <= start:
+            return []
+        start_us = timestamp_us(start)
+        end_us = timestamp_us(end)
+        connection = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        try:
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("PRAGMA busy_timeout=5000")
+            rows: list[tuple[Any, ...]] = []
+            for table in ("historical_energy_observations", "energy_observations"):
+                rows.extend(connection.execute(
+                    f"""SELECT logical_role, source_generation_id, interval_start_us, interval_end_us,
+                               resolution_seconds, value, unit, sign_convention, quality_status,
+                               coverage_ratio, gap_status, semantic_key, revision,
+                               CASE WHEN ? = 'energy_observations' THEN 1 ELSE 0 END AS live_priority
+                          FROM {table} AS current
+                         WHERE site_id = ?
+                           AND interval_start_us < ?
+                           AND interval_end_us > ?
+                           AND NOT EXISTS (
+                               SELECT 1 FROM {table} AS newer
+                                WHERE newer.semantic_key = current.semantic_key
+                                  AND newer.revision > current.revision
+                           )""",
+                    (table, site_id, end_us, start_us),
+                ).fetchall())
+        finally:
+            connection.close()
+        latest: dict[tuple[str, str, int, int], tuple[Any, ...]] = {}
+        for row in rows:
+            key = (str(row[0]), str(row[1]), int(row[2]), int(row[3]))
+            previous = latest.get(key)
+            if previous is None or (int(row[13]), int(row[12])) > (int(previous[13]), int(previous[12])):
+                latest[key] = row
+        return [
+            {
+                "logical_role": row[0],
+                "source_generation_id": row[1],
+                "interval_start": datetime.fromtimestamp(row[2] / 1_000_000, tz=timezone.utc),
+                "interval_end": datetime.fromtimestamp(row[3] / 1_000_000, tz=timezone.utc),
+                "resolution_seconds": int(row[4]),
+                "value": row[5],
+                "unit": row[6],
+                "sign_convention": row[7],
+                "quality_status": row[8],
+                "coverage_ratio": row[9],
+                "gap_status": row[10],
+                "semantic_key": row[11],
+                "revision": int(row[12]),
+                "storage_class": "canonical" if int(row[13]) else "historical",
+            }
+            for row in sorted(latest.values(), key=lambda item: (item[2], item[0], item[1]))
+        ]
+
     def count_observations(self) -> int:
         return int(self._connection().execute("SELECT COUNT(*) FROM energy_observations").fetchone()[0])
 

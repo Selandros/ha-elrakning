@@ -368,6 +368,48 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
         value = datetime(2026, 3, 29, 1, 7, 4, tzinfo=UTC)
         self.assertEqual(quarter_start(value), datetime(2026, 3, 29, 1, 0, tzinfo=UTC))
 
+    async def test_active_empty_site_does_not_stop_background_collection_for_other_site(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = SiteIdentityManager.__new__(SiteIdentityManager)
+            manager.state = {
+                "active_site_id": "site-b",
+                "sites": [{"site_id": "site-a"}, {"site_id": "site-b"}],
+                "site_configs": {
+                    "site-a": {"collection_enabled": True, "power": {}, "meter": {}},
+                    "site-b": {"collection_enabled": True, "power": {}, "meter": {}},
+                },
+                "ledger": [{
+                    "site_id": "site-a", "logical_role": "house.consumption",
+                    "entity_id": "sensor.load_a", "generation_id": "gen-a",
+                    "source_identity": {"identity_key": "site-a-load", "identity_strength": "strong"},
+                    "classification": "measured", "effective_from": None, "effective_to": None,
+                    "canonicalization": {
+                        "unit": "W", "sign_convention": "positive_consumption",
+                        "aggregation": "time_weighted_mean", "classification": "measured",
+                        "max_hold_seconds": None, "absolute_value": True,
+                    },
+                }],
+            }
+            collector = CanonicalCollector(_Hass(), manager, Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 9, 6, 8, 0, tzinfo=UTC)
+            first = _State("1.0", "kW", start)
+            second = _State("1.0", "kW", start + timedelta(minutes=14, seconds=59))
+            await collector._async_state_changed(types.SimpleNamespace(data={
+                "entity_id": "sensor.load_a", "new_state": first,
+            }))
+            await collector._async_state_changed(types.SimpleNamespace(data={
+                "entity_id": "sensor.load_a", "new_state": second,
+            }))
+            await collector.async_flush(start, start + timedelta(minutes=15, seconds=5))
+            rows = collector.storage.read_site_energy_history("site-a", start, start + timedelta(minutes=15))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["source_generation_id"], "gen-a")
+            self.assertAlmostEqual(rows[0]["value"], 1000.0)
+            self.assertEqual(collector.storage.read_site_energy_history("site-b", start, start + timedelta(minutes=15)), [])
+            collector.storage.close()
+
     def test_collection_enabled_is_independent_of_active_site(self):
         manager = SiteIdentityManager.__new__(SiteIdentityManager)
         manager.state = {

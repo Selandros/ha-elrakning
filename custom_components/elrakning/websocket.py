@@ -21,6 +21,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data, grid_variable_cost_ex_vat
+from .energy_history import async_build_energy_history
 from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
@@ -158,7 +159,16 @@ async def websocket_get_price_data(
                 data = None
         else:
             data = coordinator.data
-    connection.send_result(msg["id"], _serialize_price_data(hass, data))
+    response = _serialize_price_data(hass, data)
+    if data is not None and data.periods:
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+        response["energy_history"] = await async_build_energy_history(
+            hass, site_manager, collector,
+            min(period.start for period in data.periods),
+            max(period.end for period in data.periods),
+        )
+    connection.send_result(msg["id"], response)
 
 
 @websocket_api.websocket_command(

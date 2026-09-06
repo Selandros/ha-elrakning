@@ -1967,7 +1967,8 @@ assert.doesNotMatch(panelSource, /export_kw: Number\(point\.export_kw\) \|\| 0/)
 assert.doesNotMatch(panelSource, /points\[start - 1\]\[key\] === 0/);
 assert.doesNotMatch(panelSource, /points\[end \+ 1\]\[key\] === 0/);
 assert.match(panelSource, /if \(segment\.length < 2\) return \"\"/);
-assert.match(panelSource, /const meterCanonicalPoints = this\.buildCanonicalMeterPoints/);
+assert.match(panelSource, /const useHistoricalMeter = rawMeterPoints\.length === 0 && historicalMeterPoints\.length > 0/);
+assert.match(panelSource, /const meterCanonicalPoints = useHistoricalMeter[\s\S]*?this\.buildCanonicalMeterPoints\(meterPoints, dayStart, dayEnd\)/);
 assert.match(panelSource, /const meterDisplayPoints = this\.prepareMeterDisplayPoints\(meterCanonicalPoints\)/);
 assert.doesNotMatch(panelSource, /const meterDisplayPoints = this\.smoothSignedMeterPoints/);
 assert.match(panelSource, /const meterMaximum = Math\.max\(/);
