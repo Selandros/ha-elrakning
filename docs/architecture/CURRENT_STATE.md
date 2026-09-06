@@ -8,6 +8,16 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
+- VERIFIED (runtime, 2026-09-06): Release `0.0.624` is deployed and runtime
+  accepted for the provider-attribution/current-price fix. Authenticated
+  A→B→A→B verification showed Vikarbodarna consistently restoring 51 invoices,
+  its attributed current summary, and `electricity_cost_ex_vat=0.17` SEK/kWh.
+  Fiskvik consistently remained at zero invoices, null summary, null
+  consumption, and null current Greenely cost. E.ON remained `FUTURE`; its
+  preview was retained and `grid_cost_ex_vat` remained null.
+- VERIFIED (scope boundary, 2026-09-06): The separate E.ON global
+  multi-facility/facility-selection risk is not resolved by this release and
+  remains a follow-up scope.
 - VERIFIED (repository/runtime activation, 2026-09-06): `0.0.620` is released
   in commit `f250a01` on `main`, deployed to Home Assistant, and served by the
   runtime static manifest after a Core restart. Deployed `energy_history.py`
@@ -52,6 +62,13 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   bucket, the display fallback is clipped around canonical data while retaining
   the original hourly source interval and `resolution_seconds=3600`; no synthetic
   15-minute LTS records are created.
+- VERIFIED (runtime, 0.0.624, 2026-09-06): Current electricity-provider price
+  eligibility is independent from grid-contract status. An attributed
+  operational provider contract contributes its verified variable cost even
+  when the site grid contract is future; future grid terms remain preview-only
+  and do not suppress the provider adjustment. Backend price serialization
+  uses the internal provider snapshot while frontend public state remains
+  sanitized.
 - INFERRED (current-codebase statement): Deterministic, read-only shadow
   calculations; no physical battery write path
 - VERIFIED (static, 2026-09-05): P0-AUDIT-1 provides a temporary, source-agnostic
