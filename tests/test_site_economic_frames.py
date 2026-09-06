@@ -525,6 +525,21 @@ class SiteEconomicFrameTests(unittest.TestCase):
         self.assertEqual(after_frame, before_frame)
         self.assertEqual(after_points, before_points)
 
+    def test_decision_reader_keeps_site_economic_frames_isolated(self):
+        binding_a = _binding(fingerprint="a", street="Street A")
+        binding_b = _binding(fingerprint="b", street="Street B")
+        captured = datetime(2026, 9, 5, 20, 1, tzinfo=UTC)
+        persist_eon_grid_economic_snapshot(self.storage, "site-a", binding_a, _state(street="Street A"), captured)
+        persist_eon_grid_economic_snapshot(self.storage, "site-b", binding_b, _state(street="Street B"), captured)
+        result = self.storage.read_external_input_frames(
+            captured + timedelta(minutes=1),
+            source_scope="site", site_id="site-a",
+            logical_role="economic.grid.fixed.subscription",
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["site_id"], "site-a")
+        self.assertEqual(result[0]["points"][0]["value"], 226.25)
+
 
 if __name__ == "__main__":
     unittest.main()

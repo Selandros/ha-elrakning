@@ -15,6 +15,10 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 DATASET_VERSION = 1
+INTEGRITY_MIGRATION_VERSION = 2
+INTEGRITY_MIGRATION_CHECKSUM = hashlib.sha256(
+    b"external_input_points_immutable_v2|external_frames_replay_index_v2"
+).hexdigest()
 QUARTER_SECONDS = 900
 SCHEMA_PATH = Path(__file__).with_name("p0_storage_schema_v1.sql")
 
@@ -94,7 +98,49 @@ class CanonicalStorage:
                 self.connection.close()
                 self.connection = None
                 raise RuntimeError("canonical_schema_mismatch")
+        self._apply_integrity_migration()
         self.connection.commit()
+
+    def _apply_integrity_migration(self) -> None:
+        """Apply additive external-frame integrity protection without rewriting data."""
+        connection = self._connection()
+        migration = connection.execute(
+            "SELECT checksum FROM schema_migrations WHERE version = ?",
+            (INTEGRITY_MIGRATION_VERSION,),
+        ).fetchone()
+        if migration is not None:
+            if migration[0] != INTEGRITY_MIGRATION_CHECKSUM:
+                raise RuntimeError("canonical_integrity_migration_mismatch")
+            return
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS frames_by_replay_decision
+                ON external_input_frames(
+                    source_scope, site_id, logical_role, known_at_us,
+                    semantic_key, revision
+                );
+            CREATE INDEX IF NOT EXISTS points_by_valid_time
+                ON external_input_points(valid_at_us, frame_id);
+            CREATE TRIGGER IF NOT EXISTS point_immutable_update
+            BEFORE UPDATE ON external_input_points
+            BEGIN
+                SELECT RAISE(ABORT, 'external_input_points are immutable; insert a revision');
+            END;
+            CREATE TRIGGER IF NOT EXISTS point_immutable_delete
+            BEFORE DELETE ON external_input_points
+            BEGIN
+                SELECT RAISE(ABORT, 'external_input_points are immutable');
+            END;
+            """
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at_us, checksum) VALUES (?, ?, ?)",
+            (
+                INTEGRITY_MIGRATION_VERSION,
+                timestamp_us(datetime.now(timezone.utc)),
+                INTEGRITY_MIGRATION_CHECKSUM,
+            ),
+        )
 
     @staticmethod
     def _configure_connection(connection: sqlite3.Connection) -> None:
@@ -271,9 +317,143 @@ class CanonicalStorage:
             (semantic_key,),
         ).fetchone()
 
+    def read_external_input_frames(
+        self,
+        decision_at: datetime,
+        *,
+        source_scope: str | None = None,
+        site_id: str | None = None,
+        logical_role: str | None = None,
+        valid_at: datetime | None = None,
+        source_generation_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read external frames visible to one decision time without current-state lookup."""
+        decision_us = timestamp_us(decision_at)
+        valid_at_us = timestamp_us(valid_at) if valid_at is not None else None
+        if source_scope not in {None, "site", "global"}:
+            raise ValueError("external_source_scope_invalid")
+        if source_scope == "site" and not site_id:
+            raise ValueError("external_site_id_required")
+        if source_scope == "global" and site_id is not None:
+            raise ValueError("external_global_site_id")
+        if site_id is not None and source_scope is None:
+            raise ValueError("external_site_scope_required")
+
+        clauses = [
+            "f.known_at_us <= ?",
+            "g.created_at_us <= ?",
+        ]
+        params: list[Any] = [decision_us, decision_us]
+        if source_scope is not None:
+            clauses.append("f.source_scope = ?")
+            params.append(source_scope)
+        if site_id is not None:
+            clauses.append("f.site_id = ?")
+            params.append(site_id)
+        if logical_role is not None:
+            clauses.append("f.logical_role = ?")
+            params.append(logical_role)
+        if source_generation_id is not None:
+            clauses.append("f.source_generation_id = ?")
+            params.append(source_generation_id)
+        if valid_at_us is not None:
+            clauses.append(
+                "(f.valid_from_us IS NULL OR f.valid_from_us <= ?) "
+                "AND (f.valid_to_us IS NULL OR f.valid_to_us > ?)"
+            )
+            params.extend([valid_at_us, valid_at_us])
+        rows = self._connection().execute(
+            """
+            SELECT f.frame_id, f.schema_version, f.dataset_version, f.semantic_key,
+                   f.revision, f.supersedes_frame_id, f.source_generation_id,
+                   f.source_scope, f.site_id, f.logical_role, f.classification,
+                   f.published_at_us, f.fetched_at_us, f.known_at_us,
+                   f.captured_at_us, f.valid_from_us, f.valid_to_us,
+                   f.quality_status, f.quality_json, f.provenance_json,
+                   f.payload_schema
+              FROM external_input_frames AS f
+              JOIN source_generations AS g
+                ON g.source_generation_id = f.source_generation_id
+             WHERE """
+            + " AND ".join(clauses)
+            + " ORDER BY f.semantic_key, f.known_at_us, f.revision, f.frame_id",
+            params,
+        ).fetchall()
+
+        eligible: dict[str, tuple[Any, ...]] = {}
+        for row in rows:
+            key = str(row[3])
+            previous = eligible.get(key)
+            if previous is None or (int(row[13]), int(row[4]), str(row[0])) > (
+                int(previous[13]), int(previous[4]), str(previous[0])
+            ):
+                eligible[key] = row
+
+        results: list[dict[str, Any]] = []
+        connection = self._connection()
+        for row in eligible.values():
+            points = connection.execute(
+                """
+                SELECT point_id, point_key, valid_at_us, value, unit,
+                       quality_status, point_json
+                  FROM external_input_points
+                 WHERE frame_id = ?
+                 ORDER BY point_key
+                """,
+                (row[0],),
+            ).fetchall()
+            if valid_at_us is not None:
+                points = [point for point in points if int(point[2]) == valid_at_us]
+                if not points:
+                    continue
+            result = {
+                "frame_id": row[0],
+                "schema_version": row[1],
+                "dataset_version": row[2],
+                "semantic_key": row[3],
+                "revision": row[4],
+                "supersedes_frame_id": row[5],
+                "source_generation_id": row[6],
+                "source_scope": row[7],
+                "site_id": row[8],
+                "logical_role": row[9],
+                "classification": row[10],
+                "published_at": self._datetime_optional(row[11]),
+                "fetched_at": self._datetime_optional(row[12]),
+                "known_at": self._datetime_optional(row[13]),
+                "captured_at": self._datetime_optional(row[14]),
+                "valid_from": self._datetime_optional(row[15]),
+                "valid_to": self._datetime_optional(row[16]),
+                "quality_status": row[17],
+                "quality": json.loads(row[18]),
+                "provenance": json.loads(row[19]),
+                "payload_schema": row[20],
+                "points": [
+                    {
+                        "point_id": point[0],
+                        "point_key": point[1],
+                        "valid_at": self._datetime_optional(point[2]),
+                        "value": point[3],
+                        "unit": point[4],
+                        "quality_status": point[5],
+                        "point": json.loads(point[6]),
+                    }
+                    for point in points
+                ],
+            }
+            known_at_us = int(row[13])
+            if known_at_us > decision_us:
+                raise RuntimeError("external_replay_known_at_invariant")
+            results.append(result)
+        return results
+
     @staticmethod
     def _timestamp_optional(value: datetime | None) -> int | None:
         return timestamp_us(value) if value is not None else None
+
+    @staticmethod
+    def _datetime_optional(value: int | None) -> datetime | None:
+        return datetime.fromtimestamp(value / 1_000_000, tz=timezone.utc) if value is not None else None
 
     def _external_frame_matches(self, connection, frame: dict[str, Any], points: list[dict[str, Any]]) -> bool:
         row = connection.execute(
