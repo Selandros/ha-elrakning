@@ -20,7 +20,7 @@ from .const import (
     SUPPORTED_ELECTRICITY_PROVIDERS,
 )
 from .coordinator import ElrakningCoordinator, PriceData
-from .customer_price import build_customer_price_data, grid_variable_cost_ex_vat
+from .customer_price import build_customer_price_data, grid_price_is_current, grid_variable_cost_ex_vat
 from .energy_history import async_build_energy_history
 from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
@@ -1260,10 +1260,16 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     grid_manager = _grid_manager(hass)
     grid_state = grid_manager.public_state() if grid_manager else None
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None
-    grid_cost_ex_vat = grid_variable_cost_ex_vat(grid_price)
+    grid_contract_is_current = grid_price_is_current(grid_price)
+    grid_cost_ex_vat = (
+        grid_variable_cost_ex_vat(grid_price)
+        if grid_contract_is_current
+        else None
+    )
     grid_variable_gross = (
         grid_price.get("variable_total_ore_per_kwh_gross")
         if isinstance(grid_price, dict)
+        and grid_contract_is_current
         else None
     )
     grid_source_status = (

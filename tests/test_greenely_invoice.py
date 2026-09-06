@@ -135,6 +135,27 @@ https://signed.example/invoice.pdf
         self.assertLessEqual(len(excerpt), 4000)
         self.assertIn("spot", diagnostics["matched_fields"])
 
+    def test_installation_id_is_retained_for_single_installation(self):
+        result = parse_greenely_invoice_text(
+            "Anl.id: 735999248027541502 Elavtal: Testavtal, månadsavgift 39 kr "
+            "Period: 2026-07-01 - 2026-07-31 Spotpris 0.10 kWh 10.10 öre/kWh 0.01 SEK "
+            "Rörliga kostnader 0.10 kWh 17.00 öre/kWh 0.02 SEK "
+            "Fast avgift 31.20 SEK/månad 31.20 SEK Moms 25 %"
+        )
+        self.assertEqual(result["installation_sections"][0]["installation_id"], "735999248027541502")
+
+    def test_multiple_installations_are_not_collapsed(self):
+        text = (
+            "Anl.id: 735999248027541502 Spotpris 0.10 kWh 10.10 öre/kWh "
+            "Anl.id: 735000114000851039 Spotpris 0.20 kWh 20.10 öre/kWh"
+        )
+        result = parse_greenely_invoice_text(text)
+        self.assertEqual(
+            [item["installation_id"] for item in result["installation_sections"]],
+            ["735999248027541502", "735000114000851039"],
+        )
+        self.assertIn("multiple_installations_require_attribution", result["warnings"])
+
 
 if __name__ == "__main__":
     unittest.main()

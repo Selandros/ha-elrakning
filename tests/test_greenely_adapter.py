@@ -11,14 +11,18 @@ def test_complete_greenely_state_maps_to_provider_data():
             "facility_name": "Fiskvik 218",
             "source": {
                 "facility": {"id": "facility-a", "address": "Fiskvik 218"},
-                "contracts": [{"id": "contract-a"}],
+                "contracts": [{"_contract_id": "contract-a", "status": "OPERATIONAL"}],
                 "invoices": [{"invoice_date": "2026-08-01"}],
                 "consumption": {"samples": [{"value": 1.2}]},
             },
-            "invoices": [{"invoice_date": "2026-08-01", "amount_due_sek": 12.0}],
+            "invoices": [{"invoice_date": "2026-08-01", "amount_due_sek": 12.0, "_contract_id": "contract-a", "_invoice_key": "invoice-a"}],
             "summary": {
                 "agreement_name": "Kvartsprisavtal",
                 "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+                "_source_kind": "invoice",
+                "_facility_id": "facility-a",
+                "_contract_id": "contract-a",
+                "_invoice_key": "invoice-a",
             },
             "last_update": "2026-08-23T10:00:00+00:00",
             "consumption": {"month": "2026-08", "month_to_date_kwh": 10.0},
@@ -41,6 +45,7 @@ def test_complete_greenely_state_maps_to_provider_data():
         "agreement_name": "Kvartsprisavtal",
         "latest_period": {},
         "summary_present": True,
+        "customer_price_eligible": True,
         "processing": {"last_error": None},
         "last_update": "2026-08-23T10:00:00+00:00",
     }
@@ -101,3 +106,19 @@ def test_missing_tariff_maps_to_none():
     data = provider_data_from_greenely_state({"provider": "greenely", "summary": None})
 
     assert data.tariff is None
+
+
+def test_future_or_legacy_summary_is_not_current_price_input():
+    data = provider_data_from_greenely_state(
+        {
+            "provider": "greenely",
+            "configured": True,
+            "facility_id": "facility-b",
+            "summary": {"tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25}},
+            "invoices": [],
+            "source": {
+                "contracts": [{"_contract_id": "future", "status": "COMPLETED", "start_date": "4102444800"}],
+            },
+        }
+    )
+    assert data.active_data["customer_price_eligible"] is False

@@ -22,7 +22,7 @@ from custom_components.elrakning.elhandel.providers.greenely_client import (
     _sanitize_invoice,
 )
 from custom_components.elrakning.elhandel import models as electricity_models
-from custom_components.elrakning.elhandel.manager import ElhandelManager
+from custom_components.elrakning.elhandel.manager import ElhandelManager, _has_untrusted_legacy_history
 from custom_components.elrakning.elhandel.lifecycle import LifecycleManager
 from custom_components.elrakning.elhandel.providers.greenely import GreenelyProvider
 from custom_components.elrakning.elhandel.providers.greenely_consumption import (
@@ -66,6 +66,20 @@ def test_extract_facilities_from_raw_list():
 
 def test_extract_facilities_rejects_invalid_format():
     assert _extract_facilities({"data": {"id": "one"}}) is None
+
+
+def test_untrusted_legacy_history_is_not_accepted_as_site_history():
+    legacy = {
+        "invoices": [],
+        "source": {"consumption": {"samples": [{"timestamp": "2026-09-01", "value": 42.0}]}},
+    }
+    attributed = {
+        "invoices": [],
+        "source": {"consumption": {"samples": [{"timestamp": "2026-09-01", "value": 42.0, "facility_id": "facility-b"}]}},
+    }
+
+    assert _has_untrusted_legacy_history(legacy)
+    assert not _has_untrusted_legacy_history(attributed)
 
 
 class _Response:

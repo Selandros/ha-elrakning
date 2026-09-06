@@ -130,6 +130,7 @@ class GreenelyProvider:
         contract_id: str,
         invoice_key: str,
         amount_due_sek: float | None,
+        installation_id: str | None = None,
     ) -> dict[str, Any]:
         """Authenticate and process one Greenely invoice."""
         if not self.has_credentials(config):
@@ -137,7 +138,7 @@ class GreenelyProvider:
         await self.async_login(config[GREENELY_EMAIL], config[GREENELY_PASSWORD])
         try:
             return await GreenelyInvoiceProcessor(self).async_process(
-                contract_id, invoice_key, amount_due_sek
+                contract_id, invoice_key, amount_due_sek, installation_id
             )
         except GreenelyError as err:
             raise GreenelyInvoiceError(err.code, "pdf_download") from err

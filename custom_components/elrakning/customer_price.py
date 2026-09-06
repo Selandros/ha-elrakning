@@ -13,6 +13,11 @@ from .elhandel.provider_registry import provider_data_from_state
 VAT_MULTIPLIER = 1.25
 
 
+def grid_price_is_current(grid_price: dict[str, Any] | None) -> bool:
+    """Allow grid economics only for an explicitly current contract."""
+    return isinstance(grid_price, dict) and grid_price.get("contract_source_status") == "ACTIVE"
+
+
 def grid_variable_cost_ex_vat(grid_price: dict[str, Any] | None) -> float | None:
     """Convert a verified gross grid variable rate to the price graph basis."""
     if not isinstance(grid_price, dict) or grid_price.get("vat_included") is not True:
@@ -96,6 +101,8 @@ def _coerce_provider_data(
 
 def _variable_cost_ex_vat_sek_per_kwh(provider_data: ProviderData | None) -> float | None:
     if provider_data is None or provider_data.active_data.get("configured") is not True:
+        return None
+    if provider_data.active_data.get("customer_price_eligible") is not True:
         return None
     tariff = provider_data.tariff
     value = tariff.get("variable_cost_ore_per_kwh_incl_vat") if isinstance(tariff, dict) else None

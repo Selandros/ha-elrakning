@@ -8,6 +8,7 @@ from .greenely_invoice_parser import (
     build_greenely_summary,
     extract_pdf_text,
     parse_greenely_invoice_diagnostics,
+    parse_greenely_invoice_text,
 )
 
 
@@ -31,6 +32,7 @@ class GreenelyInvoiceProcessor:
         contract_id: str,
         invoice_key: str,
         amount_due_sek: float | None,
+        installation_id: str | None = None,
     ) -> dict[str, Any]:
         pdf_bytes = await self._provider.async_get_invoice_pdf(contract_id, invoice_key)
         try:
@@ -42,6 +44,21 @@ class GreenelyInvoiceProcessor:
             parsed, diagnostics, debug_text_excerpt = parse_greenely_invoice_diagnostics(extracted_text)
         except RuntimeError as err:
             raise GreenelyInvoiceError(str(err), "parse") from err
+
+        sections = parsed.get("installation_sections") if isinstance(parsed, dict) else None
+        if isinstance(sections, list) and sections:
+            selected = next(
+                (
+                    section for section in sections
+                    if isinstance(section, dict)
+                    and installation_id
+                    and str(section.get("installation_id")) == str(installation_id)
+                ),
+                None,
+            )
+            if selected is None:
+                raise GreenelyInvoiceError("invoice_installation_unmatched", "attribution")
+            parsed = parse_greenely_invoice_text(str(selected.get("text") or ""))
 
         diagnostics["pdf_pages"] = page_count
         used_credit = parsed.get("credit", {}).get("used_sek")

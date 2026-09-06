@@ -153,6 +153,15 @@ class ElhandelManager:
             self.state = self.storage.sanitize(cached)
             self.state["configured"] = True
             self.state["provider"] = self._site_binding.get("provider") or GREENELY_PROVIDER
+            if _has_untrusted_legacy_history(self.state):
+                self.state["summary"] = None
+                self.state["invoices"] = []
+                self.state["invoice_count"] = 0
+                self.state["consumption"] = None
+                source = self.state.setdefault("source", {})
+                consumption = source.setdefault("consumption", {})
+                consumption["samples"] = []
+                await self.storage.async_save(self.state)
             return
         self.state = {**self.state, **self._empty_site_runtime_state()}
 
@@ -413,6 +422,8 @@ class ElhandelManager:
         source["facility"] = refresh_data["facility"]
         source["contracts"] = refresh_data["contracts"]
         source["invoices"] = refresh_data["invoices"]
+        if not refresh_data["invoices"]:
+            source["consumption"] = {"samples": []}
         await self.async_diagnostic("INFO", "source", "source_facility_loaded", "Facility loaded")
         await self.async_diagnostic("INFO", "source", "source_contracts_loaded", f"Contracts loaded: {len(refresh_data['contracts'])}")
         await self.async_diagnostic("INFO", "source", "source_invoices_loaded", f"Invoices loaded: {len(refresh_data['invoices'])}")
@@ -427,7 +438,7 @@ class ElhandelManager:
             "facility_name": _safe_facility_name(refresh_data["facility"]),
             "invoice_count": len(invoices),
             "invoices": invoices,
-            "summary": self.state.get("summary"),
+            "summary": self.state.get("summary") if refresh_data["invoices"] and _summary_has_attribution(self.state) else None,
             "processing": self.state.get("processing", self._empty_processing()),
             "consumption": self.state.get("consumption"),
             "consumption_error": self.state.get("consumption_error"),
@@ -438,7 +449,9 @@ class ElhandelManager:
         }
         await self.storage.async_save(self.state)
         self.hass.bus.async_fire(ELECTRICITY_PROVIDER_UPDATE_EVENT)
-        await self.async_process_latest_invoice_if_needed()
+        await self.async_process_latest_invoice_if_needed(
+            force=not _summary_has_attribution(self.state)
+        )
         await self.async_refresh_consumption("invoice_update")
         return self.public_state()
 
@@ -463,27 +476,10 @@ class ElhandelManager:
             and current_facility_id != facility_id
         )
         invoices = [] if facility_changed else self.state.get("invoices", [])
-        restored_samples: list[dict[str, Any]] = []
-        stored_state: dict[str, Any] | None = None
-        if not facility_changed and not invoices:
-            stored_state = await self.storage.async_load(
-                facility_id=facility_id,
-                provider=GREENELY_PROVIDER,
-                use_active_namespace=True,
-            )
-            if isinstance(stored_state, dict):
-                stored_invoices = stored_state.get("invoices")
-                if isinstance(stored_invoices, list):
-                    invoices = stored_invoices
-                stored_source = stored_state.get("source")
-                if isinstance(stored_source, dict):
-                    stored_consumption = stored_source.get("consumption")
-                    if isinstance(stored_consumption, dict) and isinstance(stored_consumption.get("samples"), list):
-                        restored_samples = stored_consumption["samples"]
         source = self.state.get("source", {})
-        if restored_samples and isinstance(source, dict):
+        if not invoices and isinstance(source, dict):
             source = dict(source)
-            source["consumption"] = {"samples": restored_samples}
+            source["consumption"] = {"samples": []}
         config = dict(self.entry.data)
         config[ELECTRICITY_PROVIDER_CONFIG_KEY] = GREENELY_PROVIDER
         config[ELECTRICITY_PROVIDER_CONFIG_DATA_KEY] = saved_config
@@ -537,14 +533,26 @@ class ElhandelManager:
         processing["last_error_at"] = datetime.now(timezone.utc).isoformat()
         try:
             provider = GreenelyProvider(self.hass)
+            facility = self.state.get("source", {}).get("facility", {})
+            installation_id = facility.get("meter_id") if isinstance(facility, dict) else None
             result = await provider.async_process_invoice(
-                config, latest["_contract_id"], invoice_key, latest.get("amount_due_sek")
+                config,
+                latest["_contract_id"],
+                invoice_key,
+                latest.get("amount_due_sek"),
+                str(installation_id) if installation_id is not None else None,
             )
         except GreenelyError as err:
             return await self._process_failure(invoice_key, err.code, processing["last_error_stage"] or "refresh")
         except GreenelyInvoiceError as err:
             return await self._process_failure(invoice_key, err.code, err.stage)
         self.state["summary"] = result["summary"]
+        self.state["summary"].update({
+            "_facility_id": self.state.get("facility_id"),
+            "_contract_id": latest.get("_contract_id"),
+            "_invoice_key": invoice_key,
+            "_source_kind": "invoice",
+        })
         await self.async_diagnostic("INFO", "invoice", "invoice_parse_success", "Invoice parsed successfully")
         await self.async_diagnostic("INFO", "invoice", "summary_updated", "Summary updated")
         self.state["error"] = None
@@ -688,3 +696,35 @@ class ElhandelManager:
 
     async def async_shutdown(self) -> None:
         await self.lifecycle.async_shutdown()
+
+
+def _summary_has_attribution(state: dict[str, Any]) -> bool:
+    summary = state.get("summary")
+    if not isinstance(summary, dict):
+        return False
+    if summary.get("_source_kind") != "invoice":
+        return False
+    if summary.get("_facility_id") != state.get("facility_id"):
+        return False
+    invoice_key = summary.get("_invoice_key")
+    contract_id = summary.get("_contract_id")
+    invoices = state.get("invoices") if isinstance(state.get("invoices"), list) else []
+    return any(
+        item.get("_invoice_key") == invoice_key and item.get("_contract_id") == contract_id
+        for item in invoices
+        if isinstance(item, dict)
+    )
+
+
+def _has_untrusted_legacy_history(state: dict[str, Any]) -> bool:
+    """Reject legacy provider history that has no invoice/facility provenance."""
+    invoices = state.get("invoices") if isinstance(state.get("invoices"), list) else []
+    source = state.get("source") if isinstance(state.get("source"), dict) else {}
+    consumption = source.get("consumption") if isinstance(source.get("consumption"), dict) else {}
+    samples = consumption.get("samples") if isinstance(consumption.get("samples"), list) else []
+    if invoices or not samples:
+        return False
+    return any(
+        not isinstance(sample, dict) or not isinstance(sample.get("facility_id"), str)
+        for sample in samples
+    )

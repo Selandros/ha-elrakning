@@ -28,6 +28,22 @@ def parse_swedish_decimal(value: str) -> Decimal:
 def parse_greenely_invoice_text(text: str) -> dict[str, Any]:
     """Parse known Greenely invoice rows into a bounded normalized result."""
     normalized = re.sub(r"\s+", " ", text).strip()
+    installation_sections = _installation_sections(normalized)
+    if len(installation_sections) > 1:
+        return {
+            "parser_version": 3,
+            "installation_sections": installation_sections,
+            "warnings": ["multiple_installations_require_attribution"],
+        }
+    if len(installation_sections) == 1:
+        result = _parse_greenely_invoice_body(installation_sections[0]["text"])
+        result["installation_sections"] = installation_sections
+        return result
+    return _parse_greenely_invoice_body(normalized)
+
+
+def _parse_greenely_invoice_body(normalized: str) -> dict[str, Any]:
+    """Parse one already isolated invoice installation section."""
     warnings: list[str] = []
     agreement_match = re.search(rf"Elavtal\s*:\s*(.+?),\s*månadsavgift\s*({NUMBER})\s*kr", normalized, re.IGNORECASE)
     agreement = agreement_match.group(1).strip() if agreement_match else _search_text(normalized, r"(Kvartsprisavtal)")
@@ -74,12 +90,22 @@ def parse_greenely_invoice_text(text: str) -> dict[str, Any]:
             "fixed_fee_ex_vat_per_month": fixed["rate_ex_vat_sek_per_month"] if fixed else None,
             "fixed_fee_incl_vat_per_month": (fixed["amount_incl_vat_sek"] if fixed else agreement_fee),
         },
-        "credit": _credit_values(text),
+        "credit": _credit_values(normalized),
         "rounding_sek": _rounding_value(normalized),
         "gross_charge_sek": _gross_charge(spot_amount, variable_amount, fixed, vat_amount, _rounding_value(normalized)),
         "warnings": warnings,
     }
     return _clean_result(result)
+
+
+def _installation_sections(normalized: str) -> list[dict[str, Any]]:
+    """Split invoice text at explicit provider installation identifiers."""
+    matches = list(re.finditer(r"\bAnl\.?\s*id\s*[:#]?\s*([0-9]{6,})", normalized, re.IGNORECASE))
+    sections: list[dict[str, Any]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        sections.append({"installation_id": match.group(1), "text": normalized[match.start():end].strip()})
+    return sections
 
 
 def parse_greenely_invoice_diagnostics(text: str) -> tuple[dict[str, Any], dict[str, Any], str]:

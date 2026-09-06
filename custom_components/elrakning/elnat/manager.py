@@ -64,7 +64,12 @@ class GridManager:
         if not self._site_binding:
             self.provider.state = self.provider._empty_state()
             return
-        self.provider.state = deepcopy(state) if isinstance(state, dict) else self.provider._empty_state()
+        applied = deepcopy(state) if isinstance(state, dict) else self.provider._empty_state()
+        agreement = applied.get("agreement") if isinstance(applied.get("agreement"), dict) else {}
+        if agreement.get("status") == "future":
+            applied["consumption"] = {"status": "missing", "resolution": "Monthly"}
+            applied["cost"] = None
+        self.provider.state = applied
 
     async def async_refresh(self) -> dict[str, Any]:
         return await self.provider.async_refresh() if self.provider else {"configured": False}

@@ -35,6 +35,7 @@ sys.modules[_SPEC.name] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
 build_customer_price_data = _MODULE.build_customer_price_data
 grid_variable_cost_ex_vat = _MODULE.grid_variable_cost_ex_vat
+grid_price_is_current = _MODULE.grid_price_is_current
 ProviderData = _MODULE.ProviderData
 
 
@@ -57,7 +58,14 @@ class CustomerPriceTests(unittest.TestCase):
                 "provider": "greenely",
                 "summary": {
                     "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+                    "_source_kind": "invoice",
+                    "_facility_id": "facility-a",
+                    "_contract_id": "contract-a",
+                    "_invoice_key": "invoice-a",
                 },
+                "facility_id": "facility-a",
+                "invoices": [{"_contract_id": "contract-a", "_invoice_key": "invoice-a"}],
+                "source": {"contracts": [{"_contract_id": "contract-a", "status": "OPERATIONAL"}]},
             },
         )
 
@@ -78,17 +86,38 @@ class CustomerPriceTests(unittest.TestCase):
         self.assertEqual(data.periods[0].spot_price_ex_vat, 0.2993)
         self.assertAlmostEqual(data.periods[0].customer_price, 0.374125)
 
+    def test_future_or_unattributed_provider_data_cannot_adjust_current_price(self) -> None:
+        data = build_customer_price_data(
+            _periods(),
+            {
+                "configured": True,
+                "provider": "greenely",
+                "summary": {
+                    "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+                },
+            },
+        )
+        self.assertEqual(data.mode, "spot_price")
+        self.assertIsNone(data.electricity_cost_ex_vat)
+
     def test_provider_data_produces_the_same_result_as_current_public_state(self) -> None:
         provider_state = {
             "configured": True,
             "provider": "greenely",
             "summary": {
                 "tariff": {"variable_cost_ore_per_kwh_incl_vat": 21.25},
+                "_source_kind": "invoice",
+                "_facility_id": "facility-a",
+                "_contract_id": "contract-a",
+                "_invoice_key": "invoice-a",
             },
+            "facility_id": "facility-a",
+            "invoices": [{"_contract_id": "contract-a", "_invoice_key": "invoice-a"}],
+            "source": {"contracts": [{"_contract_id": "contract-a", "status": "OPERATIONAL"}]},
         }
         provider_data = ProviderData(
             provider="greenely",
-            active_data={"configured": True},
+            active_data={"configured": True, "customer_price_eligible": True},
             tariff={"variable_cost_ore_per_kwh_incl_vat": 21.25},
         )
 
@@ -119,3 +148,7 @@ class CustomerPriceTests(unittest.TestCase):
             "vat_included": False,
             "variable_total_ore_per_kwh_gross": 142,
         }))
+
+    def test_future_grid_price_is_preview_only(self) -> None:
+        self.assertFalse(grid_price_is_current({"contract_source_status": "FUTURE"}))
+        self.assertTrue(grid_price_is_current({"contract_source_status": "ACTIVE"}))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..models import ProviderData
@@ -18,6 +19,18 @@ def provider_data_from_greenely_state(state: Mapping[str, Any]) -> ProviderData:
     samples = _list_of_mappings(source_consumption.get("samples"))
     summary = _mapping(state.get("summary"))
     latest_period = summary.get("latest_period") if isinstance(summary.get("latest_period"), Mapping) else {}
+    summary_contract_id = summary.get("_contract_id")
+    invoices = _list_of_mappings(state.get("invoices"))
+    summary_attributed = (
+        summary.get("_source_kind") == "invoice"
+        and summary.get("_facility_id") == state.get("facility_id")
+        and any(
+            item.get("_invoice_key") == summary.get("_invoice_key")
+            and item.get("_contract_id") == summary_contract_id
+            for item in invoices
+        )
+    )
+    current_contract = _current_contract(source.get("contracts"), summary_contract_id)
 
     active_data = {
         "configured": bool(state.get("configured")),
@@ -26,6 +39,7 @@ def provider_data_from_greenely_state(state: Mapping[str, Any]) -> ProviderData:
         "agreement_name": summary.get("agreement_name"),
         "latest_period": latest_period,
         "summary_present": isinstance(state.get("summary"), Mapping),
+        "customer_price_eligible": summary_attributed and current_contract,
         "processing": _mapping(state.get("processing")),
         "last_update": state.get("last_update"),
     }
@@ -91,3 +105,22 @@ def _list_of_mappings(value: Any) -> list[dict[str, Any]]:
 
 def _string_or_none(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _current_contract(contracts: Any, contract_id: str | None) -> bool:
+    """Return true only for an attributed contract effective now."""
+    for contract in _list_of_mappings(contracts):
+        if contract_id and str(contract.get("_contract_id")) != str(contract_id):
+            continue
+        status = str(contract.get("status") or "").upper()
+        if status in {"FUTURE", "INACTIVE", "ENDED"}:
+            continue
+        start = contract.get("start_date")
+        try:
+            start_at = datetime.fromtimestamp(float(start), tz=timezone.utc) if start is not None else None
+        except (TypeError, ValueError, OverflowError):
+            start_at = None
+        if start_at is not None and start_at > datetime.now(timezone.utc):
+            continue
+        return True
+    return False
