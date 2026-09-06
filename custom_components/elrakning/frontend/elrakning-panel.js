@@ -1128,6 +1128,76 @@ export function energyIntervalsToStepPoints(intervals, valueField = "value_kw") 
   return points;
 }
 
+export function energyIntervalsToCurvePoints(intervals, valueField = "value_kw") {
+  const rows = (Array.isArray(intervals) ? intervals : []).map((interval) => ({
+    start: new Date(interval?.start).getTime(),
+    end: new Date(interval?.end).getTime(),
+    value: Number(interval?.[valueField]),
+    resolution_seconds: Number(interval?.resolution_seconds),
+    source: interval?.source || null,
+  })).filter((interval) => Number.isFinite(interval.start)
+    && Number.isFinite(interval.end)
+    && interval.end > interval.start
+    && Number.isFinite(interval.value))
+    .sort((left, right) => left.start - right.start);
+  const points = [];
+  rows.forEach((interval, index) => {
+    const previous = rows[index - 1];
+    const next = rows[index + 1];
+    const base = {
+      raw_timestamp: new Date(interval.start).toISOString(),
+      value_kw: interval.value,
+      gap_before: Boolean(previous && interval.start > previous.end + 1),
+      history_source: interval.source,
+      history_curve: true,
+      source_resolution_seconds: Number.isFinite(interval.resolution_seconds) ? interval.resolution_seconds : null,
+    };
+    points.push({ ...base, timestamp: interval.start });
+    if (!next || next.start > interval.end + 1) {
+      points.push({
+        ...base,
+        timestamp: interval.end - 1,
+        raw_timestamp: new Date(interval.end - 1).toISOString(),
+        gap_before: false,
+      });
+    }
+  });
+  return points;
+}
+
+export function energyHistoryIntervalValueAt(history, series, timestamp) {
+  const target = new Date(timestamp).getTime();
+  if (!Number.isFinite(target)) return null;
+  const interval = (Array.isArray(history?.series?.[series]) ? history.series[series] : []).find((item) => {
+    const start = new Date(item?.start).getTime();
+    const end = new Date(item?.end).getTime();
+    return Number.isFinite(start) && Number.isFinite(end) && start <= target && target < end;
+  });
+  const value = Number(interval?.value_kw);
+  return Number.isFinite(value) ? value : null;
+}
+
+export function energyHistoryToMeterCurvePoints(history) {
+  const byTimestamp = new Map();
+  const add = (series, key) => {
+    for (const point of energyIntervalsToCurvePoints(history?.series?.[series])) {
+      const current = byTimestamp.get(point.timestamp) || {
+        timestamp: point.timestamp, raw_timestamp: point.raw_timestamp,
+        import_kw: null, export_kw: null, gap_before: point.gap_before,
+        history_source: point.history_source, history_curve: true,
+        source_resolution_seconds: point.source_resolution_seconds,
+      };
+      current[key] = point.value_kw;
+      current.gap_before = current.gap_before || point.gap_before;
+      current.source_resolution_seconds ||= point.source_resolution_seconds;
+      byTimestamp.set(point.timestamp, current);
+    }
+  };
+  add("import", "import_kw");
+  add("export", "export_kw");
+  return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
+}
+
 export function energyHistoryToMeterStepPoints(history) {
   const byTimestamp = new Map();
   const add = (series, key) => {
@@ -1991,6 +2061,16 @@ export function buildThresholdClippedSegments(points, key) {
     const currentTime = new Date(point.timestamp).getTime();
     const sameHistoryInterval = Boolean(previous?.history_interval_id)
       && previous.history_interval_id === point.history_interval_id;
+    const historyResolutionMs = Math.max(
+      Number(previous?.source_resolution_seconds) || 0,
+      Number(point?.source_resolution_seconds) || 0,
+    ) * 1000;
+    const continuousHistoryCurve = Boolean(previous?.history_curve)
+      && Boolean(point?.history_curve)
+      && !point.gap_before
+      && historyResolutionMs > 0
+      && currentTime > previousTime
+      && currentTime - previousTime <= historyResolutionMs + 1;
     const contiguous = previous
       && Number.isFinite(previousValue)
       && Number.isFinite(previousTime)
@@ -1998,7 +2078,8 @@ export function buildThresholdClippedSegments(points, key) {
       && previous.raw_timestamp != null
       && point.raw_timestamp != null
       && ((currentTime - previousTime === 5 * 60 * 1000 && !point.gap_before)
-        || sameHistoryInterval);
+        || sameHistoryInterval
+        || continuousHistoryCurve);
     if (!contiguous) {
       appendSegment();
       if (isVisiblePowerValue(value)) segment.push(point);
@@ -10637,7 +10718,11 @@ class ElrakningPanel {
         .filter((point) => point.raw_timestamp !== null)
         .map((point) => [point.timestamp, point]),
     );
-    const meterDisplayPoints = this.prepareMeterDisplayPoints(meterCanonicalPoints);
+    const meterDisplayPoints = useHistoricalMeter
+      ? this.prepareMeterDisplayPoints(energyHistoryToMeterCurvePoints(energyHistory).filter((point) => (
+        point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+      )))
+      : this.prepareMeterDisplayPoints(meterCanonicalPoints);
     const powerCanonicalPoints = {};
     const powerDisplayPoints = {};
     const powerDisplayGeometry = {};
@@ -10651,10 +10736,16 @@ class ElrakningPanel {
       const historicalPoints = energyIntervalsToStepPoints(energyHistory?.series?.[key]).filter((point) => (
         point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
       ));
-      powerCanonicalPoints[key] = rawPoints.length > 0
-        ? this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd)
-        : historicalPoints;
-      powerDisplayPoints[key] = powerCanonicalPoints[key].map((point) => ({
+      const useHistoricalPower = rawPoints.length === 0 && historicalPoints.length > 0;
+      powerCanonicalPoints[key] = useHistoricalPower
+        ? historicalPoints
+        : this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
+      const displaySource = useHistoricalPower
+        ? energyIntervalsToCurvePoints(energyHistory?.series?.[key]).filter((point) => (
+          point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+        ))
+        : powerCanonicalPoints[key];
+      powerDisplayPoints[key] = displaySource.map((point) => ({
         ...point,
         value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
       }));
@@ -10789,6 +10880,7 @@ class ElrakningPanel {
       y,
       meterY,
       meterDisplayY: (key, timestamp) => this.meterDisplayYAt(meterDisplayGeometry[key], timestamp, x),
+      powerDisplayY: (key, timestamp) => this.meterDisplayYAt(powerDisplayGeometry[key], timestamp, x),
     };
     const dynamicChartMarkup = {
       grid: meterGrid,
@@ -10927,17 +11019,22 @@ class ElrakningPanel {
       const index = this.priceData.periods.indexOf(period);
       const canonicalMeterPoint = this._meterCanonicalPointAt(tooltipTimestamp);
       const rawMeterPoint = this._meterPointAtNearest(tooltipTimestamp);
+      const meterSeries = { import_kw: "import", export_kw: "export" };
       const meterValue = (key) => canonicalMeterPoint && Number.isFinite(Number(canonicalMeterPoint[key]))
         ? Number(canonicalMeterPoint[key])
-        : null;
+        : energyHistoryIntervalValueAt(this.priceSnapshot?.energy_history, meterSeries[key], tooltipTimestamp);
       const powerValue = (key) => {
         const point = this._powerCanonicalPointMaps?.[key]?.get(tooltipTimestamp);
-        return point && Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null;
+        return point && Number.isFinite(Number(point.value_kw))
+          ? Number(point.value_kw)
+          : energyHistoryIntervalValueAt(this.priceSnapshot?.energy_history, key, tooltipTimestamp);
       };
       const barPrice = this._chartBarPrices?.[index];
       const hoverSnapshot = {
         hoverTime: tooltipTimestamp,
-        meterSampleTime: canonicalMeterPoint ? canonicalMeterPoint.timestamp : null,
+        meterSampleTime: canonicalMeterPoint
+          ? canonicalMeterPoint.timestamp
+          : (Number.isFinite(meterValue("import_kw")) || Number.isFinite(meterValue("export_kw")) ? tooltipTimestamp : null),
         priceBarValue: barPrice ?? null,
         importValue: meterValue("import_kw"),
         exportValue: meterValue("export_kw"),
@@ -11009,7 +11106,8 @@ class ElrakningPanel {
         for (const [key, snapshotKey, className] of powerMarkers) {
           const value = hoverSnapshot[snapshotKey];
           if (!visibleLayers[key] || !isVisiblePowerValue(value)) continue;
-          markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" fill="${chartColor(className)}" cx="${priceMarkerX}" cy="${hoverGeometry.meterY(value)}" r="4" />`);
+          const displayY = hoverGeometry.powerDisplayY?.(key, hoverSnapshot.hoverTime);
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" fill="${chartColor(className)}" cx="${priceMarkerX}" cy="${Number.isFinite(displayY) ? displayY : hoverGeometry.meterY(value)}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");
       }
