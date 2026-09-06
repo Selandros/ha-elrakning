@@ -56,6 +56,33 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   design/audit of Forecast.Solar and Open-Meteo immutable capture plus
   site-independent `collection_enabled` semantics. No C.2 implementation is
   included here.
+- VERIFIED (runtime, 0.0.628, 2026-09-06): Step C.2.0 site-context isolation
+  passed on authenticated Home Assistant runtime through A→B→A→B, both
+  before and after a normal Home Assistant Core restart. Forecast.Solar
+  returned `available=true` with the Vikarbodarna site id and the same ten
+  Vikarbodarna baselines at A1 and A2. Fiskvik returned
+  `available=false`/unconfigured at B1 and B2, with no Vikarbodarna
+  baselines exposed.
+- VERIFIED (runtime persistence, 0.0.628, 2026-09-06): Forecast.Solar and
+  Open-Meteo namespaced Store isolation passed read-only before and after the
+  authenticated switch sequence and restart. The Vikarbodarna stores kept
+  their ownership and hashes; Fiskvik had no namespaced Forecast.Solar or
+  Open-Meteo store, and no cross-site persistence contamination was observed.
+  Global legacy stores were not used as evidence of Fiskvik ownership.
+- TEST VERIFIED (0.0.628, 2026-09-06): Open-Meteo in-memory stale-state
+  clearing, obsolete-response discard, out-of-order response protection, and
+  context/request-generation guards are covered by regression tests. The
+  Open-Meteo manager has no public websocket read command for direct live-state
+  inspection, so those internal protections are not promoted to runtime
+  manager-state evidence.
+- VERIFIED (scope boundary, 0.0.628, 2026-09-06): Step C.2.0 is complete.
+  Runtime-verified evidence covers normal site-context switching,
+  Forecast.Solar empty-site fail-closed behavior, namespaced Store ownership,
+  persistence across restart, and absence of cross-site persistence
+  contamination. Concurrency guards remain test-verified only when no natural
+  in-flight race is observed. The next scope is Step C.2.1: producer-contract
+  fixtures/design for immutable Forecast.Solar and Open-Meteo frames. No C.2.1
+  implementation is included here.
 - VERIFIED (release, 0.0.626, 2026-09-06): E.ON facility-state indexing,
   site-explicit runtime resolution, unique legacy-binding reconciliation,
   active-site websocket/public-state resolution, and site-scoped economic
