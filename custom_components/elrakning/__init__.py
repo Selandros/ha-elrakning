@@ -180,6 +180,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "shadow": solar_shadow_manager,
         "evidence": solar_evidence_manager,
     })
+    await canonical_collector.async_capture_forecast_solar()
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     await solar_evidence_manager.async_startup_catch_up()
     solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())

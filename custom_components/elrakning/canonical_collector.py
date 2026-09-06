@@ -18,7 +18,11 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from .canonical_storage import CanonicalStorage, quarter_start
-from .external_input_frames import persist_nord_pool_frame
+from .external_input_frames import (
+    build_forecast_solar_frames,
+    persist_forecast_solar_frames,
+    persist_nord_pool_frame,
+)
 from .meter import _power_kw
 
 
@@ -55,6 +59,56 @@ class CanonicalCollector:
             return await self.hass.async_add_executor_job(
                 persist_nord_pool_frame, self.storage, data, binding, captured_at
             )
+
+    async def async_capture_forecast_solar(self, captured_at: datetime | None = None) -> dict[str, int]:
+        """Capture all enabled Forecast.Solar site bindings without UI context."""
+        captured_at = (captured_at or dt_util.now()).astimezone(timezone.utc)
+        totals = {"sites": 0, "written": 0, "unchanged": 0, "revised": 0}
+        target_getter = getattr(self.site_identity_manager, "forecast_collection_targets", None)
+        targets = target_getter() if target_getter else []
+        for target in targets:
+            try:
+                frames = build_forecast_solar_frames(
+                    self.hass, target["site_id"], target["binding"], captured_at
+                )
+            except (TypeError, ValueError):
+                # Unsupported or malformed source context must fail closed.
+                continue
+            if not frames:
+                continue
+            totals["sites"] += 1
+            result = await self.hass.async_add_executor_job(
+                self._persist_forecast_target,
+                target["site_id"],
+                target["binding"],
+                frames,
+                captured_at,
+            )
+            for key in ("written", "unchanged", "revised"):
+                totals[key] += result[key]
+        return totals
+
+    def _persist_forecast_target(self, site_id, binding, frames, captured_at):
+        current = {
+            item["site_id"]: item["binding"]
+            for item in getattr(self.site_identity_manager, "forecast_collection_targets", lambda: [])()
+        }.get(site_id)
+        if current != binding:
+            return {"written": 0, "unchanged": 0, "revised": 0}
+        return persist_forecast_solar_frames(self.storage, frames, captured_at)
+
+    async def _async_forecast_state_changed(self, event: Event) -> None:
+        if not self._started:
+            return
+        entity_id = event.data.get("entity_id")
+        target_getter = getattr(self.site_identity_manager, "forecast_collection_targets", None)
+        targets = target_getter() if target_getter else []
+        if not any(
+            entity_id in (target["binding"].get("entities") or {}).values()
+            for target in targets
+        ):
+            return
+        await self.async_capture_forecast_solar()
 
     async def async_start(self) -> None:
         if self._started:
@@ -104,6 +158,7 @@ class CanonicalCollector:
 
     async def _async_state_changed(self, event: Event) -> None:
         await self._async_observation_event(event, reported=False)
+        await self._async_forecast_state_changed(event)
 
     async def _async_state_reported(self, event: Event) -> None:
         await self._async_observation_event(event, reported=True)

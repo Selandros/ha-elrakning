@@ -69,6 +69,26 @@ def _managers(mapping, meter_mapping=None):
 
 
 class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
+    def test_forecast_collection_targets_are_enabled_site_explicit_and_active_site_independent(self):
+        manager = SiteIdentityManager.__new__(SiteIdentityManager)
+        manager.state = {
+            "sites": [
+                {"site_id": "site-a", "name": "A"},
+                {"site_id": "site-b", "name": "B"},
+            ],
+            "active_site_id": "site-b",
+            "site_configs": {
+                "site-a": {
+                    "collection_enabled": True,
+                    "bindings": {"forecast": {"config_entry_id": "fs", "entities": {"today_kwh": "sensor.a"}}},
+                },
+                "site-b": {"collection_enabled": True, "bindings": {}},
+            },
+        }
+        targets = manager.forecast_collection_targets()
+        self.assertEqual([item["site_id"] for item in targets], ["site-a"])
+        self.assertEqual(targets[0]["binding"]["entities"]["today_kwh"], "sensor.a")
+
     async def test_first_migration_creates_persistent_site_and_unattributed_boundaries(self):
         entries = {"sensor.load": _Entity("registry-load", "load")}
         hass = _hass(entries)

@@ -14,6 +14,8 @@ install_elrakning_package_stub()
 from custom_components.elrakning.canonical_storage import CanonicalStorage
 from custom_components.elrakning.external_input_frames import (
     build_nord_pool_frame,
+    build_forecast_solar_frames,
+    persist_forecast_solar_frames,
     persist_nord_pool_frame,
 )
 
@@ -53,6 +55,108 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(row[:3], ("global", None, "market.price.energy"))
         self.assertEqual(row[3], int(captured.timestamp() * 1_000_000))
         self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_points").fetchone()[0], 2)
+
+    def test_forecast_solar_supported_roles_write_site_scoped_frames(self):
+        states = {
+            "sensor.today": SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"}),
+            "sensor.tomorrow": SimpleNamespace(state="17.9", attributes={"unit_of_measurement": "kWh"}),
+            "sensor.remaining": SimpleNamespace(state="12.1", attributes={"unit_of_measurement": "kWh"}),
+            "sensor.power": SimpleNamespace(state="2.5", attributes={"unit_of_measurement": "kW"}),
+            "sensor.peak_today": SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None}),
+            "sensor.peak_tomorrow": SimpleNamespace(state="2026-09-06T12:00:00+02:00", attributes={"unit_of_measurement": None}),
+        }
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=states.get),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {
+            "config_entry_id": "fs-entry",
+            "binding_fingerprint": "binding-a",
+            "entities": {
+                "today_kwh": "sensor.today",
+                "tomorrow_kwh": "sensor.tomorrow",
+                "remaining_today_kwh": "sensor.remaining",
+                "power_now_kw": "sensor.power",
+                "peak_time_today": "sensor.peak_today",
+                "peak_time_tomorrow": "sensor.peak_tomorrow",
+                "power_next_12_hours_kw": "sensor.aggregate",
+            },
+        }
+        captured = datetime(2026, 9, 5, 10, 0, tzinfo=UTC)
+        frames = build_forecast_solar_frames(hass, "site-a", binding, captured)
+        self.assertEqual(len(frames), 6)
+        self.assertTrue(all(frame["source_scope"] == "site" for frame, _ in frames))
+        self.assertTrue(all(frame["site_id"] == "site-a" for frame, _ in frames))
+        self.assertTrue(all(frame["published_at"] is None for frame, _ in frames))
+        self.assertTrue(all(frame["fetched_at"] is None for frame, _ in frames))
+        self.assertEqual({frame["logical_role"] for frame, _ in frames}, {
+            "forecast_solar.today_kwh", "forecast_solar.tomorrow_kwh",
+            "forecast_solar.remaining_today_kwh", "forecast_solar.power_now_kw",
+            "forecast_solar.peak_time_today", "forecast_solar.peak_time_tomorrow",
+        })
+        result = persist_forecast_solar_frames(self.storage, frames, captured)
+        self.assertEqual(result["written"], 6)
+        self.assertEqual(self.storage.count_external_frames(), 6)
+        self.assertEqual(persist_forecast_solar_frames(self.storage, frames, captured + timedelta(minutes=15))["unchanged"], 6)
+
+    def test_forecast_solar_changed_target_is_revision_and_replay_is_decision_time_safe(self):
+        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
+        first_at = datetime(2026, 9, 5, 10, 0, tzinfo=UTC)
+        first = build_forecast_solar_frames(hass, "site-a", binding, first_at)
+        persist_forecast_solar_frames(self.storage, first, first_at)
+        state.state = "17.9"
+        second_at = datetime(2026, 9, 5, 15, 0, tzinfo=UTC)
+        second = build_forecast_solar_frames(hass, "site-a", binding, second_at)
+        persist_forecast_solar_frames(self.storage, second, second_at)
+        rows = self.storage.connection.execute(
+            "SELECT revision, supersedes_frame_id FROM external_input_frames"
+        ).fetchall()
+        self.assertEqual(rows[0][0], 1)
+        self.assertEqual(rows[1][0], 2)
+        first_frame_id = self.storage.connection.execute(
+            "SELECT frame_id FROM external_input_frames WHERE revision=1"
+        ).fetchone()[0]
+        self.assertEqual(rows[1][1], first_frame_id)
+        old = self.storage.read_external_input_frames(first_at + timedelta(minutes=30), source_scope="site", site_id="site-a")
+        new = self.storage.read_external_input_frames(second_at + timedelta(minutes=1), source_scope="site", site_id="site-a")
+        self.assertEqual(old[0]["revision"], 1)
+        self.assertEqual(new[0]["revision"], 2)
+        self.assertEqual(old[0]["points"][0]["value"], 18.4)
+        self.assertEqual(new[0]["points"][0]["value"], 17.9)
+
+    def test_forecast_solar_generation_is_stable_for_values_and_separate_for_sites(self):
+        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity: state), config=SimpleNamespace(time_zone="Europe/Stockholm"))
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
+        first = build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 10, tzinfo=UTC))[0][0]
+        state.state = "19.1"
+        second = build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 15, tzinfo=UTC))[0][0]
+        other = build_forecast_solar_frames(hass, "site-b", binding, datetime(2026, 9, 5, 15, tzinfo=UTC))[0][0]
+        self.assertEqual(first["source_generation_id"], second["source_generation_id"])
+        self.assertNotEqual(first["source_generation_id"], other["source_generation_id"])
+        self.assertNotEqual(first["semantic_key"], other["semantic_key"])
+
+    def test_forecast_solar_unavailable_and_invalid_peak_fail_closed(self):
+        states = {
+            "sensor.today": SimpleNamespace(state="unavailable", attributes={"unit_of_measurement": "kWh"}),
+            "sensor.peak": SimpleNamespace(state="not-a-timestamp", attributes={"unit_of_measurement": None}),
+        }
+        hass = SimpleNamespace(states=SimpleNamespace(get=states.get), config=SimpleNamespace(time_zone="Europe/Stockholm"))
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today", "peak_time_today": "sensor.peak"}}
+        self.assertEqual(build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 10, tzinfo=UTC)), [])
+
+    def test_forecast_solar_local_day_uses_23_and_25_hour_utc_intervals(self):
+        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity: state), config=SimpleNamespace(time_zone="Europe/Stockholm"))
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
+        for captured, expected_hours in ((datetime(2026, 3, 29, 10, tzinfo=UTC), 23), (datetime(2026, 10, 25, 10, tzinfo=UTC), 25)):
+            frame = build_forecast_solar_frames(hass, "site-a", binding, captured)[0][0]
+            self.assertEqual((frame["valid_to"] - frame["valid_from"]).total_seconds(), expected_hours * 3600)
 
     def test_changed_real_periods_create_revision_without_destroying_old_frame(self):
         data = price_data([0.42, 0.43])

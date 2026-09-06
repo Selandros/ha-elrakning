@@ -365,6 +365,24 @@ class SiteIdentityManager:
                     })
         return targets
 
+    def forecast_collection_targets(self) -> list[dict[str, Any]]:
+        """Return explicit Forecast.Solar bindings for enabled sites."""
+        targets = []
+        configs = self.state.get("site_configs", {})
+        for site in self.state.get("sites", []):
+            site_id = site.get("site_id") if isinstance(site, dict) else None
+            if not site_id:
+                continue
+            config = configs.get(site_id, {})
+            if not isinstance(config, dict) or config.get("collection_enabled", True) is not True:
+                continue
+            bindings = config.get("bindings")
+            binding = bindings.get("forecast") if isinstance(bindings, dict) else None
+            if not isinstance(binding, dict) or not isinstance(binding.get("entities"), dict):
+                continue
+            targets.append({"site_id": site_id, "binding": deepcopy(binding)})
+        return targets
+
     def _current_mapping_config(self) -> dict[str, Any]:
         return {
             "power": deepcopy(self.power_manager.mapping),
