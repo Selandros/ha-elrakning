@@ -57,6 +57,8 @@ class GridManager:
         self._site_binding = dict(binding) if isinstance(binding, dict) else None
         if not self.provider:
             return
+        if hasattr(self.provider, "set_active_binding"):
+            self.provider.set_active_binding(self._site_binding)
         if self._refresh_unsub:
             self._refresh_unsub()
             self._refresh_unsub = None
@@ -64,7 +66,12 @@ class GridManager:
         if not self._site_binding:
             self.provider.state = self.provider._empty_state()
             return
-        applied = deepcopy(state) if isinstance(state, dict) else self.provider._empty_state()
+        resolved = None
+        if not isinstance(state, dict) and hasattr(self.provider, "state_for_binding"):
+            resolved = self.provider.state_for_binding(self._site_binding)
+        applied = deepcopy(state if isinstance(state, dict) else resolved)
+        if not isinstance(applied, dict):
+            applied = self.provider._empty_state()
         agreement = applied.get("agreement") if isinstance(applied.get("agreement"), dict) else {}
         if agreement.get("status") == "future":
             applied["consumption"] = {"status": "missing", "resolution": "Monthly"}
@@ -119,3 +126,13 @@ class GridManager:
             "provider_name": None,
             "auth_method": None,
         }
+
+    def public_state_for_binding(self, binding: dict[str, Any] | None) -> dict[str, Any]:
+        if self.provider and hasattr(self.provider, "public_state_for_binding"):
+            return self.provider.public_state_for_binding(binding)
+        return self.public_state()
+
+    def state_for_binding(self, binding: dict[str, Any] | None) -> dict[str, Any] | None:
+        if self.provider and hasattr(self.provider, "state_for_binding"):
+            return self.provider.state_for_binding(binding)
+        return None

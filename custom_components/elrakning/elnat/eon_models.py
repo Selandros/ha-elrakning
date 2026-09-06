@@ -9,6 +9,52 @@ from typing import Any, Mapping
 EON_GRID_PRICING_PREVIEW = True
 
 
+def facility_identity(facility: Any) -> str | None:
+    """Return the strongest stable native identity exposed by E.ON."""
+    if not isinstance(facility, Mapping):
+        return None
+    installation = facility.get("installation_identifier")
+    if isinstance(installation, str) and installation.strip():
+        return f"installation:{installation.strip()}"
+    point_of_delivery = facility.get("point_of_delivery_number")
+    if isinstance(point_of_delivery, str) and point_of_delivery.strip():
+        return f"pod:{point_of_delivery.strip()}"
+    return None
+
+
+def facility_context(facility: Any) -> dict[str, Any] | None:
+    """Return the deterministic legacy matching context for one facility."""
+    if not isinstance(facility, Mapping):
+        return None
+    address = facility.get("address")
+    context = {
+        "address": {
+            key: str(address.get(key)).strip()
+            for key in ("street", "city", "postal_code")
+            if isinstance(address, Mapping)
+            and address.get(key) is not None
+            and str(address.get(key)).strip()
+        },
+        "price_area": facility.get("price_area"),
+        "grid_area": facility.get("grid_area"),
+        "fuse_ampere": facility.get("fuse_ampere"),
+    }
+    if not context["address"] and not any(
+        context[key] is not None for key in ("price_area", "grid_area", "fuse_ampere")
+    ):
+        return None
+    return context
+
+
+def native_contract_identity(contract: Mapping[str, Any]) -> str | None:
+    """Preserve a provider contract identifier when the payload exposes one."""
+    for key in ("id", "contractId", "agreementId", "engagementId"):
+        value = contract.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def normalize_user_profile(payload: Any, customer_id: str) -> dict[str, Any]:
     """Normalize the verified E.ON profile shape without exposing identifiers."""
     if not isinstance(payload, Mapping) or payload.get("customerIdentifier") != customer_id:
@@ -50,6 +96,7 @@ def normalize_user_profiles(payload: Any, customer_id: str) -> list[dict[str, An
             grid_area = installation.get("gridArea")
             fuse = installation.get("fuse")
             contracts.append({
+                "contract_identity": native_contract_identity(contract),
                 "agreement": {
                     "status": agreement_status(engagement.get("engagementStatus"), engagement.get("startDate"), engagement.get("endDate")),
                     "type": engagement.get("engagementType"),
@@ -107,6 +154,7 @@ def normalize_grouped_contracts(payload: Any, installation_ids: set[str]) -> lis
                     continue
                 contracts.append({
                     "installation_identifier": installation_id,
+                    "contract_identity": native_contract_identity(contract),
                     "agreement": {
                         "status": agreement_status(contract.get("status"), contract.get("startDate"), contract.get("endDate")),
                         "source_status": contract.get("status"),

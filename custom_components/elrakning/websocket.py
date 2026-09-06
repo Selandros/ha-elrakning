@@ -429,6 +429,17 @@ def _grid_manager(hass) -> GridManager | None:
     return manager if isinstance(manager, GridManager) else None
 
 
+def _active_grid_state(hass, manager: GridManager | None) -> dict | None:
+    """Resolve grid presentation from the active site's explicit binding."""
+    if manager is None:
+        return None
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    binding = site_manager.active_binding("grid") if site_manager else None
+    if hasattr(manager, "public_state_for_binding"):
+        return manager.public_state_for_binding(binding)
+    return manager.public_state()
+
+
 @websocket_api.websocket_command({vol.Required("type"): GRID_PROVIDERS_COMMAND})
 @websocket_api.async_response
 async def websocket_grid_providers(hass, connection, msg):
@@ -448,7 +459,7 @@ async def websocket_grid_state(hass, connection, msg):
         connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
         return
     manager = _grid_manager(hass)
-    connection.send_result(msg["id"], {"success": True, **(manager.public_state() if manager else {"configured": False})})
+    connection.send_result(msg["id"], {"success": True, **(_active_grid_state(hass, manager) or {"configured": False})})
 
 
 @websocket_api.websocket_command({
@@ -545,7 +556,14 @@ async def websocket_eon_grid_state(hass, connection, msg):
         connection.send_result(msg["id"], {"success": True, "configured": False, "site_status": "unconfigured"})
         return
     manager = _grid_manager(hass)
-    connection.send_result(msg["id"], {"success": True, **(manager.public_state() if manager else {"configured": False})})
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    binding = site_manager.active_binding("grid") if site_manager else None
+    state = (
+        manager.public_state_for_binding(binding)
+        if manager and hasattr(manager, "public_state_for_binding")
+        else manager.public_state() if manager else {"configured": False}
+    )
+    connection.send_result(msg["id"], {"success": True, **state})
 
 
 @websocket_api.websocket_command({
@@ -1258,7 +1276,7 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     provider_data = manager.provider_data() if manager else None
     customer_price_data = build_customer_price_data(data.periods, provider_data)
     grid_manager = _grid_manager(hass)
-    grid_state = grid_manager.public_state() if grid_manager else None
+    grid_state = _active_grid_state(hass, grid_manager)
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None
     grid_contract_is_current = grid_price_is_current(grid_price)
     grid_cost_ex_vat = (

@@ -13,6 +13,7 @@ from typing import Any
 
 from .canonical_storage import DATASET_VERSION, SCHEMA_VERSION, CanonicalStorage
 from .const import DOMAIN
+from .elnat.eon_models import facility_identity
 
 _LOGGER = logging.getLogger(__name__)
 UTC = timezone.utc
@@ -82,6 +83,7 @@ def matching_grid_binding_targets(
     ):
         return []
     runtime_context = _normalized_facility_context(runtime_state.get("facility"))
+    runtime_identity = facility_identity(runtime_state.get("facility"))
     configs = site_identity_state.get("site_configs")
     if runtime_context is None or not isinstance(configs, dict):
         return []
@@ -95,7 +97,11 @@ def matching_grid_binding_targets(
             not isinstance(binding, dict)
             or binding.get("provider") != "eon"
             or binding.get("config_entry_id") != config_entry_id
-            or _normalized_facility_context(binding.get("facility")) != runtime_context
+            or (
+                facility_identity(binding.get("facility")) != runtime_identity
+                if runtime_identity and facility_identity(binding.get("facility"))
+                else _normalized_facility_context(binding.get("facility")) != runtime_context
+            )
         ):
             continue
         targets.append((str(site_id), deepcopy(binding)))
@@ -163,10 +169,13 @@ def build_eon_grid_economic_frames(
         raise ValueError("economic_snapshot_fetched_after_capture")
 
     context_hash = _facility_context_hash(bound_context)
+    native_identity = facility_identity(binding.get("facility"))
+    identity_strength = "strong" if native_identity else "medium"
     identity_payload = {
         "provider": "eon",
         "config_entry_id": config_entry_id,
         "facility_context_sha256": context_hash,
+        "facility_identity": native_identity,
     }
     identity_key = json.dumps(identity_payload, sort_keys=True, separators=(",", ":"))
     snapshot_key = fetched_utc.isoformat()
@@ -196,6 +205,9 @@ def build_eon_grid_economic_frames(
             "provider": "eon",
             "config_entry_id": config_entry_id,
             "facility_context_sha256": context_hash,
+            "facility_identity": native_identity,
+            "identity_strength": identity_strength,
+            "identity_provenance": "native_facility_binding" if native_identity else "normalized_facility_context",
             "binding_fingerprint": binding.get("binding_fingerprint"),
             "vat_included": True,
             "price_basis": "gross",
@@ -345,15 +357,39 @@ async def _async_capture_eon_grid_economic_snapshot(hass: Any, captured_at: date
     if not isinstance(state, dict) or not isinstance(config_entry_id, str):
         return
     state_snapshot = deepcopy(state)
-    targets = matching_grid_binding_targets(
-        getattr(site_identity, "state", None), state_snapshot, config_entry_id
+    site_state = getattr(site_identity, "state", None)
+    has_explicit_facility_states = hasattr(
+        getattr(grid_manager, "provider", None), "state_for_binding"
     )
+    if has_explicit_facility_states and isinstance(site_state, dict):
+        targets = []
+        configs = site_state.get("site_configs")
+        for site_id, config in configs.items() if isinstance(configs, dict) else ():
+            binding = config.get("bindings", {}).get("grid") if isinstance(config, dict) else None
+            if (
+                isinstance(config, dict)
+                and config.get("collection_enabled") is True
+                and isinstance(binding, dict)
+                and binding.get("provider") == "eon"
+                and binding.get("config_entry_id") == config_entry_id
+            ):
+                targets.append((str(site_id), deepcopy(binding)))
+        targets.sort(key=lambda item: item[0])
+    else:
+        targets = matching_grid_binding_targets(site_state, state_snapshot, config_entry_id)
     if not targets:
         return
     storage_path = getattr(getattr(collector, "storage", None), "path", None)
     if storage_path is None:
         return
     for site_id, binding in targets:
+        explicit_state = None
+        if has_explicit_facility_states:
+            explicit_state = grid_manager.state_for_binding(binding)
+            if not isinstance(explicit_state, dict):
+                continue
+        if isinstance(explicit_state, dict):
+            state_snapshot = deepcopy(explicit_state)
         try:
             await hass.async_add_executor_job(
                 persist_eon_grid_economic_snapshot_path,

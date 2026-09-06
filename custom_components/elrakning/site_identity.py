@@ -491,13 +491,36 @@ class SiteIdentityManager:
         provider_binding = self.active_binding("elhandel")
         grid_binding = self.active_binding("grid")
         price_binding = self.global_binding("nord_pool")
+        if grid_manager and grid_binding:
+            provider = getattr(grid_manager, "provider", None)
+            reconcile = getattr(provider, "binding_reconciliation", None)
+            if reconcile:
+                result = reconcile(grid_binding)
+                enriched = result.get("binding") if isinstance(result, dict) else None
+                if result.get("status") == "legacy_unique" and isinstance(enriched, dict):
+                    self._set_binding("grid", enriched)
+                    await self.store.async_save(self.state)
+                    grid_binding = self.active_binding("grid")
         config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
         runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
         cached_grid_state = runtime.get("grid_state") if isinstance(runtime, dict) else None
+        runtime_cleared = False
         grid_state = self._preferred_grid_runtime_state(
             grid_binding, cached_grid_state, grid_manager
         )
+        if (
+            grid_manager
+            and grid_binding
+            and hasattr(getattr(grid_manager, "provider", None), "state_for_binding")
+        ):
+            explicit_state = grid_manager.state_for_binding(grid_binding)
+            grid_state = explicit_state if isinstance(explicit_state, dict) else None
+            if not isinstance(explicit_state, dict) and isinstance(runtime, dict):
+                runtime_cleared = "grid_state" in runtime
+                runtime.pop("grid_state", None)
         runtime_changed = (
+            runtime_cleared
+            or
             isinstance(config, dict)
             and isinstance(grid_state, dict)
             and grid_state != cached_grid_state

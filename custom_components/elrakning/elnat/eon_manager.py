@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from copy import deepcopy
 import secrets
 import time
 from typing import Any
@@ -20,6 +21,9 @@ from .eon_models import (
     normalize_grouped_contracts,
     normalize_outage,
     normalize_user_profile,
+    normalize_user_profiles,
+    facility_context,
+    facility_identity,
     parse_monthly_consumption,
     parse_monthly_transfer,
     pricing_tariff_for_agreement,
@@ -34,12 +38,14 @@ class EonGridManager:
         self.entry = entry
         self.store = Store(hass, 1, f"{DOMAIN}.eon_grid_state")
         self.state: dict[str, Any] = self._empty_state()
+        self.facility_states: dict[str, dict[str, Any]] = {}
         self._refresh_unsub = None
         self._web_refresh_unsub = None
         self._pending_web_handoff: dict[str, Any] | None = None
         self._app_session: EonAppSession | None = None
         self._web_session: EonSession | None = None
         self._app_source_snapshot: dict[str, Any] | None = None
+        self._active_binding: dict[str, Any] | None = None
 
     @property
     def configured(self) -> bool:
@@ -57,8 +63,16 @@ class EonGridManager:
         cached = await self.store.async_load()
         if isinstance(cached, dict):
             self.state.update(cached)
+            cached_facilities = cached.get("facility_states")
+            if isinstance(cached_facilities, dict):
+                self.facility_states = {
+                    str(identity): value
+                    for identity, value in cached_facilities.items()
+                    if isinstance(value, dict)
+                }
         if not self.configured:
             self.state = self._empty_state()
+            self.facility_states = {}
 
     def async_start_refresh(self) -> None:
         if self._refresh_unsub is None:
@@ -108,14 +122,18 @@ class EonGridManager:
         """Verify and activate a bootstrapped web session."""
         client = EonClient(session)
         profile = await client.async_get_user(customer_id)
-        normalized = normalize_user_profile(profile, customer_id)
+        normalized = normalize_user_profiles(profile, customer_id)
         self._web_session = session
         config = self._config_with_migration()
         config["web"] = {"cookies": session.cookies, "customer_id": customer_id}
         await self._save_config(config)
         if config.get("auth") == "app":
             return await self._refresh_app(self._app_session)
-        self.state = await self._build_state(normalized, client)
+        self.facility_states = await self._build_web_states(normalized, client)
+        self.state = {
+            **(next(iter(self.facility_states.values()), self._empty_state())),
+            "facility_states": self.facility_states,
+        }
         await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
@@ -241,9 +259,11 @@ class EonGridManager:
             web = self._web_config(config)
             customer_id = web["customer_id"]
             profile = await client.async_get_user(customer_id)
-            normalized = normalize_user_profile(profile, customer_id)
-            state = await self._build_state(normalized, client)
-            self.state = state
+            normalized = normalize_user_profiles(profile, customer_id)
+            states = await self._build_web_states(normalized, client)
+            self.facility_states = states
+            state = next(iter(states.values()), self._empty_state())
+            self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
             await self._persist_web_session(config, session)
             self._schedule_web_refresh(session)
@@ -263,8 +283,10 @@ class EonGridManager:
             locations = normalize_locations(sources.get("locations"))
             if not locations:
                 raise ValueError("location_missing")
-            state = self._build_app_state(sources, locations)
-            self.state = state
+            states = self._build_app_states(sources, locations)
+            self.facility_states = states
+            state = self._state_for_active_binding(states) or self._build_app_state(sources, locations)
+            self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
         except ValueError as err:
             self.state.update({"app_authenticated": True, "reauth_required": False, "error": str(err)})
@@ -277,44 +299,55 @@ class EonGridManager:
 
     def _build_app_state(self, sources: dict[str, Any], locations: list[dict[str, Any]]) -> dict[str, Any]:
         """Build public-safe app state from the collector snapshot."""
+        states = self._build_app_states(sources, locations)
+        ordered = [facility_identity(item) for item in locations]
+        selected = next(
+            (
+                states[identity]
+                for identity in ordered
+                if identity in states and states[identity].get("agreement", {}).get("status") == "active"
+            ),
+            next(
+                (
+                    states[identity]
+                    for identity in ordered
+                    if identity in states and states[identity].get("agreement", {}).get("status") == "future"
+                ),
+                next(iter(states.values()), self._empty_state()),
+            ),
+        )
+        return deepcopy(selected)
+
+    def _build_app_states(
+        self, sources: dict[str, Any], locations: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Build one independent normalized state for every native facility."""
         now = date.today()
         installation_ids = {item["installation_identifier"] for item in locations}
         contracts = normalize_grouped_contracts(sources.get("grouped_contracts"), installation_ids)
         by_installation: dict[str, list[dict[str, Any]]] = {}
         for contract in contracts:
             by_installation.setdefault(contract["installation_identifier"], []).append(contract)
-        installation = next(
-            (
-                item for item in locations
-                if any(contract["agreement"]["status"] == "active" for contract in by_installation.get(item["installation_identifier"], []))
-            ),
-            next(
-                (
-                    item for item in locations
-                    if any(contract["agreement"]["status"] == "future" for contract in by_installation.get(item["installation_identifier"], []))
-                ),
-                locations[0],
-            ),
-        )
-        candidates = by_installation.get(installation["installation_identifier"], [])
-        current = next((item for item in candidates if item["agreement"]["status"] == "active"), None)
-        selected = current or next((item for item in candidates if item["agreement"]["status"] == "future"), None)
-        monthly = next((item["payload"] for item in sources.get("monthly_transfer", []) if item.get("installation_id") == installation["installation_identifier"]), None)
-        outage_payload = next((item["payload"] for item in sources.get("outages", []) if item.get("installation_id") == installation["installation_identifier"]), None)
-        consumption = parse_monthly_transfer(monthly, now.year, now.month) if monthly is not None else {"status": "missing", "resolution": "Monthly"}
-        agreement = selected["agreement"] if selected else {
-            "status": "future" if installation.get("is_future") is True else "configured",
-            "type": "ELECTRICITY_CONS_GRID",
-        }
-        tariff = selected.get("tariff") if selected else None
-        pricing_tariff = pricing_tariff_for_agreement(
-            tariff, agreement.get("status")
-        )
-        amount = consumption.get("consumption_kwh") if consumption.get("status") == "ok" else None
-        cost = calculate_eon_cost(amount, pricing_tariff)
-        return {
-            "agreement": agreement,
-            "facility": {
+        states = {}
+        for installation in locations:
+            installation_id = installation["installation_identifier"]
+            candidates = by_installation.get(installation_id, [])
+            current = next((item for item in candidates if item["agreement"]["status"] == "active"), None)
+            selected = current or next((item for item in candidates if item["agreement"]["status"] == "future"), None)
+            monthly = next((item["payload"] for item in sources.get("monthly_transfer", []) if item.get("installation_id") == installation_id), None)
+            outage_payload = next((item["payload"] for item in sources.get("outages", []) if item.get("installation_id") == installation_id), None)
+            consumption = parse_monthly_transfer(monthly, now.year, now.month) if monthly is not None else {"status": "missing", "resolution": "Monthly"}
+            agreement = selected["agreement"] if selected else {
+                "status": "future" if installation.get("is_future") is True else "configured",
+                "type": "ELECTRICITY_CONS_GRID",
+            }
+            tariff = selected.get("tariff") if selected else None
+            pricing_tariff = pricing_tariff_for_agreement(tariff, agreement.get("status"))
+            amount = consumption.get("consumption_kwh") if consumption.get("status") == "ok" else None
+            cost = calculate_eon_cost(amount, pricing_tariff)
+            facility = {
+                "installation_identifier": installation.get("installation_identifier"),
+                "point_of_delivery_number": installation.get("point_of_delivery_number"),
                 "address": {
                     "street": installation.get("street"),
                     "city": installation.get("city"),
@@ -323,7 +356,14 @@ class EonGridManager:
                 "price_area": installation.get("price_area"),
                 "grid_area": (selected or {}).get("facility", {}).get("grid_area"),
                 "fuse_ampere": (selected or {}).get("facility", {}).get("fuse_ampere"),
-            },
+            }
+            identity = facility_identity(facility)
+            if not identity:
+                continue
+            states[identity] = {
+            "agreement": agreement,
+            "facility": facility,
+            "contract_identity": (selected or {}).get("contract_identity"),
             "tariff": tariff,
             "grid_price": (pricing_tariff or {}).get("grid_price"),
             "consumption": consumption,
@@ -333,7 +373,75 @@ class EonGridManager:
             "reauth_required": False,
             "error": None,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+            }
+        return states
+
+    def _state_for_active_binding(self, states: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+        binding = getattr(self, "_active_binding", None)
+        if not isinstance(binding, dict):
+            return None
+        identity = facility_identity(binding.get("facility"))
+        return deepcopy(states.get(identity)) if identity else None
+
+    def set_active_binding(self, binding: dict[str, Any] | None) -> None:
+        """Track presentation context without changing shared account sources."""
+        self._active_binding = deepcopy(binding) if isinstance(binding, dict) else None
+
+    def state_for_facility(self, identity: str | None) -> dict[str, Any] | None:
+        """Return only the state explicitly indexed by one native facility identity."""
+        if not isinstance(identity, str) or not identity:
+            return None
+        state = getattr(self, "facility_states", {}).get(identity)
+        return deepcopy(state) if isinstance(state, dict) else None
+
+    def resolve_binding(self, binding: dict[str, Any] | None) -> dict[str, Any]:
+        """Resolve a binding by native identity or deterministic legacy context."""
+        if not isinstance(binding, dict):
+            return {"status": "unresolved", "state": None}
+        identity = facility_identity(binding.get("facility"))
+        if identity and identity in getattr(self, "facility_states", {}):
+            return {"status": "strong", "identity": identity, "state": self.state_for_facility(identity)}
+        expected = facility_context(binding.get("facility"))
+        if expected is None:
+            return {"status": "unresolved", "state": None}
+        matches = [
+            (candidate_identity, state)
+            for candidate_identity, state in getattr(self, "facility_states", {}).items()
+            if facility_context(state.get("facility")) == expected
+        ]
+        if len(matches) != 1:
+            return {"status": "ambiguous" if len(matches) > 1 else "unresolved", "state": None}
+        candidate_identity, state = matches[0]
+        return {"status": "legacy_unique", "identity": candidate_identity, "state": deepcopy(state)}
+
+    def binding_reconciliation(self, binding: dict[str, Any] | None) -> dict[str, Any]:
+        """Return a binding enriched only after unique native-facility reconciliation."""
+        resolved = self.resolve_binding(binding)
+        if resolved.get("status") != "legacy_unique" or not isinstance(binding, dict):
+            return {**resolved, "binding": deepcopy(binding) if isinstance(binding, dict) else None}
+        state = resolved.get("state")
+        facility = state.get("facility") if isinstance(state, dict) else None
+        enriched = deepcopy(binding)
+        if isinstance(facility, dict):
+            enriched["facility"] = {**deepcopy(enriched.get("facility") or {}), **deepcopy(facility)}
+            enriched["identity_provenance"] = "legacy_context_reconciled_unique"
+            enriched["identity_strength"] = "strong"
+        return {**resolved, "binding": enriched}
+
+    def state_for_binding(self, binding: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Resolve a site binding without consulting the global selected state."""
+        return self.resolve_binding(binding).get("state")
+
+    def public_state_for_binding(self, binding: dict[str, Any] | None) -> dict[str, Any]:
+        resolved = self.resolve_binding(binding)
+        if not isinstance(resolved.get("state"), dict):
+            return {**self.public_state(), "facility": None, "site_status": resolved["status"]}
+        previous = self.state
+        try:
+            self.state = resolved["state"]
+            return {**self.public_state(), "site_status": resolved["status"]}
+        finally:
+            self.state = previous
 
     async def _get_app_session(
         self, config: dict[str, Any], session: EonAppSession | None = None
@@ -361,6 +469,7 @@ class EonGridManager:
         self._web_session = None
         self._cancel_web_refresh()
         self.state = self._empty_state()
+        self.facility_states = {}
         await self.store.async_save(self.state)
         self.hass.bus.async_fire(EON_GRID_UPDATE_EVENT)
         return self.public_state()
@@ -437,6 +546,8 @@ class EonGridManager:
         return {
             "agreement": normalized.get("agreement"),
             "facility": {
+                "installation_identifier": facility.get("installation_identifier"),
+                "point_of_delivery_number": facility.get("point_of_delivery_number"),
                 "price_area": facility.get("price_area"),
                 "fuse_ampere": facility.get("fuse_ampere"),
             },
@@ -448,6 +559,19 @@ class EonGridManager:
             "reauth_required": False,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    async def _build_web_states(
+        self, normalized: list[dict[str, Any]], client: EonClient
+    ) -> dict[str, dict[str, Any]]:
+        """Build independent web states for every normalized native facility."""
+        states: dict[str, dict[str, Any]] = {}
+        for contract in normalized:
+            state = await self._build_state(contract, client)
+            identity = facility_identity(state.get("facility"))
+            if identity:
+                state["contract_identity"] = contract.get("contract_identity")
+                states[identity] = state
+        return states
 
     async def _save_config(self, config_data: dict[str, Any]) -> None:
         data = dict(self.entry.data)
@@ -535,6 +659,7 @@ class EonGridManager:
             "error": None,
             "outage": None,
             "app_authenticated": False,
+            "facility_states": {},
         }
 
 

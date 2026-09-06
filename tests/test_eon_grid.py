@@ -68,6 +68,24 @@ def test_normalize_user_profiles_keeps_all_web_grid_contracts_for_matching():
     assert [item["facility"]["point_of_delivery_number"] for item in result] == ["pod-a", "pod-b"]
 
 
+def test_native_facility_identity_prefers_installation_then_pod():
+    assert models.facility_identity({"installation_identifier": "installation-a", "point_of_delivery_number": "pod-a"}) == "installation:installation-a"
+    assert models.facility_identity({"point_of_delivery_number": "pod-a"}) == "pod:pod-a"
+    assert models.facility_identity({"address": {"street": "Street 1"}}) is None
+
+
+def test_grouped_contracts_preserve_native_contract_identity():
+    result = models.normalize_grouped_contracts([{
+        "contractsByType": [{
+            "type": "ELECTRICITY_CONS_GRID",
+            "installationId": "installation-a",
+            "premiseInformation": {"gridArea": "Grid", "priceArea": "SE2"},
+            "contracts": [{"id": "contract-a", "status": "ACTIVE", "prices": {"entries": []}}],
+        }],
+    }], {"installation-a"})
+    assert result[0]["contract_identity"] == "contract-a"
+
+
 def test_monthly_parser_reads_energy_block_and_selected_month():
     payload = {
         "hasNoValues": False,

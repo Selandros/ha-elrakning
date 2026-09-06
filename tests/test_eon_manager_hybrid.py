@@ -245,6 +245,52 @@ def test_app_state_prefers_active_contract_and_does_not_cost_future_tariff():
     assert state["cost"]["total_sek"] == 113
 
 
+def test_app_states_keep_two_facilities_isolated_and_order_independent():
+    from datetime import date
+
+    locations = [
+        {"installation_identifier": "installation-x", "point_of_delivery_number": "pod-x", "street": "X 1", "city": "Town", "postal_code": "111 11", "price_area": "SE2", "production": False, "is_future": False},
+        {"installation_identifier": "installation-y", "point_of_delivery_number": "pod-y", "street": "Y 2", "city": "Town", "postal_code": "222 22", "price_area": "SE3", "production": False, "is_future": False},
+    ]
+    def grouped(installation_id, status, fee):
+        return {"contractsByType": [{
+            "type": "ELECTRICITY_CONS_GRID", "installationId": installation_id,
+            "premiseInformation": {"gridArea": "Grid", "priceArea": "SE2"},
+            "contracts": [{"id": f"contract-{installation_id}", "status": status, "prices": {"entries": [
+                {"name": "Abonnemangsavgift", "price": {"value": fee, "numberUnit": "KR", "divisorUnit": "MONTH"}},
+            ]}}],
+        }]}
+    sources = {"grouped_contracts": [grouped("installation-x", "ACTIVE", 10), grouped("installation-y", "FUTURE", 20)], "monthly_transfer": [], "outages": []}
+    manager = object.__new__(manager_module.EonGridManager)
+    states = manager._build_app_states(sources, locations)
+    assert set(states) == {"installation:installation-x", "installation:installation-y"}
+    assert states["installation:installation-x"]["agreement"]["status"] == "active"
+    assert states["installation:installation-y"]["agreement"]["status"] == "future"
+    assert states["installation:installation-x"]["contract_identity"] == "contract-installation-x"
+    reordered = manager._build_app_states(sources, list(reversed(locations)))
+    assert {
+        key: (value["agreement"]["status"], value["facility"]["point_of_delivery_number"])
+        for key, value in reordered.items()
+    } == {
+        key: (value["agreement"]["status"], value["facility"]["point_of_delivery_number"])
+        for key, value in states.items()
+    }
+
+
+def test_legacy_binding_resolution_requires_unique_context():
+    manager = object.__new__(manager_module.EonGridManager)
+    manager.facility_states = {
+        "installation:x": {"facility": {"address": {"street": "X 1", "city": "Town", "postal_code": "111"}}},
+        "installation:y": {"facility": {"address": {"street": "Y 2", "city": "Town", "postal_code": "222"}}},
+    }
+    unique = {"facility": {"address": {"street": "X 1", "city": "Town", "postal_code": "111"}}}
+    assert manager.resolve_binding(unique)["status"] == "legacy_unique"
+    assert manager.resolve_binding(unique)["identity"] == "installation:x"
+    assert manager.resolve_binding({"facility": {"address": {"street": "missing"}}})["status"] == "unresolved"
+    manager.facility_states["installation:x2"] = manager.facility_states["installation:x"]
+    assert manager.resolve_binding(unique)["status"] == "ambiguous"
+
+
 def test_public_state_filters_internal_installation_identifiers():
     manager = object.__new__(manager_module.EonGridManager)
     manager.state = {"facility": {
