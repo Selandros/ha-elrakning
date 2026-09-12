@@ -75,6 +75,21 @@ class CanonicalCollector:
         trigger: str = "startup",
         entity_id: str | None = None,
     ) -> dict[str, Any]:
+        """Serialize Forecast.Solar capture with all canonical storage writes."""
+        async with self._flush_lock:
+            return await self._async_capture_forecast_solar(
+                captured_at,
+                trigger=trigger,
+                entity_id=entity_id,
+            )
+
+    async def _async_capture_forecast_solar(
+        self,
+        captured_at: datetime | None = None,
+        *,
+        trigger: str = "startup",
+        entity_id: str | None = None,
+    ) -> dict[str, Any]:
         """Capture all enabled Forecast.Solar site bindings without UI context."""
         started_at = dt_util.now().astimezone(timezone.utc)
         captured_at = (captured_at or dt_util.now()).astimezone(timezone.utc)

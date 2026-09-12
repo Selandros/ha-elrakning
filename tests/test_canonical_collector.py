@@ -1,4 +1,6 @@
+import asyncio
 import tempfile
+import threading
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -41,6 +43,11 @@ class _Identity:
 class _Hass:
     async def async_add_executor_job(self, callback, *args):
         return callback(*args)
+
+
+class _ThreadedHass(_Hass):
+    async def async_add_executor_job(self, callback, *args):
+        return await asyncio.to_thread(callback, *args)
 
 
 class _Bus:
@@ -176,6 +183,35 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot, second)
         snapshot["sites"]["site-a"]["written"] = 999
         self.assertEqual(collector.forecast_capture_status()["sites"]["site-a"]["written"], 0)
+
+    async def test_forecast_captures_serialize_shared_storage_writes(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        collector = CanonicalCollector(_ThreadedHass(), _Identity([target]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        frames = [({"site_id": "site-a"}, [])]
+        entered = threading.Event()
+        release = threading.Event()
+        calls = 0
+
+        def persist(*_args):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                entered.set()
+                release.wait(timeout=2)
+            return {"written": 1, "unchanged": 0, "revised": 0}
+
+        with patch.object(collector_module, "build_forecast_solar_frames", return_value=frames), \
+             patch.object(collector, "_persist_forecast_target", side_effect=persist):
+            first = asyncio.create_task(collector.async_capture_forecast_solar())
+            self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+            second = asyncio.create_task(collector.async_capture_forecast_solar())
+            await asyncio.sleep(0)
+            self.assertEqual(calls, 1)
+            release.set()
+            await asyncio.gather(first, second)
+
+        self.assertEqual(calls, 2)
 
     async def test_forecast_capture_typeerror_and_valueerror_are_recorded(self):
         target = _forecast_target("site-a", "sensor.forecast")
