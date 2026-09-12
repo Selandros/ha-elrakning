@@ -1,6 +1,6 @@
 # Elräkning – Current State
 
-Updated: 2026-09-06
+Updated: 2026-09-13
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
@@ -115,6 +115,51 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   next immutable external-input foundation milestone. It must preserve the
   locked C.2.1 dataset identities, `known_at`/decision-time replay rules,
   source-generation provenance, and Solar Evidence non-regression contract.
+- VERIFIED (release/recovery, 0.0.636, 2026-09-13): The exact release commit
+  is `c16b18a9d1e6ee3719ac7136837d579dc3c2d5de`, with `HEAD == origin/main`.
+  The release commit only bumps the manifest from 0.0.635 to 0.0.636; the
+  recovery was deployed as a full eight-file runtime set so the previously
+  observed hybrid deployment could not recur. All eight deployed SHA-256
+  values matched the release commit before the approved normal Core restart.
+- VERIFIED (runtime, 0.0.636, 2026-09-13): The previous hybrid deployment
+  failure is resolved. After restart, Vikarbodarna location migration was
+  present and verified with timezone `Europe/Stockholm`, provenance
+  `open_meteo_namespaced_store_and_binding`, and its persisted location
+  fingerprint. Fiskvik remained without a legitimate Open-Meteo location or
+  binding and remained a clean room with zero Open-Meteo frames.
+- VERIFIED (runtime, 0.0.636, 2026-09-13): Vikarbodarna has an immutable
+  Open-Meteo canonical frame for `solar.irradiance.forecast` with 72 points,
+  `published_at=null`, site scope, strong source identity, and source
+  generation `om-04f53ab963d11e9b9707a6b159969053`. The generation records
+  `open_meteo_request_contract`, `native_bucket`, 3600 seconds, and verified
+  timezone state.
+- VERIFIED (runtime, 0.0.636, 2026-09-13): The post-restart natural hourly
+  cadence ran through the existing read-only collector-state websocket at
+  `2026-09-13T00:00:12` local time with `trigger=hourly_cadence`, exactly one
+  target, target site Vikarbodarna, and `status=success`. This proves the
+  site-independent scheduler path without manual capture or active-site
+  substitution.
+- VERIFIED (runtime, 0.0.636, 2026-09-13): The WAL-consistent post-cadence
+  audit reported `integrity_check=ok`, 557 frames, 5,009 points, zero
+  duplicate point IDs, zero duplicate semantic-key/revision pairs, zero
+  broken supersedes chains, two Vikarbodarna Open-Meteo frames, and zero
+  Fiskvik Open-Meteo frames. The latest frame was revision 2 in the same
+  source generation and retained explicit `quality=partial` provider gaps;
+  no synthetic points or interpolation were introduced.
+- VERIFIED (scope boundary, 0.0.636, 2026-09-13): Solar Evidence remained
+  non-regressed. The locked progress values remain 39 total days, 14
+  Open-Meteo progress days, 13 Forecast.Solar common days, and 14
+  `audit_complete` rows. The distinction between 39 raw
+  `open_meteo_status=complete` rows and 14 composite progress rows is
+  intentional. The known `collected_at` immutability issue remains a
+  separate scope and was not changed.
+- COMPLETE (C.2.4, runtime closure, 2026-09-13): The Open-Meteo immutable
+  canonical producer is runtime verified through startup capture, natural
+  hourly cadence, source-generation metadata, revision/deduplication,
+  restart persistence, site-independent targeting, Fiskvik clean-room
+  isolation, WAL integrity, and Solar Evidence non-regression. Docs closure
+  is complete for the runtime scope; the unrelated E.ON thread-safety warning
+  remains a separate follow-up and is not reclassified here.
 - VERIFIED (design/fixtures, 2026-09-06): Step C.2.1 is complete and the
   external-input contract is locked in
   `docs/architecture/C2_1_EXTERNAL_INPUT_CONTRACT_V1.md` and its fixture/test
@@ -516,9 +561,9 @@ INFERRED (roadmap): Long-term data foundation:
 
 ## C.2.4 Open-Meteo immutable canonical producer
 
-- IMPLEMENTED / STATIC VERIFIED (local release candidate, 2026-09-12):
-  version 0.0.635 adds a site-explicit Open-Meteo canonical producer without
-  changing the C.1 schema or Solar Evidence paths.
+- COMPLETE / RUNTIME VERIFIED (0.0.636, 2026-09-13): The site-explicit
+  Open-Meteo canonical producer is deployed and accepted on real Home
+  Assistant runtime without changing the C.1 schema or Solar Evidence paths.
 - The producer uses a deep site-configuration snapshot, explicit verified
   site-scoped location, persisted PV geometry, and an explicit Open-Meteo
   binding. Missing or unverified location, geometry, or binding is fail-closed;
@@ -541,10 +586,20 @@ INFERRED (roadmap): Long-term data foundation:
 - Collection is active-site independent, uses a dedicated Open-Meteo capture
   lock, does not hold the canonical flush lock during HTTP, revalidates targets
   before persistence, and has startup/hourly diagnostics.
-- STATIC TEST STATUS: focused C.2.4 tests pass; full Python tests, frontend
-  MJS tests, compileall, manifest/fixture JSON validation, and diff-check pass
-  locally. Runtime acceptance is still pending deployment and must verify WAL
-  integrity, real Vikarbodarna frames, Fiskvik zero frames, replay, restart,
-  and Solar Evidence non-regression.
-- NEXT: review the implementation diff and static gate before any 0.0.635
-  deployment. C.2.4 is not runtime-closed.
+- VERIFIED (runtime closure): The accepted release is `0.0.636` from commit
+  `c16b18a9d1e6ee3719ac7136837d579dc3c2d5de`. Static gates, exact eight-file
+  deployment hashes, Core restart, startup capture, natural hourly cadence,
+  source-generation metadata, replay-visible canonical frames, restart
+  persistence, clean-room isolation, and Evidence non-regression all pass.
+- VERIFIED (runtime closure): The natural cadence status was observed through
+  the existing `canonical_collector_state` command, not through a new test
+  endpoint and not through a manual producer invocation. The accepted
+  `quality=partial` frame represents explicit provider gaps and remains
+  truthful; no interpolation or fabricated values are permitted.
+- SEPARATE FOLLOW-UP: An E.ON `async_create_task` from a non-event-loop
+  thread warning remains outside C.2.4 and must not be silently folded into
+  this release closure.
+- NEXT: Continue with the next immutable external-input foundation scope.
+  Preserve the C.2.1 dataset identities, `known_at <= decision_at`, source
+  generations, Solar Evidence non-regression contract, and the Fiskvik
+  zero-history clean-room invariant.
