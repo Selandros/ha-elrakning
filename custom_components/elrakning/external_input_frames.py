@@ -189,7 +189,15 @@ def _forecast_target(role: str, local_day: date, captured_at: datetime, zone: Zo
     return f"local_day:{target_day.isoformat()}", start, end, start
 
 
-def _forecast_value_and_point(role: str, state: Any, captured_at: datetime, target_point: datetime) -> tuple[Any, str, dict[str, Any]] | None:
+def _forecast_observed_at(state: Any) -> datetime | None:
+    """Return the HA state timestamp that identifies the observed source fact."""
+    observed_at = getattr(state, "last_updated", None)
+    if not isinstance(observed_at, datetime) or observed_at.tzinfo is None:
+        return None
+    return observed_at.astimezone(timezone.utc)
+
+
+def _forecast_value_and_point(role: str, state: Any, observed_at: datetime, target_point: datetime) -> tuple[Any, str, dict[str, Any]] | None:
     value = normalize_forecast_value(state, role)
     if value is None:
         return None
@@ -204,10 +212,14 @@ def _forecast_value_and_point(role: str, state: Any, captured_at: datetime, targ
         if parsed.tzinfo is None:
             return None
         parsed_utc = parsed.astimezone(timezone.utc)
-        return None, unit, {"source_timestamp": value, "predicted_peak_at": parsed_utc.isoformat()}
+        return None, unit, {
+            "source_timestamp": value,
+            "predicted_peak_at": parsed_utc.isoformat(),
+            "observed_at": observed_at.isoformat(),
+        }
     if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
         return None
-    return float(value), unit, {"captured_at": captured_at.isoformat(), "target_point": target_point.isoformat()}
+    return float(value), unit, {"observed_at": observed_at.isoformat(), "target_point": target_point.isoformat()}
 
 
 def build_forecast_solar_frames(
@@ -232,8 +244,11 @@ def build_forecast_solar_frames(
         if not isinstance(entity_id, str) or not entity_id:
             continue
         state = hass.states.get(entity_id)
+        observed_at = _forecast_observed_at(state)
+        if observed_at is None:
+            continue
         target, valid_from, valid_to, point_time = _forecast_target(role, local_day, captured_at, zone)
-        normalized = _forecast_value_and_point(role, state, captured_at, point_time)
+        normalized = _forecast_value_and_point(role, state, observed_at, point_time)
         if normalized is None:
             continue
         value, unit, point_payload = normalized
@@ -271,6 +286,7 @@ def build_forecast_solar_frames(
                 "site_id": site_id,
                 "site_timezone": timezone_name,
                 "target": target,
+                "observed_at": observed_at.isoformat(),
             },
             "payload_schema": "forecast_solar.observed_fact.v1",
         }

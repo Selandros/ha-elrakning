@@ -23,6 +23,10 @@ from custom_components.elrakning.external_input_frames import (
 UTC = timezone.utc
 
 
+def ha_state(value, attributes, observed_at):
+    return SimpleNamespace(state=value, attributes=attributes, last_updated=observed_at)
+
+
 def price_data(values):
     start = datetime(2026, 9, 5, 0, 0, tzinfo=UTC)
     periods = tuple(
@@ -57,13 +61,14 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_points").fetchone()[0], 2)
 
     def test_forecast_solar_supported_roles_write_site_scoped_frames(self):
+        observed_at = datetime(2026, 9, 5, 9, 59, tzinfo=UTC)
         states = {
-            "sensor.today": SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"}),
-            "sensor.tomorrow": SimpleNamespace(state="17.9", attributes={"unit_of_measurement": "kWh"}),
-            "sensor.remaining": SimpleNamespace(state="12.1", attributes={"unit_of_measurement": "kWh"}),
-            "sensor.power": SimpleNamespace(state="2.5", attributes={"unit_of_measurement": "kW"}),
-            "sensor.peak_today": SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None}),
-            "sensor.peak_tomorrow": SimpleNamespace(state="2026-09-06T12:00:00+02:00", attributes={"unit_of_measurement": None}),
+            "sensor.today": ha_state("18.4", {"unit_of_measurement": "kWh"}, observed_at),
+            "sensor.tomorrow": ha_state("17.9", {"unit_of_measurement": "kWh"}, observed_at),
+            "sensor.remaining": ha_state("12.1", {"unit_of_measurement": "kWh"}, observed_at),
+            "sensor.power": ha_state("2.5", {"unit_of_measurement": "kW"}, observed_at),
+            "sensor.peak_today": ha_state("2026-09-05T13:30:00+02:00", {"unit_of_measurement": None}, observed_at),
+            "sensor.peak_tomorrow": ha_state("2026-09-06T12:00:00+02:00", {"unit_of_measurement": None}, observed_at),
         }
         hass = SimpleNamespace(
             states=SimpleNamespace(get=states.get),
@@ -106,7 +111,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(persist_forecast_solar_frames(self.storage, frames, captured + timedelta(minutes=15))["unchanged"], 6)
 
     def test_forecast_solar_changed_target_is_revision_and_replay_is_decision_time_safe(self):
-        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        state = ha_state("18.4", {"unit_of_measurement": "kWh"}, datetime(2026, 9, 5, 9, tzinfo=UTC))
         hass = SimpleNamespace(
             states=SimpleNamespace(get=lambda _entity: state),
             config=SimpleNamespace(time_zone="Europe/Stockholm"),
@@ -116,6 +121,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         first = build_forecast_solar_frames(hass, "site-a", binding, first_at)
         persist_forecast_solar_frames(self.storage, first, first_at)
         state.state = "17.9"
+        state.last_updated = datetime(2026, 9, 5, 14, tzinfo=UTC)
         second_at = datetime(2026, 9, 5, 15, 0, tzinfo=UTC)
         second = build_forecast_solar_frames(hass, "site-a", binding, second_at)
         persist_forecast_solar_frames(self.storage, second, second_at)
@@ -136,7 +142,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(new[0]["points"][0]["value"], 17.9)
 
     def test_forecast_solar_revisions_rekey_points_when_content_returns(self):
-        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        state = ha_state("2026-09-05T13:30:00+02:00", {"unit_of_measurement": None}, datetime(2026, 9, 5, 9, tzinfo=UTC))
         hass = SimpleNamespace(
             states=SimpleNamespace(get=lambda _entity: state),
             config=SimpleNamespace(time_zone="Europe/Stockholm"),
@@ -147,6 +153,7 @@ class ExternalInputFrameTests(unittest.TestCase):
                                    ("2026-09-05T14:00:00+02:00", datetime(2026, 9, 5, 15, tzinfo=UTC)),
                                    ("2026-09-05T13:30:00+02:00", datetime(2026, 9, 5, 20, tzinfo=UTC))):
             state.state = value
+            state.last_updated = captured_at - timedelta(minutes=1)
             captures.append((build_forecast_solar_frames(hass, "site-a", binding, captured_at), captured_at))
         for frames, captured_at in captures:
             persist_forecast_solar_frames(self.storage, frames, captured_at)
@@ -167,7 +174,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual([frame["points"][0]["point"]["predicted_peak_at"] for frame in replay], ["2026-09-05T11:30:00+00:00"])
 
     def test_forecast_solar_repeated_content_is_deduplicated_after_revision(self):
-        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        state = ha_state("2026-09-05T13:30:00+02:00", {"unit_of_measurement": None}, datetime(2026, 9, 5, 9, tzinfo=UTC))
         hass = SimpleNamespace(
             states=SimpleNamespace(get=lambda _entity: state),
             config=SimpleNamespace(time_zone="Europe/Stockholm"),
@@ -177,14 +184,57 @@ class ExternalInputFrameTests(unittest.TestCase):
         persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, first_at), first_at)
         state.state = "2026-09-05T14:00:00+02:00"
         second_at = datetime(2026, 9, 5, 15, tzinfo=UTC)
+        state.last_updated = datetime(2026, 9, 5, 14, tzinfo=UTC)
         persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, second_at), second_at)
         third_at = datetime(2026, 9, 5, 20, tzinfo=UTC)
         result = persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, third_at), third_at)
         self.assertEqual(result["unchanged"], 1)
         self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0], 2)
 
+    def test_forecast_solar_unchanged_numeric_observation_is_not_revised_by_new_capture(self):
+        observed_at = datetime(2026, 9, 5, 9, 59, tzinfo=UTC)
+        state = ha_state("18.4", {"unit_of_measurement": "kWh"}, observed_at)
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
+        first_at = datetime(2026, 9, 5, 10, tzinfo=UTC)
+        second_at = datetime(2026, 9, 5, 10, 15, tzinfo=UTC)
+        persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, first_at), first_at)
+        result = persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, second_at), second_at)
+        self.assertEqual(result["unchanged"], 1)
+        self.assertEqual(self.storage.count_external_frames(), 1)
+
+    def test_forecast_solar_changed_observation_timestamp_creates_revision(self):
+        state = ha_state("18.4", {"unit_of_measurement": "kWh"}, datetime(2026, 9, 5, 9, 59, tzinfo=UTC))
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
+        first_at = datetime(2026, 9, 5, 10, tzinfo=UTC)
+        second_at = datetime(2026, 9, 5, 10, 15, tzinfo=UTC)
+        persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, first_at), first_at)
+        state.last_updated = datetime(2026, 9, 5, 10, 14, tzinfo=UTC)
+        result = persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, second_at), second_at)
+        self.assertEqual(result["revised"], 1)
+        self.assertEqual(self.storage.count_external_frames(), 2)
+
+    def test_forecast_solar_missing_observation_timestamp_fails_closed(self):
+        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
+        self.assertEqual(
+            build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 10, tzinfo=UTC)),
+            [],
+        )
+
     def test_forecast_solar_exact_recapture_matches_legacy_point_id(self):
-        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        state = ha_state("2026-09-05T13:30:00+02:00", {"unit_of_measurement": None}, datetime(2026, 9, 5, 9, tzinfo=UTC))
         hass = SimpleNamespace(
             states=SimpleNamespace(get=lambda _entity: state),
             config=SimpleNamespace(time_zone="Europe/Stockholm"),
@@ -206,7 +256,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         )
 
     def test_forecast_solar_exact_recapture_matches_legacy_revision_above_one(self):
-        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        state = ha_state("2026-09-05T13:30:00+02:00", {"unit_of_measurement": None}, datetime(2026, 9, 5, 9, tzinfo=UTC))
         hass = SimpleNamespace(
             states=SimpleNamespace(get=lambda _entity: state),
             config=SimpleNamespace(time_zone="Europe/Stockholm"),
@@ -218,6 +268,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         persist_forecast_solar_frames(self.storage, [(first_frame, first_points)], first_at)
 
         state.state = "2026-09-05T14:00:00+02:00"
+        state.last_updated = datetime(2026, 9, 5, 14, tzinfo=UTC)
         second_at = datetime(2026, 9, 5, 15, tzinfo=UTC)
         second_frame, second_points = build_forecast_solar_frames(hass, "site-a", binding, second_at)[0]
         second_frame["revision"] = 2
@@ -233,6 +284,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0], 2)
 
         state.state = "2026-09-05T15:00:00+02:00"
+        state.last_updated = datetime(2026, 9, 5, 15, tzinfo=UTC)
         third_at = datetime(2026, 9, 5, 20, tzinfo=UTC)
         revised = persist_forecast_solar_frames(
             self.storage, build_forecast_solar_frames(hass, "site-a", binding, third_at), third_at
@@ -251,11 +303,12 @@ class ExternalInputFrameTests(unittest.TestCase):
         )
 
     def test_forecast_solar_generation_is_stable_for_values_and_separate_for_sites(self):
-        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        state = ha_state("18.4", {"unit_of_measurement": "kWh"}, datetime(2026, 9, 5, 9, tzinfo=UTC))
         hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity: state), config=SimpleNamespace(time_zone="Europe/Stockholm"))
         binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
         first = build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 10, tzinfo=UTC))[0][0]
         state.state = "19.1"
+        state.last_updated = datetime(2026, 9, 5, 14, tzinfo=UTC)
         second = build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 15, tzinfo=UTC))[0][0]
         other = build_forecast_solar_frames(hass, "site-b", binding, datetime(2026, 9, 5, 15, tzinfo=UTC))[0][0]
         self.assertEqual(first["source_generation_id"], second["source_generation_id"])
@@ -263,16 +316,17 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertNotEqual(first["semantic_key"], other["semantic_key"])
 
     def test_forecast_solar_unavailable_and_invalid_peak_fail_closed(self):
+        observed_at = datetime(2026, 9, 5, 9, tzinfo=UTC)
         states = {
-            "sensor.today": SimpleNamespace(state="unavailable", attributes={"unit_of_measurement": "kWh"}),
-            "sensor.peak": SimpleNamespace(state="not-a-timestamp", attributes={"unit_of_measurement": None}),
+            "sensor.today": ha_state("unavailable", {"unit_of_measurement": "kWh"}, observed_at),
+            "sensor.peak": ha_state("not-a-timestamp", {"unit_of_measurement": None}, observed_at),
         }
         hass = SimpleNamespace(states=SimpleNamespace(get=states.get), config=SimpleNamespace(time_zone="Europe/Stockholm"))
         binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today", "peak_time_today": "sensor.peak"}}
         self.assertEqual(build_forecast_solar_frames(hass, "site-a", binding, datetime(2026, 9, 5, 10, tzinfo=UTC)), [])
 
     def test_forecast_solar_local_day_uses_23_and_25_hour_utc_intervals(self):
-        state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
+        state = ha_state("18.4", {"unit_of_measurement": "kWh"}, datetime(2026, 3, 29, 9, tzinfo=UTC))
         hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity: state), config=SimpleNamespace(time_zone="Europe/Stockholm"))
         binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"today_kwh": "sensor.today"}}
         for captured, expected_hours in ((datetime(2026, 3, 29, 10, tzinfo=UTC), 23), (datetime(2026, 10, 25, 10, tzinfo=UTC), 25)):
