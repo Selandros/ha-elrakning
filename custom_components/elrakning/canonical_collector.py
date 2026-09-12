@@ -22,10 +22,17 @@ from homeassistant.util import dt as dt_util
 from .canonical_storage import CanonicalStorage, quarter_start
 from .external_input_frames import (
     build_forecast_solar_frames,
+    build_open_meteo_frame,
     persist_forecast_solar_frames,
+    persist_open_meteo_frames,
     persist_nord_pool_frame,
 )
 from .meter import _power_kw
+from .solar_open_meteo import (
+    async_fetch_open_meteo_target,
+    build_open_meteo_targets,
+    normalize_open_meteo_payload,
+)
 
 
 POWER_ROLES = {
@@ -56,6 +63,9 @@ class CanonicalCollector:
         self._flush_lock = asyncio.Lock()
         self._started = False
         self._forecast_capture_status: dict[str, Any] | None = None
+        self._open_meteo_capture_status: dict[str, Any] | None = None
+        self._open_meteo_lock = asyncio.Lock()
+        self._open_meteo_unsub = None
 
     async def async_persist_nord_pool_frame(self, data, binding, captured_at) -> bool:
         """Persist one global price frame without changing collection context."""
@@ -67,6 +77,87 @@ class CanonicalCollector:
     def forecast_capture_status(self) -> dict[str, Any] | None:
         """Return the latest in-memory Forecast.Solar capture diagnostics."""
         return copy.deepcopy(self._forecast_capture_status)
+
+    def open_meteo_capture_status(self) -> dict[str, Any] | None:
+        """Return the latest in-memory Open-Meteo capture diagnostics."""
+        return copy.deepcopy(self._open_meteo_capture_status)
+
+    def _open_meteo_targets(self) -> list[dict[str, Any]]:
+        getter = getattr(self.site_identity_manager, "collection_site_configs", None)
+        return build_open_meteo_targets(getter() if getter else {})
+
+    async def async_capture_open_meteo(self, *, trigger: str = "startup") -> dict[str, Any]:
+        """Capture immutable Open-Meteo frames without active-site context."""
+        async with self._open_meteo_lock:
+            started_at = dt_util.now().astimezone(timezone.utc)
+            targets = self._open_meteo_targets()
+            result = {
+                "started_at": started_at.isoformat(),
+                "finished_at": None,
+                "trigger": trigger,
+                "target_count": len(targets),
+                "target_site_ids": sorted({target["site_id"] for target in targets}),
+                "sections": {},
+                "last_error": None,
+            }
+            candidates = []
+            for target in targets:
+                key = f"{target['site_id']}:{target['section_request_fingerprint']}"
+                try:
+                    payload, fetched_at = await async_fetch_open_meteo_target(self.hass, target)
+                    normalized = normalize_open_meteo_payload(payload, target)
+                    if normalized is None:
+                        raise ValueError("invalid_response")
+                    candidates.append((target, normalized, fetched_at))
+                    result["sections"][key] = {"status": "fetched", "written": 0, "revised": 0, "deduplicated": 0}
+                except Exception as error:
+                    result["sections"][key] = {
+                        "status": "error",
+                        "written": 0,
+                        "revised": 0,
+                        "deduplicated": 0,
+                        "error_type": type(error).__name__,
+                        "error_message": str(error),
+                    }
+                    result["last_error"] = str(error)
+            current = {
+                (target["site_id"], target["section_request_fingerprint"]): target
+                for target in self._open_meteo_targets()
+            }
+            frames = []
+            for target, normalized, fetched_at in candidates:
+                if current.get((target["site_id"], target["section_request_fingerprint"])) != target:
+                    key = f"{target['site_id']}:{target['section_request_fingerprint']}"
+                    result["sections"][key]["status"] = "stale_target"
+                    continue
+                frames.append(build_open_meteo_frame(target, normalized, fetched_at))
+            if frames:
+                try:
+                    async with self._flush_lock:
+                        persisted = await self.hass.async_add_executor_job(
+                            persist_open_meteo_frames, self.storage, frames, started_at
+                        )
+                    for frame, _points in frames:
+                        key = f"{frame['site_id']}:{frame['provenance']['section_request_fingerprint']}"
+                        item = result["sections"][key]
+                        frame_result = persisted.get("frames", {}).get(frame["semantic_key"], persisted)
+                        item["written"] = int(frame_result.get("written", 0))
+                        item["revised"] = int(frame_result.get("revised", 0))
+                        item["deduplicated"] = int(frame_result.get("unchanged", 0))
+                        item["status"] = "success" if item["written"] or item["revised"] else "deduplicated"
+                except Exception as error:
+                    result["last_error"] = str(error)
+                    for frame, _points in frames:
+                        key = f"{frame['site_id']}:{frame['provenance']['section_request_fingerprint']}"
+                        result["sections"][key].update({
+                            "status": "error",
+                            "error_type": type(error).__name__,
+                            "error_message": str(error),
+                        })
+            result["finished_at"] = dt_util.now().astimezone(timezone.utc).isoformat()
+            result["status"] = "error" if result["last_error"] and not frames else "success"
+            self._open_meteo_capture_status = result
+            return copy.deepcopy(result)
 
     async def async_capture_forecast_solar(
         self,
@@ -234,6 +325,12 @@ class CanonicalCollector:
             minute=[0, 15, 30, 45],
             second=5,
         )
+        self._open_meteo_unsub = async_track_time_change(
+            self.hass,
+            lambda now: self.async_capture_open_meteo(trigger="hourly_cadence"),
+            minute=0,
+            second=12,
+        )
 
     async def async_shutdown(self) -> None:
         if self._state_unsub:
@@ -245,6 +342,9 @@ class CanonicalCollector:
         if self._quarter_unsub:
             self._quarter_unsub()
             self._quarter_unsub = None
+        if self._open_meteo_unsub:
+            self._open_meteo_unsub()
+            self._open_meteo_unsub = None
         self._buffers.clear()
         self._recent_reported.clear()
         self._finalized_intervals.clear()

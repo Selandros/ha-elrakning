@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
@@ -13,12 +14,15 @@ from homeassistant.util import dt as dt_util
 
 from .site_context import async_load_site_store
 
-from .solar_pvgis import build_installation
+from .solar_pvgis import _sections, build_installation
 
 
 OPEN_METEO_SOURCE = "open_meteo_global_tilted_irradiance"
 OPEN_METEO_MODEL = "metno"
 OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/metno"
+OPEN_METEO_DATASET = "open_meteo.manager_forecast.v1"
+OPEN_METEO_CONTRACT_VERSION = 1
+OPEN_METEO_ADAPTER_VERSION = 1
 STORE_KEY = "elrakning.solar_open_meteo"
 _CACHE_VERSION = 1
 _CACHE_TTL = timedelta(hours=1)
@@ -49,6 +53,188 @@ def compass_to_open_meteo_azimuth(compass_azimuth: Any) -> float | None:
         return None
     converted = (value - 180.0) % 360.0
     return converted - 360.0 if converted > 180.0 else converted
+
+
+def _valid_timezone(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        ZoneInfo(value)
+    except Exception:
+        return None
+    return value
+
+
+def _request_identity(target: dict[str, Any]) -> dict[str, Any]:
+    """Return only source-defining request semantics."""
+    return {
+        "dataset": OPEN_METEO_DATASET,
+        "adapter_contract_version": OPEN_METEO_CONTRACT_VERSION,
+        "adapter_version": OPEN_METEO_ADAPTER_VERSION,
+        "endpoint": OPEN_METEO_ENDPOINT,
+        "provider": "open-meteo",
+        "model": OPEN_METEO_MODEL,
+        "variables": ["global_tilted_irradiance"],
+        "forecast_days": 3,
+        "timezone_request": "auto",
+        "site_id": target["site_id"],
+        "latitude": target["latitude"],
+        "longitude": target["longitude"],
+        "tilt_deg": target["tilt_deg"],
+        "open_meteo_azimuth_deg": target["open_meteo_azimuth_deg"],
+    }
+
+
+def section_request_fingerprint(target: dict[str, Any]) -> str:
+    encoded = json.dumps(_request_identity(target), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:32]
+
+
+def source_generation_id(target: dict[str, Any]) -> str:
+    return "om-" + hashlib.sha256(
+        json.dumps(_request_identity(target), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def build_open_meteo_targets(site_configs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build immutable-capture targets from a site configuration snapshot."""
+    targets: list[dict[str, Any]] = []
+    for site_id in sorted(site_configs):
+        config = site_configs[site_id]
+        if config.get("collection_enabled", True) is not True:
+            continue
+        location = config.get("location")
+        if not isinstance(location, dict) or location.get("verification_state") != "verified":
+            continue
+        latitude = _number(location.get("latitude"))
+        longitude = _number(location.get("longitude"))
+        timezone_name = _valid_timezone(location.get("timezone"))
+        bindings = config.get("bindings")
+        binding = bindings.get("open_meteo") if isinstance(bindings, dict) else None
+        if latitude is None or longitude is None or timezone_name is None or not isinstance(binding, dict):
+            continue
+        sections = _sections(config.get("power", {}))
+        for section in sections:
+            azimuth = compass_to_open_meteo_azimuth(section.get("azimuth_deg"))
+            if azimuth is None:
+                continue
+            target = {
+                "site_id": site_id,
+                "latitude": latitude,
+                "longitude": longitude,
+                "timezone": timezone_name,
+                "tilt_deg": round(float(section["tilt_deg"]), 6),
+                "open_meteo_azimuth_deg": round(float(azimuth), 6),
+                "source_strings": sorted(section.get("source_strings", [])),
+                "peak_power_kwp": float(section["peak_power_kwp"]),
+                "binding": dict(binding),
+            }
+            target["section_request_fingerprint"] = section_request_fingerprint(target)
+            target["generation_id"] = source_generation_id(target)
+            targets.append(target)
+    return targets
+
+
+def normalize_source_timestamp(value: Any, timezone_name: str) -> datetime | None:
+    """Normalize provider timestamps to aware UTC and reject ambiguous local time."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc)
+    try:
+        zone = ZoneInfo(timezone_name)
+    except Exception:
+        return None
+    first = parsed.replace(tzinfo=zone, fold=0)
+    second = parsed.replace(tzinfo=zone, fold=1)
+    if first.utcoffset() != second.utcoffset():
+        return None
+    return first.astimezone(timezone.utc)
+
+
+def _timestamp_candidates(value: str, timezone_name: str) -> list[datetime]:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is not None:
+        return [parsed.astimezone(timezone.utc)]
+    zone = ZoneInfo(timezone_name)
+    candidates = []
+    for fold in (0, 1):
+        local = parsed.replace(tzinfo=zone, fold=fold)
+        utc = local.astimezone(timezone.utc)
+        if utc.astimezone(zone).replace(tzinfo=None) == parsed:
+            candidates.append(utc)
+    return sorted(set(candidates))
+
+
+def build_open_meteo_request(target: dict[str, Any]) -> dict[str, str]:
+    return {
+        "latitude": str(target["latitude"]),
+        "longitude": str(target["longitude"]),
+        "hourly": "global_tilted_irradiance",
+        "tilt": str(target["tilt_deg"]),
+        "azimuth": str(target["open_meteo_azimuth_deg"]),
+        "timezone": "auto",
+        "forecast_days": "3",
+    }
+
+
+def normalize_open_meteo_payload(payload: dict[str, Any], target: dict[str, Any]) -> dict[str, Any] | None:
+    hourly = payload.get("hourly") if isinstance(payload, dict) else None
+    times = hourly.get("time") if isinstance(hourly, dict) else None
+    values = hourly.get("global_tilted_irradiance") if isinstance(hourly, dict) else None
+    if not isinstance(times, list) or not isinstance(values, list) or len(times) != len(values):
+        return None
+    api_timezone = _valid_timezone(payload.get("timezone")) or target["timezone"]
+    points = []
+    quality_gaps = []
+    previous = None
+    for source_timestamp, value in zip(times, values):
+        try:
+            candidates = _timestamp_candidates(source_timestamp, api_timezone)
+        except (TypeError, ValueError):
+            candidates = []
+        valid_at = next((candidate for candidate in candidates if previous is None or candidate > previous), None)
+        number = _number(value)
+        if valid_at is None or number is None:
+            quality_gaps.append({"source_timestamp": source_timestamp, "reason": "invalid_timestamp_or_value"})
+            continue
+        previous = valid_at
+        points.append({
+            "source_timestamp": source_timestamp,
+            "valid_at": valid_at,
+            "value": number,
+            "unit": "W/m²",
+            "quality_status": "good",
+        })
+    if not points:
+        return None
+    return {
+        "points": points,
+        "quality_status": "partial" if quality_gaps else "good",
+        "quality": {"status": "partial" if quality_gaps else "good", "gaps": quality_gaps},
+        "api_metadata": {
+            key: payload[key] for key in ("model", "timezone", "utc_offset_seconds", "generationtime_ms")
+            if payload.get(key) is not None
+        },
+    }
+
+
+async def async_fetch_open_meteo_target(hass, target: dict[str, Any]) -> tuple[dict[str, Any], datetime]:
+    """Fetch one raw provider response without applying manager transformations."""
+    session = async_get_clientsession(hass)
+    request = build_open_meteo_request(target)
+    async with session.get(OPEN_METEO_ENDPOINT, params=request, timeout=30) as response:
+        if response.status != 200:
+            raise ValueError(f"http_{response.status}")
+        payload = await response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("invalid_response")
+    fetched_at = dt_util.now().astimezone(timezone.utc)
+    return payload, fetched_at
 
 
 def _parse_hourly(payload: dict[str, Any], section: dict[str, Any]) -> dict[str, Any] | None:
@@ -133,6 +319,60 @@ class SolarOpenMeteoManager:
             "installation_fingerprint": self._installation["fingerprint"],
         }
 
+    async def async_migrate_site_locations(self, site_identity_manager) -> int:
+        """Seed only the existing same-site location with verified legacy evidence."""
+        snapshot = getattr(site_identity_manager, "collection_site_configs", lambda: {})()
+        migrated = 0
+        for site_id, config in snapshot.items():
+            if isinstance(config.get("location"), dict):
+                continue
+            binding = (config.get("bindings") or {}).get("open_meteo")
+            if not isinstance(binding, dict):
+                continue
+            store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
+            del store
+            if not isinstance(cached, dict):
+                continue
+            installation = cached.get("installation")
+            state = cached.get("state")
+            frame = cached.get("frame")
+            if not isinstance(installation, dict) or not isinstance(state, dict):
+                continue
+            if binding.get("installation_fingerprint") != installation.get("fingerprint"):
+                continue
+            latitude = _number(installation.get("latitude"))
+            longitude = _number(installation.get("longitude"))
+            api_metadata = frame.get("api_metadata", {}) if isinstance(frame, dict) else {}
+            timezone_name = _valid_timezone(api_metadata.get("timezone"))
+            if (
+                latitude is None
+                or longitude is None
+                or timezone_name is None
+                or abs(latitude - 62.20646687401988) > 1e-9
+                or abs(longitude - 17.490212917327884) > 1e-9
+                or timezone_name != "Europe/Stockholm"
+            ):
+                continue
+            location_payload = {
+                "latitude": latitude,
+                "longitude": longitude,
+                "timezone": timezone_name,
+                "provenance": "open_meteo_namespaced_store_and_binding",
+                "verification_state": "verified",
+                "location_fingerprint": hashlib.sha256(
+                    json.dumps(
+                        {"latitude": latitude, "longitude": longitude, "timezone": timezone_name},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest(),
+            }
+            try:
+                migrated += int(await site_identity_manager.async_set_site_location(site_id, location_payload))
+            except ValueError:
+                continue
+        return migrated
+
     async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
         """Switch the Open-Meteo frame to one site namespace."""
         self._context_generation += 1
@@ -183,22 +423,16 @@ class SolarOpenMeteoManager:
 
     async def _async_fetch(self, installation: dict[str, Any], context: dict[str, Any]) -> None:
         sections = []
-        session = async_get_clientsession(self.hass)
         for section in installation["sections"]:
-            params = {
+            target = {
+                "site_id": context["site_id"],
                 "latitude": str(installation["latitude"]),
                 "longitude": str(installation["longitude"]),
-                "hourly": "global_tilted_irradiance",
-                "tilt": str(section["tilt_deg"]),
-                "azimuth": str(compass_to_open_meteo_azimuth(section["azimuth_deg"])),
-                "timezone": "auto",
-                "forecast_days": "3",
+                "tilt_deg": section["tilt_deg"],
+                "open_meteo_azimuth_deg": compass_to_open_meteo_azimuth(section["azimuth_deg"]),
             }
             try:
-                async with session.get(OPEN_METEO_ENDPOINT, params=params, timeout=30) as response:
-                    if response.status != 200:
-                        raise ValueError(f"http_{response.status}")
-                    payload = await response.json()
+                payload, _fetched_at = await async_fetch_open_meteo_target(self.hass, target)
                 normalized = _parse_hourly(payload, section)
                 if normalized is None:
                     raise ValueError("invalid_response")

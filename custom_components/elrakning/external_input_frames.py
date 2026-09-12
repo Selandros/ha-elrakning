@@ -40,6 +40,9 @@ _FORECAST_SOLAR_TARGET_DAY_OFFSETS = {
     "peak_time_tomorrow": 1,
 }
 
+OPEN_METEO_DATASET = "open_meteo.manager_forecast.v1"
+OPEN_METEO_LOGICAL_ROLE = "solar.irradiance.forecast"
+
 
 def build_nord_pool_frame(
     data: Any,
@@ -386,4 +389,149 @@ def persist_forecast_solar_frames(storage: CanonicalStorage, frames: list[tuple[
         else:
             inserted = storage.insert_external_frame(frame, points)
             result["written"] += int(inserted)
+    return result
+
+
+def build_open_meteo_frame(
+    target: dict[str, Any],
+    normalized: dict[str, Any],
+    fetched_at: datetime,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build one immutable raw-GTI frame for one explicit request section."""
+    points = normalized.get("points") if isinstance(normalized, dict) else None
+    if not isinstance(points, list) or not points:
+        raise ValueError("open_meteo_points_missing")
+    fetched_at = fetched_at.astimezone(timezone.utc)
+    request_fingerprint = target["section_request_fingerprint"]
+    generation_id = target["generation_id"]
+    semantic_key = (
+        f"{OPEN_METEO_DATASET}|{target['site_id']}|{generation_id}|"
+        f"{OPEN_METEO_LOGICAL_ROLE}|{request_fingerprint}"
+    )
+    frame_seed = json.dumps(
+        [
+            semantic_key,
+            [
+                {
+                    "point_key": point["valid_at"].astimezone(timezone.utc).isoformat(),
+                    "value": point["value"],
+                    "unit": point["unit"],
+                }
+                for point in points
+            ],
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    frame_id = "frame-" + hashlib.sha256(frame_seed.encode("utf-8")).hexdigest()[:32]
+    valid_at_values = [point["valid_at"].astimezone(timezone.utc) for point in points]
+    frame = {
+        "frame_id": frame_id,
+        "schema_version": SCHEMA_VERSION,
+        "dataset_version": DATASET_VERSION,
+        "semantic_key": semantic_key,
+        "revision": 1,
+        "source_generation_id": generation_id,
+        "source_scope": "site",
+        "site_id": target["site_id"],
+        "logical_role": OPEN_METEO_LOGICAL_ROLE,
+        "classification": "forecast",
+        "published_at": None,
+        "fetched_at": fetched_at,
+        "known_at": fetched_at,
+        "captured_at": fetched_at,
+        "valid_from": min(valid_at_values),
+        "valid_to": max(valid_at_values) + timedelta(hours=1),
+        "quality_status": normalized.get("quality_status", "good"),
+        "quality": normalized.get("quality", {}),
+        "provenance": {
+            "origin_type": "open_meteo_http_response",
+            "provider": "open-meteo",
+            "endpoint": "https://api.open-meteo.com/v1/metno",
+            "model": "metno",
+            "site_id": target["site_id"],
+            "timezone": target["timezone"],
+            "latitude": target["latitude"],
+            "longitude": target["longitude"],
+            "tilt_deg": target["tilt_deg"],
+            "open_meteo_azimuth_deg": target["open_meteo_azimuth_deg"],
+            "section_request_fingerprint": request_fingerprint,
+            "binding_fingerprint": target.get("binding", {}).get("binding_fingerprint"),
+            "installation_fingerprint": target.get("binding", {}).get("installation_fingerprint"),
+            "source_strings": list(target.get("source_strings", [])),
+            "peak_power_kwp": target.get("peak_power_kwp"),
+            "api_metadata": normalized.get("api_metadata", {}),
+        },
+        "payload_schema": "open_meteo.global_tilted_irradiance.v1",
+    }
+    frame_points = [
+        {
+            "point_id": f"{frame_id}-p{index:03d}",
+            "point_key": point["valid_at"].astimezone(timezone.utc).isoformat(),
+            "valid_at": point["valid_at"].astimezone(timezone.utc),
+            "value": point["value"],
+            "unit": "W/m²",
+            "quality_status": point.get("quality_status", "good"),
+            "point": {"source_timestamp": point.get("source_timestamp")},
+        }
+        for index, point in enumerate(points, start=1)
+    ]
+    return frame, frame_points
+
+
+def persist_open_meteo_frames(
+    storage: CanonicalStorage,
+    frames: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    captured_at: datetime,
+) -> dict[str, int]:
+    """Persist site-scoped Open-Meteo frames with immutable revisions."""
+    result = {"written": 0, "unchanged": 0, "revised": 0, "frames": {}}
+    for frame, points in frames:
+        frame_result = {"written": 0, "unchanged": 0, "revised": 0}
+        storage.ensure_source_generation(
+            {
+                "site_id": frame["site_id"],
+                "logical_role": frame["logical_role"],
+                "generation_id": frame["source_generation_id"],
+                "source_identity": {
+                    "identity_key": frame["provenance"]["section_request_fingerprint"],
+                    "identity_strength": "strong",
+                    "identity_provenance": "open_meteo_request_contract",
+                },
+                "source_resolution_kind": "native_bucket",
+                "source_resolution_seconds": 3600,
+                "timezone_state": "verified",
+            },
+            captured_at,
+        )
+        latest = storage.latest_external_frame(frame["semantic_key"])
+        if latest:
+            frame["revision"] = latest[1]
+            frame["frame_id"] = latest[0]
+            frame["supersedes_frame_id"] = latest[2]
+            comparable = _points_with_stored_ids(storage, frame["frame_id"], points)
+            try:
+                inserted = storage.insert_external_frame(frame, comparable)
+            except ValueError as error:
+                if str(error) != "canonical_frame_revision_conflict":
+                    raise
+                frame["revision"] = latest[1] + 1
+                frame["supersedes_frame_id"] = latest[0]
+                frame["frame_id"] = "frame-" + hashlib.sha256(
+                    (
+                        f"{frame['semantic_key']}|{frame['revision']}|"
+                        + json.dumps(_point_content_for_revision_hash(comparable), sort_keys=True, default=str)
+                    ).encode("utf-8")
+                ).hexdigest()[:32]
+                comparable = _points_with_revision_ids(frame["frame_id"], comparable)
+                inserted = storage.insert_external_frame(frame, comparable)
+                result["revised"] += int(inserted)
+                frame_result["revised"] += int(inserted)
+        else:
+            inserted = storage.insert_external_frame(frame, points)
+        result["written"] += int(inserted)
+        result["unchanged"] += int(not inserted)
+        frame_result["written"] += int(inserted)
+        frame_result["unchanged"] += int(not inserted)
+        result["frames"][frame["semantic_key"]] = frame_result
     return result

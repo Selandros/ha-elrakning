@@ -383,6 +383,37 @@ class SiteIdentityManager:
             targets.append({"site_id": site_id, "binding": deepcopy(binding)})
         return targets
 
+    def collection_site_configs(self) -> dict[str, dict[str, Any]]:
+        """Return a deep snapshot of site configuration for background producers."""
+        configs = self.state.get("site_configs", {})
+        return {
+            str(site_id): deepcopy(config)
+            for site_id, config in configs.items()
+            if isinstance(site_id, str) and isinstance(config, dict)
+        }
+
+    async def async_set_site_location(self, site_id: str, location: dict[str, Any]) -> bool:
+        """Persist an explicitly verified site location without changing active context."""
+        if not isinstance(site_id, str) or not site_id or not isinstance(location, dict):
+            raise ValueError("site_location_invalid")
+        if site_id not in {
+            item.get("site_id")
+            for item in self.state.get("sites", [])
+            if isinstance(item, dict)
+        }:
+            raise ValueError("site_not_found")
+        config = self.state.setdefault("site_configs", {}).setdefault(
+            site_id, self._empty_site_config()
+        )
+        current = config.get("location")
+        if current == location:
+            return False
+        if current is not None:
+            raise ValueError("site_location_conflict")
+        config["location"] = deepcopy(location)
+        await self.store.async_save(self.state)
+        return True
+
     def _current_mapping_config(self) -> dict[str, Any]:
         return {
             "power": deepcopy(self.power_manager.mapping),

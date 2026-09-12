@@ -180,6 +180,8 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "shadow": solar_shadow_manager,
         "evidence": solar_evidence_manager,
     })
+    await solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager)
+    await canonical_collector.async_capture_open_meteo(trigger="startup")
     await canonical_collector.async_capture_forecast_solar(trigger="startup")
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     await solar_evidence_manager.async_startup_catch_up()

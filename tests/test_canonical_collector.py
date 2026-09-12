@@ -39,6 +39,9 @@ class _Identity:
     def forecast_collection_targets(self):
         return [target for target in self.targets if "binding" in target]
 
+    def collection_site_configs(self):
+        return getattr(self, "site_configs", {})
+
 
 class _Hass:
     async def async_add_executor_job(self, callback, *args):
@@ -106,6 +109,85 @@ def _forecast_target(site, entity):
 
 
 class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_open_meteo_capture_is_site_independent_and_fiskvik_empty(self):
+        identity = _Identity([])
+        identity.site_configs = {
+            "site-a": {
+                "collection_enabled": True,
+                "location": {
+                    "latitude": 62.2,
+                    "longitude": 17.4,
+                    "timezone": "Europe/Stockholm",
+                    "verification_state": "verified",
+                },
+                "bindings": {"open_meteo": {"binding_fingerprint": "a"}},
+                "power": {
+                    "solar_entities": ["sensor.pv-a"],
+                    "solar_array_metadata": {
+                        "sensor.pv-a": {"capacity_kwp": 1, "tilt_deg": 30, "azimuth_deg": 225}
+                    },
+                },
+            },
+            "site-b": {
+                "collection_enabled": True,
+                "location": {
+                    "latitude": 59.3,
+                    "longitude": 18.1,
+                    "timezone": "Europe/Stockholm",
+                    "verification_state": "unverified",
+                },
+                "bindings": {},
+                "power": {"solar_entities": [], "solar_array_metadata": {}},
+            },
+        }
+        collector = CanonicalCollector(_Hass(), identity, ":memory:")
+        self.addCleanup(collector.storage.close)
+        async def fetch(_hass, target):
+            return {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-09-12T12:00"],
+                    "global_tilted_irradiance": [-1.5],
+                },
+            }, datetime(2026, 9, 12, 10, 0, tzinfo=UTC)
+        with patch.object(collector_module, "async_fetch_open_meteo_target", side_effect=fetch), \
+             patch.object(collector_module, "persist_open_meteo_frames", return_value={"written": 1, "unchanged": 0, "revised": 0, "frames": {}}):
+            result = await collector.async_capture_open_meteo()
+        self.assertEqual(result["target_site_ids"], ["site-a"])
+        self.assertEqual(result["target_count"], 1)
+        self.assertEqual(result["status"], "success")
+
+    async def test_open_meteo_capture_discards_stale_target_before_persist(self):
+        identity = _Identity([])
+        identity.site_configs = {
+            "site-a": {
+                "collection_enabled": True,
+                "location": {
+                    "latitude": 62.2,
+                    "longitude": 17.4,
+                    "timezone": "Europe/Stockholm",
+                    "verification_state": "verified",
+                },
+                "bindings": {"open_meteo": {"binding_fingerprint": "a"}},
+                "power": {
+                    "solar_entities": ["sensor.pv-a"],
+                    "solar_array_metadata": {
+                        "sensor.pv-a": {"capacity_kwp": 1, "tilt_deg": 30, "azimuth_deg": 225}
+                    },
+                },
+            }
+        }
+        collector = CanonicalCollector(_Hass(), identity, ":memory:")
+        self.addCleanup(collector.storage.close)
+        async def fetch(_hass, target):
+            identity.site_configs["site-a"]["location"]["latitude"] = 63.0
+            return {"timezone": "Europe/Stockholm", "hourly": {"time": ["2026-09-12T12:00"], "global_tilted_irradiance": [1]}}, datetime(2026, 9, 12, 10, 0, tzinfo=UTC)
+        with patch.object(collector_module, "async_fetch_open_meteo_target", side_effect=fetch), \
+             patch.object(collector_module, "persist_open_meteo_frames") as persist:
+            result = await collector.async_capture_open_meteo()
+        persist.assert_not_called()
+        self.assertEqual(next(iter(result["sections"].values()))["status"], "stale_target")
+
     async def test_forecast_capture_status_starts_empty_and_is_read_only(self):
         collector = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
         self.addCleanup(collector.storage.close)

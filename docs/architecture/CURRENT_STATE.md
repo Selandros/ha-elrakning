@@ -513,3 +513,38 @@ INFERRED (roadmap): Long-term data foundation:
 - NEXT: C.2.4 production implementation is blocked until this amendment is
   respected by the implementation. No manifest bump, deploy, or restart belongs
   to C.2.3C.
+
+## C.2.4 Open-Meteo immutable canonical producer
+
+- IMPLEMENTED / STATIC VERIFIED (local release candidate, 2026-09-12):
+  version 0.0.635 adds a site-explicit Open-Meteo canonical producer without
+  changing the C.1 schema or Solar Evidence paths.
+- The producer uses a deep site-configuration snapshot, explicit verified
+  site-scoped location, persisted PV geometry, and an explicit Open-Meteo
+  binding. Missing or unverified location, geometry, or binding is fail-closed;
+  Fiskvik therefore remains zero-target/zero-frame unless it receives its own
+  legitimate configuration.
+- The existing Vikarbodarna namespaced Open-Meteo Store can seed its own
+  location only when the same-site Store, binding fingerprint, finite
+  coordinates, and valid API timezone agree. The migration is idempotent and
+  never copies location to another site.
+- Canonical capture uses a shared explicit-target raw HTTP fetch beneath both
+  the mutable manager and immutable collector. Canonical normalization preserves
+  finite negative GTI, source timestamp text, provider timezone metadata, and
+  aware UTC valid_at; invalid/DST-ambiguous points are quality gaps with no
+  fabricated values or interpolation.
+- Frames use open_meteo.manager_forecast.v1 and solar.irradiance.forecast,
+  are site-scoped, carry deterministic request generation/semantic identity,
+  have published_at = null, and use immutable content-based
+  deduplication/revisions. Manager-only derived/clamped fields remain outside
+  canonical points.
+- Collection is active-site independent, uses a dedicated Open-Meteo capture
+  lock, does not hold the canonical flush lock during HTTP, revalidates targets
+  before persistence, and has startup/hourly diagnostics.
+- STATIC TEST STATUS: focused C.2.4 tests pass; full Python tests, frontend
+  MJS tests, compileall, manifest/fixture JSON validation, and diff-check pass
+  locally. Runtime acceptance is still pending deployment and must verify WAL
+  integrity, real Vikarbodarna frames, Fiskvik zero frames, replay, restart,
+  and Solar Evidence non-regression.
+- NEXT: review the implementation diff and static gate before any 0.0.635
+  deployment. C.2.4 is not runtime-closed.

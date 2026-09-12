@@ -13,6 +13,9 @@ install_optional_dependency_stubs()
 
 from custom_components.elrakning.solar_open_meteo import (
     SolarOpenMeteoManager,
+    build_open_meteo_targets,
+    normalize_open_meteo_payload,
+    normalize_source_timestamp,
     _parse_fetched_at,
     _parse_hourly,
     compass_to_open_meteo_azimuth,
@@ -28,6 +31,135 @@ async def _empty_state():
 
 
 class SolarOpenMeteoTests(unittest.TestCase):
+    def _site_config(self, site_id="site-a", location=None):
+        return {
+            site_id: {
+                "collection_enabled": True,
+                "location": location or {
+                    "latitude": 62.20646687401988,
+                    "longitude": 17.490212917327884,
+                    "timezone": "Europe/Stockholm",
+                    "verification_state": "verified",
+                },
+                "bindings": {"open_meteo": {"binding_fingerprint": "binding-a"}},
+                "power": {
+                    "solar_entities": ["sensor.pv"],
+                    "solar_array_metadata": {
+                        "sensor.pv": {"capacity_kwp": 9.45, "tilt_deg": 30, "azimuth_deg": 225}
+                    },
+                },
+            }
+        }
+
+    def test_open_meteo_targets_are_site_explicit_and_fail_closed(self):
+        targets = build_open_meteo_targets(self._site_config())
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0]["site_id"], "site-a")
+        self.assertEqual(targets[0]["generation_id"].startswith("om-"), True)
+        self.assertEqual(build_open_meteo_targets(self._site_config("site-b", {
+            "latitude": 62.2, "longitude": 17.4, "timezone": "Europe/Stockholm",
+            "verification_state": "unverified",
+        })), [])
+
+    def test_open_meteo_source_identity_excludes_provenance_only_changes(self):
+        first = build_open_meteo_targets(self._site_config())[0]
+        changed = self._site_config()
+        changed["site-a"]["power"]["solar_array_metadata"]["sensor.pv"]["capacity_kwp"] = 12
+        changed["site-a"]["power"]["solar_entities"] = ["sensor.pv_renamed"]
+        changed["site-a"]["power"]["solar_array_metadata"]["sensor.pv_renamed"] = changed["site-a"]["power"]["solar_array_metadata"].pop("sensor.pv")
+        second = build_open_meteo_targets(changed)[0]
+        self.assertEqual(first["generation_id"], second["generation_id"])
+        self.assertNotEqual(first["source_strings"], second["source_strings"])
+
+    def test_open_meteo_timestamp_normalization_rejects_ambiguous_local_time(self):
+        self.assertEqual(
+            normalize_source_timestamp("2026-09-12T12:00", "Europe/Stockholm").isoformat(),
+            "2026-09-12T10:00:00+00:00",
+        )
+        self.assertIsNone(normalize_source_timestamp("2026-10-25T02:30", "Europe/Stockholm"))
+
+    def test_open_meteo_payload_preserves_negative_raw_gti_and_marks_gaps(self):
+        target = build_open_meteo_targets(self._site_config())[0]
+        result = normalize_open_meteo_payload(
+            {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-09-12T12:00", "2026-09-12T13:00", "2026-09-12T14:00"],
+                    "global_tilted_irradiance": [-2.5, None, 4.0],
+                },
+            },
+            target,
+        )
+        self.assertEqual([point["value"] for point in result["points"]], [-2.5, 4.0])
+        self.assertEqual(result["quality_status"], "partial")
+        self.assertEqual(result["points"][0]["unit"], "W/m²")
+
+    def test_open_meteo_payload_resolves_ordered_autumn_duplicate(self):
+        target = build_open_meteo_targets(self._site_config())[0]
+        result = normalize_open_meteo_payload(
+            {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-10-25T01:00", "2026-10-25T02:00", "2026-10-25T02:00", "2026-10-25T03:00"],
+                    "global_tilted_irradiance": [1, 2, 3, 4],
+                },
+            },
+            target,
+        )
+        self.assertEqual(
+            [point["valid_at"].isoformat() for point in result["points"]],
+            [
+                "2026-10-24T23:00:00+00:00",
+                "2026-10-25T00:00:00+00:00",
+                "2026-10-25T01:00:00+00:00",
+                "2026-10-25T02:00:00+00:00",
+            ],
+        )
+
+    def test_open_meteo_location_migration_is_same_site_and_idempotent(self):
+        import asyncio
+        import custom_components.elrakning.solar_open_meteo as module
+
+        manager = SolarOpenMeteoManager.__new__(SolarOpenMeteoManager)
+        manager.hass = SimpleNamespace()
+        site_configs = {
+            "site-a": {
+                "bindings": {"open_meteo": {"installation_fingerprint": "legacy"}},
+            },
+            "site-b": {"bindings": {}},
+        }
+        cached = {
+            "installation": {
+                "latitude": 62.20646687401988,
+                "longitude": 17.490212917327884,
+                "fingerprint": "legacy",
+            },
+            "state": {},
+            "frame": {"api_metadata": {"timezone": "Europe/Stockholm"}},
+        }
+        class Identity:
+            def __init__(self):
+                self.saved = {}
+            def collection_site_configs(self):
+                return site_configs
+            async def async_set_site_location(self, site_id, location):
+                if site_id in self.saved:
+                    return False
+                self.saved[site_id] = location
+                return True
+        async def load_store(*_args):
+            return SimpleNamespace(), cached if _args[-1] == "site-a" else None
+        original = module.async_load_site_store
+        module.async_load_site_store = load_store
+        try:
+            identity = Identity()
+            self.assertEqual(asyncio.run(manager.async_migrate_site_locations(identity)), 1)
+            self.assertEqual(identity.saved["site-a"]["verification_state"], "verified")
+            site_configs["site-a"]["location"] = identity.saved["site-a"]
+            self.assertEqual(asyncio.run(manager.async_migrate_site_locations(identity)), 0)
+            self.assertNotIn("site-b", identity.saved)
+        finally:
+            module.async_load_site_store = original
     def test_manager_accepts_missing_or_invalid_fetched_at_as_cache_miss(self):
         for value in (None, "not-a-timestamp"):
             self.assertIsNone(_parse_fetched_at(value))

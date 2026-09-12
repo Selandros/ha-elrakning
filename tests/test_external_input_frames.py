@@ -15,6 +15,8 @@ from custom_components.elrakning.canonical_storage import CanonicalStorage
 from custom_components.elrakning.external_input_frames import (
     build_nord_pool_frame,
     build_forecast_solar_frames,
+    build_open_meteo_frame,
+    persist_open_meteo_frames,
     persist_forecast_solar_frames,
     persist_nord_pool_frame,
 )
@@ -59,6 +61,50 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(row[:3], ("global", None, "market.price.energy"))
         self.assertEqual(row[3], int(captured.timestamp() * 1_000_000))
         self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_points").fetchone()[0], 2)
+
+    def test_open_meteo_frame_is_site_scoped_and_revision_safe(self):
+        target = {
+            "site_id": "site-a",
+            "latitude": 62.2,
+            "longitude": 17.4,
+            "timezone": "Europe/Stockholm",
+            "tilt_deg": 30.0,
+            "open_meteo_azimuth_deg": 45.0,
+            "section_request_fingerprint": "request-a",
+            "generation_id": "om-generation-a",
+            "source_strings": ["sensor.pv"],
+            "peak_power_kwp": 9.45,
+            "binding": {"binding_fingerprint": "binding-a"},
+        }
+        fetched = datetime(2026, 9, 5, 10, 0, tzinfo=UTC)
+        normalized = {
+            "quality_status": "good",
+            "quality": {"status": "good", "gaps": []},
+            "api_metadata": {"timezone": "Europe/Stockholm"},
+            "points": [
+                {
+                    "source_timestamp": "2026-09-05T12:00",
+                    "valid_at": datetime(2026, 9, 5, 10, 0, tzinfo=UTC),
+                    "value": -2.5,
+                    "unit": "W/m²",
+                    "quality_status": "good",
+                }
+            ],
+        }
+        frame = build_open_meteo_frame(target, normalized, fetched)
+        self.assertEqual(frame[0]["source_scope"], "site")
+        self.assertEqual(frame[0]["site_id"], "site-a")
+        self.assertIsNone(frame[0]["published_at"])
+        self.assertEqual(persist_open_meteo_frames(self.storage, [frame], fetched)["written"], 1)
+        self.assertEqual(persist_open_meteo_frames(self.storage, [frame], fetched)["unchanged"], 1)
+        normalized["points"][0]["value"] = 4.0
+        changed = build_open_meteo_frame(target, normalized, fetched + timedelta(hours=1))
+        result = persist_open_meteo_frames(self.storage, [changed], fetched + timedelta(hours=1))
+        self.assertEqual(result["revised"], 1)
+        rows = self.storage.connection.execute(
+            "SELECT site_id, logical_role, revision FROM external_input_frames ORDER BY revision"
+        ).fetchall()
+        self.assertEqual(rows, [("site-a", "solar.irradiance.forecast", 1), ("site-a", "solar.irradiance.forecast", 2)])
 
     def test_forecast_solar_supported_roles_write_site_scoped_frames(self):
         observed_at = datetime(2026, 9, 5, 9, 59, tzinfo=UTC)
