@@ -206,6 +206,37 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(result["unchanged"], 1)
         self.assertEqual(self.storage.count_external_frames(), 1)
 
+    def test_forecast_solar_capture_relative_roles_use_observation_time(self):
+        observed_at = datetime(2026, 9, 5, 9, 59, tzinfo=UTC)
+        states = {
+            "sensor.remaining": ha_state("9.108", {"unit_of_measurement": "kWh"}, observed_at),
+            "sensor.power": ha_state("4.13", {"unit_of_measurement": "kW"}, observed_at),
+        }
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=states.get),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {
+            "config_entry_id": "fs-entry",
+            "binding_fingerprint": "binding-a",
+            "entities": {"remaining_today_kwh": "sensor.remaining", "power_now_kw": "sensor.power"},
+        }
+        first_at = datetime(2026, 9, 5, 10, tzinfo=UTC)
+        second_at = datetime(2026, 9, 5, 10, 15, tzinfo=UTC)
+        first = build_forecast_solar_frames(hass, "site-a", binding, first_at)
+        second = build_forecast_solar_frames(hass, "site-a", binding, second_at)
+        self.assertEqual(len(first), 2)
+        self.assertEqual(len(second), 2)
+        for frame, points in first + second:
+            self.assertEqual(points[0]["point"]["observed_at"], observed_at.isoformat())
+            self.assertEqual(points[0]["point"]["target_point"], observed_at.isoformat())
+            if frame["logical_role"].endswith("remaining_today_kwh"):
+                self.assertEqual(frame["valid_from"], observed_at)
+        persist_forecast_solar_frames(self.storage, first, first_at)
+        result = persist_forecast_solar_frames(self.storage, second, second_at)
+        self.assertEqual(result["unchanged"], 2)
+        self.assertEqual(self.storage.count_external_frames(), 2)
+
     def test_forecast_solar_changed_observation_timestamp_creates_revision(self):
         state = ha_state("18.4", {"unit_of_measurement": "kWh"}, datetime(2026, 9, 5, 9, 59, tzinfo=UTC))
         hass = SimpleNamespace(

@@ -178,12 +178,17 @@ def _forecast_source_identity(site_id: str, binding: dict[str, Any], role: str, 
     return "fs-" + hashlib.sha256(identity_key.encode()).hexdigest()[:32], identity_key
 
 
-def _forecast_target(role: str, local_day: date, captured_at: datetime, zone: ZoneInfo) -> tuple[str, datetime | None, datetime | None, datetime]:
+def _forecast_target(
+    role: str,
+    local_day: date,
+    observed_at: datetime,
+    zone: ZoneInfo,
+) -> tuple[str, datetime | None, datetime | None, datetime]:
     if role == "power_now_kw":
-        return "instant:current", None, None, captured_at
+        return "instant:current", None, None, observed_at
     if role == "remaining_today_kwh":
         start, end = _local_day_bounds(local_day, zone)
-        return f"local_day_remainder:{local_day.isoformat()}", captured_at, end, captured_at
+        return f"local_day_remainder:{local_day.isoformat()}", observed_at, end, observed_at
     target_day = local_day + timedelta(days=_FORECAST_SOLAR_TARGET_DAY_OFFSETS.get(role, 0))
     start, end = _local_day_bounds(target_day, zone)
     return f"local_day:{target_day.isoformat()}", start, end, start
@@ -247,7 +252,9 @@ def build_forecast_solar_frames(
         observed_at = _forecast_observed_at(state)
         if observed_at is None:
             continue
-        target, valid_from, valid_to, point_time = _forecast_target(role, local_day, captured_at, zone)
+        target, valid_from, valid_to, point_time = _forecast_target(
+            role, local_day, observed_at, zone
+        )
         normalized = _forecast_value_and_point(role, state, observed_at, point_time)
         if normalized is None:
             continue
