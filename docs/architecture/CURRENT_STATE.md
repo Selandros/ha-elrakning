@@ -456,3 +456,34 @@ INFERRED (roadmap): Long-term data foundation:
 4. establish deterministic replay and battery digital-twin backtesting;
 5. keep Vikarbodarna shadow-only and make Fiskvik collection-ready from day
    one.
+
+## C.2.3 Open-Meteo producer contract
+
+- VERIFIED (runtime evidence closure, 2026-09-12): Vikarbodarna has
+  `collection_enabled=true`, a persisted Open-Meteo binding, and deterministic
+  persisted PV geometry: two sources totaling 9.45 kWp at tilt 30° and
+  azimuth 225°. The existing runtime cache had one section and 67 monotonic
+  hourly points; its source timestamps were naive local ISO text with API
+  timezone `Europe/Stockholm` and offset metadata 7200 seconds.
+- VERIFIED (runtime evidence closure, 2026-09-12): Fiskvik has
+  `collection_enabled=true` but no solar entities, no persisted solar array
+  geometry, no Open-Meteo binding, and no namespaced Open-Meteo Store. It must
+  remain a clean room with zero Open-Meteo canonical frames until legitimate
+  source/configuration exists.
+- COMPLETE (C.2.3A): site-explicit geometry reconstruction and runtime cache
+  evidence are closed. DST behavior remains design/fixture verified only; the
+  observed cache horizon did not cross a DST transition.
+- COMPLETE (C.2.3B): Open-Meteo immutable producer contract is locked in
+  `docs/architecture/C2_3_OPEN_METEO_PRODUCER_CONTRACT_V1.md` with deterministic
+  fixtures and pure tests. The contract uses per-normalized-section frames,
+  explicit source generation and semantic/revision identities, raw GTI without
+  clamp or derived potential-DC canonicalization, UTC valid_at with fail-closed
+  DST handling, and `known_at <= decision_at` replay.
+- NON-REGRESSION LOCK: C.2.4 must not change Solar Evidence, previous_day1,
+  evidence-v1 qualification, frozen Forecast.Solar baselines, historical rows,
+  counters, or consumers. The established baseline remains 39 days, 14
+  Open-Meteo-complete, 13 Forecast.Solar-common with the recorded full and
+  semantic hashes.
+- NEXT: C.2.4 is the first production implementation scope. It is not part of
+  this docs/fixtures-only closure. No manifest bump, deploy, or restart belongs
+  to C.2.3B.

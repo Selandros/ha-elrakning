@@ -1,0 +1,68 @@
+{
+  "fixture_suite": "elrakning.c2_3_open_meteo_producer_contract.v1",
+  "contract_version": 1,
+  "dataset": "open_meteo.manager_forecast.v1",
+  "role": "solar.irradiance.forecast",
+  "runtime_evidence": {
+    "vikarbodarna_site_id": "76f92eea-5720-4c19-9b43-17028d19a0a4",
+    "fiskvik_site_id": "66edee1e-ee32-4511-8e9d-4fc96947c861",
+    "vikarbodarna_sections": 1,
+    "vikarbodarna_peak_power_kwp": 9.45,
+    "vikarbodarna_tilt_deg": 30.0,
+    "vikarbodarna_azimuth_deg": 225.0,
+    "vikarbodarna_open_meteo_azimuth_deg": 45.0,
+    "cache_version": 1,
+    "cache_hourly_points": 67,
+    "cache_first_timestamp": "2026-09-12T00:00",
+    "cache_last_timestamp": "2026-09-14T18:00",
+    "cache_api_timezone": "Europe/Stockholm",
+    "cache_utc_offset_seconds": 7200,
+    "cache_min_gti": 0.0,
+    "cache_max_gti": 709.7,
+    "cache_zero_count": 27,
+    "fiskvik_has_target": false,
+    "fiskvik_has_canonical_frame": false
+  },
+  "request_contract": {
+    "endpoint": "https://api.open-meteo.com/v1/metno",
+    "provider": "open-meteo",
+    "model": "metno",
+    "variables": ["global_tilted_irradiance"],
+    "forecast_days": 3,
+    "timezone": "auto",
+    "identity_excludes": ["fetched_at", "captured_at", "known_at", "values", "generationtime_ms", "frame_id", "source_strings", "peak_power_kwp"]
+  },
+  "identity": {
+    "section_order_is_semantically_irrelevant": true,
+    "source_generation_changes_on": ["dataset_contract", "adapter_contract", "endpoint", "provider", "model", "variables", "forecast_days", "timezone", "site_id", "latitude", "longitude", "tilt_deg", "open_meteo_azimuth_deg"],
+    "source_generation_does_not_change_on": ["fetched_at", "captured_at", "known_at", "values", "generationtime_ms", "frame_id", "source_strings", "peak_power_kwp"],
+    "point_key": "valid_at_utc",
+    "revision_partition": "dataset|site_id|source_generation_id|role|section_request_fingerprint",
+    "published_at": null
+  },
+  "timestamp_fixtures": {
+    "ordinary": {"timezone": "Europe/Stockholm", "local": "2026-09-12T12:00", "utc": "2026-09-12T10:00:00Z"},
+    "spring_day_hours": 23,
+    "autumn_day_hours": 25,
+    "nonexistent_local_timestamp": "quality_gap",
+    "ambiguous_local_timestamp_without_unique_order": "quality_gap",
+    "offset_aware_source": "preserve_source_offset_and_normalize_to_utc"
+  },
+  "quality": {
+    "negative_finite_gti": "preserve_raw",
+    "null_nan_inf_missing_or_malformed": "quality_gap_no_point",
+    "duplicate_or_nonmonotonic_timestamp": "quality_gap_no_point",
+    "cadence_gap": "quality_gap_no_fabrication",
+    "section_http_failure": "no_frame_for_failed_section"
+  },
+  "solar_evidence_non_regression": {
+    "days": 39,
+    "open_meteo_complete": 14,
+    "forecast_solar_common": 13,
+    "full_hash": "481044f6ed637654b0050ad33ddde2f1b3e9ad38dbfe77b02def163d90e05801",
+    "semantic_hash": "a8d81efffcdd9e7d694d77787dc8d375c6c200f73ed50567b536378b5f7ad1da",
+    "previous_day1_untouched": true,
+    "no_backfill": true,
+    "no_counter_reset": true
+  }
+}
