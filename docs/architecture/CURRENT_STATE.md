@@ -83,6 +83,38 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   in-flight race is observed. The next scope is Step C.2.1: producer-contract
   fixtures/design for immutable Forecast.Solar and Open-Meteo frames. No C.2.1
   implementation is included here.
+- VERIFIED (runtime release, 0.0.634, 2026-09-12): Step C.2.2 Forecast.Solar
+  immutable canonical capture is complete. The exact release commit was
+  `2f83eec`. After a normal Home Assistant Core restart, a natural
+  Forecast.Solar burst while Fiskvik was active produced six source events but
+  only two new canonical revisions: one each for the changed
+  `remaining_today_kwh` and `power_now_kw` observations. Their `target_point`
+  values matched the real HA observation timestamps. The following unchanged
+  events were deduplicated and created no additional revisions.
+- VERIFIED (runtime release, 0.0.634, 2026-09-12): The final C.2.2
+  post-burst WAL-consistent audit reported `integrity_check=ok`, 533 canonical
+  frames, 4,857 canonical points, 487 Forecast.Solar frames, zero duplicate
+  `point_id`, zero duplicate `(semantic_key, revision)`, zero broken
+  supersedes chains, zero non-null Forecast.Solar `published_at`, 487
+  Vikarbodarna Forecast.Solar frames, and zero Fiskvik Forecast.Solar frames.
+  No new defined Forecast.Solar persistence errors were found in the
+  post-restart burst log scan. `tomorrow_kwh` and `peak_time_tomorrow`
+  retained their D+1 target semantics.
+- VERIFIED (scope boundary, 0.0.634, 2026-09-12): Site-independent
+  Forecast.Solar collection, Fiskvik empty-site isolation, concurrent
+  persistence serialization, HA observation identity, capture-relative target
+  semantics, and post-restart replay/persistence are runtime verified.
+  C.2.2 is closed; no 0.0.635 release is required for this scope.
+- VERIFIED (non-regression, 0.0.634, 2026-09-12): Solar Evidence remained
+  unchanged during the C.2.2 gate: 39 days, Open-Meteo progress 14, Forecast.Solar
+  common progress 13, and the recorded full and semantic hashes were unchanged
+  from the pre-release baseline. The known Evidence `collected_at`
+  immutability issue remains a separate known fail and was not changed or
+  reclassified by C.2.2.
+- VERIFIED (scope boundary, 2026-09-12): The next scope after C.2.2 is the
+  next immutable external-input foundation milestone. It must preserve the
+  locked C.2.1 dataset identities, `known_at`/decision-time replay rules,
+  source-generation provenance, and Solar Evidence non-regression contract.
 - VERIFIED (design/fixtures, 2026-09-06): Step C.2.1 is complete and the
   external-input contract is locked in
   `docs/architecture/C2_1_EXTERNAL_INPUT_CONTRACT_V1.md` and its fixture/test
