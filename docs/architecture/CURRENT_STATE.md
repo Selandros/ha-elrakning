@@ -603,3 +603,37 @@ INFERRED (roadmap): Long-term data foundation:
   Preserve the C.2.1 dataset identities, `known_at <= decision_at`, source
   generations, Solar Evidence non-regression contract, and the Fiskvik
   zero-history clean-room invariant.
+
+## C.3 Weather / SMHI immutable external-input foundation
+
+- COMPLETE (C.3A, read-only source/runtime/consumer audit, 2026-09-13): The
+  current HA weather source is SMHI through the site-explicit Vikarbodarna
+  binding. Current conditions and hourly forecasts are separate source
+  contracts; the active site does not select background collection targets.
+  Fiskvik has no legitimate weather binding and therefore remains a zero-target
+  and zero-frame clean room.
+- COMPLETE (C.3B, contract/design/fixtures/tests, 2026-09-13): The immutable
+  weather contract locks `smhi.current_weather.v1` and
+  `smhi.hourly_forecast.v1` as separate dataset identities with separate
+  revision chains. Source generation includes only source-defining semantics,
+  while values and capture times remain observation data.
+- The current-weather contract uses a current snapshot target with no
+  fabricated `valid_at`; HA `last_updated` is retained only as source
+  provenance. The hourly contract stores one response vintage per frame and
+  one point per forecast datetime with explicit UTC `valid_at`. The hourly
+  frame semantic stream is stable across revisions; forecast datetimes belong
+  to point identity, not frame identity.
+- `captured_at`, `fetched_at`, `known_at`, `published_at`, and `valid_at` stay
+  semantically separate. Producers must satisfy `known_at >= captured_at` and,
+  when present, `known_at >= fetched_at`; replay retains the hard invariant
+  `known_at <= decision_at`. No publication timestamp is fabricated.
+- No-binding behavior is fail-closed: no target, provider call, frame, or
+  Fiskvik attribution is created. No historical backfill is included. Solar
+  Shadow and Solar Evidence stores, rows, baselines, qualification, counts,
+  and consumers are explicitly untouched by C.3B.
+- C.3B closure has no producer, runtime Store/DB migration, version bump,
+  deploy, or restart. Focused contract tests passed 11/11; the closure gate
+  must also include the full repository test and validation suite.
+- NEXT: C.3C is not started and is not implementation-authorized. Any future
+  producer must preserve these identities, site/source provenance, no-lookahead
+  semantics, Fiskvik zero-frame behavior, and Solar Evidence non-regression.
