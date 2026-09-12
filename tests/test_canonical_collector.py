@@ -111,6 +111,27 @@ def _forecast_target(site, entity):
 
 
 class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_open_meteo_capture_status_is_empty_then_returns_deep_read_only_snapshot(self):
+        collector = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
+        self.addCleanup(collector.storage.close)
+
+        self.assertIsNone(collector.open_meteo_capture_status())
+        collector._open_meteo_capture_status = {
+            "trigger": "hourly",
+            "sections": {"site-a:request": {"status": "fetched"}},
+        }
+
+        snapshot = collector.open_meteo_capture_status()
+        snapshot["sections"]["site-a:request"]["status"] = "mutated"
+
+        self.assertEqual(
+            collector.open_meteo_capture_status(),
+            {
+                "trigger": "hourly",
+                "sections": {"site-a:request": {"status": "fetched"}},
+            },
+        )
+
     async def test_open_meteo_hourly_callback_is_a_coroutine_function(self):
         collector = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
         self.addCleanup(collector.storage.close)

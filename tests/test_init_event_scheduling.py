@@ -191,8 +191,25 @@ def test_forecast_capture_status_websocket_is_read_only_and_registered():
     assert "CANONICAL_COLLECTOR_STATE_COMMAND" in source
     assert "websocket_api.async_register_command(hass, websocket_canonical_collector_state)" in source
     assert "forecast_capture_status()" in handler
+    assert "open_meteo_capture_status()" in handler
+    assert '"open_meteo": collector.open_meteo_capture_status()' in handler
+    assert '"open_meteo": None' not in handler
     assert "async_capture_forecast_solar" not in handler
     assert "persist_forecast_solar_frames" not in handler
+
+
+def test_canonical_collector_status_contract_includes_read_only_open_meteo_diagnostics():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
+    source = source_path.read_text(encoding="utf-8")
+    handler_start = source.index("async def websocket_canonical_collector_state")
+    handler_end = source.index("async def websocket_frontend_preferences", handler_start)
+    handler = source[handler_start:handler_end]
+
+    assert '"forecast_solar": collector.forecast_capture_status()' in handler
+    assert '"open_meteo": collector.open_meteo_capture_status()' in handler
+    assert "open_meteo_capture_status()" not in handler.replace(
+        '"open_meteo": collector.open_meteo_capture_status()', "", 1
+    )
 
 
 def test_panel_is_registered_before_site_runtime_initialization():

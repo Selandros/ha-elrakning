@@ -839,7 +839,7 @@ async def websocket_diagnostics_clear(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): CANONICAL_COLLECTOR_STATE_COMMAND})
 @websocket_api.async_response
 async def websocket_canonical_collector_state(hass, connection, msg):
-    """Return read-only in-memory Forecast.Solar capture diagnostics."""
+    """Return read-only in-memory canonical collector diagnostics."""
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
     if collector is None:
         connection.send_result(msg["id"], {"success": False, "error": "not_ready"})
@@ -847,6 +847,7 @@ async def websocket_canonical_collector_state(hass, connection, msg):
     connection.send_result(msg["id"], {
         "success": True,
         "forecast_solar": collector.forecast_capture_status(),
+        "open_meteo": collector.open_meteo_capture_status(),
     })
 
 
