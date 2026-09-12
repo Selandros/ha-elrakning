@@ -1,6 +1,6 @@
-# C.2.3B Open-Meteo immutable producer contract v1
+# C.2.3C Open-Meteo immutable producer contract v1 amendment
 
-Status: locked design and deterministic fixtures. No producer is implemented by this document.
+Status: locked design amendment and deterministic fixtures. No producer is implemented by this document.
 
 ## Scope and isolation
 
@@ -17,16 +17,35 @@ context only and is never an eligibility or collection selector.
 
 The target resolver reads `site_identity.site_configs[site_id]`, requires
 `collection_enabled == true`, and derives normalized sections from persisted
-`power.solar_entities` and `power.solar_array_metadata`, plus the immutable HA
-global latitude, longitude, and timezone. An existing Open-Meteo binding is
-required as binding/provenance validation, but it does not supply missing
-geometry and it does not make an otherwise incomplete site eligible.
+`power.solar_entities` and `power.solar_array_metadata`. It also requires a
+persisted site-scoped location object; current HA global location and timezone
+are never consulted for an inactive site:
 
-A target is eligible only when latitude, longitude, at least one solar entity,
-and complete finite section geometry (`peak_power_kwp`, tilt, azimuth) are
-present and deterministic. Missing data is fail-closed: no request, no cache,
-and no canonical frame. Current Fiskvik therefore produces zero targets and
-zero canonical Open-Meteo frames.
+```text
+site_configs[site_id].location = {
+  latitude,
+  longitude,
+  timezone,
+  provenance,
+  verification_state,
+  location_fingerprint
+}
+```
+
+The location object is configuration identity/provenance, not a canonical
+SQLite schema change. `latitude`, `longitude`, and IANA `timezone` must be
+finite/valid and explicitly verified. An existing Open-Meteo binding is
+required as source/provider ownership validation, but it does not supply
+missing location or geometry and it does not make an otherwise incomplete
+site eligible.
+
+A target is eligible only when the verified site location, at least one solar
+entity, complete finite section geometry (`peak_power_kwp`, tilt, azimuth),
+and an Open-Meteo binding are present and deterministic. Missing or
+unverified location is fail-closed: no target, no HTTP request, no cache, and
+no canonical frame. No location may be inferred from a grid address, entity
+name, another site, or current HA globals. Current Fiskvik therefore produces
+zero targets and zero canonical Open-Meteo frames.
 
 The resolver must not activate a site, mutate PowerManager, render UI, or infer
 geometry. Section grouping is by normalized source-defining request geometry;
@@ -54,11 +73,11 @@ open_meteo_azimuth_deg
 ```
 
 The deterministic section/request fingerprint is calculated from canonical JSON
-of those fields. It becomes the source-generation identity together with the
-site binding context and contract version. `peak_power_kwp` and
-`source_strings` are provenance; they do not create a new raw-GTI generation
-when request location/orientation/model are unchanged. A binding or request
-contract change creates a new generation. Ordinary refresh, fetched time,
+of those fields. It is authoritative for raw-GTI source generation together
+with the dataset/adapter contract; it is not derived from installation or
+binding fingerprints. `peak_power_kwp` and `source_strings` are provenance;
+they do not create a new raw-GTI generation when request
+location/orientation/model are unchanged. Ordinary refresh, fetched time,
 capture time, known time, values, `generationtime_ms`, cache `frame_id`, and
 entity renames alone do not.
 
@@ -109,6 +128,40 @@ timestamp is accepted only when response ordering/duplicates uniquely establish
 a strictly increasing UTC sequence; otherwise it is a quality gap. The fixed
 `utc_offset_seconds` value is never applied blindly across a DST transition.
 
+## Location, binding, and installation identity
+
+The persisted site location belongs in `site_configs[site_id].location`, because
+the existing Site Identity store already owns site-specific physical source
+configuration. It is written only by an explicit future site-configuration
+operation, with `provenance`, `verification_state`, and a deterministic
+fingerprint of latitude/longitude/timezone. It is not copied from another site
+and it is not silently refreshed from HA globals.
+
+The Open-Meteo binding validates provider/source ownership and the expected
+dataset/adapter contract. The request fingerprint is authoritative for
+canonical raw-GTI generation. A change to the existing installation
+fingerprint caused only by entity names, source strings, capacity, or other
+provenance does not force a new generation when request semantics are
+unchanged. `binding_fingerprint` remains binding provenance/validation and
+must not become a raw-GTI generation partition.
+
+A change to site latitude, longitude, request timezone, orientation, provider,
+model, variables, forecast horizon, endpoint, or contract version is
+source-defining: it creates a new request fingerprint and source generation,
+starts at revision 1, and has no `supersedes` link across generations. Old
+frames retain their old coordinates and provenance. Timezone is persisted per
+site and is never silently replaced by the current HA timezone.
+
+The future one-time Vikarbodarna migration may seed the site-scoped location
+only when the existing Vikarbodarna namespaced Open-Meteo Store, expected
+binding, and runtime evidence agree on latitude `62.20646687401988`, longitude
+`17.490212917327884`, and API timezone `Europe/Stockholm`. The migration must
+record explicit provenance and verification state, be deterministic and
+idempotent, and fail closed on disagreement. It must never copy those values
+to Fiskvik or any other site. Fiskvik remains ineligible until it has its own
+verified location, geometry, and binding; its E.ON address is not location
+evidence for this producer.
+
 ## Raw values and quality
 
 The canonical producer consumes the provider response before runtime-cache
@@ -154,3 +207,22 @@ frames, Fiskvik zero frames without legitimate source, restart persistence, and
 unchanged Evidence hashes/counts.
 
 This is a design-only scope. No production code or runtime data is changed.
+
+## C.2.3C amendment acceptance
+
+The amendment is complete only when deterministic fixtures/tests prove that:
+
+- two sites with identical geometry but different persisted coordinates have
+  different request/source identities;
+- changing current/global HA location cannot change an existing inactive-site
+  target contract;
+- missing location is ineligible and the current Fiskvik fixture produces zero
+  targets;
+- source-string/entity rename and capacity changes leave raw-GTI generation
+  unchanged, while tilt, azimuth, coordinates, provider/model/variables,
+  forecast horizon, timezone, endpoint, or contract changes create a new
+  generation;
+- section ordering is irrelevant, installation/binding fingerprints remain
+  provenance/validation only, and location-generation revision starts at 1
+  without cross-generation supersedes;
+- the existing Solar Evidence fixtures and baseline remain untouched.

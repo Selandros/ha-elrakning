@@ -30,12 +30,36 @@
     "variables": ["global_tilted_irradiance"],
     "forecast_days": 3,
     "timezone": "auto",
-    "identity_excludes": ["fetched_at", "captured_at", "known_at", "values", "generationtime_ms", "frame_id", "source_strings", "peak_power_kwp"]
+    "identity_excludes": ["fetched_at", "captured_at", "known_at", "values", "generationtime_ms", "frame_id", "source_strings", "peak_power_kwp", "installation_fingerprint", "binding_fingerprint"]
+  },
+  "site_location_contract": {
+    "persisted_shape": "site_configs[site_id].location",
+    "required": ["latitude", "longitude", "timezone", "provenance", "verification_state", "location_fingerprint"],
+    "missing_location": "ineligible_no_request_no_http_no_cache_no_frame",
+    "global_ha_location_is_never_a_fallback": true,
+    "vikarbodarna_migration": {
+      "one_time": true,
+      "idempotent": true,
+      "fail_closed_on_store_binding_disagreement": true,
+      "latitude": 62.20646687401988,
+      "longitude": 17.490212917327884,
+      "timezone": "Europe/Stockholm",
+      "source": "existing_vikarbodarna_namespaced_open_meteo_store_plus_expected_binding"
+    },
+    "fiskvik": {
+      "location_verified": false,
+      "target_count": 0,
+      "http_calls": 0,
+      "canonical_frames": 0
+    }
   },
   "identity": {
     "section_order_is_semantically_irrelevant": true,
     "source_generation_changes_on": ["dataset_contract", "adapter_contract", "endpoint", "provider", "model", "variables", "forecast_days", "timezone", "site_id", "latitude", "longitude", "tilt_deg", "open_meteo_azimuth_deg"],
-    "source_generation_does_not_change_on": ["fetched_at", "captured_at", "known_at", "values", "generationtime_ms", "frame_id", "source_strings", "peak_power_kwp"],
+    "source_generation_does_not_change_on": ["fetched_at", "captured_at", "known_at", "values", "generationtime_ms", "frame_id", "source_strings", "peak_power_kwp", "installation_fingerprint", "binding_fingerprint"],
+    "installation_fingerprint_role": "installation_provenance_only",
+    "binding_fingerprint_role": "provider_source_validation_only",
+    "location_change": "new_generation_revision_1_no_cross_generation_supersedes",
     "point_key": "valid_at_utc",
     "revision_partition": "dataset|site_id|source_generation_id|role|section_request_fingerprint",
     "published_at": null

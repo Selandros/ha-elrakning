@@ -484,6 +484,32 @@ INFERRED (roadmap): Long-term data foundation:
   counters, or consumers. The established baseline remains 39 days, 14
   Open-Meteo-complete, 13 Forecast.Solar-common with the recorded full and
   semantic hashes.
-- NEXT: C.2.4 is the first production implementation scope. It is not part of
-  this docs/fixtures-only closure. No manifest bump, deploy, or restart belongs
-  to C.2.3B.
+- COMPLETE (C.2.3C, docs/fixtures/tests, 2026-09-12): The B-contract
+  correction is locked before production implementation. Open-Meteo location
+  is persisted as verified site-scoped configuration under
+  `site_configs[site_id].location` with latitude, longitude, IANA timezone,
+  provenance, verification state, and deterministic fingerprint. Missing or
+  unverified location is fail-closed; current HA global location, active site,
+  grid address, and entity names are never fallbacks for background collection.
+- COMPLETE (C.2.3C): Raw-GTI source generation is authoritative from the
+  canonical request fingerprint, not existing installation or binding
+  fingerprints. Capacity/source-string/entity changes remain installation
+  provenance and binding validation only when request semantics are unchanged.
+  Location, timezone, geometry, provider, model, variables, endpoint, horizon,
+  or contract changes start a new generation at revision 1 with no
+  cross-generation supersedes; historical coordinates remain immutable.
+- COMPLETE (C.2.3C): The future Vikarbodarna migration is one-time,
+  deterministic, provenance-explicit, idempotent, and fail-closed on
+  store/binding disagreement. It may use the existing Vikarbodarna namespaced
+  Open-Meteo Store evidence for `62.20646687401988`,
+  `17.490212917327884`, and `Europe/Stockholm`, but must never copy those
+  coordinates to Fiskvik. Fiskvik remains a zero-target clean room until its
+  own verified location, geometry, and binding exist.
+- COMPLETE (C.2.3C): Deterministic contract fixtures/tests cover inactive-site
+  protection from global-location changes, identity separation, provenance
+  changes, generation changes, Fiskvik zero-target behavior, and migration
+  preconditions. No production code, canonical schema, runtime data, Evidence
+  store, version, deploy, or restart changed.
+- NEXT: C.2.4 production implementation is blocked until this amendment is
+  respected by the implementation. No manifest bump, deploy, or restart belongs
+  to C.2.3C.
