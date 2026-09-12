@@ -135,6 +135,121 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(old[0]["points"][0]["value"], 18.4)
         self.assertEqual(new[0]["points"][0]["value"], 17.9)
 
+    def test_forecast_solar_revisions_rekey_points_when_content_returns(self):
+        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"peak_time_today": "sensor.peak"}}
+        captures = []
+        for value, captured_at in (("2026-09-05T13:30:00+02:00", datetime(2026, 9, 5, 10, tzinfo=UTC)),
+                                   ("2026-09-05T14:00:00+02:00", datetime(2026, 9, 5, 15, tzinfo=UTC)),
+                                   ("2026-09-05T13:30:00+02:00", datetime(2026, 9, 5, 20, tzinfo=UTC))):
+            state.state = value
+            captures.append((build_forecast_solar_frames(hass, "site-a", binding, captured_at), captured_at))
+        for frames, captured_at in captures:
+            persist_forecast_solar_frames(self.storage, frames, captured_at)
+        rows = self.storage.connection.execute(
+            "SELECT revision, frame_id, supersedes_frame_id FROM external_input_frames ORDER BY revision"
+        ).fetchall()
+        points = self.storage.connection.execute(
+            "SELECT point_id FROM external_input_points ORDER BY frame_id"
+        ).fetchall()
+        self.assertEqual([row[0] for row in rows], [1, 2, 3])
+        self.assertEqual(rows[1][2], rows[0][1])
+        self.assertEqual(rows[2][2], rows[1][1])
+        self.assertEqual(len({row[1] for row in rows}), 3)
+        self.assertEqual(len({row[0] for row in points}), 3)
+        replay = self.storage.read_external_input_frames(
+            datetime(2026, 9, 5, 21, tzinfo=UTC), source_scope="site", site_id="site-a"
+        )
+        self.assertEqual([frame["points"][0]["point"]["predicted_peak_at"] for frame in replay], ["2026-09-05T11:30:00+00:00"])
+
+    def test_forecast_solar_repeated_content_is_deduplicated_after_revision(self):
+        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"peak_time_today": "sensor.peak"}}
+        first_at = datetime(2026, 9, 5, 10, tzinfo=UTC)
+        persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, first_at), first_at)
+        state.state = "2026-09-05T14:00:00+02:00"
+        second_at = datetime(2026, 9, 5, 15, tzinfo=UTC)
+        persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, second_at), second_at)
+        third_at = datetime(2026, 9, 5, 20, tzinfo=UTC)
+        result = persist_forecast_solar_frames(self.storage, build_forecast_solar_frames(hass, "site-a", binding, third_at), third_at)
+        self.assertEqual(result["unchanged"], 1)
+        self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0], 2)
+
+    def test_forecast_solar_exact_recapture_matches_legacy_point_id(self):
+        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"peak_time_today": "sensor.peak"}}
+        captured = datetime(2026, 9, 5, 10, tzinfo=UTC)
+        legacy_frames = build_forecast_solar_frames(hass, "site-a", binding, captured)
+        legacy_frame, legacy_points = legacy_frames[0]
+        legacy_points[0]["point_id"] = "legacy-revision-1-point"
+        persist_forecast_solar_frames(self.storage, [(legacy_frame, legacy_points)], captured)
+        result = persist_forecast_solar_frames(
+            self.storage, build_forecast_solar_frames(hass, "site-a", binding, captured + timedelta(minutes=15)), captured + timedelta(minutes=15)
+        )
+        self.assertEqual(result["unchanged"], 1)
+        self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0], 1)
+        self.assertEqual(
+            self.storage.connection.execute("SELECT point_id FROM external_input_points").fetchone()[0],
+            "legacy-revision-1-point",
+        )
+
+    def test_forecast_solar_exact_recapture_matches_legacy_revision_above_one(self):
+        state = SimpleNamespace(state="2026-09-05T13:30:00+02:00", attributes={"unit_of_measurement": None})
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity: state),
+            config=SimpleNamespace(time_zone="Europe/Stockholm"),
+        )
+        binding = {"config_entry_id": "fs-entry", "binding_fingerprint": "binding-a", "entities": {"peak_time_today": "sensor.peak"}}
+        first_at = datetime(2026, 9, 5, 10, tzinfo=UTC)
+        first_frame, first_points = build_forecast_solar_frames(hass, "site-a", binding, first_at)[0]
+        first_points[0]["point_id"] = "legacy-revision-1-point"
+        persist_forecast_solar_frames(self.storage, [(first_frame, first_points)], first_at)
+
+        state.state = "2026-09-05T14:00:00+02:00"
+        second_at = datetime(2026, 9, 5, 15, tzinfo=UTC)
+        second_frame, second_points = build_forecast_solar_frames(hass, "site-a", binding, second_at)[0]
+        second_frame["revision"] = 2
+        second_frame["frame_id"] = "legacy-revision-2-frame"
+        second_frame["supersedes_frame_id"] = first_frame["frame_id"]
+        second_points[0]["point_id"] = "legacy-revision-2-point"
+        self.storage.insert_external_frame(second_frame, second_points)
+
+        exact = persist_forecast_solar_frames(
+            self.storage, build_forecast_solar_frames(hass, "site-a", binding, second_at + timedelta(minutes=15)), second_at + timedelta(minutes=15)
+        )
+        self.assertEqual(exact["unchanged"], 1)
+        self.assertEqual(self.storage.connection.execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0], 2)
+
+        state.state = "2026-09-05T15:00:00+02:00"
+        third_at = datetime(2026, 9, 5, 20, tzinfo=UTC)
+        revised = persist_forecast_solar_frames(
+            self.storage, build_forecast_solar_frames(hass, "site-a", binding, third_at), third_at
+        )
+        self.assertEqual(revised["revised"], 1)
+        rows = self.storage.connection.execute(
+            "SELECT revision, frame_id, supersedes_frame_id FROM external_input_frames ORDER BY revision"
+        ).fetchall()
+        self.assertEqual([row[0] for row in rows], [1, 2, 3])
+        self.assertEqual(rows[2][2], "legacy-revision-2-frame")
+        self.assertEqual(
+            self.storage.connection.execute(
+                "SELECT point_id FROM external_input_points WHERE frame_id = ?", (rows[2][1],)
+            ).fetchone()[0],
+            f"{rows[2][1]}-p001",
+        )
+
     def test_forecast_solar_generation_is_stable_for_values_and_separate_for_sites(self):
         state = SimpleNamespace(state="18.4", attributes={"unit_of_measurement": "kWh"})
         hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity: state), config=SimpleNamespace(time_zone="Europe/Stockholm"))

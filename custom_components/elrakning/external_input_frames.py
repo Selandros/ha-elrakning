@@ -287,6 +287,38 @@ def build_forecast_solar_frames(
     return frames
 
 
+def _points_with_stored_ids(storage: CanonicalStorage, frame_id: str, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Align a recapture with stored point IDs without changing C.1 matching."""
+    connection = storage.connection
+    if connection is None:
+        raise RuntimeError("canonical_storage_not_open")
+    stored = connection.execute(
+        "SELECT point_key, point_id FROM external_input_points WHERE frame_id = ?",
+        (frame_id,),
+    ).fetchall()
+    stored_ids = {str(point_key): str(point_id) for point_key, point_id in stored}
+    if len(stored_ids) != len(points) or {point["point_key"] for point in points} != set(stored_ids):
+        return points
+    return [dict(point, point_id=stored_ids[point["point_key"]]) for point in points]
+
+
+def _points_with_revision_ids(frame_id: str, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Assign deterministic storage IDs after a new final revision ID exists."""
+    ordered = sorted(points, key=lambda point: point["point_key"])
+    return [
+        dict(point, point_id=f"{frame_id}-p{index:03d}")
+        for index, point in enumerate(ordered, start=1)
+    ]
+
+
+def _point_content_for_revision_hash(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return deterministic point content without storage-only point IDs."""
+    return [
+        {key: value for key, value in point.items() if key != "point_id"}
+        for point in sorted(points, key=lambda point: point["point_key"])
+    ]
+
+
 def persist_forecast_solar_frames(storage: CanonicalStorage, frames: list[tuple[dict[str, Any], list[dict[str, Any]]]], captured_at: datetime) -> dict[str, int]:
     """Persist one explicit site's Forecast.Solar frames with immutable revisions."""
     result = {"written": 0, "unchanged": 0, "revised": 0}
@@ -309,17 +341,22 @@ def persist_forecast_solar_frames(storage: CanonicalStorage, frames: list[tuple[
             frame["revision"] = latest[1]
             frame["frame_id"] = latest[0]
             frame["supersedes_frame_id"] = latest[2]
+            comparable_points = _points_with_stored_ids(storage, frame["frame_id"], points)
             try:
-                inserted = storage.insert_external_frame(frame, points)
+                inserted = storage.insert_external_frame(frame, comparable_points)
             except ValueError as error:
                 if str(error) != "canonical_frame_revision_conflict":
                     raise
                 frame["revision"] = latest[1] + 1
                 frame["supersedes_frame_id"] = latest[0]
                 frame["frame_id"] = "frame-" + hashlib.sha256(
-                    (f"{frame['semantic_key']}|{frame['revision']}|" + json.dumps(points, sort_keys=True, default=str)).encode()
+                    (
+                        f"{frame['semantic_key']}|{frame['revision']}|"
+                        + json.dumps(_point_content_for_revision_hash(comparable_points), sort_keys=True, default=str)
+                    ).encode()
                 ).hexdigest()[:32]
-                inserted = storage.insert_external_frame(frame, points)
+                comparable_points = _points_with_revision_ids(frame["frame_id"], comparable_points)
+                inserted = storage.insert_external_frame(frame, comparable_points)
                 result["revised"] += int(inserted)
             result["written"] += int(inserted)
             result["unchanged"] += int(not inserted)
