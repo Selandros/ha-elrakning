@@ -165,6 +165,13 @@ def test_control_plane_is_registered_before_risky_runtime_initialization():
     assert source.index('frontend_data["runtime_status"] = "ready"') < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
 
 
+def test_open_meteo_startup_capture_is_scheduled_and_cancelled_with_unload():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert 'frontend_data["open_meteo_startup_task"] = hass.async_create_task(' in source
+    assert 'frontend_data.pop("open_meteo_startup_task", None)' in source
+
+
 def test_control_plane_state_handlers_have_safe_pre_ready_contract():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
     source = source_path.read_text(encoding="utf-8")

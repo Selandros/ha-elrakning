@@ -1,5 +1,6 @@
 """The Elräkning integration."""
 
+import asyncio
 import json
 from functools import partial
 from pathlib import Path
@@ -118,6 +119,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
+    frontend_data = hass.data.setdefault(DOMAIN, {})
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
@@ -181,7 +183,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "evidence": solar_evidence_manager,
     })
     await solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager)
-    await canonical_collector.async_capture_open_meteo(trigger="startup")
+    frontend_data["open_meteo_startup_task"] = hass.async_create_task(
+        canonical_collector.async_capture_open_meteo(trigger="startup")
+    )
     await canonical_collector.async_capture_forecast_solar(trigger="startup")
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     await solar_evidence_manager.async_startup_catch_up()
@@ -234,6 +238,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if cadence_audit_manager := frontend_data.pop("cadence_audit_manager", None):
         await cadence_audit_manager.async_shutdown()
+    if startup_task := frontend_data.pop("open_meteo_startup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
     if canonical_collector := frontend_data.pop("canonical_collector", None):
         await canonical_collector.async_shutdown()
     if solar_weather_manager := frontend_data.pop("solar_weather_manager", None):

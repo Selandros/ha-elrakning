@@ -82,6 +82,7 @@ def _request_identity(target: dict[str, Any]) -> dict[str, Any]:
         "variables": ["global_tilted_irradiance"],
         "forecast_days": 3,
         "timezone_request": "auto",
+        "site_timezone": target["timezone"],
         "site_id": target["site_id"],
         "latitude": target["latitude"],
         "longitude": target["longitude"],
@@ -123,7 +124,13 @@ def build_open_meteo_targets(site_configs: dict[str, dict[str, Any]]) -> list[di
             continue
         bindings = config.get("bindings")
         binding = bindings.get("open_meteo") if isinstance(bindings, dict) else None
-        if latitude is None or longitude is None or timezone_name is None or not isinstance(binding, dict):
+        if (
+            latitude is None
+            or longitude is None
+            or timezone_name is None
+            or not isinstance(binding, dict)
+            or binding.get("source") != OPEN_METEO_SOURCE
+        ):
             continue
         sections = _sections(config.get("power", {}))
         for section in sections:
@@ -207,6 +214,8 @@ def _resolve_timestamp_sequence(times: list[Any], timezone_name: str) -> tuple[l
             return [()]
         candidates = candidate_sets[index]
         choices = [None] if not candidates else [candidate for candidate in candidates if previous is None or candidate > previous]
+        if candidates and not choices:
+            choices = [None]
         solutions: list[tuple[datetime | None, ...]] = []
         for choice in choices:
             for suffix in solve(index + 1, choice or previous, memo):
@@ -219,6 +228,9 @@ def _resolve_timestamp_sequence(times: list[Any], timezone_name: str) -> tuple[l
         return solutions
 
     solutions = solve(0, None, {})
+    if len(solutions) > 1:
+        best_count = max(sum(value is not None for value in solution) for solution in solutions)
+        solutions = [solution for solution in solutions if sum(value is not None for value in solution) == best_count]
     if len(solutions) == 1:
         resolved = list(solutions[0])
     else:
@@ -233,6 +245,14 @@ def _resolve_timestamp_sequence(times: list[Any], timezone_name: str) -> tuple[l
             for index, candidates in enumerate(candidate_sets):
                 if candidates:
                     gaps.append({"index": index, "source_timestamp": times[index], "reason": "nonmonotonic_timestamp_sequence"})
+    existing_gap_indices = {gap.get("index") for gap in gaps}
+    for index, candidates in enumerate(candidate_sets):
+        if candidates and resolved[index] is None and index not in existing_gap_indices:
+            gaps.append({
+                "index": index,
+                "source_timestamp": times[index],
+                "reason": "nonmonotonic_timestamp_sequence",
+            })
     return resolved, gaps
 
 
@@ -281,12 +301,16 @@ def normalize_open_meteo_payload(payload: dict[str, Any], target: dict[str, Any]
             "unit": "W/m²",
             "quality_status": "good",
         })
-    if not points:
-        return None
+    valid_times = [value for value in resolved if value is not None]
+    source_valid_from = min(valid_times) if valid_times else None
+    source_valid_to = max(valid_times) + timedelta(hours=1) if valid_times else None
+    quality_status = "good" if not quality_gaps and points else "partial" if points else "invalid"
     return {
         "points": points,
-        "quality_status": "partial" if quality_gaps else "good",
-        "quality": {"status": "partial" if quality_gaps else "good", "gaps": quality_gaps},
+        "quality_status": quality_status,
+        "quality": {"status": quality_status, "gaps": quality_gaps},
+        "source_valid_from": source_valid_from,
+        "source_valid_to": source_valid_to,
             "api_metadata": {
             key: payload[key] for key in ("model", "timezone", "utc_offset_seconds", "generationtime_ms")
             if payload.get(key) is not None

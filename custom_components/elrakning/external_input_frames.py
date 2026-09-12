@@ -401,7 +401,7 @@ def build_open_meteo_frame(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build one immutable raw-GTI frame for one explicit request section."""
     points = normalized.get("points") if isinstance(normalized, dict) else None
-    if not isinstance(points, list) or not points:
+    if not isinstance(points, list):
         raise ValueError("open_meteo_points_missing")
     fetched_at = fetched_at.astimezone(timezone.utc)
     captured_at = (captured_at or fetched_at).astimezone(timezone.utc)
@@ -433,6 +433,8 @@ def build_open_meteo_frame(
     frame_seed = json.dumps(knowledge, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     frame_id = "frame-" + hashlib.sha256(frame_seed.encode("utf-8")).hexdigest()[:32]
     valid_at_values = [point["valid_at"].astimezone(timezone.utc) for point in points]
+    valid_from = normalized.get("source_valid_from") or (min(valid_at_values) if valid_at_values else None)
+    valid_to = normalized.get("source_valid_to") or (max(valid_at_values) + timedelta(hours=1) if valid_at_values else None)
     frame = {
         "frame_id": frame_id,
         "schema_version": SCHEMA_VERSION,
@@ -448,8 +450,8 @@ def build_open_meteo_frame(
         "fetched_at": fetched_at,
         "known_at": known_at,
         "captured_at": captured_at,
-        "valid_from": min(valid_at_values),
-        "valid_to": max(valid_at_values) + timedelta(hours=1),
+        "valid_from": valid_from,
+        "valid_to": valid_to,
         "quality_status": normalized.get("quality_status", "good"),
         "quality": dict(normalized.get("quality", {}), knowledge_fingerprint=knowledge_fingerprint),
         "provenance": {

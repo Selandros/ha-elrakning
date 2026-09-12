@@ -169,6 +169,10 @@ class CanonicalCollector:
             self._open_meteo_capture_status = result
             return copy.deepcopy(result)
 
+    async def _async_open_meteo_cadence(self, _now) -> None:
+        """Run the hourly capture as a real Home Assistant coroutine job."""
+        await self.async_capture_open_meteo(trigger="hourly_cadence")
+
     async def async_capture_forecast_solar(
         self,
         captured_at: datetime | None = None,
@@ -337,7 +341,7 @@ class CanonicalCollector:
         )
         self._open_meteo_unsub = async_track_time_change(
             self.hass,
-            lambda now: self.async_capture_open_meteo(trigger="hourly_cadence"),
+            self._async_open_meteo_cadence,
             minute=0,
             second=12,
         )

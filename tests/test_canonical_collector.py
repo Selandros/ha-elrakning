@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import tempfile
 import threading
 import types
@@ -110,6 +111,11 @@ def _forecast_target(site, entity):
 
 
 class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_open_meteo_hourly_callback_is_a_coroutine_function(self):
+        collector = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        self.assertTrue(inspect.iscoroutinefunction(collector._async_open_meteo_cadence))
+
     async def test_open_meteo_capture_is_site_independent_and_fiskvik_empty(self):
         identity = _Identity([])
         identity.site_configs = {
@@ -123,7 +129,7 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                     "provenance": "test",
                     "location_fingerprint": _location_fingerprint(62.2, 17.4, "Europe/Stockholm"),
                 },
-                "bindings": {"open_meteo": {"binding_fingerprint": "a"}},
+                "bindings": {"open_meteo": {"source": "open_meteo_global_tilted_irradiance", "binding_fingerprint": "a"}},
                 "power": {
                     "solar_entities": ["sensor.pv-a"],
                     "solar_array_metadata": {
@@ -173,7 +179,7 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                     "provenance": "test",
                     "location_fingerprint": _location_fingerprint(62.2, 17.4, "Europe/Stockholm"),
                 },
-                "bindings": {"open_meteo": {"binding_fingerprint": "a"}},
+                "bindings": {"open_meteo": {"source": "open_meteo_global_tilted_irradiance", "binding_fingerprint": "a"}},
                 "power": {
                     "solar_entities": ["sensor.pv-a"],
                     "solar_array_metadata": {

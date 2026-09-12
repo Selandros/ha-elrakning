@@ -44,7 +44,7 @@ class SolarOpenMeteoTests(unittest.TestCase):
                     "provenance": "test",
                     "location_fingerprint": _location_fingerprint(62.20646687401988, 17.490212917327884, "Europe/Stockholm"),
                 },
-                "bindings": {"open_meteo": {"binding_fingerprint": "binding-a"}},
+                "bindings": {"open_meteo": {"source": "open_meteo_global_tilted_irradiance", "binding_fingerprint": "binding-a"}},
                 "power": {
                     "solar_entities": ["sensor.pv"],
                     "solar_array_metadata": {
@@ -73,6 +73,19 @@ class SolarOpenMeteoTests(unittest.TestCase):
         second = build_open_meteo_targets(changed)[0]
         self.assertEqual(first["generation_id"], second["generation_id"])
         self.assertNotEqual(first["source_strings"], second["source_strings"])
+
+    def test_open_meteo_timezone_is_generation_identity(self):
+        stockholm = build_open_meteo_targets(self._site_config())[0]
+        helsinki = self._site_config()
+        helsinki["site-a"]["location"]["timezone"] = "Europe/Helsinki"
+        helsinki["site-a"]["location"]["location_fingerprint"] = _location_fingerprint(62.20646687401988, 17.490212917327884, "Europe/Helsinki")
+        other = build_open_meteo_targets(helsinki)[0]
+        self.assertNotEqual(stockholm["generation_id"], other["generation_id"])
+
+    def test_open_meteo_binding_must_identify_source(self):
+        config = self._site_config()
+        config["site-a"]["bindings"]["open_meteo"]["source"] = "not-open-meteo"
+        self.assertEqual(build_open_meteo_targets(config), [])
 
     def test_open_meteo_timestamp_normalization_rejects_ambiguous_local_time(self):
         self.assertEqual(
@@ -147,6 +160,36 @@ class SolarOpenMeteoTests(unittest.TestCase):
         )
         self.assertIn("cadence_gap", {gap["reason"] for gap in cadence["quality"]["gaps"]})
 
+    def test_open_meteo_duplicate_nonmonotonic_point_is_a_gap_not_total_failure(self):
+        target = build_open_meteo_targets(self._site_config())[0]
+        result = normalize_open_meteo_payload(
+            {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-09-12T12:00", "2026-09-12T12:00", "2026-09-12T13:00"],
+                    "global_tilted_irradiance": [1, 2, 3],
+                },
+            },
+            target,
+        )
+        self.assertEqual(len(result["points"]), 2)
+        self.assertIn("nonmonotonic_timestamp_sequence", {gap["reason"] for gap in result["quality"]["gaps"]})
+
+    def test_open_meteo_all_invalid_values_are_an_invalid_frame_candidate(self):
+        target = build_open_meteo_targets(self._site_config())[0]
+        result = normalize_open_meteo_payload(
+            {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-09-12T12:00", "2026-09-12T13:00"],
+                    "global_tilted_irradiance": [None, float("nan")],
+                },
+            },
+            target,
+        )
+        self.assertEqual(result["points"], [])
+        self.assertEqual(result["quality_status"], "invalid")
+
     def test_open_meteo_location_migration_is_same_site_and_idempotent(self):
         import asyncio
         import custom_components.elrakning.solar_open_meteo as module
@@ -155,7 +198,7 @@ class SolarOpenMeteoTests(unittest.TestCase):
         manager.hass = SimpleNamespace()
         site_configs = {
             "site-a": {
-                "bindings": {"open_meteo": {"installation_fingerprint": "legacy"}},
+                "bindings": {"open_meteo": {"source": "open_meteo_global_tilted_irradiance", "installation_fingerprint": "legacy"}},
             },
             "site-b": {"bindings": {}},
         }
