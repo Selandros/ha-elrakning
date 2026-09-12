@@ -187,10 +187,13 @@ class CanonicalStorage:
                 source_identity_provenance, source_resolution_kind,
                 source_resolution_seconds, timezone_state, valid_from_us,
                 valid_to_us, created_at_us
-            ) VALUES (?, ?, 'site', ?, ?, ?, ?, ?, 'event_stream', NULL, 'unknown', ?, NULL, ?)""",
+            ) VALUES (?, ?, 'site', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)""",
             (
                 target["generation_id"], SCHEMA_VERSION, site_id,
                 target["logical_role"], fingerprint, strength, provenance,
+                target.get("source_resolution_kind", "event_stream"),
+                target.get("source_resolution_seconds"),
+                target.get("timezone_state", "unknown"),
                 valid_from_us, timestamp_us(now),
             ),
         )

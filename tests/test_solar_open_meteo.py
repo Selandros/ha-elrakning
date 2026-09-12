@@ -16,6 +16,7 @@ from custom_components.elrakning.solar_open_meteo import (
     build_open_meteo_targets,
     normalize_open_meteo_payload,
     normalize_source_timestamp,
+    _location_fingerprint,
     _parse_fetched_at,
     _parse_hourly,
     compass_to_open_meteo_azimuth,
@@ -40,6 +41,8 @@ class SolarOpenMeteoTests(unittest.TestCase):
                     "longitude": 17.490212917327884,
                     "timezone": "Europe/Stockholm",
                     "verification_state": "verified",
+                    "provenance": "test",
+                    "location_fingerprint": _location_fingerprint(62.20646687401988, 17.490212917327884, "Europe/Stockholm"),
                 },
                 "bindings": {"open_meteo": {"binding_fingerprint": "binding-a"}},
                 "power": {
@@ -115,6 +118,34 @@ class SolarOpenMeteoTests(unittest.TestCase):
                 "2026-10-25T02:00:00+00:00",
             ],
         )
+
+    def test_open_meteo_singleton_ambiguous_and_cadence_gap_are_partial(self):
+        target = build_open_meteo_targets(self._site_config())[0]
+        result = normalize_open_meteo_payload(
+            {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-10-25T02:00", "2026-10-25T04:00"],
+                    "global_tilted_irradiance": [1, 2],
+                },
+            },
+            target,
+        )
+        self.assertEqual(result["quality_status"], "partial")
+        self.assertEqual(len(result["points"]), 1)
+        reasons = {gap["reason"] for gap in result["quality"]["gaps"]}
+        self.assertIn("ambiguous_timestamp", reasons)
+        cadence = normalize_open_meteo_payload(
+            {
+                "timezone": "Europe/Stockholm",
+                "hourly": {
+                    "time": ["2026-09-12T12:00", "2026-09-12T14:00"],
+                    "global_tilted_irradiance": [1, 2],
+                },
+            },
+            target,
+        )
+        self.assertIn("cadence_gap", {gap["reason"] for gap in cadence["quality"]["gaps"]})
 
     def test_open_meteo_location_migration_is_same_site_and_idempotent(self):
         import asyncio

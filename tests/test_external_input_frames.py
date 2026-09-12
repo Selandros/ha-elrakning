@@ -97,6 +97,15 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertIsNone(frame[0]["published_at"])
         self.assertEqual(persist_open_meteo_frames(self.storage, [frame], fetched)["written"], 1)
         self.assertEqual(persist_open_meteo_frames(self.storage, [frame], fetched)["unchanged"], 1)
+        metadata_only = dict(normalized)
+        metadata_only["api_metadata"] = {"timezone": "Europe/Stockholm", "generationtime_ms": 0.2}
+        unchanged = build_open_meteo_frame(target, metadata_only, fetched + timedelta(hours=1))
+        self.assertEqual(persist_open_meteo_frames(self.storage, [unchanged], fetched + timedelta(hours=1))["unchanged"], 1)
+        generation = self.storage.connection.execute(
+            "SELECT source_resolution_kind, source_resolution_seconds, timezone_state FROM source_generations WHERE source_generation_id = ?",
+            ("om-generation-a",),
+        ).fetchone()
+        self.assertEqual(generation, ("native_bucket", 3600, "verified"))
         normalized["points"][0]["value"] = 4.0
         changed = build_open_meteo_frame(target, normalized, fetched + timedelta(hours=1))
         result = persist_open_meteo_frames(self.storage, [changed], fetched + timedelta(hours=1))

@@ -108,7 +108,8 @@ class CanonicalCollector:
                     normalized = normalize_open_meteo_payload(payload, target)
                     if normalized is None:
                         raise ValueError("invalid_response")
-                    candidates.append((target, normalized, fetched_at))
+                    normalized_at = dt_util.now().astimezone(timezone.utc)
+                    candidates.append((target, normalized, fetched_at, normalized_at))
                     result["sections"][key] = {"status": "fetched", "written": 0, "revised": 0, "deduplicated": 0}
                 except Exception as error:
                     result["sections"][key] = {
@@ -125,12 +126,12 @@ class CanonicalCollector:
                 for target in self._open_meteo_targets()
             }
             frames = []
-            for target, normalized, fetched_at in candidates:
+            for target, normalized, fetched_at, normalized_at in candidates:
                 if current.get((target["site_id"], target["section_request_fingerprint"])) != target:
                     key = f"{target['site_id']}:{target['section_request_fingerprint']}"
                     result["sections"][key]["status"] = "stale_target"
                     continue
-                frames.append(build_open_meteo_frame(target, normalized, fetched_at))
+                frames.append(build_open_meteo_frame(target, normalized, fetched_at, normalized_at, normalized_at))
             if frames:
                 try:
                     async with self._flush_lock:
@@ -155,7 +156,16 @@ class CanonicalCollector:
                             "error_message": str(error),
                         })
             result["finished_at"] = dt_util.now().astimezone(timezone.utc).isoformat()
-            result["status"] = "error" if result["last_error"] and not frames else "success"
+            successful = any(
+                section.get("status") in {"success", "deduplicated"}
+                for section in result["sections"].values()
+            )
+            result["status"] = (
+                "no_targets" if not targets
+                else "error" if result["last_error"] and not successful
+                else "partial_failure" if result["last_error"]
+                else "success"
+            )
             self._open_meteo_capture_status = result
             return copy.deepcopy(result)
 

@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
@@ -65,6 +65,11 @@ def _valid_timezone(value: Any) -> str | None:
     return value
 
 
+def _location_fingerprint(latitude: float, longitude: float, timezone_name: str) -> str:
+    payload = {"latitude": latitude, "longitude": longitude, "timezone": timezone_name}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def _request_identity(target: dict[str, Any]) -> dict[str, Any]:
     """Return only source-defining request semantics."""
     return {
@@ -109,6 +114,13 @@ def build_open_meteo_targets(site_configs: dict[str, dict[str, Any]]) -> list[di
         latitude = _number(location.get("latitude"))
         longitude = _number(location.get("longitude"))
         timezone_name = _valid_timezone(location.get("timezone"))
+        if (
+            not isinstance(location.get("provenance"), str)
+            or not location["provenance"].strip()
+            or not isinstance(location.get("location_fingerprint"), str)
+            or location["location_fingerprint"] != _location_fingerprint(latitude, longitude, timezone_name)
+        ):
+            continue
         bindings = config.get("bindings")
         binding = bindings.get("open_meteo") if isinstance(bindings, dict) else None
         if latitude is None or longitude is None or timezone_name is None or not isinstance(binding, dict):
@@ -170,6 +182,60 @@ def _timestamp_candidates(value: str, timezone_name: str) -> list[datetime]:
     return sorted(set(candidates))
 
 
+def _resolve_timestamp_sequence(times: list[Any], timezone_name: str) -> tuple[list[datetime | None], list[dict[str, Any]]]:
+    """Resolve local timestamps only when the complete sequence is unambiguous."""
+    candidate_sets: list[list[datetime]] = []
+    gaps: list[dict[str, Any]] = []
+    for index, value in enumerate(times):
+        if not isinstance(value, str):
+            candidate_sets.append([])
+            gaps.append({"index": index, "source_timestamp": value, "reason": "malformed_timestamp"})
+            continue
+        try:
+            candidates = _timestamp_candidates(value, timezone_name)
+        except (TypeError, ValueError, ZoneInfoNotFoundError):
+            candidates = []
+        candidate_sets.append(candidates)
+        if not candidates:
+            gaps.append({"index": index, "source_timestamp": value, "reason": "invalid_or_nonexistent_timestamp"})
+
+    def solve(index: int, previous: datetime | None, memo: dict[tuple[int, datetime | None], list[tuple[datetime | None, ...]]]):
+        key = (index, previous)
+        if key in memo:
+            return memo[key]
+        if index == len(candidate_sets):
+            return [()]
+        candidates = candidate_sets[index]
+        choices = [None] if not candidates else [candidate for candidate in candidates if previous is None or candidate > previous]
+        solutions: list[tuple[datetime | None, ...]] = []
+        for choice in choices:
+            for suffix in solve(index + 1, choice or previous, memo):
+                solutions.append((choice,) + suffix)
+                if len(solutions) >= 2:
+                    break
+            if len(solutions) >= 2:
+                break
+        memo[key] = solutions
+        return solutions
+
+    solutions = solve(0, None, {})
+    if len(solutions) == 1:
+        resolved = list(solutions[0])
+    else:
+        resolved = [None] * len(times)
+        if solutions:
+            for index, values in enumerate(zip(*solutions)):
+                if len(set(values)) == 1:
+                    resolved[index] = values[0]
+                elif candidate_sets[index]:
+                    gaps.append({"index": index, "source_timestamp": times[index], "reason": "ambiguous_timestamp"})
+        else:
+            for index, candidates in enumerate(candidate_sets):
+                if candidates:
+                    gaps.append({"index": index, "source_timestamp": times[index], "reason": "nonmonotonic_timestamp_sequence"})
+    return resolved, gaps
+
+
 def build_open_meteo_request(target: dict[str, Any]) -> dict[str, str]:
     return {
         "latitude": str(target["latitude"]),
@@ -186,21 +252,26 @@ def normalize_open_meteo_payload(payload: dict[str, Any], target: dict[str, Any]
     hourly = payload.get("hourly") if isinstance(payload, dict) else None
     times = hourly.get("time") if isinstance(hourly, dict) else None
     values = hourly.get("global_tilted_irradiance") if isinstance(hourly, dict) else None
-    if not isinstance(times, list) or not isinstance(values, list) or len(times) != len(values):
+    if not isinstance(times, list) or not isinstance(values, list):
         return None
     api_timezone = _valid_timezone(payload.get("timezone")) or target["timezone"]
     points = []
     quality_gaps = []
+    resolved, timestamp_gaps = _resolve_timestamp_sequence(times, api_timezone)
+    quality_gaps.extend(timestamp_gaps)
     previous = None
-    for source_timestamp, value in zip(times, values):
-        try:
-            candidates = _timestamp_candidates(source_timestamp, api_timezone)
-        except (TypeError, ValueError):
-            candidates = []
-        valid_at = next((candidate for candidate in candidates if previous is None or candidate > previous), None)
+    pair_count = min(len(times), len(values))
+    if len(times) != len(values):
+        quality_gaps.append({"reason": "array_length_mismatch", "time_count": len(times), "value_count": len(values)})
+    for index in range(pair_count):
+        source_timestamp = times[index]
+        value = values[index]
+        valid_at = resolved[index]
         number = _number(value)
+        if valid_at is not None and previous is not None and valid_at - previous != timedelta(hours=1):
+            quality_gaps.append({"index": index, "source_timestamp": source_timestamp, "reason": "cadence_gap", "previous_valid_at": previous.isoformat(), "valid_at": valid_at.isoformat()})
         if valid_at is None or number is None:
-            quality_gaps.append({"source_timestamp": source_timestamp, "reason": "invalid_timestamp_or_value"})
+            quality_gaps.append({"index": index, "source_timestamp": source_timestamp, "reason": "invalid_timestamp_or_value"})
             continue
         previous = valid_at
         points.append({
@@ -216,7 +287,7 @@ def normalize_open_meteo_payload(payload: dict[str, Any], target: dict[str, Any]
         "points": points,
         "quality_status": "partial" if quality_gaps else "good",
         "quality": {"status": "partial" if quality_gaps else "good", "gaps": quality_gaps},
-        "api_metadata": {
+            "api_metadata": {
             key: payload[key] for key in ("model", "timezone", "utc_offset_seconds", "generationtime_ms")
             if payload.get(key) is not None
         },
@@ -344,14 +415,7 @@ class SolarOpenMeteoManager:
             longitude = _number(installation.get("longitude"))
             api_metadata = frame.get("api_metadata", {}) if isinstance(frame, dict) else {}
             timezone_name = _valid_timezone(api_metadata.get("timezone"))
-            if (
-                latitude is None
-                or longitude is None
-                or timezone_name is None
-                or abs(latitude - 62.20646687401988) > 1e-9
-                or abs(longitude - 17.490212917327884) > 1e-9
-                or timezone_name != "Europe/Stockholm"
-            ):
+            if latitude is None or longitude is None or timezone_name is None:
                 continue
             location_payload = {
                 "latitude": latitude,
@@ -359,13 +423,7 @@ class SolarOpenMeteoManager:
                 "timezone": timezone_name,
                 "provenance": "open_meteo_namespaced_store_and_binding",
                 "verification_state": "verified",
-                "location_fingerprint": hashlib.sha256(
-                    json.dumps(
-                        {"latitude": latitude, "longitude": longitude, "timezone": timezone_name},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ).encode("utf-8")
-                ).hexdigest(),
+                "location_fingerprint": _location_fingerprint(latitude, longitude, timezone_name),
             }
             try:
                 migrated += int(await site_identity_manager.async_set_site_location(site_id, location_payload))

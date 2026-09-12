@@ -396,33 +396,41 @@ def build_open_meteo_frame(
     target: dict[str, Any],
     normalized: dict[str, Any],
     fetched_at: datetime,
+    captured_at: datetime | None = None,
+    known_at: datetime | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build one immutable raw-GTI frame for one explicit request section."""
     points = normalized.get("points") if isinstance(normalized, dict) else None
     if not isinstance(points, list) or not points:
         raise ValueError("open_meteo_points_missing")
     fetched_at = fetched_at.astimezone(timezone.utc)
+    captured_at = (captured_at or fetched_at).astimezone(timezone.utc)
+    known_at = (known_at or captured_at).astimezone(timezone.utc)
+    if fetched_at > known_at or captured_at > known_at:
+        raise ValueError("open_meteo_timestamp_order_invalid")
     request_fingerprint = target["section_request_fingerprint"]
     generation_id = target["generation_id"]
     semantic_key = (
         f"{OPEN_METEO_DATASET}|{target['site_id']}|{generation_id}|"
         f"{OPEN_METEO_LOGICAL_ROLE}|{request_fingerprint}"
     )
-    frame_seed = json.dumps(
-        [
-            semantic_key,
-            [
-                {
-                    "point_key": point["valid_at"].astimezone(timezone.utc).isoformat(),
-                    "value": point["value"],
-                    "unit": point["unit"],
-                }
-                for point in points
-            ],
+    knowledge = {
+        "semantic_key": semantic_key,
+        "quality_status": normalized.get("quality_status", "good"),
+        "quality": normalized.get("quality", {}),
+        "points": [
+            {
+                "point_key": point["valid_at"].astimezone(timezone.utc).isoformat(),
+                "source_timestamp": point.get("source_timestamp"),
+                "value": point["value"],
+                "unit": point["unit"],
+                "quality_status": point.get("quality_status", "good"),
+            }
+            for point in points
         ],
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    }
+    knowledge_fingerprint = hashlib.sha256(json.dumps(knowledge, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest()
+    frame_seed = json.dumps(knowledge, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     frame_id = "frame-" + hashlib.sha256(frame_seed.encode("utf-8")).hexdigest()[:32]
     valid_at_values = [point["valid_at"].astimezone(timezone.utc) for point in points]
     frame = {
@@ -438,12 +446,12 @@ def build_open_meteo_frame(
         "classification": "forecast",
         "published_at": None,
         "fetched_at": fetched_at,
-        "known_at": fetched_at,
-        "captured_at": fetched_at,
+        "known_at": known_at,
+        "captured_at": captured_at,
         "valid_from": min(valid_at_values),
         "valid_to": max(valid_at_values) + timedelta(hours=1),
         "quality_status": normalized.get("quality_status", "good"),
-        "quality": normalized.get("quality", {}),
+        "quality": dict(normalized.get("quality", {}), knowledge_fingerprint=knowledge_fingerprint),
         "provenance": {
             "origin_type": "open_meteo_http_response",
             "provider": "open-meteo",
@@ -456,11 +464,11 @@ def build_open_meteo_frame(
             "tilt_deg": target["tilt_deg"],
             "open_meteo_azimuth_deg": target["open_meteo_azimuth_deg"],
             "section_request_fingerprint": request_fingerprint,
-            "binding_fingerprint": target.get("binding", {}).get("binding_fingerprint"),
-            "installation_fingerprint": target.get("binding", {}).get("installation_fingerprint"),
-            "source_strings": list(target.get("source_strings", [])),
-            "peak_power_kwp": target.get("peak_power_kwp"),
-            "api_metadata": normalized.get("api_metadata", {}),
+            "source_generation_id": generation_id,
+            "source_timezone": normalized.get("api_metadata", {}).get("timezone", target["timezone"]),
+            "raw_unit": "W/m²",
+            "source_timestamp_semantics": "provider_local_or_offset_aware",
+            "knowledge_fingerprint": knowledge_fingerprint,
         },
         "payload_schema": "open_meteo.global_tilted_irradiance.v1",
     }

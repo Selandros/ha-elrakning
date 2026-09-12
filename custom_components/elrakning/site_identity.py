@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from copy import deepcopy
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
@@ -402,6 +404,20 @@ class SiteIdentityManager:
             if isinstance(item, dict)
         }:
             raise ValueError("site_not_found")
+        required = {"latitude", "longitude", "timezone", "provenance", "verification_state", "location_fingerprint"}
+        if set(location) != required or location.get("verification_state") != "verified":
+            raise ValueError("site_location_invalid")
+        try:
+            latitude = float(location["latitude"])
+            longitude = float(location["longitude"])
+            timezone_name = str(location["timezone"])
+            ZoneInfo(timezone_name)
+        except (TypeError, ValueError, ZoneInfoNotFoundError):
+            raise ValueError("site_location_invalid") from None
+        if not math.isfinite(latitude) or not math.isfinite(longitude) or not str(location["provenance"]).strip():
+            raise ValueError("site_location_invalid")
+        if location.get("location_fingerprint") != self.site_location_fingerprint(latitude, longitude, timezone_name):
+            raise ValueError("site_location_invalid")
         config = self.state.setdefault("site_configs", {}).setdefault(
             site_id, self._empty_site_config()
         )
@@ -413,6 +429,11 @@ class SiteIdentityManager:
         config["location"] = deepcopy(location)
         await self.store.async_save(self.state)
         return True
+
+    @staticmethod
+    def site_location_fingerprint(latitude: float, longitude: float, timezone_name: str) -> str:
+        payload = {"latitude": latitude, "longitude": longitude, "timezone": timezone_name}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     def _current_mapping_config(self) -> dict[str, Any]:
         return {

@@ -17,6 +17,7 @@ from custom_components.elrakning.canonical_collector import CanonicalCollector  
 from custom_components.elrakning import canonical_collector as collector_module  # noqa: E402
 from custom_components.elrakning.canonical_storage import CanonicalStorage, SCHEMA_PATH, quarter_start  # noqa: E402
 from custom_components.elrakning.site_identity import SiteIdentityManager  # noqa: E402
+from custom_components.elrakning.solar_open_meteo import _location_fingerprint  # noqa: E402
 
 
 UTC = timezone.utc
@@ -119,6 +120,8 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                     "longitude": 17.4,
                     "timezone": "Europe/Stockholm",
                     "verification_state": "verified",
+                    "provenance": "test",
+                    "location_fingerprint": _location_fingerprint(62.2, 17.4, "Europe/Stockholm"),
                 },
                 "bindings": {"open_meteo": {"binding_fingerprint": "a"}},
                 "power": {
@@ -167,6 +170,8 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                     "longitude": 17.4,
                     "timezone": "Europe/Stockholm",
                     "verification_state": "verified",
+                    "provenance": "test",
+                    "location_fingerprint": _location_fingerprint(62.2, 17.4, "Europe/Stockholm"),
                 },
                 "bindings": {"open_meteo": {"binding_fingerprint": "a"}},
                 "power": {
