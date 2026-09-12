@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -32,6 +34,7 @@ POWER_ROLES = {
     "grid.power/import": ("W", "positive_import_negative_export"),
     "battery.power": ("W", "positive_discharge_negative_charge"),
 }
+_LOGGER = logging.getLogger(__name__)
 
 
 class CanonicalCollector:
@@ -52,6 +55,7 @@ class CanonicalCollector:
         self._finalized_intervals: set[datetime] = set()
         self._flush_lock = asyncio.Lock()
         self._started = False
+        self._forecast_capture_status: dict[str, Any] | None = None
 
     async def async_persist_nord_pool_frame(self, data, binding, captured_at) -> bool:
         """Persist one global price frame without changing collection context."""
@@ -60,33 +64,115 @@ class CanonicalCollector:
                 persist_nord_pool_frame, self.storage, data, binding, captured_at
             )
 
-    async def async_capture_forecast_solar(self, captured_at: datetime | None = None) -> dict[str, int]:
+    def forecast_capture_status(self) -> dict[str, Any] | None:
+        """Return the latest in-memory Forecast.Solar capture diagnostics."""
+        return copy.deepcopy(self._forecast_capture_status)
+
+    async def async_capture_forecast_solar(
+        self,
+        captured_at: datetime | None = None,
+        *,
+        trigger: str = "startup",
+        entity_id: str | None = None,
+    ) -> dict[str, Any]:
         """Capture all enabled Forecast.Solar site bindings without UI context."""
+        started_at = dt_util.now().astimezone(timezone.utc)
         captured_at = (captured_at or dt_util.now()).astimezone(timezone.utc)
-        totals = {"sites": 0, "written": 0, "unchanged": 0, "revised": 0}
         target_getter = getattr(self.site_identity_manager, "forecast_collection_targets", None)
         targets = target_getter() if target_getter else []
+        result: dict[str, Any] = {
+            "started_at": started_at.isoformat(),
+            "finished_at": None,
+            "last_attempt_at": started_at.isoformat(),
+            "last_success_at": None,
+            "trigger": trigger,
+            "entity_id": entity_id,
+            "target_count": len(targets),
+            "target_site_ids": [target.get("site_id") for target in targets],
+            "sites": {},
+            "last_error": None,
+        }
         for target in targets:
+            site_id = target.get("site_id")
+            site_result = {
+                "status": "no_candidates",
+                "candidates": 0,
+                "written": 0,
+                "deduplicated": 0,
+                "revised": 0,
+                "rejected": 0,
+                "error_type": None,
+                "error_message": None,
+            }
+            result["sites"][site_id] = site_result
             try:
                 frames = build_forecast_solar_frames(
-                    self.hass, target["site_id"], target["binding"], captured_at
+                    self.hass, site_id, target["binding"], captured_at
                 )
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as error:
                 # Unsupported or malformed source context must fail closed.
+                site_result.update({
+                    "status": "error",
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                })
+                result["last_error"] = {
+                    "site_id": site_id,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                }
+                _LOGGER.warning("Forecast.Solar capture failed for site %s: %s", site_id, error)
                 continue
             if not frames:
                 continue
-            totals["sites"] += 1
-            result = await self.hass.async_add_executor_job(
-                self._persist_forecast_target,
-                target["site_id"],
-                target["binding"],
-                frames,
-                captured_at,
-            )
-            for key in ("written", "unchanged", "revised"):
-                totals[key] += result[key]
-        return totals
+            site_result["candidates"] = len(frames)
+            try:
+                persisted = await self.hass.async_add_executor_job(
+                    self._persist_forecast_target,
+                    site_id,
+                    target["binding"],
+                    frames,
+                    captured_at,
+                )
+            except Exception as error:
+                site_result.update({
+                    "status": "error",
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                })
+                result["last_error"] = {
+                    "site_id": site_id,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                }
+                _LOGGER.warning("Forecast.Solar persistence failed for site %s: %s", site_id, error)
+                continue
+            site_result.update({
+                "written": int(persisted.get("written", 0)),
+                "deduplicated": int(persisted.get("unchanged", 0)),
+                "revised": int(persisted.get("revised", 0)),
+            })
+            if persisted.get("status") == "stale_binding":
+                site_result["status"] = "stale_binding"
+            elif site_result["written"] or site_result["revised"]:
+                site_result["status"] = "success"
+            else:
+                site_result["status"] = "deduplicated"
+        result["finished_at"] = dt_util.now().astimezone(timezone.utc).isoformat()
+        previous_success = (
+            self._forecast_capture_status or {}
+        ).get("last_success_at")
+        result["last_success_at"] = (
+            result["finished_at"] if not result["last_error"] else previous_success
+        )
+        result["status"] = (
+            "no_targets" if not targets else "error" if result["last_error"] and not any(
+                site.get("status") in {"success", "deduplicated", "stale_binding"}
+                for site in result["sites"].values()
+            ) else "partial_failure" if result["last_error"] else "success"
+        )
+        self._forecast_capture_status = result
+        return copy.deepcopy(result)
 
     def _persist_forecast_target(self, site_id, binding, frames, captured_at):
         current = {
@@ -94,8 +180,10 @@ class CanonicalCollector:
             for item in getattr(self.site_identity_manager, "forecast_collection_targets", lambda: [])()
         }.get(site_id)
         if current != binding:
-            return {"written": 0, "unchanged": 0, "revised": 0}
-        return persist_forecast_solar_frames(self.storage, frames, captured_at)
+            return {"status": "stale_binding", "written": 0, "unchanged": 0, "revised": 0}
+        persisted = persist_forecast_solar_frames(self.storage, frames, captured_at)
+        persisted["status"] = "persisted"
+        return persisted
 
     async def _async_forecast_state_changed(self, event: Event) -> None:
         if not self._started:
@@ -108,7 +196,10 @@ class CanonicalCollector:
             for target in targets
         ):
             return
-        await self.async_capture_forecast_solar()
+        await self.async_capture_forecast_solar(
+            trigger="forecast_solar_state_changed",
+            entity_id=entity_id,
+        )
 
     async def async_start(self) -> None:
         if self._started:

@@ -94,6 +94,12 @@ class ExternalInputFrameTests(unittest.TestCase):
             "forecast_solar.remaining_today_kwh", "forecast_solar.power_now_kw",
             "forecast_solar.peak_time_today", "forecast_solar.peak_time_tomorrow",
         })
+        targets = {frame["logical_role"]: frame["provenance"]["target"] for frame, _ in frames}
+        self.assertEqual(targets["forecast_solar.today_kwh"], "local_day:2026-09-05")
+        self.assertEqual(targets["forecast_solar.tomorrow_kwh"], "local_day:2026-09-06")
+        self.assertEqual(targets["forecast_solar.remaining_today_kwh"], "local_day_remainder:2026-09-05")
+        self.assertEqual(targets["forecast_solar.peak_time_today"], "local_day:2026-09-05")
+        self.assertEqual(targets["forecast_solar.peak_time_tomorrow"], "local_day:2026-09-06")
         result = persist_forecast_solar_frames(self.storage, frames, captured)
         self.assertEqual(result["written"], 6)
         self.assertEqual(self.storage.count_external_frames(), 6)

@@ -58,6 +58,7 @@ GRID_REMOVE_COMMAND = f"{DOMAIN}/grid/remove"
 ELECTRICITY_HISTORY_STATE_COMMAND = f"{DOMAIN}/electricity_history_state"
 ELECTRICITY_HISTORY_PURGE_COMMAND = f"{DOMAIN}/electricity_history_purge"
 DIAGNOSTICS_STATE_COMMAND = f"{DOMAIN}/diagnostics_state"
+CANONICAL_COLLECTOR_STATE_COMMAND = f"{DOMAIN}/canonical_collector_state"
 DIAGNOSTICS_CLEAR_COMMAND = f"{DOMAIN}/diagnostics_clear"
 FRONTEND_PREFERENCES_COMMAND = f"{DOMAIN}/frontend_preferences"
 FRONTEND_PREFERENCES_SET_COMMAND = f"{DOMAIN}/frontend_preferences_set"
@@ -110,6 +111,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_electricity_history_state)
     websocket_api.async_register_command(hass, websocket_electricity_history_purge)
     websocket_api.async_register_command(hass, websocket_diagnostics_state)
+    websocket_api.async_register_command(hass, websocket_canonical_collector_state)
     websocket_api.async_register_command(hass, websocket_diagnostics_clear)
     websocket_api.async_register_command(hass, websocket_frontend_preferences)
     websocket_api.async_register_command(hass, websocket_frontend_preferences_set)
@@ -832,6 +834,20 @@ async def websocket_diagnostics_clear(hass, connection, msg):
     if manager:
         await manager.async_clear_diagnostics()
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command({vol.Required("type"): CANONICAL_COLLECTOR_STATE_COMMAND})
+@websocket_api.async_response
+async def websocket_canonical_collector_state(hass, connection, msg):
+    """Return read-only in-memory Forecast.Solar capture diagnostics."""
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    if collector is None:
+        connection.send_result(msg["id"], {"success": False, "error": "not_ready"})
+        return
+    connection.send_result(msg["id"], {
+        "success": True,
+        "forecast_solar": collector.forecast_capture_status(),
+    })
 
 
 @websocket_api.websocket_command({vol.Required("type"): FRONTEND_PREFERENCES_COMMAND})

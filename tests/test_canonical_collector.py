@@ -3,7 +3,7 @@ import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
 
@@ -12,6 +12,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_collector import CanonicalCollector  # noqa: E402
+from custom_components.elrakning import canonical_collector as collector_module  # noqa: E402
 from custom_components.elrakning.canonical_storage import CanonicalStorage, SCHEMA_PATH, quarter_start  # noqa: E402
 from custom_components.elrakning.site_identity import SiteIdentityManager  # noqa: E402
 
@@ -32,6 +33,9 @@ class _Identity:
 
     def collection_targets(self):
         return self.targets
+
+    def forecast_collection_targets(self):
+        return [target for target in self.targets if "binding" in target]
 
 
 class _Hass:
@@ -83,7 +87,144 @@ def _target(site, role, entity, generation, mapping=None):
     }
 
 
+def _forecast_target(site, entity):
+    return {
+        "site_id": site,
+        "binding": {
+            "config_entry_id": "forecast-entry",
+            "binding_fingerprint": f"binding-{site}",
+            "entities": {"today_kwh": entity},
+        },
+    }
+
+
 class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_forecast_capture_status_starts_empty_and_is_read_only(self):
+        collector = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        self.assertIsNone(collector.forecast_capture_status())
+
+    async def test_forecast_capture_without_targets_is_explicitly_reported(self):
+        collector = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        result = await collector.async_capture_forecast_solar()
+        self.assertEqual(result["status"], "no_targets")
+        self.assertEqual(result["target_count"], 0)
+
+    async def test_forecast_capture_with_no_candidates_is_explicitly_reported(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        with patch.object(collector_module, "build_forecast_solar_frames", return_value=[]):
+            result = await collector.async_capture_forecast_solar()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["sites"]["site-a"]["status"], "no_candidates")
+
+    async def test_forecast_capture_persistence_failure_is_explicitly_reported(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        frames = [({"site_id": "site-a"}, [])]
+        with patch.object(collector_module, "build_forecast_solar_frames", return_value=frames), \
+             patch.object(collector_module, "persist_forecast_solar_frames", side_effect=RuntimeError("db failed")):
+            result = await collector.async_capture_forecast_solar()
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["sites"]["site-a"]["error_type"], "RuntimeError")
+
+    async def test_forecast_capture_stale_binding_is_fail_closed(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        identity = _Identity([target])
+        collector = CanonicalCollector(_Hass(), identity, ":memory:")
+        self.addCleanup(collector.storage.close)
+        frames = [({"site_id": "site-a"}, [])]
+        def build_and_replace(*_args):
+            identity.targets = [_forecast_target("site-a", "sensor.forecast-new")]
+            return frames
+
+        with patch.object(collector_module, "build_forecast_solar_frames", side_effect=build_and_replace):
+            result = await collector.async_capture_forecast_solar()
+        self.assertEqual(result["sites"]["site-a"]["status"], "stale_binding")
+        self.assertEqual(result["sites"]["site-a"]["written"], 0)
+
+    async def test_forecast_capture_success_and_deduplication_are_observable(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        frames = [({"site_id": "site-a"}, [])]
+        with patch.object(collector_module, "build_forecast_solar_frames", return_value=frames), \
+             patch.object(
+                 collector_module,
+                 "persist_forecast_solar_frames",
+                 side_effect=[
+                     {"written": 1, "unchanged": 0, "revised": 0},
+                     {"written": 0, "unchanged": 1, "revised": 0},
+                 ],
+             ):
+            first = await collector.async_capture_forecast_solar(trigger="startup")
+            second = await collector.async_capture_forecast_solar(
+                trigger="forecast_solar_state_changed", entity_id="sensor.forecast"
+            )
+        self.assertEqual(first["status"], "success")
+        self.assertEqual(first["trigger"], "startup")
+        self.assertEqual(first["sites"]["site-a"]["status"], "success")
+        self.assertEqual(first["sites"]["site-a"]["written"], 1)
+        self.assertEqual(second["trigger"], "forecast_solar_state_changed")
+        self.assertEqual(second["entity_id"], "sensor.forecast")
+        self.assertEqual(second["sites"]["site-a"]["status"], "deduplicated")
+        self.assertEqual(second["sites"]["site-a"]["deduplicated"], 1)
+        snapshot = collector.forecast_capture_status()
+        self.assertEqual(snapshot, second)
+        snapshot["sites"]["site-a"]["written"] = 999
+        self.assertEqual(collector.forecast_capture_status()["sites"]["site-a"]["written"], 0)
+
+    async def test_forecast_capture_typeerror_and_valueerror_are_recorded(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        for error in (TypeError("bad type"), ValueError("bad value")):
+            with patch.object(collector_module, "build_forecast_solar_frames", side_effect=error):
+                result = await collector.async_capture_forecast_solar()
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["sites"]["site-a"]["error_type"], type(error).__name__)
+            self.assertEqual(result["last_error"]["error_message"], str(error))
+
+    async def test_forecast_capture_one_site_failure_does_not_abort_next_site(self):
+        targets = [_forecast_target("site-a", "sensor.a"), _forecast_target("site-b", "sensor.b")]
+        collector = CanonicalCollector(_Hass(), _Identity(targets), ":memory:")
+        self.addCleanup(collector.storage.close)
+        frames = [({"site_id": "site-b"}, [])]
+        with patch.object(
+            collector_module,
+            "build_forecast_solar_frames",
+            side_effect=[ValueError("site-a failed"), frames],
+        ), patch.object(
+            collector_module,
+            "persist_forecast_solar_frames",
+            return_value={"written": 1, "unchanged": 0, "revised": 0},
+        ):
+            result = await collector.async_capture_forecast_solar()
+        self.assertEqual(result["sites"]["site-a"]["status"], "error")
+        self.assertEqual(result["sites"]["site-b"]["status"], "success")
+        self.assertEqual(result["status"], "partial_failure")
+
+    async def test_forecast_capture_event_keeps_entity_trigger_identity(self):
+        target = _forecast_target("site-a", "sensor.forecast")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        self.addCleanup(collector.storage.close)
+        collector._started = True
+        collector.async_capture_forecast_solar = AsyncMock()
+        await collector._async_forecast_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.forecast"}))
+        collector.async_capture_forecast_solar.assert_awaited_once_with(
+            trigger="forecast_solar_state_changed", entity_id="sensor.forecast"
+        )
+
+    async def test_forecast_capture_new_collector_has_no_persisted_status(self):
+        first = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
+        self.addCleanup(first.storage.close)
+        await first.async_capture_forecast_solar()
+        second = CanonicalCollector(_Hass(), _Identity([]), ":memory:")
+        self.addCleanup(second.storage.close)
+        self.assertIsNone(second.forecast_capture_status())
+
     async def test_start_finalizes_previous_quarter_before_scheduling_next(self):
         with tempfile.TemporaryDirectory() as directory:
             collector = CanonicalCollector(

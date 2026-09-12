@@ -32,6 +32,13 @@ _FORECAST_SOLAR_ROLE_UNITS = {
     "peak_time_today": "timestamp",
     "peak_time_tomorrow": "timestamp",
 }
+_FORECAST_SOLAR_TARGET_DAY_OFFSETS = {
+    "today_kwh": 0,
+    "tomorrow_kwh": 1,
+    "remaining_today_kwh": 0,
+    "peak_time_today": 0,
+    "peak_time_tomorrow": 1,
+}
 
 
 def build_nord_pool_frame(
@@ -177,7 +184,7 @@ def _forecast_target(role: str, local_day: date, captured_at: datetime, zone: Zo
     if role == "remaining_today_kwh":
         start, end = _local_day_bounds(local_day, zone)
         return f"local_day_remainder:{local_day.isoformat()}", captured_at, end, captured_at
-    target_day = local_day + timedelta(days=1) if role.endswith("tomorrow") else local_day
+    target_day = local_day + timedelta(days=_FORECAST_SOLAR_TARGET_DAY_OFFSETS.get(role, 0))
     start, end = _local_day_bounds(target_day, zone)
     return f"local_day:{target_day.isoformat()}", start, end, start
 
