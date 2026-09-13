@@ -1,0 +1,160 @@
+{
+  "fixture_suite": "elrakning.c4c1_greenely_identity_amendment.v1",
+  "contract_version": 1,
+  "status": "READY_FOR_REVIEW",
+  "scope_guards": {
+    "production_code_change": false,
+    "network_call": false,
+    "provider_write": false,
+    "store_write": false,
+    "sqlite_write": false,
+    "version_bump": false,
+    "deploy": false,
+    "restart": false
+  },
+  "hmac_key_audit": {
+    "status": "HMAC_KEY_MODEL_RESOLVED",
+    "test_key_only": true,
+    "production_key_selected": true,
+    "production_key_material_created": false,
+    "storage": "homeassistant.helpers.storage.Store(private=True, atomic_writes=True)",
+    "scope": "one_random_256_bit_key_per_config_entry_identity_domain",
+    "key_id_is_source_generation_input": true,
+    "key_material_exposed": false,
+    "plain_sha_fallback_allowed": false,
+    "rotation": "unsupported_v1_fail_closed; future rotation requires separate identity domain",
+    "backup_restore": "matching_key_and_database_restore_together; partial_separation_fail_closed"
+  },
+  "key_lifecycle_cases": [
+    {"name": "no_key_no_dependent_history", "expected": "generate_once_and_durable_save_before_collection"},
+    {"name": "key_with_dependent_history", "expected": "continue_same_identity_domain"},
+    {"name": "key_without_history", "expected": "valid_empty_domain"},
+    {"name": "no_key_with_dependent_history", "expected": "fail_closed_no_replacement_key"},
+    {"name": "restored_key_with_matching_database", "expected": "continue_same_identity_domain"},
+    {"name": "database_without_key", "expected": "fail_closed_no_implicit_attachment"},
+    {"name": "key_without_database", "expected": "no_implicit_history_attachment"},
+    {"name": "rotation_requested_v1", "expected": "reject_and_fail_closed"}
+  ],
+  "terminology": {
+    "provider_invoice_occurrence_reference": "ocr_number",
+    "invoice_occurrence_identity": "opaque_hmac(provider_namespace, contract_identity, occurrence_reference)",
+    "installation_proof": "greenely_meter_to_invoice_installation_proof",
+    "proof_states": ["UNVERIFIED", "EXPLICITLY_VERIFIED"]
+  },
+  "proof_record_fields": [
+    "proof_schema_version",
+    "relation",
+    "verification_state",
+    "verification_method",
+    "site_binding_fingerprint",
+    "provider",
+    "config_entry_identity",
+    "facility_identity_fingerprint",
+    "contract_identity_fingerprint",
+    "facility_meter_id_fingerprint",
+    "contract_meter_id_fingerprint_or_state",
+    "invoice_installation_identity_fingerprint",
+    "verified_at",
+    "parser_identity",
+    "normalization_identity"
+  ],
+  "acceptable_verification_methods": [
+    "provider_native_semantic_proof",
+    "explicit_out_of_band_invoice_verification"
+  ],
+  "proof_invalidation": [
+    "site_or_facility_rebind",
+    "contract_scope_mismatch_or_rebind",
+    "facility_meter_change",
+    "contract_meter_change_in_proof_scope",
+    "provider_or_config_entry_change",
+    "attribution_relevant_binding_fingerprint_change",
+    "proof_schema_version_change",
+    "attribution_relevant_parser_or_normalization_change"
+  ],
+  "identity_cases": [
+    {"name": "equal_ids_without_proof", "expected": "reject_insufficient_evidence"},
+    {"name": "verified_proof_exact_binding", "expected": "accept_attribution"},
+    {"name": "facility_rebind", "expected": "invalidate_proof_and_new_generation"},
+    {"name": "contract_mismatch", "expected": "invalidate_proof"},
+    {"name": "meter_id_change", "expected": "invalidate_proof"},
+    {"name": "binding_fingerprint_change", "expected": "invalidate_proof"},
+    {"name": "proof_version_change", "expected": "new_generation_if_semantics_change"},
+    {"name": "active_site_change", "expected": "no_identity_effect"}
+  ],
+  "occurrence_cases": [
+    {"name": "same_occurrence_same_knowledge", "expected": "deduplicate"},
+    {"name": "same_occurrence_changed_knowledge", "expected": "revision_next_same_generation"},
+    {"name": "two_occurrences_same_billing_period", "expected": "two_targets"},
+    {"name": "new_occurrence_reissue_without_link", "expected": "new_target_no_supersedes"},
+    {"name": "duplicate_occurrence_same_contract", "expected": "reject_ambiguous"},
+    {"name": "same_reference_different_contracts", "expected": "different_targets"},
+    {"name": "missing_occurrence", "expected": "reject"},
+    {"name": "blank_occurrence", "expected": "reject"},
+    {"name": "invalid_occurrence", "expected": "reject_non_native_or_empty"}
+  ],
+  "source_generation": {
+    "includes": [
+      "provider_adapter_version",
+      "config_entry_identity",
+      "site_binding_identity",
+      "facility_identity",
+      "contract_identity",
+      "dataset_identity",
+      "parser_version",
+      "normalization_version",
+      "vat_semantics",
+      "unit_semantics",
+      "verified_timezone_identity_and_state",
+      "installation_attribution_proof_identity_state_version",
+      "pseudonymization_key_id_identity_domain_id"
+    ],
+    "schema_migration_required": false,
+    "c1_compatibility_concepts": [
+      "source_generation_id",
+      "semantic_key",
+      "revision",
+      "supersedes_frame_id",
+      "site_id",
+      "site_scope",
+      "known_at",
+      "captured_at",
+      "valid_from",
+      "valid_to",
+      "provenance",
+      "quality",
+      "external_input_points"
+    ],
+    "excludes": [
+      "raw_ocr",
+      "invoice_occurrence_identity",
+      "billing_period",
+      "economic_values",
+      "captured_at",
+      "fetched_at",
+      "known_at",
+      "frame_id",
+      "revision",
+      "active_site_id"
+    ]
+  },
+  "replay_cases": [
+    {"name": "later_revision_hidden_before_decision", "invariant": "known_at <= decision_at"},
+    {"name": "later_occurrence_does_not_erase_earlier", "expected": "both_distinct_if_individually_eligible"},
+    {"name": "no_latest_wins_across_occurrences", "expected": "no_implicit_winner"}
+  ],
+  "clean_room_cases": [
+    {"name": "future_without_invoice", "expected_invoice_frames": 0},
+    {"name": "arbitrary_site_id_same_inputs", "expected": "same_generic_outcome"},
+    {"name": "ended_contract_attributed_invoice", "expected": "eligible"}
+  ],
+  "privacy_cases": [
+    {"name": "raw_ocr_not_in_target_or_provenance", "expected": true},
+    {"name": "raw_anl_id_not_in_canonical_output", "expected": true},
+    {"name": "only_opaque_fingerprints_exposed", "expected": true},
+    {"name": "test_hmac_key_does_not_create_production_key", "expected": true},
+    {"name": "same_key_same_inputs_deterministic", "expected": true},
+    {"name": "different_key_domains_have_different_occurrence_identity", "expected": true},
+    {"name": "key_material_absent_from_outputs", "expected": true}
+  ]
+}
