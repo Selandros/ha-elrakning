@@ -634,6 +634,35 @@ INFERRED (roadmap): Long-term data foundation:
 - C.3B closure has no producer, runtime Store/DB migration, version bump,
   deploy, or restart. Focused contract tests passed 11/11; the closure gate
   must also include the full repository test and validation suite.
-- NEXT: C.3C is not started and is not implementation-authorized. Any future
-  producer must preserve these identities, site/source provenance, no-lookahead
-  semantics, Fiskvik zero-frame behavior, and Solar Evidence non-regression.
+- COMPLETE (C.3C, immutable SMHI producer, 2026-09-13): The exact release
+  commit is `5a84b00b16ce5c00dc5d926191030b45199e5f13`, version `0.0.637`.
+  The release adds site-explicit immutable SMHI current-weather and hourly
+  forecast capture without changing the canonical schema, Solar Evidence,
+  Solar Shadow, Forecast.Solar, Open-Meteo, or provider paths.
+- VERIFIED (C.3C runtime, 0.0.637, 2026-09-13): After a normal Core restart,
+  Fiskvik was the active site while the collector selected exactly one weather
+  target, Vikarbodarna. The runtime capture reported one hourly
+  `weather.get_forecasts` service call for Vikarbodarna and zero Fiskvik
+  weather targets, calls, or frames. This proves site-independent collection
+  for the SMHI producer and fail-closed empty-site behavior.
+- VERIFIED (C.3C canonical runtime, 0.0.637, 2026-09-13): The WAL-consistent
+  canonical database reported `integrity_check=ok`, 16 source generations,
+  602 external frames, 5,301 external points, zero duplicate point IDs, zero
+  duplicate semantic-key/revision pairs, and no broken supersedes links.
+  Vikarbodarna has one current-weather frame and one 60-point hourly-weather
+  frame after restart; Fiskvik has zero weather frames. The hourly generation
+  is `native_bucket / 3600 / verified`; the current generation is
+  `event_stream / unknown` as specified by the contract.
+- VERIFIED (C.3C timestamp/replay evidence, 0.0.637, 2026-09-13): Weather
+  frames satisfy `known_at >= captured_at` and, where present,
+  `known_at >= fetched_at`; current weather has no fabricated `valid_at`, and
+  hourly points retain explicit UTC valid times. Existing C.1 replay semantics
+  remain unchanged and no schema migration was introduced.
+- VERIFIED (C.3C non-regression, 0.0.637, 2026-09-13): The site-scoped Solar
+  Evidence store remains at 39 daily rows, 14 Open-Meteo progress days, 13
+  Forecast.Solar common days, and 14 completed audit rows. Evidence/Shadow
+  data, historical rows, baselines, counters, and consumers were not changed.
+  The known `collected_at` immutability issue remains a separate known fail.
+- C.3C is closed. No further code, Store, database, deploy, or restart is
+  required for this scope. The next scope remains the next immutable
+  external-input foundation milestone.
