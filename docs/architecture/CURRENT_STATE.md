@@ -667,6 +667,58 @@ INFERRED (roadmap): Long-term data foundation:
   required for this scope. The next scope remains the next immutable
   external-input foundation milestone.
 
+## C.4 Greenely immutable provider-economics foundation
+
+- COMPLETE (C.4A, read-only source/runtime/consumer audit, 2026-09-13): The
+  current Greenely runtime has explicit site-scoped `elhandel` bindings and
+  separate durable facility/provider namespaces. Vikarbodarna has attributed
+  invoice/tariff history; Fiskvik has zero historical invoices, zero historical
+  consumption samples, no attributed current summary, and only a future
+  Greenely contract start. Provider refresh remains active-site-bound today, so
+  no current implementation claim is made that Greenely collection is already
+  site-independent.
+- COMPLETE / CONTRACT LOCKED (C.4B, design/fixtures/tests, 2026-09-13):
+  `docs/architecture/C4B_GREENELY_ECONOMICS_EXTERNAL_INPUT_CONTRACT_V1.md`
+  freezes `greenely.invoice_economics.v1` and
+  `greenely.current_tariff_snapshot.v1` as separate site-scoped dataset
+  identities with separate semantic/revision/supersedes chains.
+- C.4B requires explicit site, facility and contract attribution; invoice
+  economics additionally requires stable invoice attribution. Producer
+  ownership must come from `collection_enabled` site configuration plus the
+  explicit `elhandel` binding. `active_site_id`, shared credentials and the
+  active provider namespace are not ownership identity.
+- Provider economics are component facts only. Greenely variable retailer cost
+  and fixed subscription remain separate from Nord Pool spot, weighted invoice
+  spot, credits/settlement adjustments, `amount_due`, grid economics and the
+  derived customer price. Missing components remain unavailable and are never
+  zero-filled or reconstructed from totals.
+- Temporal semantics are locked: contract `effective_from`, invoice validity,
+  point `valid_at`, `captured_at`, `known_at` and `fetched_at` are distinct.
+  Invoice calendar dates may become UTC validity only with a verified site
+  timezone; otherwise invoice economics fail closed rather than inventing
+  boundaries. A current tariff snapshot is valid only at capture time and must
+  never be expanded backward into historical tariff coverage.
+- Fiskvik remains a Greenely economics clean room in C.4B: zero historical
+  invoice-economics frames and zero current-tariff-snapshot frames under the
+  audited state. Explicit FUTURE contract metadata may be retained as future
+  metadata but is not current or historical economics and does not authorize
+  retrospective backfill.
+- C.4B preserves the C.1 immutable external-frame model and hard replay rule
+  `known_at <= decision_at`. Same normalized knowledge deduplicates; changed
+  knowledge within one semantic target revises; facility/contract or relevant
+  normalization replacement creates a new source generation starting at
+  revision 1 without cross-generation supersedes. C.1 schema v1 is sufficient;
+  no migration is required.
+- VERIFIED (C.4B local closure gate, 2026-09-13): the scope contains only the
+  contract document, deterministic JSON fixtures, contract tests and this
+  current-state closure entry. Focused C.4B tests pass 17/17; no production
+  code, manifest version, Home Assistant Store, canonical database, network
+  behavior, deploy or restart is changed by C.4B.
+- C.4C producer is NOT STARTED. No production implementation or release is
+  authorized by the C.4B closure. The next scope must begin from the locked
+  C.4B contract and separately review producer design, site-independent target
+  enumeration, persistence/replay behavior and runtime acceptance.
+
 ## 0.0.639 Site-independent solar collection fix
 
 - IMPLEMENTED / STATIC VERIFIED (2026-09-13): Forecast.Solar `day_ahead` and

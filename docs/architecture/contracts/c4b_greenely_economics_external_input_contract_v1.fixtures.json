@@ -1,0 +1,232 @@
+{
+  "fixture_suite": "elrakning.c4b_greenely_economics_external_input_contract.v1",
+  "contract_version": 1,
+  "datasets": [
+    {
+      "id": "invoice_economics",
+      "dataset": "greenely.invoice_economics.v1",
+      "scope": "site",
+      "classification": "published",
+      "logical_roles": [
+        "economic.provider.import.variable",
+        "economic.provider.fixed.subscription"
+      ],
+      "target_descriptor": "attributed_invoice_identity_and_component",
+      "share_revision_chain_with": []
+    },
+    {
+      "id": "current_tariff_snapshot",
+      "dataset": "greenely.current_tariff_snapshot.v1",
+      "scope": "site",
+      "classification": "derived",
+      "logical_roles": [
+        "economic.provider.import.variable",
+        "economic.provider.fixed.subscription"
+      ],
+      "target_descriptor": "current_tariff_snapshot",
+      "share_revision_chain_with": []
+    }
+  ],
+  "component_contract": {
+    "included": {
+      "economic.provider.import.variable": {
+        "unit": "SEK/kWh",
+        "requires_explicit_vat_basis": true
+      },
+      "economic.provider.fixed.subscription": {
+        "unit": "SEK/month",
+        "requires_explicit_vat_basis": true
+      }
+    },
+    "excluded": [
+      "nord_pool_spot",
+      "invoice_weighted_spot_average",
+      "credits",
+      "credit_balance",
+      "discounts_at_settlement_level",
+      "amount_due",
+      "gross_invoice_total",
+      "payment_state",
+      "customer_price",
+      "grid_economics"
+    ],
+    "missing_component_rule": "unavailable_not_zero_filled"
+  },
+  "attribution": {
+    "required_site_fields": [
+      "site_id",
+      "collection_enabled",
+      "elhandel_binding"
+    ],
+    "invoice_target_fields": [
+      "invoice_key",
+      "contract_id",
+      "facility_id",
+      "billing_period"
+    ],
+    "generation_excludes": [
+      "invoice_key",
+      "values",
+      "billing_dates",
+      "amount_due",
+      "credits",
+      "spot_values",
+      "captured_at",
+      "fetched_at",
+      "known_at",
+      "revision",
+      "active_site_id"
+    ],
+    "fail_closed_on_mismatch": true,
+    "common_generation_fields": [
+      "provider_adapter",
+      "config_entry_id",
+      "site_binding_identity",
+      "facility_id",
+      "contract_id",
+      "dataset_identity",
+      "adapter_parser_normalization_version",
+      "vat_unit_contract"
+    ],
+    "invoice_generation_additional_fields": [
+      "site_timezone",
+      "site_timezone_verification_state"
+    ],
+    "current_snapshot_generation_additional_fields": []
+  },
+  "timestamp_contract": {
+    "contract_effective_from": {
+      "source": "greenely_contract_start_date_unix_epoch",
+      "meaning": "contract_eligibility_provenance_only",
+      "may_define_invoice_valid_from": false,
+      "may_define_current_snapshot_valid_from": false
+    },
+    "invoice": {
+      "source_period_dates": "preserve_exactly",
+      "verified_timezone_resolution": "local_period_start_00_inclusive_to_day_after_period_end_00_exclusive",
+      "unknown_timezone": "no_canonical_invoice_economics_frame",
+      "point_valid_at": "resolved_valid_from",
+      "known_at": "captured_at_conservative",
+      "fetched_at": null,
+      "published_at": null
+    },
+    "current_snapshot": {
+      "valid_from": null,
+      "valid_to": null,
+      "point_valid_at": "captured_at",
+      "known_at": "captured_at",
+      "fetched_at": null,
+      "published_at": null,
+      "backfill_allowed": false
+    },
+    "schema_invariants": {
+      "known_at_gte_captured_at": true,
+      "known_at_gte_fetched_at_when_present": true,
+      "replay_requires_known_at_lte_decision_at": true
+    }
+  },
+  "semantic_key": {
+    "format": "dataset|site_id|source_generation|logical_role|target_descriptor",
+    "excludes": [
+      "value",
+      "captured_at",
+      "fetched_at",
+      "known_at",
+      "revision",
+      "active_site_id"
+    ],
+    "examples": {
+      "invoice_variable": "greenely.invoice_economics.v1|site-a|gen-a|economic.provider.import.variable|invoice:invoice-a:2026-08-01_2026-08-31",
+      "current_variable": "greenely.current_tariff_snapshot.v1|site-a|gen-a|economic.provider.import.variable|current_tariff_snapshot"
+    }
+  },
+  "revision_rules": {
+    "same_normalized_knowledge": "deduplicate",
+    "changed_same_semantic_target": "next_revision_same_generation",
+    "new_invoice_same_contract": "new_semantic_target_same_generation",
+    "new_contract_or_facility": "new_generation_revision_1_no_cross_generation_supersedes",
+    "cross_dataset_supersedes": false
+  },
+  "replay_fixture": {
+    "revision_1": {
+      "known_at": "2026-09-13T10:00:00Z",
+      "value_sek_per_kwh": 0.1816
+    },
+    "revision_2": {
+      "known_at": "2026-09-13T11:00:00Z",
+      "value_sek_per_kwh": 0.19
+    },
+    "decision_early": {
+      "decision_at": "2026-09-13T10:30:00Z",
+      "expected_value_sek_per_kwh": 0.1816
+    },
+    "decision_late": {
+      "decision_at": "2026-09-13T11:30:00Z",
+      "expected_value_sek_per_kwh": 0.19
+    }
+  },
+  "dst_fixture": {
+    "timezone": "Europe/Stockholm",
+    "period_start": "2026-10-25",
+    "period_end": "2026-10-25",
+    "expected_valid_from_utc": "2026-10-24T22:00:00+00:00",
+    "expected_valid_to_utc": "2026-10-25T23:00:00+00:00",
+    "duration_hours": 25
+  },
+  "site_fixtures": {
+    "vikarbodarna": {
+      "site_id": "76f92eea-5720-4c19-9b43-17028d19a0a4",
+      "collection_enabled": true,
+      "provider": "greenely",
+      "binding_present": true,
+      "site_timezone": "Europe/Stockholm",
+      "timezone_state": "verified",
+      "invoice_history_present": true,
+      "attributed_current_summary_present": true
+    },
+    "fiskvik": {
+      "site_id": "66edee1e-ee32-4511-8e9d-4fc96947c861",
+      "collection_enabled": true,
+      "provider": "greenely",
+      "binding_present": true,
+      "timezone_state": "unknown",
+      "historical_invoice_count": 0,
+      "historical_consumption_samples": 0,
+      "attributed_current_summary_present": false,
+      "future_contract_metadata": {
+        "eligibility": "FUTURE",
+        "effective_from": "2026-10-01T00:00:00Z"
+      },
+      "expected_invoice_economics_frames": 0,
+      "expected_current_tariff_snapshot_frames": 0
+    }
+  },
+  "no_backfill": {
+    "copy_latest_tariff_to_old_invoices": false,
+    "derive_tariff_from_amount_due": false,
+    "derive_tariff_from_credits": false,
+    "derive_tariff_from_spot": false,
+    "current_snapshot_as_historical_interval": false,
+    "c4b_historical_backfill": false
+  },
+  "ownership": {
+    "producer_scope_source": "collection_enabled_site_elhandel_binding",
+    "active_site_id_is_ownership": false,
+    "shared_credentials_may_define_ownership": false,
+    "active_provider_namespace_may_define_ownership": false
+  },
+  "schema": {
+    "external_input_frame_model_sufficient": true,
+    "schema_migration_required": false,
+    "unknown_timezone_invoice_point_policy": "fail_closed_no_frame"
+  },
+  "scope_guards": {
+    "production_code_changes": false,
+    "version_bump": false,
+    "store_write": false,
+    "canonical_db_write": false,
+    "network_call": false,
+    "deploy": false,
+    "restart": false
+  }
+}
