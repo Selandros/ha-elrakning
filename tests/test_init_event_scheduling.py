@@ -128,6 +128,25 @@ def test_price_recovery_is_bounded_and_cancelable():
     assert "async_get_price_data" in source
     assert "refresh=True" in source
     assert "_async_fetch_date(target_date)" in source
+
+
+def test_site_independent_forecast_and_evidence_providers_are_wired():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert "site_identity_manager.forecast_collection_targets" in source
+    assert "site_identity_manager.collection_site_configs" in source
+    assert "await solar_forecast_manager.async_capture_collection_baselines()" in source
+    assert "await solar_evidence_manager.async_startup_catch_up()" in source
+
+
+def test_baseline_capture_precedes_evidence_startup_catch_up():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    baseline = source.index("await solar_forecast_manager.async_capture_collection_baselines()")
+    catch_up = source.index("await solar_evidence_manager.async_startup_catch_up()")
+    assert baseline < catch_up
     assert "for delay in (15, 30, 60, 120, 240)" in source
     assert "cancel_midnight_recovery" in source
     assert "_NEXT_DAY_PREFETCH_START_HOUR = 14" in source

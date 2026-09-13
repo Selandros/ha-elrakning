@@ -240,5 +240,252 @@ class ForecastSolarTests(unittest.TestCase):
         self.assertEqual(manager.public_state()["baselines"], {"2026-08-30": 12})
 
 
+    def test_background_baseline_capture_continues_for_inactive_enabled_site(self):
+        states = {
+            "sensor.vik_today": _state(5, "kWh", "Estimated energy production today"),
+            "sensor.vik_tomorrow": _state(12, "kWh", "Estimated energy production tomorrow"),
+        }
+        hass, _manager = self._manager(states, [])
+        targets = [{
+            "site_id": "site-vik",
+            "binding": {"entities": {"today_kwh": "sensor.vik_today", "tomorrow_kwh": "sensor.vik_tomorrow"}},
+        }]
+        manager = solar_forecast.SolarForecastManager(
+            hass, collection_targets_getter=lambda: targets
+        )
+        manager._site_context_enabled = True
+        manager._site_id = None
+        stores = {}
+
+        class SiteStore:
+            def __init__(self, site_id):
+                self.site_id = site_id
+
+            async def async_save(self, data):
+                stores[self.site_id] = data
+
+        async def load_site_store(_hass, _key, _version, site_id, *_args):
+            return SiteStore(site_id), stores.get(site_id)
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            asyncio.run(manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.vik_tomorrow"})))
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        days = stores["site-vik"]["days"]
+        self.assertEqual(days["2026-08-29"]["forecast_kwh"], 5)
+        self.assertEqual(days["2026-08-29"]["capture_type"], "first_today")
+        self.assertEqual(days["2026-08-30"]["forecast_kwh"], 12)
+        self.assertEqual(days["2026-08-30"]["capture_type"], "day_ahead")
+        self.assertEqual(days["2026-08-30"]["site_id"], "site-vik")
+        self.assertIsNone(manager._site_id)
+        self.assertEqual(manager._entities, {})
+
+    def test_background_capture_has_no_target_and_no_store_write_without_binding(self):
+        hass, _manager = self._manager({}, [])
+        manager = solar_forecast.SolarForecastManager(
+            hass, collection_targets_getter=lambda: []
+        )
+        calls = []
+
+        async def load_site_store(*_args, **_kwargs):
+            calls.append(True)
+            raise AssertionError("no site store should be opened without a target")
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            result = asyncio.run(manager.async_capture_collection_baselines())
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        self.assertEqual(result["target_count"], 0)
+        self.assertEqual(result["written"], 0)
+        self.assertEqual(calls, [])
+
+    def test_background_first_today_is_frozen_and_startup_does_not_reconstruct_yesterday(self):
+        states = {
+            "sensor.vik_today": _state(5, "kWh", "Estimated energy production today"),
+            "sensor.vik_tomorrow": _state(12, "kWh", "Estimated energy production tomorrow"),
+        }
+        hass, _manager = self._manager(states, [])
+        targets = [{
+            "site_id": "site-vik",
+            "binding": {"entities": {"today_kwh": "sensor.vik_today", "tomorrow_kwh": "sensor.vik_tomorrow"}},
+        }]
+        manager = solar_forecast.SolarForecastManager(hass, collection_targets_getter=lambda: targets)
+        stores = {}
+
+        class SiteStore:
+            async def async_save(self, data):
+                stores["site-vik"] = data
+
+        async def load_site_store(*_args, **_kwargs):
+            return SiteStore(), stores.get("site-vik")
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            asyncio.run(manager.async_capture_collection_baselines())
+            states["sensor.vik_today"] = _state(9, "kWh", "Estimated energy production today")
+            states["sensor.vik_tomorrow"] = _state(13, "kWh", "Estimated energy production tomorrow")
+            asyncio.run(manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.vik_today"})))
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        days = stores["site-vik"]["days"]
+        self.assertNotIn("2026-08-28", days)
+        self.assertEqual(days["2026-08-29"]["forecast_kwh"], 5)
+        self.assertEqual(days["2026-08-29"]["capture_type"], "first_today")
+        self.assertEqual(days["2026-08-30"]["forecast_kwh"], 13)
+        self.assertEqual(days["2026-08-30"]["capture_type"], "day_ahead")
+
+    def test_background_rebinding_ignores_old_entity_and_uses_new_entity(self):
+        states = {
+            "sensor.old_tomorrow": _state(12, "kWh", "Estimated energy production tomorrow"),
+            "sensor.new_tomorrow": _state(20, "kWh", "Estimated energy production tomorrow"),
+        }
+        hass, _manager = self._manager(states, [])
+        targets = [{"site_id": "site-vik", "binding": {"entities": {"tomorrow_kwh": "sensor.old_tomorrow"}}}]
+        manager = solar_forecast.SolarForecastManager(hass, collection_targets_getter=lambda: targets)
+        stores = {}
+
+        class SiteStore:
+            async def async_save(self, data):
+                stores["site-vik"] = data
+
+        async def load_site_store(*_args, **_kwargs):
+            return SiteStore(), stores.get("site-vik")
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            asyncio.run(manager.async_capture_collection_baselines())
+            targets[0] = {"site_id": "site-vik", "binding": {"entities": {"tomorrow_kwh": "sensor.new_tomorrow"}}}
+            before = dict(stores["site-vik"]["days"]["2026-08-30"])
+            asyncio.run(manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.old_tomorrow"})))
+            self.assertEqual(stores["site-vik"]["days"]["2026-08-30"], before)
+            asyncio.run(manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.new_tomorrow"})))
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        self.assertEqual(stores["site-vik"]["days"]["2026-08-30"]["forecast_kwh"], 20)
+
+    def test_site_baseline_reader_is_explicit_and_does_not_change_active_context(self):
+        hass, manager = self._manager({}, [])
+        manager._site_id = "site-fisk"
+        manager._entities = {"today_kwh": "sensor.fisk"}
+        cached = {
+            "site-vik": {"days": {"2026-08-30": {"forecast_kwh": 12, "capture_type": "day_ahead"}}},
+        }
+
+        class SiteStore:
+            async def async_save(self, _data):
+                pass
+
+        async def load_site_store(_hass, _key, _version, site_id, *_args):
+            return SiteStore(), cached.get(site_id)
+
+        original = solar_forecast.async_load_site_store
+        solar_forecast.async_load_site_store = load_site_store
+        try:
+            item = asyncio.run(manager.async_site_baseline_record("site-vik", "2026-08-30"))
+        finally:
+            solar_forecast.async_load_site_store = original
+
+        self.assertEqual(item["forecast_kwh"], 12)
+        self.assertEqual(manager._site_id, "site-fisk")
+        self.assertEqual(manager._entities, {"today_kwh": "sensor.fisk"})
+
+    def test_context_switch_waits_for_baseline_store_io_and_keeps_site_context(self):
+        states = {
+            "sensor.vik_today": _state(5, "kWh", "Estimated energy production today"),
+            "sensor.vik_tomorrow": _state(12, "kWh", "Estimated energy production tomorrow"),
+        }
+        hass, _manager = self._manager(states, [])
+        manager = solar_forecast.SolarForecastManager(
+            hass,
+            collection_targets_getter=lambda: [{
+                "site_id": "site-vik",
+                "binding": {"entities": {"today_kwh": "sensor.vik_today", "tomorrow_kwh": "sensor.vik_tomorrow"}},
+            }],
+        )
+        stores = {}
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class SiteStore:
+            def __init__(self, site_id):
+                self.site_id = site_id
+
+            async def async_save(self, data):
+                stores[self.site_id] = data
+
+        async def load_site_store(_hass, _key, _version, site_id, *_args):
+            if site_id == "site-vik" and not entered.is_set():
+                entered.set()
+                await release.wait()
+            return SiteStore(site_id), stores.get(site_id)
+
+        original = solar_forecast.async_load_site_store
+
+        async def scenario():
+            solar_forecast.async_load_site_store = load_site_store
+            try:
+                capture = asyncio.create_task(manager.async_capture_collection_baselines())
+                await entered.wait()
+                switch = asyncio.create_task(manager.async_apply_site_context("site-fisk", {"entities": {"today_kwh": "sensor.fisk_today"}}))
+                await asyncio.sleep(0)
+                self.assertFalse(switch.done())
+                release.set()
+                await asyncio.gather(capture, switch)
+            finally:
+                solar_forecast.async_load_site_store = original
+
+        asyncio.run(scenario())
+        self.assertEqual(manager._site_id, "site-fisk")
+        self.assertEqual(manager._entities, {"today_kwh": "sensor.fisk_today"})
+        self.assertIn("site-vik", stores)
+        self.assertNotIn("site-fisk", stores)
+
+    def test_baseline_capture_waits_for_context_restore_lock(self):
+        hass, manager = self._manager({}, [])
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        stores = {}
+
+        class SiteStore:
+            async def async_save(self, data):
+                stores["site-vik"] = data
+
+        async def load_site_store(_hass, _key, _version, site_id, *_args):
+            if site_id == "site-fisk" and not entered.is_set():
+                entered.set()
+                await release.wait()
+            return SiteStore(), None
+
+        original = solar_forecast.async_load_site_store
+
+        async def scenario():
+            solar_forecast.async_load_site_store = load_site_store
+            try:
+                restore = asyncio.create_task(manager.async_apply_site_context("site-fisk", {"entities": {}}))
+                await entered.wait()
+                manager._collection_targets_getter = lambda: [{"site_id": "site-vik", "binding": {"entities": {}}}]
+                capture = asyncio.create_task(manager.async_capture_collection_baselines())
+                await asyncio.sleep(0)
+                self.assertFalse(capture.done())
+                release.set()
+                await asyncio.gather(restore, capture)
+            finally:
+                solar_forecast.async_load_site_store = original
+
+        asyncio.run(scenario())
+        self.assertEqual(manager._site_id, "site-fisk")
+        self.assertNotIn("site-vik", stores)
+
+
 if __name__ == "__main__":
     unittest.main()

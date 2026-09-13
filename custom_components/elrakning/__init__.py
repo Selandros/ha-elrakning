@@ -150,7 +150,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):
         manager.async_start_refresh()
-    solar_forecast_manager = SolarForecastManager(hass, manager.async_diagnostic)
+    solar_forecast_manager = SolarForecastManager(
+        hass, manager.async_diagnostic, site_identity_manager.forecast_collection_targets
+    )
     await solar_forecast_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_forecast_manager"] = solar_forecast_manager
     solar_weather_manager = SolarWeatherManager(hass)
@@ -172,7 +174,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await solar_shadow_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["solar_shadow_manager"] = solar_shadow_manager
-    solar_evidence_manager = SolarEvidenceManager(hass, power_manager, solar_forecast_manager)
+    solar_evidence_manager = SolarEvidenceManager(
+        hass, power_manager, solar_forecast_manager, site_identity_manager.collection_site_configs
+    )
     await solar_evidence_manager.async_load()
     await site_identity_manager.async_prepare_solar_contexts({
         "forecast": solar_forecast_manager,
@@ -183,6 +187,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "evidence": solar_evidence_manager,
     })
     await solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager)
+    await solar_forecast_manager.async_capture_collection_baselines()
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
     )

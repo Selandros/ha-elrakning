@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import re
 from typing import Any
@@ -85,9 +86,11 @@ def normalize_forecast_value(state: Any, role: str) -> float | str | None:
 class SolarForecastManager:
     """Consume one unambiguous Forecast.Solar installation."""
 
-    def __init__(self, hass, diagnostic_callback=None) -> None:
+    def __init__(self, hass, diagnostic_callback=None, collection_targets_getter=None) -> None:
         self.hass = hass
         self._diagnostic_callback = diagnostic_callback
+        self._collection_targets_getter = collection_targets_getter
+        self._baseline_lock = asyncio.Lock()
         self.store = Store(hass, 1, STORE_KEY)
         self._baselines: dict[str, dict[str, Any]] = {}
         self._entities: dict[str, str] = {}
@@ -143,30 +146,86 @@ class SolarForecastManager:
 
     async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
         """Switch baselines and live discovery to one explicit site."""
-        self._context_generation += 1
-        self._site_id = site_id if isinstance(binding, dict) else None
-        self._site_context_enabled = True
-        self._baselines = {}
-        self._entities = {}
-        self._facts = self._unavailable_facts()
-        if self._site_id is None:
-            return
-        self.store, cached = await async_load_site_store(
-            self.hass, STORE_KEY, 1, self._site_id
-        )
-        if cached and isinstance(cached.get("days", cached), dict):
-            self._baselines = {
-                key: value for key, value in cached.get("days", cached).items()
-                if isinstance(key, str) and isinstance(value, dict)
-            }
-        self._entities = dict(binding.get("entities", {}))
-        self._facts = self._read_facts()
-        self._facts["site_id"] = self._site_id
+        async with self._baseline_lock:
+            self._context_generation += 1
+            self._site_id = site_id if isinstance(binding, dict) else None
+            self._site_context_enabled = True
+            self._baselines = {}
+            self._entities = {}
+            self._facts = self._unavailable_facts()
+            if self._site_id is None:
+                return
+            self.store, cached = await async_load_site_store(
+                self.hass, STORE_KEY, 1, self._site_id
+            )
+            if cached and isinstance(cached.get("days", cached), dict):
+                self._baselines = {
+                    key: value for key, value in cached.get("days", cached).items()
+                    if isinstance(key, str) and isinstance(value, dict)
+                }
+            self._entities = dict(binding.get("entities", {}))
+            self._facts = self._read_facts()
+            self._facts["site_id"] = self._site_id
 
     async def async_shutdown(self) -> None:
         if self._state_unsub:
             self._state_unsub()
             self._state_unsub = None
+
+    async def async_capture_collection_baselines(self, entity_id: str | None = None) -> dict[str, Any]:
+        """Capture baseline stores for every explicitly enabled Forecast.Solar site."""
+        getter = self._collection_targets_getter
+        targets = getter() if callable(getter) else []
+        if entity_id is not None:
+            targets = [
+                target for target in targets
+                if entity_id in ((target.get("binding") or {}).get("entities") or {}).values()
+            ]
+        result = {"target_count": len(targets), "written": 0, "site_ids": []}
+        async with self._baseline_lock:
+            for target in targets:
+                site_id = target.get("site_id")
+                binding = target.get("binding")
+                entities = binding.get("entities") if isinstance(binding, dict) else None
+                if not isinstance(site_id, str) or not site_id or not isinstance(entities, dict):
+                    continue
+                result["site_ids"].append(site_id)
+                store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
+                days = {
+                    key: dict(value)
+                    for key, value in ((cached or {}).get("days", {}) or {}).items()
+                    if isinstance(key, str) and isinstance(value, dict)
+                }
+                today = dt_util.as_local(dt_util.now()).date()
+                changed = self._trim_baseline_days(days, today)
+                facts = self._read_facts(entities)
+                captured_at = dt_util.now()
+                tomorrow = facts.get("tomorrow_kwh")
+                if isinstance(tomorrow, (int, float)) and tomorrow >= 0:
+                    changed |= self._capture_into(
+                        days, site_id, today + timedelta(days=1), tomorrow, "day_ahead", captured_at
+                    )
+                current = facts.get("today_kwh")
+                if isinstance(current, (int, float)) and current >= 0:
+                    changed |= self._capture_into(
+                        days, site_id, today, current, "first_today", captured_at
+                    )
+                if changed:
+                    await store.async_save({"days": days})
+                    result["written"] += 1
+                if site_id == self._site_id and entities == self._entities:
+                    self._baselines = {key: dict(value) for key, value in days.items()}
+        return result
+
+    async def async_site_baseline_record(self, site_id: str, key: str) -> dict[str, Any] | None:
+        """Read one site's frozen baseline without changing active UI context."""
+        if not isinstance(site_id, str) or not site_id or not isinstance(key, str) or not key:
+            return None
+        async with self._baseline_lock:
+            _store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
+            days = (cached or {}).get("days", {}) if isinstance(cached, dict) else {}
+            item = days.get(key) if isinstance(days, dict) else None
+            return dict(item) if isinstance(item, dict) else None
 
     def _discover(self) -> None:
         entries = self.hass.config_entries.async_entries(FORECAST_SOLAR_DOMAIN)
@@ -214,62 +273,94 @@ class SolarForecastManager:
         facts["available"] = any(value is not None for key, value in facts.items() if key not in {"available", "source"})
         return facts
 
-    def _trim_baselines(self, today) -> bool:
+    @staticmethod
+    def _trim_baseline_days(days: dict[str, dict[str, Any]], today) -> bool:
         minimum = today - timedelta(days=BASELINE_DAYS - 1)
-        original = len(self._baselines)
-        self._baselines = {
-            date: value for date, value in self._baselines.items()
+        retained = {
+            date: value for date, value in days.items()
             if _date_in_window(date, minimum, today + timedelta(days=1))
         }
-        return len(self._baselines) != original
+        changed = len(retained) != len(days)
+        if changed:
+            days.clear()
+            days.update(retained)
+        return changed
+
+    def _trim_baselines(self, today) -> bool:
+        return self._trim_baseline_days(self._baselines, today)
 
     async def _refresh(self, *, capture: bool) -> bool:
-        context_generation = self._context_generation
-        context_site_id = self._site_id
-        context_entities = dict(self._entities)
-        context_store = self.store
-        previous_facts = self._facts
-        self._facts = self._read_facts(context_entities)
-        changed = self._facts != previous_facts
-        today = dt_util.as_local(dt_util.now()).date()
-        baselines_changed = self._trim_baselines(today)
-        if capture:
-            tomorrow = self._facts.get("tomorrow_kwh")
-            if isinstance(tomorrow, (int, float)) and tomorrow >= 0:
-                baselines_changed |= self._capture(today + timedelta(days=1), tomorrow, "day_ahead")
-            current = self._facts.get("today_kwh")
-            if today.isoformat() not in self._baselines and isinstance(current, (int, float)) and current >= 0:
-                baselines_changed |= self._capture(today, current, "first_today")
-        if baselines_changed:
-            if context_generation != self._context_generation or context_site_id != self._site_id:
-                return False
-            await context_store.async_save({"days": self._baselines})
-        if (changed or baselines_changed) and context_generation == self._context_generation and context_site_id == self._site_id:
-            self.hass.bus.async_fire(UPDATE_EVENT)
-        return changed or baselines_changed
+        async with self._baseline_lock:
+            context_generation = self._context_generation
+            context_site_id = self._site_id
+            context_entities = dict(self._entities)
+            context_store = self.store
+            previous_facts = self._facts
+            self._facts = self._read_facts(context_entities)
+            changed = self._facts != previous_facts
+            today = dt_util.as_local(dt_util.now()).date()
+            baselines_changed = self._trim_baselines(today)
+            if capture:
+                tomorrow = self._facts.get("tomorrow_kwh")
+                if isinstance(tomorrow, (int, float)) and tomorrow >= 0:
+                    baselines_changed |= self._capture(today + timedelta(days=1), tomorrow, "day_ahead")
+                current = self._facts.get("today_kwh")
+                if today.isoformat() not in self._baselines and isinstance(current, (int, float)) and current >= 0:
+                    baselines_changed |= self._capture(today, current, "first_today")
+            if baselines_changed:
+                if context_generation != self._context_generation or context_site_id != self._site_id:
+                    return False
+                await context_store.async_save({"days": self._baselines})
+            if (changed or baselines_changed) and context_generation == self._context_generation and context_site_id == self._site_id:
+                self.hass.bus.async_fire(UPDATE_EVENT)
+            return changed or baselines_changed
 
-    def _capture(self, target_date, forecast_kwh: float, capture_type: str) -> bool:
+    @staticmethod
+    def _capture_into(
+        days: dict[str, dict[str, Any]],
+        site_id: str | None,
+        target_date,
+        forecast_kwh: float,
+        capture_type: str,
+        captured_at: datetime,
+    ) -> bool:
         key = target_date.isoformat()
-        existing = self._baselines.get(key)
+        existing = days.get(key)
         if capture_type == "first_today" and existing is not None:
             return False
         next_value = {
             "forecast_kwh": float(forecast_kwh),
-            "captured_at": dt_util.now().isoformat(),
+            "captured_at": captured_at.isoformat(),
             "source": "forecast_solar",
             "capture_type": capture_type,
-            "site_id": self._site_id,
+            "site_id": site_id,
         }
-        if existing and existing.get("forecast_kwh") == next_value["forecast_kwh"] and existing.get("capture_type") == capture_type:
+        if (
+            existing
+            and existing.get("forecast_kwh") == next_value["forecast_kwh"]
+            and existing.get("capture_type") == capture_type
+        ):
             return False
-        self._baselines[key] = next_value
+        days[key] = next_value
         return True
 
+    def _capture(self, target_date, forecast_kwh: float, capture_type: str) -> bool:
+        return self._capture_into(
+            self._baselines, self._site_id, target_date, forecast_kwh, capture_type, dt_util.now()
+        )
+
     async def _async_state_changed(self, event: Event) -> None:
+        entity_id = event.data.get("entity_id")
+        if callable(self._collection_targets_getter):
+            await self.async_capture_collection_baselines(entity_id=entity_id)
+            context_entities = dict(self._entities)
+            if entity_id in context_entities.values():
+                await self._refresh(capture=False)
+            return
         if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
             return
         context_entities = dict(self._entities)
-        if event.data.get("entity_id") not in context_entities.values():
+        if entity_id not in context_entities.values():
             return
         await self._refresh(capture=True)
 

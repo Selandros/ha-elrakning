@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 from functools import partial
 from typing import Any
@@ -131,13 +132,48 @@ def parse_previous_runs(payload: dict[str, Any], target_date: str) -> dict[str, 
     return {"status": "complete", "values": 24, "missing": 0, "gti_kwh_m2": gti, "nominal_kwh": gti * CAPACITY_KWP}
 
 
+def build_evidence_collection_targets(site_configs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return enabled, explicitly bound Evidence-v1 site targets."""
+    targets: list[dict[str, Any]] = []
+    if not isinstance(site_configs, dict):
+        return targets
+    for site_id in sorted(site_configs):
+        config = site_configs.get(site_id)
+        if not isinstance(config, dict) or config.get("collection_enabled", True) is not True:
+            continue
+        bindings = config.get("bindings")
+        binding = bindings.get("evidence") if isinstance(bindings, dict) else None
+        if (
+            not isinstance(binding, dict)
+            or binding.get("source") != "solar_evidence"
+            or binding.get("protocol_version") != PROTOCOL_VERSION
+        ):
+            continue
+        power = config.get("power") if isinstance(config.get("power"), dict) else {}
+        solar_entities = power.get("solar_entities")
+        if (
+            not isinstance(solar_entities, list)
+            or not solar_entities
+            or any(not isinstance(entity_id, str) or not entity_id for entity_id in solar_entities)
+        ):
+            continue
+        targets.append({
+            "site_id": site_id,
+            "binding": deepcopy(binding),
+            "power": deepcopy(power),
+        })
+    return targets
+
+
 class SolarEvidenceManager:
     """Collect frozen evidence without feeding any candidate/model path."""
 
-    def __init__(self, hass, power_manager, forecast_manager) -> None:
+    def __init__(self, hass, power_manager, forecast_manager, collection_site_configs_getter=None) -> None:
         self.hass = hass
         self.power_manager = power_manager
         self.forecast_manager = forecast_manager
+        self._collection_site_configs_getter = collection_site_configs_getter
+        self._collection_lock = asyncio.Lock()
         self.store = Store(hass, 1, STORE_KEY)
         self._days: dict[str, dict[str, Any]] = {}
         self._task = None
@@ -163,20 +199,21 @@ class SolarEvidenceManager:
 
     async def async_apply_site_context(self, site_id: str, binding: dict[str, Any] | None) -> None:
         """Switch evidence days to one site namespace."""
-        self._site_id = site_id if isinstance(binding, dict) else None
-        self._site_context_enabled = True
-        if self._site_id is None:
+        async with self._collection_lock:
+            self._site_id = site_id if isinstance(binding, dict) else None
+            self._site_context_enabled = True
+            if self._site_id is None:
+                self._days = {}
+                return
+            self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id)
             self._days = {}
-            return
-        legacy = {"protocol_version": PROTOCOL_VERSION, "days": self._days}
-        self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id, legacy)
-        if cached and isinstance(cached.get("days"), dict):
-            self._days = {
-                key: value for key, value in cached["days"].items()
-                if isinstance(key, str) and isinstance(value, dict)
-            }
-            for day in self._days.values():
-                day.setdefault("site_id", self._site_id)
+            if cached and isinstance(cached.get("days"), dict):
+                self._days = {
+                    key: value for key, value in cached["days"].items()
+                    if isinstance(key, str) and isinstance(value, dict)
+                }
+                for day in self._days.values():
+                    day.setdefault("site_id", self._site_id)
 
     async def async_shutdown(self) -> None:
         if self._unsub:
@@ -184,9 +221,16 @@ class SolarEvidenceManager:
         if self._task:
             self._task.cancel()
 
+    def _collection_targets(self) -> list[dict[str, Any]]:
+        getter = self._collection_site_configs_getter
+        configs = getter() if callable(getter) else {}
+        return build_evidence_collection_targets(configs)
+
     async def _daily_update(self, _now) -> None:
         try:
-            await self.async_collect_completed_day(dt_util.as_local(dt_util.now()).date() - timedelta(days=1))
+            await self.async_collect_completed_day_for_targets(
+                dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -197,7 +241,7 @@ class SolarEvidenceManager:
             today = dt_util.as_local(dt_util.now()).date()
             for offset in range(1, days + 1):
                 try:
-                    await self.async_collect_completed_day(today - timedelta(days=offset))
+                    await self.async_collect_completed_day_for_targets(today - timedelta(days=offset))
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -208,62 +252,115 @@ class SolarEvidenceManager:
             return
 
     async def async_startup_catch_up(self) -> None:
-        """Finalize yesterday through the normal evidence audit path."""
+        """Finalize yesterday through the same site-explicit evidence path as 00:05."""
         yesterday = dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
         try:
-            await self.async_collect_completed_day(yesterday)
+            await self.async_collect_completed_day_for_targets(yesterday)
         except asyncio.CancelledError:
             raise
         except Exception:
             return
 
+    async def async_collect_completed_day_for_targets(self, target_date: date) -> dict[str, dict[str, Any]]:
+        """Collect one completed day for every eligible site, independent of active UI context."""
+        if not callable(self._collection_site_configs_getter):
+            return {"legacy": await self.async_collect_completed_day(target_date)}
+        results: dict[str, dict[str, Any]] = {}
+        for target in self._collection_targets():
+            site_id = target["site_id"]
+            try:
+                results[site_id] = await self._async_collect_target_day(target, target_date)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                results[site_id] = {
+                    "site_id": site_id,
+                    "date": target_date.isoformat(),
+                    "audit_complete": False,
+                    "exclusion_reasons": ["collection_failed"],
+                }
+        return results
+
     async def async_collect_completed_day(self, target_date: date) -> dict[str, Any]:
+        """Collect the active site's target; retained for explicit/manual compatibility."""
+        if callable(self._collection_site_configs_getter):
+            target = next(
+                (item for item in self._collection_targets() if item.get("site_id") == self._site_id),
+                None,
+            )
+            if target is None:
+                return {
+                    "date": target_date.isoformat(),
+                    "audit_complete": False,
+                    "exclusion_reasons": ["site_unconfigured"],
+                }
+            return await self._async_collect_target_day(target, target_date)
         if getattr(self, "_site_context_enabled", False) and getattr(self, "_site_id", None) is None:
             return {"date": target_date.isoformat(), "audit_complete": False, "exclusion_reasons": ["site_unconfigured"]}
-        key = target_date.isoformat()
-        existing = self._days.get(key)
-        if (isinstance(existing, dict) and existing.get("audit_complete") is True
-                and existing.get("open_meteo_status") == "complete"
-                and "forecast_solar_frozen_kwh" in existing):
-            return existing
         power_state = await self.power_manager.async_state()
-        entities = list(power_state.get("solar_entities", []))
-        start = dt_util.start_of_local_day(datetime.combine(target_date, datetime.min.time(), tzinfo=dt_util.now().tzinfo))
-        end = dt_util.start_of_local_day(start + timedelta(days=1))
-        query_end = end + timedelta(hours=12)
-        record: dict[str, Any] = {"site_id": self._site_id, "date": key, "protocol_version": PROTOCOL_VERSION, "collected_at": dt_util.now().isoformat(), "pv_entity_count": len(entities), "actual_kwh": None}
-        if not entities:
-            record["exclusion_reasons"] = ["no_solar_entities"]
-            record["audit_complete"] = False
-            return await self._save_day(key, record)
-        try:
-            from homeassistant.components.recorder import get_instance, history
-            recorder = get_instance(self.hass)
-            history_by_entity = await recorder.async_add_executor_job(partial(history.get_significant_states, self.hass, start, query_end, entity_ids=entities, include_start_time_state=True, significant_changes_only=False, minimal_response=False, no_attributes=False))
-        except Exception:
-            record.update({"audit_complete": False, "exclusion_reasons": ["recorder_unavailable"]})
-            return await self._save_day(key, record)
-        merged = merge_pv_points(history_by_entity, entities)
-        entity_starts = []
-        unavailable = 0
-        for entity in entities:
-            unavailable += sum(1 for state in history_by_entity.get(entity, []) if str(getattr(state, "state", "")).lower() in {"unknown", "unavailable"})
-            points = [point for state in history_by_entity.get(entity, []) if (point := _state_point(state))]
-            entity_starts.append(bool(points and abs((dt_util.parse_datetime(points[0]["timestamp"]) - start).total_seconds()) <= 2))
-        actual, boundary_long, interior_long = integrate_actual(merged, start, end)
-        quality = assess_completeness(merged, entity_starts, start, end)
-        if unavailable:
-            quality["exclusion_reasons"].append("unavailable_or_unknown")
-        if actual is None:
-            quality["exclusion_reasons"].append("actual_unavailable")
-        record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and unavailable == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
-        om = await self._fetch_open_meteo(target_date, power_state)
-        record.update({f"open_meteo_{key_name}": value for key_name, value in om.items()})
-        baseline = self._frozen_forecast_baseline(key, start)
-        record["forecast_solar_frozen_kwh"] = baseline
-        if baseline is not None and actual is not None:
-            record["common_forecast_solar_day"] = True
-        return await self._save_day(key, record)
+        return await self._async_collect_target_day(
+            {"site_id": self._site_id, "binding": {}, "power": power_state}, target_date
+        )
+
+    async def _async_collect_target_day(self, target: dict[str, Any], target_date: date) -> dict[str, Any]:
+        site_id = target["site_id"]
+        power_state = target.get("power") if isinstance(target.get("power"), dict) else {}
+        async with self._collection_lock:
+            store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
+            days = {
+                key: dict(value)
+                for key, value in ((cached or {}).get("days", {}) or {}).items()
+                if isinstance(key, str) and isinstance(value, dict)
+            }
+            key = target_date.isoformat()
+            existing = days.get(key)
+            if (isinstance(existing, dict) and existing.get("audit_complete") is True
+                    and existing.get("open_meteo_status") == "complete"
+                    and "forecast_solar_frozen_kwh" in existing):
+                if site_id == self._site_id:
+                    self._days = {day: dict(value) for day, value in days.items()}
+                    self.store = store
+                return existing
+            entities = list(power_state.get("solar_entities", []))
+            start = dt_util.start_of_local_day(datetime.combine(target_date, datetime.min.time(), tzinfo=dt_util.now().tzinfo))
+            end = dt_util.start_of_local_day(start + timedelta(days=1))
+            query_end = end + timedelta(hours=12)
+            record: dict[str, Any] = {
+                "site_id": site_id, "date": key, "protocol_version": PROTOCOL_VERSION,
+                "collected_at": dt_util.now().isoformat(), "pv_entity_count": len(entities), "actual_kwh": None,
+            }
+            if not entities:
+                record["exclusion_reasons"] = ["no_solar_entities"]
+                record["audit_complete"] = False
+                return await self._save_target_day(site_id, store, days, key, record)
+            try:
+                from homeassistant.components.recorder import get_instance, history
+                recorder = get_instance(self.hass)
+                history_by_entity = await recorder.async_add_executor_job(partial(history.get_significant_states, self.hass, start, query_end, entity_ids=entities, include_start_time_state=True, significant_changes_only=False, minimal_response=False, no_attributes=False))
+            except Exception:
+                record.update({"audit_complete": False, "exclusion_reasons": ["recorder_unavailable"]})
+                return await self._save_target_day(site_id, store, days, key, record)
+            merged = merge_pv_points(history_by_entity, entities)
+            entity_starts = []
+            unavailable = 0
+            for entity in entities:
+                unavailable += sum(1 for state in history_by_entity.get(entity, []) if str(getattr(state, "state", "")).lower() in {"unknown", "unavailable"})
+                points = [point for state in history_by_entity.get(entity, []) if (point := _state_point(state))]
+                entity_starts.append(bool(points and abs((dt_util.parse_datetime(points[0]["timestamp"]) - start).total_seconds()) <= 2))
+            actual, boundary_long, interior_long = integrate_actual(merged, start, end)
+            quality = assess_completeness(merged, entity_starts, start, end)
+            if unavailable:
+                quality["exclusion_reasons"].append("unavailable_or_unknown")
+            if actual is None:
+                quality["exclusion_reasons"].append("actual_unavailable")
+            record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and unavailable == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
+            om = await self._fetch_open_meteo(target_date, power_state)
+            record.update({f"open_meteo_{key_name}": value for key_name, value in om.items()})
+            baseline = await self._frozen_forecast_baseline(site_id, key, start)
+            record["forecast_solar_frozen_kwh"] = baseline
+            if baseline is not None and actual is not None:
+                record["common_forecast_solar_day"] = True
+            return await self._save_target_day(site_id, store, days, key, record)
 
     async def _fetch_open_meteo(self, target_date: date, power_state: dict[str, Any]) -> dict[str, Any]:
         installation = build_installation(self.hass, power_state)
@@ -279,24 +376,41 @@ class SolarEvidenceManager:
         except Exception:
             return {"status": "request_failed", "values": 0, "missing": 24}
 
-    def _frozen_forecast_baseline(self, key: str, start: datetime) -> float | None:
-        baselines = getattr(self.forecast_manager, "_baselines", {})
-        item = baselines.get(key) if isinstance(baselines, dict) else None
+    async def _frozen_forecast_baseline(self, site_id: str, key: str, start: datetime) -> float | None:
+        reader = getattr(self.forecast_manager, "async_site_baseline_record", None)
+        if callable(reader):
+            item = await reader(site_id, key)
+        else:
+            baselines = getattr(self.forecast_manager, "_baselines", {})
+            item = baselines.get(key) if isinstance(baselines, dict) else None
         if not isinstance(item, dict) or item.get("capture_type") != "day_ahead":
             return None
         captured = dt_util.parse_datetime(item.get("captured_at"))
         return _number(item.get("forecast_kwh")) if captured and captured < start else None
 
-    async def _save_day(self, key: str, record: dict[str, Any]) -> dict[str, Any]:
-        old = self._days.get(key, {})
+    async def _save_target_day(
+        self,
+        site_id: str | None,
+        store,
+        days: dict[str, dict[str, Any]],
+        key: str,
+        record: dict[str, Any],
+    ) -> dict[str, Any]:
+        old = days.get(key, {})
         merged = {**old, **record}
         for field in ("actual_kwh", "forecast_solar_frozen_kwh"):
             if old.get(field) is not None:
                 merged[field] = old[field]
-        self._days[key] = merged
-        await self.store.async_save({"protocol_version": PROTOCOL_VERSION, "days": self._days})
-        self.hass.bus.async_fire("elrakning_solar_evidence_update")
+        days[key] = merged
+        await store.async_save({"protocol_version": PROTOCOL_VERSION, "days": days})
+        if site_id == self._site_id:
+            self._days = {day: dict(value) for day, value in days.items()}
+            self.store = store
+            self.hass.bus.async_fire("elrakning_solar_evidence_update")
         return merged
+
+    async def _save_day(self, key: str, record: dict[str, Any]) -> dict[str, Any]:
+        return await self._save_target_day(self._site_id, self.store, self._days, key, record)
 
     def public_state(self) -> dict[str, Any]:
         days = []

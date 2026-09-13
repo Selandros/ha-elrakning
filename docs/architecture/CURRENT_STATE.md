@@ -666,3 +666,23 @@ INFERRED (roadmap): Long-term data foundation:
 - C.3C is closed. No further code, Store, database, deploy, or restart is
   required for this scope. The next scope remains the next immutable
   external-input foundation milestone.
+
+## 0.0.639 Site-independent solar collection fix
+
+- IMPLEMENTED / STATIC VERIFIED (2026-09-13): Forecast.Solar `day_ahead` and
+  `first_today` baseline capture uses explicit `collection_enabled` site
+  targets. Solar Evidence daily, startup and backfill collection uses the same
+  explicit site-target model. Vikarbodarna can continue collection while
+  Fiskvik is the active site; Fiskvik without a legitimate binding/PV mapping
+  produces no target and no fabricated data.
+- UI and live managers remain active-site-contextual. Canonical telemetry,
+  canonical Forecast.Solar, canonical Open-Meteo, and SMHI producers were not
+  changed by this fix. The Evidence-v1 definition, counters, `previous_day1`
+  request, and immutable Evidence rows were not changed.
+- Context concurrency is protected by the Forecast baseline lock and Evidence
+  collection lock. Deterministic asyncio gate tests cover capture/restore
+  ordering and namespaced ownership; the Evidence lock may bound a site switch
+  behind one in-flight collection operation.
+- Static release gates pass for version `0.0.639`. Runtime verification is
+  PENDING until deployment. Final acceptance requires a natural 00:05 runtime
+  collection and Evidence non-regression verification.
