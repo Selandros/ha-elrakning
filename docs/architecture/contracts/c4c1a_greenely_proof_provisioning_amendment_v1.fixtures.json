@@ -1,0 +1,100 @@
+{
+  "fixture_suite": "elrakning.c4c1a_greenely_proof_provisioning_amendment.v1",
+  "contract_version": 1,
+  "status": "READY_FOR_REVIEW",
+  "precedence": {
+    "c4b": "locked",
+    "c4c": "locked",
+    "c4c1": "locked",
+    "scope": "proof_provisioning_and_audit_evidence_only",
+    "c1_schema_migration_required": false
+  },
+  "provider_relation": {
+    "required_relation": "bound_facility_to_exact_contract",
+    "facility_field": "facility_id",
+    "operator_input_sufficient": false,
+    "equal_string_sufficient": false,
+    "failure_cases": ["missing_contract", "facility_mismatch", "ambiguous_contract", "provider_lookup_failure", "stale_binding", "binding_changed_during_lookup"]
+  },
+  "proof_record_fields": [
+    "proof_schema_version", "relation", "verification_state", "verification_method",
+    "site_binding_fingerprint", "provider", "config_entry_identity",
+    "facility_identity_fingerprint", "contract_identity_fingerprint",
+    "facility_meter_id_fingerprint", "contract_meter_id_fingerprint_or_state",
+    "invoice_installation_identity_fingerprint", "verified_at", "parser_identity",
+    "normalization_identity", "fingerprint_version", "verification_actor",
+    "evidence_reference", "evidence_digest", "proof_semantic_identity",
+    "proof_audit_identity", "proof_fingerprint"
+  ],
+  "verification_methods": [
+    "provider_native_semantic_proof",
+    "explicit_out_of_band_invoice_verification"
+  ],
+  "semantic_identity_fields": [
+    "relation", "provider_config_entry_identity_domain", "site_binding_identity",
+    "facility_identity", "contract_identity_scope", "facility_meter_identity_state",
+    "contract_meter_identity_state", "invoice_installation_identity",
+    "verification_method", "proof_schema_version", "fingerprint_version",
+    "parser_identity", "normalization_identity"
+  ],
+  "audit_identity_fields": [
+    "verification_actor", "verified_at", "evidence_reference", "evidence_digest"
+  ],
+  "source_generation": {
+    "includes": ["proof_semantic_identity", "proof_schema_version", "fingerprint_version", "pseudonymization_key_id_identity_domain_id"],
+    "excludes": ["verification_actor", "verified_at", "evidence_reference", "evidence_digest", "raw_ocr", "occurrence_identity", "billing_period", "values", "captured_at", "fetched_at", "known_at", "frame_id", "revision", "active_site_id"]
+  },
+  "audit_evidence": {
+    "actor_source": "authenticated_home_assistant_service_context",
+    "actor_caller_supplied": false,
+    "reference_opaque": true,
+    "reference_namespace": "c4c1a-audit-ref-v1",
+    "reference_max_length": 256,
+    "digest_algorithm": "sha256",
+    "digest_input_contract_version": "c4c1a-evidence-package-v1",
+    "digest_input_requires_procedure_semantics": true,
+    "digest_of_single_raw_identifier_allowed": false,
+    "required": true
+  },
+  "provider_lookup_states": ["LOOKUP_OK", "LOOKUP_FAILED"],
+  "provisioning_steps": [
+    "authenticated_service_call", "explicit_site_id", "admin_required",
+    "reread_current_binding", "expected_binding_match", "provider_greenely",
+    "resolve_bound_facility", "resolve_exact_contract",
+    "verify_contract_facility_relation", "validate_audit_evidence",
+    "construct_semantic_identity", "construct_audit_identity",
+    "validate_complete_proof", "persist_site_scoped_proof",
+    "reread_binding_and_confirm_unchanged"
+  ],
+  "cases": [
+    {"name": "admin_alone", "expected": "reject"},
+    {"name": "missing_contract", "expected": "reject"},
+    {"name": "wrong_facility", "expected": "reject"},
+    {"name": "ambiguous_contract", "expected": "reject"},
+    {"name": "provider_lookup_failure", "expected": "reject"},
+    {"name": "complete_out_of_band_evidence", "expected": "eligible"},
+    {"name": "unknown_method", "expected": "reject"},
+    {"name": "missing_actor", "expected": "reject"},
+    {"name": "missing_reference", "expected": "reject"},
+    {"name": "missing_digest", "expected": "reject"},
+    {"name": "malformed_digest", "expected": "reject"},
+    {"name": "semantic_identity_deterministic", "expected": "same"},
+    {"name": "semantic_change", "expected": "different"},
+    {"name": "audit_only_change", "expected": "same_semantic_different_audit"},
+    {"name": "active_site_change", "expected": "no_identity_effect"},
+    {"name": "stale_binding", "expected": "reject"},
+    {"name": "raw_identity_exposure", "expected": "absent"},
+    {"name": "caller_supplied_actor", "expected": "reject"},
+    {"name": "opaque_reference", "expected": "reject_raw_identity"},
+    {"name": "versioned_evidence_package", "expected": "digest_match"},
+    {"name": "binding_changed_during_lookup", "expected": "reject"},
+    {"name": "semantic_context_invalidation", "expected": "unusable"},
+    {"name": "supplied_digest_mismatch", "expected": "reject"},
+    {"name": "provider_relation_stale_before_persist", "expected": "reject"},
+    {"name": "blank_actor", "expected": "reject"}
+  ],
+  "privacy": {
+    "raw_fields_forbidden": ["facility_id", "contract_id", "meter_id", "Anl.id", "ocr_number", "credentials", "jwt", "signed_pdf_url", "hmac_key_material"],
+    "canonical_frame_audit_fields_forbidden": ["verification_actor", "evidence_reference", "evidence_digest"]
+  }
+}
