@@ -49,6 +49,7 @@ def install_homeassistant_stubs() -> None:
     core.callback = lambda function: function
     core.State = object
     core.HomeAssistant = object
+    core.ServiceCall = object
     core.valid_entity_id = lambda value: isinstance(value, str) and "." in value
 
     config_entries = sys.modules.get("homeassistant.config_entries") or _module("homeassistant.config_entries")
@@ -67,7 +68,7 @@ def install_homeassistant_stubs() -> None:
     storage = sys.modules.get("homeassistant.helpers.storage") or _module("homeassistant.helpers.storage")
 
     class Store:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             self.data = None
 
         async def async_load(self):

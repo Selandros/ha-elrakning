@@ -29,6 +29,7 @@ from .solar_weather import SolarWeatherManager
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
+from .elhandel.providers.greenely_invoice_economics import GreenelyInvoiceEconomicsProducer, async_register_proof_service
 
 PANEL_PATH = DOMAIN
 PANEL_LOADER_PATH = f"/{DOMAIN}/elrakning-loader.js"
@@ -120,6 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
     frontend_data = hass.data.setdefault(DOMAIN, {})
+    frontend_data["config_entry"] = entry
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
@@ -147,6 +149,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     canonical_collector = CanonicalCollector(hass, site_identity_manager)
     await canonical_collector.async_start()
     hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
+    await async_register_proof_service(hass, site_identity_manager, entry)
     await coordinator.async_config_entry_first_refresh()
     if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):
         manager.async_start_refresh()
@@ -187,6 +190,14 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "evidence": solar_evidence_manager,
     })
     await solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager)
+    greenely_economics = GreenelyInvoiceEconomicsProducer(hass, entry, site_identity_manager, canonical_collector.storage)
+    hass.data.setdefault(DOMAIN, {})["greenely_invoice_economics"] = greenely_economics
+    greenely_economics.async_schedule_capture()
+    if unsubscribe := frontend_data.pop("greenely_economics_unsub", None):
+        unsubscribe()
+    frontend_data["greenely_economics_unsub"] = async_track_time_change(
+        hass, lambda _now: greenely_economics.async_schedule_capture(), hour=0, minute=5, second=0
+    )
     await solar_forecast_manager.async_capture_collection_baselines()
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
@@ -235,6 +246,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Elräkning from a config entry."""
     frontend_data = hass.data.get(DOMAIN, {})
+    entry_coordinator = getattr(entry, "runtime_data", None)
     frontend_data["runtime_status"] = "unavailable"
     if unsubscribe := frontend_data.pop("coordinator_unsub", None):
         unsubscribe()
@@ -246,6 +258,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     if cadence_audit_manager := frontend_data.pop("cadence_audit_manager", None):
         await cadence_audit_manager.async_shutdown()
+    if frontend_data.pop("greenely_proof_service_registered", False):
+        hass.services.async_remove("elrakning", "greenely_proof_provision")
+    frontend_data.pop("config_entry", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()
         try:
@@ -260,6 +275,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pass
     if canonical_collector := frontend_data.pop("canonical_collector", None):
         await canonical_collector.async_shutdown()
+    if unsubscribe := frontend_data.pop("greenely_economics_unsub", None):
+        unsubscribe()
+    if greenely_economics := frontend_data.pop("greenely_invoice_economics", None):
+        await greenely_economics.async_shutdown()
     if solar_weather_manager := frontend_data.pop("solar_weather_manager", None):
         await solar_weather_manager.async_shutdown()
     if solar_shadow_manager := frontend_data.pop("solar_shadow_manager", None):
@@ -272,7 +291,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await solar_open_meteo_manager.async_shutdown()
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
         unsubscribe()
-    coordinator.cancel_midnight_recovery()
+    if entry_coordinator is not None:
+        entry_coordinator.cancel_midnight_recovery()
     if manager := frontend_data.pop("elhandel_manager", None):
         await manager.async_shutdown()
     if meter_manager := frontend_data.pop("meter_manager", None):

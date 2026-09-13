@@ -22,6 +22,13 @@ from .power import POWER_FIELDS
 STORE_KEY = "elrakning.site_identity"
 STORE_VERSION = 1
 SITE_BINDING_SERVICES = ("elhandel", "grid")
+GREENELY_PROOF_SCHEMA_VERSION = 1
+GREENELY_PROOF_FINGERPRINT_VERSION = "sha256-v1"
+GREENELY_PROOF_RELATION = "greenely_meter_id_to_invoice_installation_id"
+GREENELY_ALLOWED_VERIFICATION_METHODS = {
+    "provider_native_semantic_proof",
+    "explicit_out_of_band_invoice_verification",
+}
 
 ROLE_MAP = {
     "consumption_entity": "house.consumption",
@@ -448,6 +455,192 @@ class SiteIdentityManager:
             return None
         payload = {key: value for key, value in binding.items() if key != "binding_fingerprint"}
         return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    @staticmethod
+    def identity_fingerprint(payload: dict[str, Any]) -> str:
+        """Fingerprint operator-verified identity evidence without retaining raw values."""
+        value = {"fingerprint_version": GREENELY_PROOF_FINGERPRINT_VERSION, **payload}
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def current_greenely_proof(self, site_id: str) -> dict[str, Any] | None:
+        config = self.state.get("site_configs", {}).get(site_id, {})
+        proof = config.get("greenely_meter_to_invoice_installation_proof") if isinstance(config, dict) else None
+        return deepcopy(proof) if isinstance(proof, dict) else None
+
+    def validated_greenely_proof(self, site_id: str, binding: dict[str, Any]) -> dict[str, Any] | None:
+        proof = self.current_greenely_proof(site_id)
+        if not proof or proof.get("verification_state") != "EXPLICITLY_VERIFIED":
+            return None
+        if proof.get("provider") != "greenely" or proof.get("site_id") != site_id:
+            return None
+        if proof.get("site_binding_fingerprint") != self.binding_fingerprint(binding):
+            return None
+        if proof.get("proof_schema_version") != GREENELY_PROOF_SCHEMA_VERSION:
+            return None
+        if proof.get("fingerprint_version") != GREENELY_PROOF_FINGERPRINT_VERSION:
+            return None
+        if proof.get("relation") != GREENELY_PROOF_RELATION:
+            return None
+        if proof.get("verification_method") not in GREENELY_ALLOWED_VERIFICATION_METHODS:
+            return None
+        if proof.get("verification_actor_source") != "authenticated_home_assistant_service_context":
+            return None
+        if not isinstance(proof.get("evidence_reference"), str) or not proof["evidence_reference"].startswith("c4c1a-audit-ref-v1:"):
+            return None
+        if not isinstance(proof.get("evidence_digest"), str) or len(proof["evidence_digest"]) != 64:
+            return None
+        required = (
+            "relation", "config_entry_identity", "facility_identity_fingerprint",
+            "contract_identity_fingerprint", "facility_meter_id_fingerprint",
+            "contract_meter_id_fingerprint_or_state", "invoice_installation_identity_fingerprint",
+            "verification_method", "verified_at", "parser_identity", "normalization_identity",
+            "verification_actor", "verification_actor_source", "evidence_reference", "evidence_digest",
+            "proof_semantic_identity", "proof_audit_identity",
+        )
+        if any(not proof.get(key) for key in required):
+            return None
+        if proof.get("config_entry_identity") != self.identity_fingerprint({"config_entry_id": binding.get("config_entry_id")}):
+            return None
+        if proof.get("facility_identity_fingerprint") != self.identity_fingerprint({"facility_id": binding.get("facility_id")}):
+            return None
+        semantic = {
+            "relation": proof["relation"],
+            "provider_config_entry_identity": proof["config_entry_identity"],
+            "site_binding_identity": proof["site_binding_fingerprint"],
+            "facility_identity": proof["facility_identity_fingerprint"],
+            "contract_identity_scope": proof["contract_identity_fingerprint"],
+            "facility_meter_identity_state": proof["facility_meter_id_fingerprint"],
+            "contract_meter_identity_state": proof["contract_meter_id_fingerprint_or_state"],
+            "invoice_installation_identity": proof["invoice_installation_identity_fingerprint"],
+            "verification_method": proof["verification_method"],
+            "proof_schema_version": proof["proof_schema_version"],
+            "fingerprint_version": proof["fingerprint_version"],
+            "parser_identity": proof["parser_identity"],
+            "normalization_identity": proof["normalization_identity"],
+        }
+        audit = {
+            "verification_actor": proof["verification_actor"],
+            "verified_at": proof["verified_at"],
+            "evidence_reference": proof["evidence_reference"],
+            "evidence_digest": proof["evidence_digest"],
+        }
+        expected = self.identity_fingerprint(semantic)
+        expected_audit = self.identity_fingerprint(audit)
+        if proof.get("proof_semantic_identity") != expected or proof.get("proof_audit_identity") != expected_audit:
+            return None
+        return deepcopy(proof) if proof.get("proof_fingerprint") == expected else None
+
+    async def async_provision_greenely_proof(self, payload: dict[str, Any], *, provider_relation: dict[str, Any]) -> dict[str, Any]:
+        """Persist an explicitly operator-verified Greenely attribution proof."""
+        site_id = payload.get("site_id")
+        if not isinstance(site_id, str) or not site_id:
+            raise ValueError("site_id_required")
+        config = self.state.get("site_configs", {}).get(site_id, {})
+        binding = config.get("bindings", {}).get("elhandel") if isinstance(config, dict) else None
+        if not isinstance(binding, dict) or binding.get("provider") != "greenely":
+            raise ValueError("greenely_binding_required")
+        if payload.get("expected_binding_fingerprint") != self.binding_fingerprint(binding):
+            raise ValueError("stale_binding")
+        verification_method = payload.get("verification_method")
+        if verification_method not in GREENELY_ALLOWED_VERIFICATION_METHODS:
+            raise ValueError("verification_method_invalid")
+        contract = provider_relation
+        if str(contract.get("facility_id")) != str(binding.get("facility_id")):
+            raise ValueError("contract_facility_mismatch")
+        contract_id = contract.get("id")
+        if not isinstance(contract_id, (str, int)) or isinstance(contract_id, bool):
+            raise ValueError("contract_identity_required")
+        if payload.get("contract_id") != str(contract_id):
+            raise ValueError("contract_not_provider_verified")
+        actor = payload.get("verification_actor")
+        actor_source = payload.get("verification_actor_source")
+        if not isinstance(actor, str) or not actor.strip() or actor_source != "authenticated_home_assistant_service_context":
+            raise ValueError("verification_actor_required")
+        evidence_reference = payload.get("evidence_reference")
+        evidence_digest = payload.get("evidence_digest")
+        evidence_package = payload.get("evidence_package")
+        if not isinstance(evidence_reference, str) or not evidence_reference.startswith("c4c1a-audit-ref-v1:") or len(evidence_reference) > 256:
+            raise ValueError("evidence_reference_invalid")
+        if not isinstance(evidence_digest, str) or len(evidence_digest) != 64 or any(c not in "0123456789abcdef" for c in evidence_digest.lower()):
+            raise ValueError("evidence_digest_invalid")
+        if not isinstance(evidence_package, dict) or evidence_package.get("contract_version") != 1:
+            raise ValueError("evidence_package_invalid")
+        package_digest = hashlib.sha256(json.dumps(evidence_package, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if package_digest != evidence_digest:
+            raise ValueError("evidence_digest_mismatch")
+        fields = {
+            "site_id": site_id,
+            "provider": "greenely",
+            "relation": GREENELY_PROOF_RELATION,
+            "site_binding_fingerprint": self.binding_fingerprint(binding),
+            "config_entry_identity": self.identity_fingerprint({"config_entry_id": binding.get("config_entry_id")}),
+            "facility_identity_fingerprint": self.identity_fingerprint({"facility_id": binding.get("facility_id")}),
+            "contract_identity_fingerprint": self.identity_fingerprint({"contract_id": str(contract_id)}),
+            "facility_meter_id_fingerprint": payload.get("facility_meter_id_fingerprint"),
+            "contract_meter_id_fingerprint_or_state": payload.get("contract_meter_id_fingerprint_or_state"),
+            "invoice_installation_identity_fingerprint": payload.get("invoice_installation_identity_fingerprint"),
+            "verification_method": verification_method,
+            "verification_state": "EXPLICITLY_VERIFIED",
+            "verified_at": _now(),
+            "proof_schema_version": GREENELY_PROOF_SCHEMA_VERSION,
+            "fingerprint_version": GREENELY_PROOF_FINGERPRINT_VERSION,
+            "parser_identity": payload.get("parser_identity"),
+            "normalization_identity": payload.get("normalization_identity"),
+            "verification_actor": actor,
+            "verification_actor_source": actor_source,
+            "evidence_reference": evidence_reference,
+            "evidence_digest": evidence_digest,
+        }
+        if any(not fields.get(key) for key in (
+            "contract_identity_fingerprint", "facility_meter_id_fingerprint",
+            "contract_meter_id_fingerprint_or_state", "invoice_installation_identity_fingerprint",
+            "parser_identity", "normalization_identity",
+        )):
+            raise ValueError("proof_fields_required")
+        semantic = {
+            "relation": fields["relation"],
+            "provider_config_entry_identity": fields["config_entry_identity"],
+            "site_binding_identity": fields["site_binding_fingerprint"],
+            "facility_identity": fields["facility_identity_fingerprint"],
+            "contract_identity_scope": fields["contract_identity_fingerprint"],
+            "facility_meter_identity_state": fields["facility_meter_id_fingerprint"],
+            "contract_meter_identity_state": fields["contract_meter_id_fingerprint_or_state"],
+            "invoice_installation_identity": fields["invoice_installation_identity_fingerprint"],
+            "verification_method": fields["verification_method"],
+            "proof_schema_version": fields["proof_schema_version"],
+            "fingerprint_version": fields["fingerprint_version"],
+            "parser_identity": fields["parser_identity"],
+            "normalization_identity": fields["normalization_identity"],
+        }
+        audit = {key: fields[key] for key in ("verification_actor", "verified_at", "evidence_reference", "evidence_digest")}
+        fields["proof_semantic_identity"] = self.identity_fingerprint(semantic)
+        fields["proof_audit_identity"] = self.identity_fingerprint(audit)
+        fields["proof_fingerprint"] = fields["proof_semantic_identity"]
+        before = self.binding_fingerprint(binding)
+        if before != self.binding_fingerprint(config.get("bindings", {}).get("elhandel")):
+            raise ValueError("stale_binding")
+        config["greenely_meter_to_invoice_installation_proof"] = fields
+        await self.store.async_save(self.state)
+        authoritative_state = await self.store.async_load()
+        authoritative_configs = (
+            authoritative_state.get("site_configs", {})
+            if isinstance(authoritative_state, dict)
+            else {}
+        )
+        authoritative_config = authoritative_configs.get(site_id, {})
+        authoritative_bindings = (
+            authoritative_config.get("bindings", {})
+            if isinstance(authoritative_config, dict)
+            else {}
+        )
+        authoritative_binding = (
+            authoritative_bindings.get("elhandel")
+            if isinstance(authoritative_bindings, dict)
+            else None
+        )
+        if self.binding_fingerprint(authoritative_binding) != before:
+            raise ValueError("stale_binding")
+        return {"site_id": site_id, "verification_state": fields["verification_state"], "proof_fingerprint": fields["proof_fingerprint"]}
 
     def active_binding(self, service: str) -> dict[str, Any] | None:
         """Return only the active site's explicit binding for one service."""

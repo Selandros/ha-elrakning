@@ -19,6 +19,9 @@ INTEGRITY_MIGRATION_VERSION = 2
 INTEGRITY_MIGRATION_CHECKSUM = hashlib.sha256(
     b"external_input_points_immutable_v2|external_frames_replay_index_v2"
 ).hexdigest()
+HISTORY_FOUND = "HISTORY_FOUND"
+HISTORY_NONE = "NO_HISTORY"
+HISTORY_UNKNOWN = "UNKNOWN"
 QUARTER_SECONDS = 900
 SCHEMA_PATH = Path(__file__).with_name("p0_storage_schema_v1.sql")
 
@@ -319,6 +322,71 @@ class CanonicalStorage:
             "SELECT frame_id, revision, supersedes_frame_id FROM external_input_frames WHERE semantic_key = ? ORDER BY revision DESC LIMIT 1",
             (semantic_key,),
         ).fetchone()
+
+    def latest_external_frame_snapshot(self, semantic_key: str) -> dict[str, Any] | None:
+        """Return the latest frame and point payload for deterministic deduplication."""
+        row = self._connection().execute(
+            """SELECT frame_id, revision, supersedes_frame_id, source_generation_id,
+                      source_scope, site_id, logical_role, classification,
+                      published_at_us, fetched_at_us, known_at_us, captured_at_us,
+                      valid_from_us, valid_to_us, quality_status, quality_json,
+                      provenance_json, payload_schema
+                 FROM external_input_frames
+                WHERE semantic_key = ? ORDER BY revision DESC LIMIT 1""",
+            (semantic_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        points = self._connection().execute(
+            """SELECT point_id, point_key, valid_at_us, value, unit, quality_status, point_json
+                 FROM external_input_points WHERE frame_id = ? ORDER BY point_key""",
+            (row[0],),
+        ).fetchall()
+        keys = (
+            "frame_id", "revision", "supersedes_frame_id", "source_generation_id", "source_scope",
+            "site_id", "logical_role", "classification", "published_at_us", "fetched_at_us",
+            "known_at_us", "captured_at_us", "valid_from_us", "valid_to_us", "quality_status",
+            "quality_json", "provenance_json", "payload_schema",
+        )
+        return {"frame": dict(zip(keys, row)), "points": [dict(zip(("point_id", "point_key", "valid_at_us", "value", "unit", "quality_status", "point_json"), item)) for item in points]}
+
+    def external_history_status_for_identity_domain(self, dataset: str, identity_domain_id: str) -> str:
+        """Classify dependent history without requiring the current secret key."""
+        if not dataset or not identity_domain_id:
+            raise ValueError("external_history_identity_required")
+        try:
+            rows = self._connection().execute(
+                """SELECT f.provenance_json, g.source_identity_provenance
+                     FROM external_input_frames AS f
+                     JOIN source_generations AS g
+                       ON g.source_generation_id = f.source_generation_id
+                    WHERE f.logical_role = ?""",
+                (dataset,),
+            ).fetchall()
+        except sqlite3.Error as err:
+            raise RuntimeError("external_history_query_failed") from err
+        for provenance_json, source_identity_provenance in rows:
+            parsed_values = []
+            for raw in (provenance_json, source_identity_provenance):
+                try:
+                    value = json.loads(raw) if isinstance(raw, str) else raw
+                except (TypeError, ValueError) as err:
+                    return HISTORY_UNKNOWN
+                if value is not None and not isinstance(value, dict):
+                    return HISTORY_UNKNOWN
+                parsed_values.append(value)
+            if any(isinstance(value, dict) and value.get("identity_domain_id") == identity_domain_id for value in parsed_values):
+                return HISTORY_FOUND
+            if not any(isinstance(value, dict) and isinstance(value.get("identity_domain_id"), str) for value in parsed_values):
+                return HISTORY_UNKNOWN
+        return HISTORY_NONE
+
+    def has_external_history_for_identity_domain(self, dataset: str, identity_domain_id: str) -> bool:
+        """Compatibility wrapper; unknown history is fail-closed."""
+        status = self.external_history_status_for_identity_domain(dataset, identity_domain_id)
+        if status == HISTORY_UNKNOWN:
+            raise RuntimeError("external_history_unknown")
+        return status == HISTORY_FOUND
 
     def read_external_input_frames(
         self,

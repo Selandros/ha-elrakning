@@ -714,10 +714,39 @@ INFERRED (roadmap): Long-term data foundation:
   current-state closure entry. Focused C.4B tests pass 17/17; no production
   code, manifest version, Home Assistant Store, canonical database, network
   behavior, deploy or restart is changed by C.4B.
-- C.4C producer is NOT STARTED. No production implementation or release is
-  authorized by the C.4B closure. The next scope must begin from the locked
-  C.4B contract and separately review producer design, site-independent target
-  enumeration, persistence/replay behavior and runtime acceptance.
+- C.4C.1 implementation is LOCAL ONLY / NOT RELEASED (2026-09-13): the first
+  production slice is implemented for `greenely.invoice_economics.v1` only.
+  It uses explicit `collection_enabled` site targets, verified site timezone,
+  explicit Greenely binding/proof, all-section invoice attribution, opaque
+  occurrence identity, immutable C.1 frames and source-generation identity.
+  It does not implement current tariff snapshots, backfill, customer-price
+  changes, grid/E.ON economics, frontend changes, Evidence/Shadow changes or
+  schema migration.
+- The local slice includes the privileged proof-provisioning service, durable
+  pseudonymization key domain with fail-closed missing-key history detection,
+  deterministic invoice candidate selection, exact local-calendar UTC bounds,
+  and producer fetch/capture timestamps. `active_site_id` is not used for
+  ownership. FUTURE/no-invoice/ambiguous/unproven attribution remains empty.
+- VERIFIED (static, local C.4C.1 correction, 2026-09-13): The proof
+  provisioning path now performs an independent `Store.async_load()` after
+  persisting the site-scoped proof, resolves the same site's current
+  `elhandel` binding from the freshly loaded state, and fails closed with
+  `stale_binding` if its fingerprint no longer matches the accepted binding.
+  This closes the post-persist binding race without rollback, schema change,
+  provider-specific logic, or changes to Evidence/Shadow behavior.
+- VERIFIED (static, local C.4C.1 closure review, 2026-09-13): The corrected
+  A→B post-save binding race and A→A control are covered by executable tests;
+  the final read-only C4C.1 review reported no findings across A–V. Focused
+  C4C.1 producer/proof tests pass 36/36 and the full Python suite passes
+  500/500. All MJS tests, compileall, JSON validation, and `git diff --check`
+  pass. Existing ResourceWarnings from unrelated test database cleanup remain
+  known and are not introduced by this scope.
+- C.4C.1 is READY FOR COMMIT PREPARATION, but is not committed, pushed,
+  version-bumped, deployed, restarted, or runtime-verified. `CURRENT_STATE`
+  is updated before commit as required by the scope review. The next action
+  requires explicit commit authorization; `0.0.640` release/deploy/restart
+  remain unauthorized. The separate 0.0.639 natural 00:05 Evidence gate is
+  untouched and pending.
 
 ## 0.0.639 Site-independent solar collection fix
 
