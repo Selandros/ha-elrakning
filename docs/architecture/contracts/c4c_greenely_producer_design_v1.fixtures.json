@@ -1,0 +1,261 @@
+{
+  "fixture_suite": "elrakning.c4c_greenely_producer_design.v1",
+  "contract_version": 1,
+  "scope_guards": {
+    "production_code_change": false,
+    "runtime_store_write": false,
+    "canonical_sqlite_write": false,
+    "network_call": false,
+    "schema_migration": false,
+    "backfill": false,
+    "version_bump": false,
+    "deploy": false,
+    "restart": false
+  },
+  "identity_fields": [
+    "site_id",
+    "configured_facility_id",
+    "api_facility_id",
+    "facility_meter_id",
+    "contract_id",
+    "contract_facility_id",
+    "invoice_key",
+    "invoice_contract_id",
+    "pdf_installation_id",
+    "verified_site_timezone"
+  ],
+  "attribution_statuses": [
+    "ATTRIBUTED",
+    "AMBIGUOUS",
+    "MISMATCH",
+    "INSUFFICIENT_EVIDENCE"
+  ],
+  "dataset_matrix": [
+    {
+      "dataset": "greenely.invoice_economics.v1",
+      "target": "attributed_invoice_billing_period_component",
+      "roles": [
+        "economic.provider.import.variable",
+        "economic.provider.fixed.subscription"
+      ],
+      "shares_revision_chain_with": []
+    },
+    {
+      "dataset": "greenely.current_tariff_snapshot.v1",
+      "target": "current_tariff_snapshot_component",
+      "roles": [
+        "economic.provider.import.variable",
+        "economic.provider.fixed.subscription"
+      ],
+      "shares_revision_chain_with": []
+    }
+  ],
+  "component_contract": {
+    "included": {
+      "economic.provider.import.variable": {
+        "unit": "SEK/kWh",
+        "requires_explicit_vat_basis": true
+      },
+      "economic.provider.fixed.subscription": {
+        "unit": "SEK/month",
+        "requires_explicit_vat_basis": true
+      }
+    },
+    "excluded": [
+      "nord_pool_spot",
+      "invoice_weighted_spot_average",
+      "credits",
+      "settlement_discounts",
+      "amount_due",
+      "gross_invoice_total",
+      "grid_economics",
+      "customer_price"
+    ],
+    "missing_component_rule": "unavailable_not_zero_filled"
+  },
+  "identity_cases": [
+    {
+      "name": "one_installation_exact_identity",
+      "pdf_sections": ["735999248027541502"],
+      "selected_installation": "735999248027541502",
+      "status": "ATTRIBUTED",
+      "candidate_count": 1
+    },
+    {
+      "name": "multi_installation_exact_selected_identity",
+      "pdf_sections": ["735999248027541502", "735999114000851039"],
+      "selected_installation": "735999114000851039",
+      "status": "ATTRIBUTED",
+      "selected_section_count": 1
+    },
+    {
+      "name": "multi_installation_without_selected_identity",
+      "pdf_sections": ["735999248027541502", "735999114000851039"],
+      "selected_installation": null,
+      "status": "INSUFFICIENT_EVIDENCE",
+      "candidate_count": 0
+    },
+    {
+      "name": "selected_identity_has_no_section_match",
+      "pdf_sections": ["735999248027541502"],
+      "selected_installation": "unknown-installation",
+      "status": "MISMATCH",
+      "candidate_count": 0
+    },
+    {
+      "name": "equal_meter_and_installation_without_relation_proof",
+      "facility_meter_id": "735999114000851039",
+      "pdf_installation_id": "735999114000851039",
+      "identity_relation_proof": false,
+      "status": "INSUFFICIENT_EVIDENCE",
+      "candidate_count": 0
+    },
+    {
+      "name": "multiple_plausible_sections",
+      "pdf_sections": ["735999248027541502", "735999248027541502"],
+      "selected_installation": "735999248027541502",
+      "status": "AMBIGUOUS",
+      "candidate_count": 0
+    },
+    {
+      "name": "facility_identity_mismatch",
+      "configured_facility_id": "facility-a",
+      "api_facility_id": "facility-b",
+      "status": "MISMATCH",
+      "candidate_count": 0
+    },
+    {
+      "name": "contract_facility_mismatch",
+      "configured_facility_id": "facility-a",
+      "api_facility_id": "facility-a",
+      "contract_facility_id": "facility-b",
+      "status": "MISMATCH",
+      "candidate_count": 0
+    },
+    {
+      "name": "missing_contract_attribution",
+      "contract_id": null,
+      "invoice_contract_id": null,
+      "status": "INSUFFICIENT_EVIDENCE",
+      "candidate_count": 0
+    }
+  ],
+  "timestamp_cases": [
+    {
+      "name": "stockholm_dst_period",
+      "timezone": "Europe/Stockholm",
+      "period_start": "2026-10-24",
+      "period_end": "2026-10-25",
+      "expected_valid_from_utc": "2026-10-23T22:00:00+00:00",
+      "expected_valid_to_utc": "2026-10-25T23:00:00+00:00",
+      "duration_hours": 49
+    },
+    {
+      "name": "stockholm_spring_dst_period",
+      "timezone": "Europe/Stockholm",
+      "period_start": "2026-03-28",
+      "period_end": "2026-03-29",
+      "expected_valid_from_utc": "2026-03-27T23:00:00+00:00",
+      "expected_valid_to_utc": "2026-03-29T22:00:00+00:00",
+      "duration_hours": 47
+    },
+    {
+      "name": "unknown_timezone_fails_closed",
+      "timezone": null,
+      "expected_frame": false,
+      "reason": "verified_site_timezone_required"
+    },
+    {
+      "name": "current_snapshot_is_capture_instant",
+      "dataset": "greenely.current_tariff_snapshot.v1",
+      "valid_from": null,
+      "valid_to": null,
+      "valid_at": "captured_at",
+      "backfill_allowed": false
+    }
+  ],
+  "identity_and_revision_cases": [
+    {
+      "name": "same_knowledge_deduplicates",
+      "expected": "deduplicate"
+    },
+    {
+      "name": "changed_knowledge_same_target_revises",
+      "expected": "revision_next_same_generation"
+    },
+    {
+      "name": "source_generation_change",
+      "expected": "revision_1_without_cross_generation_supersedes"
+    },
+    {
+      "name": "invoice_is_target_not_generation",
+      "expected": "new_invoice_target_same_generation"
+    },
+    {
+      "name": "known_at_replay_filter",
+      "decision_at": "2026-09-13T11:00:00Z",
+      "revision_1_known_at": "2026-09-13T10:00:00Z",
+      "revision_2_known_at": "2026-09-13T12:00:00Z",
+      "expected_visible_revision": 1,
+      "invariant": "known_at <= decision_at"
+    }
+  ],
+  "site_cases": [
+    {
+      "name": "inactive_bound_site_is_targeted",
+      "active_site_id": "fiskvik",
+      "collection_enabled_site_id": "vikarbodarna",
+      "expected_target": true
+    },
+    {
+      "name": "active_site_without_binding_is_not_targeted",
+      "active_site_id": "fiskvik",
+      "collection_enabled_site_id": "fiskvik",
+      "has_legitimate_elhandel_binding": false,
+      "expected_target": false
+    },
+    {
+      "name": "fiskvik_future_clean_room",
+      "site_id": "fiskvik",
+      "collection_enabled": true,
+      "invoice_evidence": false,
+      "contract_status": "FUTURE",
+      "inherited_site_data": false,
+      "eligibility_basis": "future_contract_without_invoice_evidence",
+      "expected_invoice_frames": 0,
+      "expected_current_snapshot_frames": 0
+    },
+    {
+      "name": "site_rebinding_never_reuses_old_attribution",
+      "old_facility_id": "facility-a",
+      "new_facility_id": "facility-b",
+      "expected": "new_generation_no_old_data_attribution"
+    }
+  ],
+  "source_generation_excludes": [
+    "invoice_key",
+    "invoice_number",
+    "billing_period",
+    "pdf_section_index",
+    "economic_values",
+    "captured_at",
+    "fetched_at",
+    "known_at",
+    "revision",
+    "frame_id",
+    "active_site_id"
+  ],
+  "source_generation_includes": [
+    "provider_adapter_version",
+    "config_entry_identity",
+    "site_binding_identity",
+    "facility_identity",
+    "contract_identity",
+    "dataset_identity",
+    "parser_version",
+    "normalization_version",
+    "vat_semantics",
+    "unit_semantics",
+    "verified_timezone_identity_and_state"
+  ]
+}
