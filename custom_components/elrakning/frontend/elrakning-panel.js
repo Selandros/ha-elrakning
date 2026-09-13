@@ -10132,8 +10132,7 @@ class ElrakningPanel {
   }
 
   _periodCustomerPrice(period) {
-    const value = Number(period.customer_price ?? period.price);
-    return Number.isFinite(value) ? value * 100 : null;
+    return this._comparisonPrice(period);
   }
 
   _comparisonPrice(period) {
@@ -10147,7 +10146,10 @@ class ElrakningPanel {
       if (Number.isFinite(electricity)) subtotal += electricity;
     }
     if (this._priceComparisonVisible.grid && this._hasGridPriceData()) {
-      const grid = Number(period.grid_cost_ex_vat);
+      const rawGrid = period.grid_cost_ex_vat;
+      const grid = rawGrid === null || rawGrid === undefined || rawGrid === ""
+        ? null
+        : Number(rawGrid);
       if (Number.isFinite(grid)) subtotal += grid;
     }
     return subtotal * 125;
@@ -10155,7 +10157,14 @@ class ElrakningPanel {
 
   _hasGridPriceData() {
     return this.priceData.periods.length > 0
-      && this.priceData.periods.every((period) => Number.isFinite(Number(period.grid_cost_ex_vat)));
+      && this.priceData.periods.every((period) => {
+        const rawGrid = period.grid_cost_ex_vat;
+        return period.grid_contract_source_status === "ACTIVE"
+          && rawGrid !== null
+          && rawGrid !== undefined
+          && rawGrid !== ""
+          && Number.isFinite(Number(rawGrid));
+      });
   }
 
   _hasTradePriceData() {
