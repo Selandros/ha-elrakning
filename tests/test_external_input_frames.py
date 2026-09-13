@@ -19,6 +19,9 @@ from custom_components.elrakning.external_input_frames import (
     persist_open_meteo_frames,
     persist_forecast_solar_frames,
     persist_nord_pool_frame,
+    build_smhi_current_frame,
+    build_smhi_hourly_frame,
+    persist_smhi_frames,
 )
 
 
@@ -45,6 +48,111 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.storage.open()
         self.binding = {"config_entry_id": "np-entry", "area": "SE2", "currency": "SEK"}
 
+    def test_smhi_current_and_hourly_use_separate_revision_streams(self):
+        target = {
+            "site_id": "site-a", "config_entry_id": "smhi-1",
+            "weather_entity": "weather.home", "sensor_entities": {}, "source": "smhi",
+        }
+        captured = datetime(2026, 9, 13, 10, tzinfo=UTC)
+        current, current_points = build_smhi_current_frame(target, {"temperature": 18}, captured)
+        hourly, hourly_points = build_smhi_hourly_frame(
+            target,
+            {"points": [{"valid_at": datetime(2026, 9, 13, 12, tzinfo=UTC), "temperature": 14}], "quality_status": "good", "quality": {"status": "good", "gaps": []}},
+            captured, captured, captured,
+        )
+        self.assertNotEqual(current["semantic_key"], hourly["semantic_key"])
+        self.assertEqual(current["valid_from"], None)
+        self.assertEqual(current_points, [])
+        self.assertEqual(hourly_points[0]["valid_at"], datetime(2026, 9, 13, 12, tzinfo=UTC))
+        result = persist_smhi_frames(self.storage, [(current, current_points), (hourly, hourly_points)], captured)
+        self.assertEqual(result["written"], 2)
+        self.assertEqual(self.storage.count_external_frames(), 2)
+
+    def test_smhi_generations_are_site_owned_and_hourly_ignores_current_sensor_mapping(self):
+        base = {"site_id": "site-a", "config_entry_id": "smhi-1", "weather_entity": "weather.home", "source": "smhi"}
+        current_a, _ = build_smhi_current_frame({**base, "sensor_entities": {"cloud_total": "sensor.a"}}, {"temperature": 18}, datetime(2026, 9, 13, 10, tzinfo=UTC))
+        current_b, _ = build_smhi_current_frame({**base, "site_id": "site-b", "sensor_entities": {"cloud_total": "sensor.a"}}, {"temperature": 18}, datetime(2026, 9, 13, 10, tzinfo=UTC))
+        hourly_a, _ = build_smhi_hourly_frame({**base, "sensor_entities": {"cloud_total": "sensor.a"}}, {"points": [{"valid_at": datetime(2026, 9, 13, 12, tzinfo=UTC), "temperature": 14}], "quality_status": "good", "quality": {}}, datetime(2026, 9, 13, 10, tzinfo=UTC), datetime(2026, 9, 13, 10, tzinfo=UTC), datetime(2026, 9, 13, 10, tzinfo=UTC))
+        hourly_b, _ = build_smhi_hourly_frame({**base, "sensor_entities": {"cloud_total": "sensor.b"}}, {"points": [{"valid_at": datetime(2026, 9, 13, 12, tzinfo=UTC), "temperature": 14}], "quality_status": "good", "quality": {}}, datetime(2026, 9, 13, 10, tzinfo=UTC), datetime(2026, 9, 13, 10, tzinfo=UTC), datetime(2026, 9, 13, 10, tzinfo=UTC))
+        self.assertNotEqual(current_a["source_generation_id"], current_b["source_generation_id"])
+        self.assertEqual(hourly_a["source_generation_id"], hourly_b["source_generation_id"])
+
+    def test_smhi_hourly_rejected_points_are_immutable_frame_knowledge(self):
+        target = {
+            "site_id": "site-a", "config_entry_id": "smhi-1",
+            "weather_entity": "weather.home", "sensor_entities": {}, "source": "smhi",
+        }
+        captured = datetime(2026, 9, 13, 10, tzinfo=UTC)
+        normalized_a = {
+            "points": [{"valid_at": datetime(2026, 9, 13, 12, tzinfo=UTC), "temperature": 14}],
+            "quality_status": "partial", "quality": {"status": "partial", "gaps": [{"reason": "duplicate_utc_target"}]},
+            "rejected_points": 2,
+        }
+        normalized_b = {**normalized_a, "quality": {**normalized_a["quality"], "gaps": [{"reason": "duplicate_utc_target"}, {"reason": "malformed_timestamp"}]}, "rejected_points": 3}
+        frame_a, _ = build_smhi_hourly_frame(target, normalized_a, captured, captured, captured)
+        frame_b, _ = build_smhi_hourly_frame(target, normalized_b, captured, captured, captured)
+        self.assertEqual(frame_a["quality"]["rejected_points"], 2)
+        self.assertEqual(frame_b["quality"]["rejected_points"], 3)
+        self.assertNotEqual(frame_a["frame_id"], frame_b["frame_id"])
+
+    def test_smhi_revisions_are_replayable_by_known_at_and_generation(self):
+        target = {
+            "site_id": "site-a", "config_entry_id": "smhi-1",
+            "weather_entity": "weather.home", "sensor_entities": {}, "source": "smhi",
+        }
+        first_at = datetime(2026, 9, 13, 10, tzinfo=UTC)
+        second_at = datetime(2026, 9, 13, 11, tzinfo=UTC)
+        current_a, _ = build_smhi_current_frame(target, {"condition": "sunny", "temperature": 18}, first_at)
+        current_b, _ = build_smhi_current_frame(target, {"condition": "cloudy", "temperature": 16}, second_at)
+        self.assertEqual(persist_smhi_frames(self.storage, [(current_a, [])], first_at)["written"], 1)
+        self.assertEqual(persist_smhi_frames(self.storage, [(current_a, [])], second_at)["unchanged"], 1)
+        self.assertEqual(persist_smhi_frames(self.storage, [(current_b, [])], second_at)["revised"], 1)
+        generation = current_a["source_generation_id"]
+        before = self.storage.read_external_input_frames(
+            first_at + timedelta(minutes=30), source_scope="site", site_id="site-a",
+            source_generation_id=generation, logical_role="weather.current_conditions",
+        )
+        after = self.storage.read_external_input_frames(
+            second_at + timedelta(minutes=30), source_scope="site", site_id="site-a",
+            source_generation_id=generation, logical_role="weather.current_conditions",
+        )
+        self.assertEqual(before[0]["revision"], 1)
+        self.assertEqual(before[0]["quality"]["knowledge"]["current"]["temperature"], 18)
+        self.assertEqual(after[0]["revision"], 2)
+        self.assertEqual(after[0]["quality"]["knowledge"]["current"]["temperature"], 16)
+
+    def test_smhi_hourly_same_payload_deduplicates_and_changed_payload_revises(self):
+        target = {
+            "site_id": "site-a", "config_entry_id": "smhi-1",
+            "weather_entity": "weather.home", "sensor_entities": {}, "source": "smhi",
+        }
+        captured = datetime(2026, 9, 13, 10, tzinfo=UTC)
+        def hourly(temperature):
+            return build_smhi_hourly_frame(target, {
+                "points": [{"valid_at": datetime(2026, 9, 13, 12, tzinfo=UTC), "temperature": temperature}],
+                "quality_status": "good", "quality": {}, "rejected_points": 0,
+            }, captured, captured, captured)
+        first, first_points = hourly(14)
+        same, same_points = hourly(14)
+        changed, changed_points = hourly(15)
+        self.assertEqual(persist_smhi_frames(self.storage, [(first, first_points)], captured)["written"], 1)
+        self.assertEqual(persist_smhi_frames(self.storage, [(same, same_points)], captured + timedelta(hours=1))["unchanged"], 1)
+        self.assertEqual(persist_smhi_frames(self.storage, [(changed, changed_points)], captured + timedelta(hours=2))["revised"], 1)
+        self.assertEqual(self.storage.count_external_frames(), 2)
+
+    def test_smhi_new_generation_does_not_supersede_previous_generation(self):
+        captured = datetime(2026, 9, 13, 10, tzinfo=UTC)
+        target_a = {"site_id": "site-a", "config_entry_id": "smhi-1", "weather_entity": "weather.a", "sensor_entities": {}, "source": "smhi"}
+        target_b = {**target_a, "weather_entity": "weather.b"}
+        frame_a, _ = build_smhi_current_frame(target_a, {"condition": "sunny"}, captured)
+        frame_b, _ = build_smhi_current_frame(target_b, {"condition": "sunny"}, captured)
+        persist_smhi_frames(self.storage, [(frame_a, [])], captured)
+        persist_smhi_frames(self.storage, [(frame_b, [])], captured + timedelta(hours=1))
+        rows = self.storage.connection.execute(
+            "SELECT source_generation_id, supersedes_frame_id FROM external_input_frames ORDER BY frame_id"
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row[1] is None for row in rows))
     def tearDown(self):
         self.storage.close()
         self.directory.cleanup()

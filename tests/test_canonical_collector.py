@@ -69,6 +69,18 @@ class _StartHass(_Hass):
         self.bus = _Bus()
 
 
+class _WeatherHass(_Hass):
+    def __init__(self, weather_state, response):
+        self.calls = []
+        self.states = types.SimpleNamespace(get=lambda entity_id: weather_state.get(entity_id))
+
+        async def async_call(*args, **kwargs):
+            self.calls.append((args, kwargs))
+            return response
+
+        self.services = types.SimpleNamespace(async_call=async_call)
+
+
 def _target(site, role, entity, generation, mapping=None):
     power_semantics = {
         "house.consumption": ("W", "positive_consumption", "time_weighted_mean"),
@@ -231,6 +243,63 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
         result = await collector.async_capture_forecast_solar()
         self.assertEqual(result["status"], "no_targets")
         self.assertEqual(result["target_count"], 0)
+
+    async def test_weather_capture_is_site_explicit_and_empty_sites_make_no_service_calls(self):
+        identity = _Identity([])
+        identity.site_configs = {
+            "site-a": {"collection_enabled": True, "bindings": {}},
+            "site-b": {"collection_enabled": True, "bindings": {}},
+        }
+        hass = _WeatherHass({}, {})
+        collector = CanonicalCollector(hass, identity, ":memory:")
+        self.addCleanup(collector.storage.close)
+        result = await collector.async_capture_weather()
+        self.assertEqual(result["target_count"], 0)
+        self.assertEqual(result["target_site_ids"], [])
+        self.assertEqual(hass.calls, [])
+        self.assertEqual(result["status"], "no_targets")
+
+    async def test_weather_capture_partial_hourly_failure_does_not_block_current_path(self):
+        identity = _Identity([])
+        identity.site_configs = {"site-a": {"collection_enabled": True, "bindings": {"weather": {
+            "source": "smhi", "config_entry_id": "smhi-1", "weather_entity": "weather.home",
+        }}}}
+        state = types.SimpleNamespace(state="partlycloudy", attributes={"temperature": 18})
+        hass = _WeatherHass({"weather.home": state}, {})
+        collector = CanonicalCollector(hass, identity, ":memory:")
+        self.addCleanup(collector.storage.close)
+        with patch.object(collector_module, "persist_smhi_frames", side_effect=[
+            {"written": 1, "unchanged": 0, "revised": 0},
+        ]):
+            result = await collector.async_capture_weather()
+        self.assertEqual(result["target_site_ids"], ["site-a"])
+        self.assertEqual(result["current"]["written"], 1)
+        self.assertEqual(result["hourly"]["failed"], 1)
+        self.assertEqual(len(hass.calls), 1)
+
+    async def test_weather_capture_uses_partial_rejected_count_and_separate_hourly_persist(self):
+        identity = _Identity([])
+        identity.site_configs = {"site-a": {"collection_enabled": True, "bindings": {"weather": {
+            "source": "smhi", "config_entry_id": "smhi-1", "weather_entity": "weather.home",
+        }}}}
+        state = types.SimpleNamespace(state="partlycloudy", attributes={"temperature": 18})
+        response = {"weather.home": {"forecast": [
+            {"datetime": "2026-09-13T12:00:00+00:00", "temperature": 14},
+            {"datetime": "2026-09-13T14:00:00+02:00", "temperature": 15},
+            {"datetime": "2026-09-13T13:00:00+00:00", "temperature": 16},
+        ]}}
+        hass = _WeatherHass({"weather.home": state}, response)
+        collector = CanonicalCollector(hass, identity, ":memory:")
+        self.addCleanup(collector.storage.close)
+        with patch.object(collector_module, "persist_smhi_frames", side_effect=[
+            {"written": 1, "unchanged": 0, "revised": 0},
+            {"written": 1, "unchanged": 0, "revised": 0},
+        ]) as persist:
+            result = await collector.async_capture_weather()
+        self.assertEqual(result["hourly"]["rejected_points"], 2)
+        self.assertEqual(result["current"]["written"], 1)
+        self.assertEqual(result["hourly"]["written"], 1)
+        self.assertEqual(persist.call_count, 2)
 
     async def test_forecast_capture_with_no_candidates_is_explicitly_reported(self):
         target = _forecast_target("site-a", "sensor.forecast")

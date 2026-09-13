@@ -186,6 +186,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
     )
+    frontend_data["weather_startup_task"] = hass.async_create_task(
+        canonical_collector.async_capture_weather(trigger="startup")
+    )
     await canonical_collector.async_capture_forecast_solar(trigger="startup")
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     await solar_evidence_manager.async_startup_catch_up()
@@ -239,6 +242,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if cadence_audit_manager := frontend_data.pop("cadence_audit_manager", None):
         await cadence_audit_manager.async_shutdown()
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+    if startup_task := frontend_data.pop("weather_startup_task", None):
         startup_task.cancel()
         try:
             await startup_task

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .canonical_storage import DATASET_VERSION, SCHEMA_VERSION, CanonicalStorage
 from .solar_forecast import normalize_forecast_value
+from .solar_weather import SMHI_CURRENT_DATASET, SMHI_HOURLY_DATASET
 
 
 FORECAST_SOLAR_DATASET = "forecast_solar.observed_facts.v1"
@@ -42,6 +43,149 @@ _FORECAST_SOLAR_TARGET_DAY_OFFSETS = {
 
 OPEN_METEO_DATASET = "open_meteo.manager_forecast.v1"
 OPEN_METEO_LOGICAL_ROLE = "solar.irradiance.forecast"
+
+
+def _smhi_identity(target: dict[str, Any], dataset: str) -> tuple[str, str]:
+    identity = {
+        "adapter": "smhi_weather",
+        "adapter_version": 1,
+        "dataset": dataset,
+        "site_id": target.get("site_id"),
+        "config_entry_id": target.get("config_entry_id"),
+        "weather_entity": target.get("weather_entity"),
+        "sensor_entities": target.get("sensor_entities", {}) if dataset == SMHI_CURRENT_DATASET else {},
+        "source": target.get("source", "smhi"),
+        "request": {"service": "weather.get_forecasts", "type": "hourly"},
+    }
+    identity_key = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "smhi-" + hashlib.sha256(identity_key.encode()).hexdigest()[:32], identity_key
+
+
+def build_smhi_current_frame(
+    target: dict[str, Any], current: dict[str, Any], captured_at: datetime,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build a current-condition snapshot frame without synthetic valid_at."""
+    if not current:
+        raise ValueError("smhi_current_payload_missing")
+    captured_at = captured_at.astimezone(timezone.utc)
+    generation_id, identity_key = _smhi_identity(target, SMHI_CURRENT_DATASET)
+    semantic_key = f"{SMHI_CURRENT_DATASET}|site:{target['site_id']}|generation:{generation_id}|role:weather.current_conditions|target:current_snapshot"
+    knowledge = {"current": current}
+    frame_id = "frame-" + hashlib.sha256((semantic_key + "|" + json.dumps(knowledge, sort_keys=True, separators=(",", ":"))).encode()).hexdigest()[:32]
+    frame = {
+        "frame_id": frame_id, "schema_version": SCHEMA_VERSION, "dataset_version": DATASET_VERSION,
+        "semantic_key": semantic_key, "revision": 1, "source_generation_id": generation_id,
+        "source_scope": "site", "site_id": target["site_id"], "logical_role": "weather.current_conditions",
+        "classification": "measured", "published_at": None, "fetched_at": None,
+        "known_at": captured_at, "captured_at": captured_at, "valid_from": None, "valid_to": None,
+        "quality_status": "good", "quality": {"status": "good", "knowledge": knowledge},
+        "provenance": {"origin_type": "home_assistant_smhi_state", "provider": "smhi",
+                        "site_id": target["site_id"], "source_identity_key": identity_key,
+                        "config_entry_id": target.get("config_entry_id"), "weather_entity": target.get("weather_entity"),
+                        "sensor_entities": target.get("sensor_entities", {})},
+        "payload_schema": "smhi.current_weather.v1",
+    }
+    return frame, []
+
+
+def build_smhi_hourly_frame(
+    target: dict[str, Any], normalized: dict[str, Any], fetched_at: datetime,
+    captured_at: datetime, known_at: datetime,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build one immutable hourly SMHI response frame and its UTC points."""
+    points = normalized.get("points") if isinstance(normalized, dict) else None
+    if not isinstance(points, list) or not points:
+        raise ValueError("smhi_hourly_points_missing")
+    fetched_at = fetched_at.astimezone(timezone.utc)
+    captured_at = captured_at.astimezone(timezone.utc)
+    known_at = known_at.astimezone(timezone.utc)
+    if fetched_at > known_at or captured_at > known_at:
+        raise ValueError("smhi_timestamp_order_invalid")
+    generation_id, identity_key = _smhi_identity(target, SMHI_HOURLY_DATASET)
+    semantic_key = f"{SMHI_HOURLY_DATASET}|site:{target['site_id']}|generation:{generation_id}|role:weather.forecast.hourly|target:forecast_request_vintage"
+    quality = dict(normalized.get("quality", {}))
+    quality["rejected_points"] = int(normalized.get("rejected_points", 0))
+    knowledge = {
+        "semantic_key": semantic_key,
+        "quality_status": normalized.get("quality_status", "good"),
+        "quality": quality,
+        "points": [
+            {"point_key": point["valid_at"].astimezone(timezone.utc).isoformat(), **{
+                key: value for key, value in point.items() if key != "valid_at"
+            }} for point in points
+        ],
+    }
+    knowledge_json = json.dumps(knowledge, sort_keys=True, separators=(",", ":"), default=str)
+    frame_id = "frame-" + hashlib.sha256((semantic_key + "|" + knowledge_json).encode()).hexdigest()[:32]
+    valid_at_values = [point["valid_at"].astimezone(timezone.utc) for point in points]
+    frame = {
+        "frame_id": frame_id, "schema_version": SCHEMA_VERSION, "dataset_version": DATASET_VERSION,
+        "semantic_key": semantic_key, "revision": 1, "source_generation_id": generation_id,
+        "source_scope": "site", "site_id": target["site_id"], "logical_role": "weather.forecast.hourly",
+        "classification": "forecast", "published_at": None, "fetched_at": fetched_at,
+        "known_at": known_at, "captured_at": captured_at, "valid_from": min(valid_at_values),
+        "valid_to": max(valid_at_values) + timedelta(hours=1), "quality_status": normalized.get("quality_status", "good"),
+        "quality": quality,
+        "provenance": {"origin_type": "home_assistant_smhi_get_forecasts", "provider": "smhi",
+                        "site_id": target["site_id"], "source_identity_key": identity_key,
+                        "config_entry_id": target.get("config_entry_id"), "weather_entity": target.get("weather_entity"),
+                        "request": {"service": "weather.get_forecasts", "type": "hourly"}},
+        "payload_schema": "smhi.hourly_forecast.v1",
+    }
+    frame_points = [
+        {"point_id": f"{frame_id}-p{index:03d}", "point_key": point["valid_at"].astimezone(timezone.utc).isoformat(),
+         "valid_at": point["valid_at"].astimezone(timezone.utc), "value": None, "unit": "weather",
+         "quality_status": "good", "point": {key: value for key, value in point.items() if key != "valid_at"}}
+        for index, point in enumerate(points, start=1)
+    ]
+    return frame, frame_points
+
+
+def persist_smhi_frames(
+    storage: CanonicalStorage,
+    frames: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    captured_at: datetime,
+) -> dict[str, int]:
+    """Persist current/hourly SMHI frames with separate semantic streams."""
+    result = {"written": 0, "unchanged": 0, "revised": 0}
+    for frame, points in frames:
+        storage.ensure_source_generation(
+            {"site_id": frame["site_id"], "logical_role": frame["logical_role"],
+             "generation_id": frame["source_generation_id"],
+             "source_identity": {"identity_key": frame["provenance"]["source_identity_key"],
+                                  "identity_strength": "strong",
+                                  "identity_provenance": "smhi_weather_binding_and_request_contract"},
+             "source_resolution_kind": "native_bucket" if frame["logical_role"] == "weather.forecast.hourly" else "event_stream",
+             "source_resolution_seconds": 3600 if frame["logical_role"] == "weather.forecast.hourly" else None,
+             "timezone_state": "verified" if frame["logical_role"] == "weather.forecast.hourly" else "unknown"},
+            captured_at,
+        )
+        latest = storage.latest_external_frame(frame["semantic_key"])
+        if latest:
+            frame["revision"] = latest[1]
+            frame["frame_id"] = latest[0]
+            frame["supersedes_frame_id"] = latest[2]
+            comparable = _points_with_stored_ids(storage, frame["frame_id"], points)
+            try:
+                inserted = storage.insert_external_frame(frame, comparable)
+            except ValueError as error:
+                if str(error) != "canonical_frame_revision_conflict":
+                    raise
+                frame["revision"] = latest[1] + 1
+                frame["supersedes_frame_id"] = latest[0]
+                frame["frame_id"] = "frame-" + hashlib.sha256(
+                    (f"{frame['semantic_key']}|{frame['revision']}|" + json.dumps(
+                        _point_content_for_revision_hash(comparable), sort_keys=True, default=str
+                    )).encode()
+                ).hexdigest()[:32]
+                comparable = _points_with_revision_ids(frame["frame_id"], comparable)
+                inserted = storage.insert_external_frame(frame, comparable)
+                result["revised"] += int(inserted)
+        else:
+            inserted = storage.insert_external_frame(frame, points)
+        result["written"] += int(inserted)
+        result["unchanged"] += int(not inserted)
+    return result
 
 
 def build_nord_pool_frame(

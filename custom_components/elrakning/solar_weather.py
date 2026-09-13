@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components import weather
@@ -33,6 +34,8 @@ SMHI_SENSOR_ROLES = {
     "high_cloud": "cloud_high",
     "thunder": "thunder_probability",
 }
+SMHI_CURRENT_DATASET = "smhi.current_weather.v1"
+SMHI_HOURLY_DATASET = "smhi.hourly_forecast.v1"
 SUN_CONTEXT_ATTRIBUTES = (
     "elevation",
     "azimuth",
@@ -69,6 +72,97 @@ def _copy_known(source: Any, keys: tuple[str, ...]) -> dict[str, Any]:
         elif (number := _number(value)) is not None:
             result[key] = number
     return result
+
+
+def build_weather_targets(site_configs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build site-explicit SMHI targets without changing legacy manager state."""
+    targets: list[dict[str, Any]] = []
+    for site_id in sorted(site_configs):
+        config = site_configs[site_id]
+        if not isinstance(config, dict) or config.get("collection_enabled", True) is not True:
+            continue
+        bindings = config.get("bindings")
+        binding = bindings.get("weather") if isinstance(bindings, dict) else None
+        if not isinstance(binding, dict) or binding.get("source") != "smhi":
+            continue
+        config_entry_id = binding.get("config_entry_id")
+        if not isinstance(config_entry_id, str) or not config_entry_id.strip():
+            continue
+        entity_id = binding.get("weather_entity")
+        if not isinstance(entity_id, str) or not entity_id:
+            continue
+        sensor_entities = binding.get("sensor_entities", {})
+        if not isinstance(sensor_entities, dict):
+            sensor_entities = {}
+        targets.append({
+            "site_id": site_id,
+            "config_entry_id": config_entry_id,
+            "weather_entity": entity_id,
+            "sensor_entities": {str(role): str(entity) for role, entity in sensor_entities.items() if isinstance(role, str) and isinstance(entity, str)},
+            "source": binding.get("source", "smhi"),
+        })
+    return targets
+
+
+def normalize_current_weather(state: Any, sensor_states: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize one current SMHI state without timestamps or provider defaults."""
+    if state is None or str(getattr(state, "state", "")).lower() in {"unknown", "unavailable", ""}:
+        return None
+    current = _copy_known(getattr(state, "attributes", {}), WEATHER_ATTRIBUTES)
+    condition = getattr(state, "state", None)
+    if isinstance(condition, str) and condition and condition.lower() not in {"unknown", "unavailable"}:
+        current["condition"] = condition
+    if "cloud_coverage" in current:
+        current["cloud_total"] = current["cloud_coverage"]
+    for role, sensor in sensor_states.items():
+        value = _number(getattr(sensor, "state", None)) if sensor is not None else None
+        if value is not None:
+            current[role] = value
+    return current or None
+
+
+def normalize_hourly_forecast(response: Any, timezone_name: str | None = None) -> dict[str, Any] | None:
+    """Normalize a weather service response and reject ambiguous timestamps."""
+    entity_response = response if isinstance(response, dict) else {}
+    forecast = entity_response.get("forecast", []) if isinstance(entity_response, dict) else []
+    if not isinstance(forecast, list) or not forecast:
+        return None
+    points: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    rejected_points = 0
+    for index, raw in enumerate(forecast):
+        item = _copy_known(raw, FORECAST_ATTRIBUTES)
+        value = item.get("datetime")
+        if not isinstance(value, str):
+            gaps.append({"index": index, "reason": "malformed_timestamp"})
+            rejected_points += 1
+            continue
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            gaps.append({"index": index, "source_timestamp": value, "reason": "malformed_timestamp"})
+            rejected_points += 1
+            continue
+        if parsed.tzinfo is None:
+            gaps.append({"index": index, "source_timestamp": value, "reason": "naive_timestamp"})
+            rejected_points += 1
+            continue
+        item["valid_at"] = parsed.astimezone(timezone.utc)
+        item["source_timestamp"] = value
+        item.pop("datetime", None)
+        points.append(item)
+    duplicate_targets = {
+        valid_at for valid_at in {point["valid_at"] for point in points}
+        if sum(point["valid_at"] == valid_at for point in points) > 1
+    }
+    if duplicate_targets:
+        for valid_at in sorted(duplicate_targets):
+            rejected_points += sum(point["valid_at"] == valid_at for point in points)
+            gaps.append({"valid_at": valid_at.isoformat(), "reason": "duplicate_utc_target"})
+        points = [point for point in points if point["valid_at"] not in duplicate_targets]
+    if not points:
+        return None
+    return {"points": points, "quality_status": "good" if not gaps else "partial", "quality": {"status": "good" if not gaps else "partial", "gaps": gaps}, "rejected_points": rejected_points}
 
 
 class SolarWeatherManager:

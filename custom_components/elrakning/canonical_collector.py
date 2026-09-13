@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from homeassistant.core import EVENT_STATE_CHANGED, Event, callback
+from homeassistant.components import weather
 try:
     from homeassistant.core import EVENT_STATE_REPORTED
 except ImportError:
@@ -26,6 +27,9 @@ from .external_input_frames import (
     persist_forecast_solar_frames,
     persist_open_meteo_frames,
     persist_nord_pool_frame,
+    build_smhi_current_frame,
+    build_smhi_hourly_frame,
+    persist_smhi_frames,
 )
 from .meter import _power_kw
 from .solar_open_meteo import (
@@ -33,6 +37,7 @@ from .solar_open_meteo import (
     build_open_meteo_targets,
     normalize_open_meteo_payload,
 )
+from .solar_weather import build_weather_targets, normalize_current_weather, normalize_hourly_forecast
 
 
 POWER_ROLES = {
@@ -66,6 +71,9 @@ class CanonicalCollector:
         self._open_meteo_capture_status: dict[str, Any] | None = None
         self._open_meteo_lock = asyncio.Lock()
         self._open_meteo_unsub = None
+        self._weather_unsub = None
+        self._weather_capture_lock = asyncio.Lock()
+        self._weather_capture_status: dict[str, Any] | None = None
 
     async def async_persist_nord_pool_frame(self, data, binding, captured_at) -> bool:
         """Persist one global price frame without changing collection context."""
@@ -81,6 +89,93 @@ class CanonicalCollector:
     def open_meteo_capture_status(self) -> dict[str, Any] | None:
         """Return the latest in-memory Open-Meteo capture diagnostics."""
         return copy.deepcopy(self._open_meteo_capture_status)
+
+    def weather_capture_status(self) -> dict[str, Any] | None:
+        """Return the latest in-memory SMHI canonical capture diagnostics."""
+        return copy.deepcopy(self._weather_capture_status)
+
+    def _weather_targets(self) -> list[dict[str, Any]]:
+        getter = getattr(self.site_identity_manager, "collection_site_configs", None)
+        return build_weather_targets(getter() if getter else {})
+
+    async def async_capture_weather(self, *, trigger: str = "startup") -> dict[str, Any]:
+        """Capture site-explicit SMHI current and hourly frames."""
+        async with self._weather_capture_lock:
+            started_at = dt_util.now().astimezone(timezone.utc)
+            targets = self._weather_targets()
+            result = {
+                "started_at": started_at.isoformat(), "finished_at": None, "trigger": trigger,
+                "target_count": len(targets), "target_site_ids": [target["site_id"] for target in targets],
+                "current": {"attempted": 0, "written": 0, "deduplicated": 0, "revised": 0, "failed": 0},
+                "hourly": {"attempted": 0, "service_calls": 0, "written": 0, "deduplicated": 0, "revised": 0, "failed": 0, "valid_points": 0, "rejected_points": 0},
+                "sites": {}, "last_error": None,
+            }
+            frames = []
+            for target in targets:
+                site_id = target["site_id"]
+                site_result = {"current": "unattempted", "hourly": "unattempted", "service_calls": 0, "valid_points": 0, "rejected_points": 0}
+                result["sites"][site_id] = site_result
+                result["current"]["attempted"] += 1
+                state = self.hass.states.get(target["weather_entity"])
+                sensors = {role: self.hass.states.get(entity_id) for role, entity_id in target["sensor_entities"].items()}
+                current = normalize_current_weather(state, sensors)
+                if current is None:
+                    site_result["current"] = "failed"
+                    result["current"]["failed"] += 1
+                else:
+                    current_captured_at = dt_util.now().astimezone(timezone.utc)
+                    frames.append(build_smhi_current_frame(target, current, current_captured_at))
+                    site_result["current"] = "ready"
+                result["hourly"]["attempted"] += 1
+                result["hourly"]["service_calls"] += 1
+                site_result["service_calls"] = 1
+                try:
+                    response = await self.hass.services.async_call(
+                        weather.DOMAIN, weather.SERVICE_GET_FORECASTS,
+                        {"entity_id": target["weather_entity"], "type": "hourly"},
+                        blocking=True, return_response=True,
+                    )
+                    fetched_at = dt_util.now().astimezone(timezone.utc)
+                    entity_response = response.get(target["weather_entity"], response) if isinstance(response, dict) else {}
+                    normalized = normalize_hourly_forecast(entity_response)
+                    if normalized is None:
+                        raise ValueError("invalid_response")
+                    captured_at = dt_util.now().astimezone(timezone.utc)
+                    hourly_frame = build_smhi_hourly_frame(target, normalized, fetched_at, captured_at, captured_at)
+                    frames.append(hourly_frame)
+                    valid_points = len(normalized["points"])
+                    rejected = int(normalized.get("rejected_points", 0))
+                    result["hourly"]["valid_points"] += valid_points
+                    result["hourly"]["rejected_points"] += rejected
+                    site_result.update({"hourly": "ready", "valid_points": valid_points, "rejected_points": rejected})
+                except Exception as error:
+                    result["hourly"]["failed"] += 1
+                    site_result["hourly"] = "failed"
+                    result["last_error"] = str(error)
+            current_frames = [frame for frame in frames if frame[0]["logical_role"] == "weather.current_conditions"]
+            hourly_frames = [frame for frame in frames if frame[0]["logical_role"] == "weather.forecast.hourly"]
+            for key, frame_group in (("current", current_frames), ("hourly", hourly_frames)):
+                if not frame_group:
+                    continue
+                try:
+                    async with self._flush_lock:
+                        persisted = await self.hass.async_add_executor_job(
+                            persist_smhi_frames, self.storage, frame_group, started_at
+                        )
+                    result[key]["written"] = int(persisted.get("written", 0))
+                    result[key]["revised"] = int(persisted.get("revised", 0))
+                    result[key]["deduplicated"] = int(persisted.get("unchanged", 0))
+                except Exception as error:
+                    result["last_error"] = str(error)
+                    result[key]["failed"] += 1
+            result["finished_at"] = dt_util.now().astimezone(timezone.utc).isoformat()
+            result["status"] = "no_targets" if not targets else "error" if result["last_error"] else "success"
+            self._weather_capture_status = result
+            return copy.deepcopy(result)
+
+    async def _async_weather_cadence(self, _now) -> None:
+        """Run the hourly canonical weather capture."""
+        await self.async_capture_weather(trigger="hourly_cadence")
 
     def _open_meteo_targets(self) -> list[dict[str, Any]]:
         getter = getattr(self.site_identity_manager, "collection_site_configs", None)
@@ -345,6 +440,9 @@ class CanonicalCollector:
             minute=0,
             second=12,
         )
+        self._weather_unsub = async_track_time_change(
+            self.hass, self._async_weather_cadence, minute=0, second=22,
+        )
 
     async def async_shutdown(self) -> None:
         if self._state_unsub:
@@ -359,6 +457,9 @@ class CanonicalCollector:
         if self._open_meteo_unsub:
             self._open_meteo_unsub()
             self._open_meteo_unsub = None
+        if self._weather_unsub:
+            self._weather_unsub()
+            self._weather_unsub = None
         self._buffers.clear()
         self._recent_reported.clear()
         self._finalized_intervals.clear()

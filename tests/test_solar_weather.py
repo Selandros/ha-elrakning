@@ -102,6 +102,56 @@ def _hass(response, state=None, registry_entries=None, entries=None):
 
 
 class SolarWeatherTests(unittest.TestCase):
+    def test_weather_targets_are_site_explicit_and_fail_closed_without_binding(self):
+        targets = solar_weather.build_weather_targets({
+            "site-a": {"collection_enabled": True, "bindings": {"weather": {
+                "config_entry_id": "smhi-1", "weather_entity": "weather.home",
+                "sensor_entities": {"cloud_total": "sensor.cloud"},
+                "source": "smhi",
+            }}},
+            "site-b": {"collection_enabled": True, "bindings": {}},
+        })
+        self.assertEqual([target["site_id"] for target in targets], ["site-a"])
+        self.assertEqual(targets[0]["weather_entity"], "weather.home")
+
+    def test_weather_targets_reject_non_smhi_source_and_missing_config_entry(self):
+        targets = solar_weather.build_weather_targets({
+            "wrong-provider": {"collection_enabled": True, "bindings": {"weather": {
+                "source": "other", "config_entry_id": "other-1", "weather_entity": "weather.home",
+            }}},
+            "missing-entry": {"collection_enabled": True, "bindings": {"weather": {
+                "source": "smhi", "config_entry_id": "", "weather_entity": "weather.home",
+            }}},
+        })
+        self.assertEqual(targets, [])
+
+    def test_hourly_normalizer_rejects_naive_points_and_keeps_valid_points(self):
+        normalized = solar_weather.normalize_hourly_forecast({"forecast": [
+            {"datetime": "2026-09-13T12:00:00+00:00", "temperature": 14},
+            {"datetime": "2026-09-13T13:00:00", "temperature": 15},
+        ]})
+        self.assertEqual(normalized["quality_status"], "partial")
+        self.assertEqual(len(normalized["points"]), 1)
+        self.assertEqual(len(normalized["quality"]["gaps"]), 1)
+        self.assertEqual(normalized["rejected_points"], 1)
+
+    def test_current_normalizer_does_not_fabricate_missing_values(self):
+        state = types.SimpleNamespace(state="partlycloudy", attributes={"temperature": 18})
+        current = solar_weather.normalize_current_weather(state, {"cloud_total": None})
+        self.assertEqual(current, {"temperature": 18, "condition": "partlycloudy"})
+
+    def test_hourly_normalizer_rejects_duplicate_utc_targets(self):
+        normalized = solar_weather.normalize_hourly_forecast({"forecast": [
+            {"datetime": "2026-09-13T12:00:00+00:00", "temperature": 14},
+            {"datetime": "2026-09-13T14:00:00+02:00", "temperature": 15},
+            {"datetime": "2026-09-13T13:00:00+00:00", "temperature": 16},
+        ]})
+        self.assertEqual(normalized["quality_status"], "partial")
+        self.assertEqual(len(normalized["points"]), 1)
+        self.assertEqual(normalized["points"][0]["temperature"], 16)
+        self.assertEqual(normalized["quality"]["gaps"][0]["reason"], "duplicate_utc_target")
+        self.assertEqual(normalized["rejected_points"], 2)
+
     def test_single_smhi_entity_reads_current_and_hourly_forecast(self):
         hass = _hass({"weather.home": {"forecast": [{
             "datetime": "2026-08-30T12:00:00+00:00",

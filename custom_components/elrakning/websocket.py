@@ -848,6 +848,7 @@ async def websocket_canonical_collector_state(hass, connection, msg):
         "success": True,
         "forecast_solar": collector.forecast_capture_status(),
         "open_meteo": collector.open_meteo_capture_status(),
+        "weather": collector.weather_capture_status(),
     })
 
 
