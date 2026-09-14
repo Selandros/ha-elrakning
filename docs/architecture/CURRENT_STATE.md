@@ -767,3 +767,40 @@ INFERRED (roadmap): Long-term data foundation:
 - Static release gates pass for version `0.0.639`. Runtime verification is
   PENDING until deployment. Final acceptance requires a natural 00:05 runtime
   collection and Evidence non-regression verification.
+
+## Current release closure
+
+- VERIFIED (runtime, 0.0.639, 2026-09-14): The natural local 00:05 Solar
+  Evidence run produced and persisted the Vikarbodarna completed-day result
+  with `audit_complete=true`, complete Open-Meteo data and a Forecast.Solar
+  common result while Fiskvik was the current UI site. Fiskvik had no Evidence
+  binding and no namespaced Evidence Store. Site-independent target selection
+  is implemented and the result is attributed to Vikarbodarna. The exact
+  active site at 00:05 and a complete historical log window remain documented
+  observability limitations, not behavior failures. Evidence progress is
+  16/21 Open-Meteo and 15/14 Forecast.Solar common; no Evidence rows were
+  rewritten by this gate.
+- VERIFIED (release/deploy/runtime, 0.0.640, 2026-09-14): The release commit
+  is `5da2d9e7fca34f90e13eff7d15f813af50d6a9e5`, containing only the manifest
+  patch from 0.0.639 to 0.0.640. It is pushed with `HEAD == origin/main` and
+  tracked tree clean except for the two intentional user documents. The exact
+  release payload was deployed with 56/56 SHA-256 matches before one normal
+  Home Assistant Core restart; HA is running and serves manifest version
+  0.0.640. No schema migration or canonical data mutation was performed.
+- VERIFIED (runtime, 0.0.640, 2026-09-14): Site registry and Evidence state
+  survived restart. Fiskvik remains the active site and has no Evidence
+  binding; Vikarbodarna retains its site-scoped completed-day Evidence result.
+  A WAL-consistent canonical SQLite read-only snapshot reported
+  `integrity_check=ok`, 7,233 external points, zero duplicate point IDs and
+  zero `greenely.*` frames. The canonical schema opened without migration.
+- VERIFIED (release boundary, 0.0.640, 2026-09-14): C.4C.1 production code is
+  live and remains fail-closed because no Greenely proof was provisioned.
+  Greenely invoice-economics eligibility is `NOT YET ELIGIBLE`; no Greenely
+  economics frame was created and Fiskvik remains a clean room. Proof
+  provisioning, Greenely invoice capture and runtime activation are separate
+  future work.
+- COMPLETE (0.0.639 natural 00:05 gate, 2026-09-14): The gate is closed as
+  PASS with the documented active-site and log-window observability
+  limitations. 0.0.640 is released, deployed and runtime-loaded. The next
+  scope is explicit Greenely proof activation; no CURRENT_STATE change is
+  included in that scope until separately authorized.
