@@ -743,7 +743,293 @@ digital twin and zero-write shadow planner.
 - Authenticated runtime evidence for every site before it can become an ELLA
   execution target.
 
-## 11. Non-goals of this plan
+## 11. Capture-first data-gap audit
+
+This audit is a planning classification, not proof that an unverified live
+entity exists. `ALREADY_CAPTURED_LONG_TERM` means that the current canonical
+or immutable store has sufficient site-scoped provenance and retention for
+replay. Recorder-only or bounded UI history is deliberately not counted as
+long-term capture. `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` means that the role is
+mapped, readable, or used by existing code, but its detail, provenance,
+retention, or per-resource identity is insufficient. `NOT_AVAILABLE_OR_NOT_VERIFIED`
+means that the role must be discovered or configured before ELLA may use it.
+
+### 11.1 Current classification
+
+| Signal family | Classification and current path | Native cadence / retention known today | ELLA capture target and provenance | Why late capture is costly |
+|---|---|---|---|---|
+| Gross house load / total consumption | `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; site consumption/meter roles, Recorder and the billing reader | HA/Recorder cadence is source-dependent; long-term retention is not guaranteed by the current role | 1-5 min detail plus canonical 15 min; `site_id`, source generation, observed/known time, unit, sign and quality | Missing gross load cannot be reconstructed from an invoice total without losing peaks and causality |
+| Grid import/export power and cumulative energy | `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; mapped grid power/energy roles and history paths | Runtime mapping exists; durable per-interval coverage is not established | Signed 1-60 s raw where available, 1-5 min detail, 15 min canonical; meter reset/rollover and source generation required | Peak, export-limit and self-consumption decisions need interval data, not later totals |
+| PV total and per-inverter/string | Total PV role is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; per-inverter/string is `NOT_AVAILABLE_OR_NOT_VERIFIED` | HA/provider cadence is mapped per site; long-term per-array retention is not proven | Per source 1-60 s raw if available, 1-5 min detail, 15 min canonical; source identity, unit, sign and generation | Provider forecasts cannot recover clipping, inverter imbalance or missed solar |
+| Battery charge/discharge/signed power and counters | Combined signed power is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; separate counters/per-ESS paths are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Generic `battery_power_entity`/charge/discharge roles exist; per-ESS retention is not proven | Per ESS 1-60 s raw if supported, 1-5 min detail, 15 min canonical, event counters; explicit sign and reset semantics | Without charge/discharge history, efficiency, cycles and command outcomes are unknowable |
+| ESS SOC, capacity and health | SOC/capacity roles are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; SOH, temperature, cell and dynamic limits are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Mapped roles have HA history; long-term per-ESS identity and BMS provenance are not proven | SOC/power/capability snapshots at 1-60 s raw or source cadence, 1-5 min detail, 15 min canonical; capability generation, stale state and quality | A later digital twin cannot infer reserve breaches, derating or degradation history |
+| Grid phases and safety | Phase/grid diagnostics are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; fuse/export-limit semantics are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Diagnostics are available where mapped; retention is not guaranteed | Phase current/voltage/power at source cadence, event capture for outage/health, canonical 15 min summaries; safety source generation | Safety envelopes and phase violations cannot be replayed from aggregate kWh |
+| Purchase/sell price and tariffs | Nord Pool/provider price and site economic frames are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` for full ELLA replay; some immutable external frames already exist | Price periods are normally 15 min/day-ahead; tariff validity/retention differs by source | Immutable 15 min price/tariff frames with `known_at`, publication state, effective interval, VAT/unit and source version; daily/event summaries long-lived | A later tariff revision must not rewrite what the planner knew at decision time |
+| Greenely invoice/economics | `ALREADY_CAPTURED_LONG_TERM` for verified Vikarbodarna invoice/economic records; not physical telemetry | 52 invoices and 1,153 normalized samples were verified; canonical economics frames are sparse | Retain immutable occurrence/revision, contract attribution, economics and provenance; no raw PII; Fiskvik remains zero | Historical invoice context is useful calibration, but cannot replace missing interval meter data |
+| Forecast.Solar raw / corrected | Raw immutable forecast/provenance is `ALREADY_CAPTURED_LONG_TERM` for current verified Vikarbodarna paths; corrected model is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` | Natural canonical frames and evidence exist; corrected forecast contract is not yet first-class | Preserve raw frames; add separate corrected frames with source frame IDs, `known_at`, calibration version, confidence and target interval | Raw provider history cannot be recreated after a forecast revision |
+| Open-Meteo, Single Run and weather | Open-Meteo/Single Run frames and weather are `ALREADY_CAPTURED_LONG_TERM` only for the verified frames/roles; broader cadence is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` | Verified natural Single Run exists; broader seasonal retention is not established | Immutable target-day frames, weather observations and forecasts with response/known times, target timezone, model/source generation and confidence | Missing weather vintages prevent causal forecast-error analysis |
+| Load forecast | Existing billing estimator is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; its output is not yet a first-class immutable dataset | Current month/trailing 28-day model; no long-term forecast-frame retention | Hourly/15 min frames, 24-36 h horizon, model/calibration version, `known_at`, scenarios and confidence | Future ELLA and billing cannot reproduce past decisions without forecast vintages |
+| Temperature and load features | Weather/temperature sources are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; calendar effects are derivable but not persisted as an ELLA feature contract | Provider cadence varies; retention is dataset-dependent | Persist technical weather/calendar features used by a model with source/known time; never infer occupancy | Historical model inputs disappear even if the forecast output remains |
+| Flexible/large loads | `NOT_AVAILABLE_OR_NOT_VERIFIED`; EV, heat pump, hot water and smartplug roles are not established as ELLA resources | No safe current entity/resource contract verified | Capture only after explicit site-scoped adapter/config, with availability and control capability | Late discovery creates an unexplainable load-model break |
+| Plan, command and outcome data | `NOT_AVAILABLE_OR_NOT_VERIFIED`; no ELLA executor exists | No ELLA cadence yet | Once shadow mode exists, persist every immutable plan, block, referenced frame, model/parameter version, command, acknowledgement, override, fallback and actual interval | Execution safety and savings cannot be audited after the fact |
+
+The classification above is deliberately conservative. The present repo has
+strong immutable external-input contracts, but that does not prove that all
+live meter and ESS roles are already retained as long-lived canonical data.
+
+### 11.2 Per-ESS audit: APX/MOD 8k and ARK/MOD 10k
+
+The two named Growatt paths must be discovered as separate resources, not
+assumed from labels or aggregate values. For each APX/MOD 8k and ARK/MOD 10k
+path, the capture audit must establish:
+
+- stable resource identity and firmware/product capability generation;
+- SOC, signed power, usable/nominal capacity, SOH, battery temperature,
+  pack voltage/current, and cell min/max/delta where exposed;
+- dynamic charge/discharge power/current limits, inverter limits, BMS
+  permission/derating flags, alarms/faults/warnings and availability;
+- operating/work mode, configured min/max/reserve SOC and hardware targets;
+- whether each system has independent meter/grid constraints or shares one
+  site meter, export limit and phase/fuse envelope.
+
+Current status is `NOT_AVAILABLE_OR_NOT_VERIFIED` for separate APX/ARK
+resource completeness. If runtime exposes only aggregate battery power/SOC,
+that is a capture gap, not evidence that the two systems can be safely split.
+The first data-capture release must record the observed shape and leave the
+resource uneligible until every safety-critical field has an explicit state.
+
+### 11.3 Start collecting now
+
+These are technical data-risk priorities, not product-value rankings.
+
+| Priority | Capture now | Minimum reason |
+|---|---|---|
+| P0 | Gross load, grid import/export, cumulative meter energy, total PV, aggregate battery power/SOC, per-ESS identity when available, price/tariff frames, phase/grid safety signals, source health and all immutable forecast vintages | Needed for safety, replay, site isolation and causal debugging; cannot be reconstructed later |
+| P0 | ESS limits/reserve/derating/alarms and plan/input provenance once discovered | A planner must prove why a decision was safe and what capability it used |
+| P1 | Per-inverter/string PV, ESS temperature/SOH/cell data, weather observations, load features, Greenely economic/invoice revisions and corrected forecast outputs | Improves calibration, health and attribution without being the minimum write-safety boundary |
+| P2 | Flexible-load detail, advanced diagnostics, richer UI-only summaries and optional high-frequency data after growth is measured | Useful for optimization, but not a reason to fabricate a control capability |
+
+### 11.4 Capture policy and retention proposal
+
+Capture-first is an explicit ELLA policy: when a technical signal exists now
+and may later matter for replay, safety, model calibration or debugging, save
+it by default. Downsampling is possible later; absent raw history cannot be
+reconstructed. Capture must remain technical-only and must never persist PII,
+credentials, signed URLs or raw provider identity values.
+
+Raw/detail/canonical/event layers are separate. An initial conservative
+proposal, subject to measured storage growth, is:
+
+- source raw/detail at 1-60 seconds for relevant live/ESS signals: 30-90
+  days when the source cadence supports it;
+- normalized detail at 1-5 minutes: at least 1-2 years;
+- canonical 15-minute observations and forecasts: several years, practically
+  append-only while storage remains acceptable;
+- daily summaries, health/fault events, plan/command/outcome records and model
+  metadata: long-lived/indefinite;
+- immutable price, tariff and forecast vintages: several years for replay.
+
+Every persisted signal carries schema/contract version, site/resource scope,
+unit, sign convention, source generation, `known_at`/`observed_at` as
+applicable, quality/stale state and capture method. Source changes create a
+new generation; they are never silently mixed. Recorder may be a useful
+short-term source, but it is not the only long-term P0 store when retention is
+short or deployment-specific.
+
+The capture foundation must measure row counts, bytes/day, WAL growth,
+compression/downsampling effects and worst-case source cadence for at least
+one representative site before changing retention. A retention change is not
+complete until a replay sample proves that the required decision inputs remain
+available.
+
+## 12. Operational implementation order
+
+The following steps supersede the earlier broad “first implementation” list
+where it implied that a load model should be built before preserving the live
+signals it depends on.
+
+### Step 1 - Data preservation foundation
+
+Prerequisite: read-only role/entity audit and storage-growth measurement.
+Likely files/modules: canonical frame/storage/collector paths, site identity,
+power/meter managers, price/tariff adapters, tests and architecture fixtures.
+Data contract: site/resource-scoped immutable observations for P0 signals with
+unit/sign, source generation, `observed_at`/`known_at`, quality and stale state.
+Tests: all P0 roles, duplicates, resets, DST, source replacement, two-site
+isolation and retention/replay cutoff.
+Runtime gate: observe Vikarbodarna targets without active-site dependence;
+Fiskvik remains empty when not eligible; storage growth is measured.
+Completion: every available P0 role is durably replayable or explicitly marked
+unavailable, with no fabricated values.
+
+### Step 2 - First-class load forecast
+
+Prerequisite: Step 1 gross-load history and source semantics.
+Likely files/modules: billing history/estimator, canonical collector, forecast
+contracts, websocket/UI readers and focused forecast tests.
+Data contract: immutable hourly/15-minute load forecast, 24-36 h horizon,
+`known_at`, model/calibration version, confidence/scenarios and input-frame
+references; billing and ELLA consume the same frame.
+Tests: missing history, day/DST lengths, gaps, replay cutoff, stable blending,
+site isolation and billing/ELLA consistency.
+Runtime gate: forecast frames are produced naturally and stale/low-confidence
+inputs fail closed.
+Completion: billing and ELLA have one versioned load-forecast source.
+
+### Step 3 - Solar correction and confidence
+
+Prerequisite: raw Forecast.Solar, Open-Meteo/Single Run and actual PV history.
+Likely files/modules: solar provenance/evidence, forecast selector, calibration
+adapter and forecast contract tests.
+Data contract: raw immutable frames remain untouched; corrected frames reference
+raw frames and carry calibration version, confidence and target interval.
+Tests: provider revision, pre/post decision, bias, missing weather, DST and
+Fiskvik clean-room.
+Runtime gate: corrected output is absent when evidence is stale/ambiguous.
+Completion: ELLA can select raw/corrected scenarios without rewriting Evidence.
+
+### Step 4 - ESS capability model and digital twin
+
+Prerequisite: separate APX/MOD 8k and ARK/MOD 10k resource audit from Step 1.
+Likely files/modules: site/resource registry, power manager, new capability
+contract/fixtures and simulator tests.
+Data contract: per-ESS SOC, capacity, efficiency, limits, derating, health,
+mode, availability and safety generation; aggregate values are derived only.
+Tests: energy balance, clipping, reserve, missing telemetry, shared meter,
+simultaneous systems and predicted-vs-observed SOC drift.
+Runtime gate: no ESS becomes eligible on aggregate-only data.
+Completion: both systems are either independently modeled or explicitly
+ineligible with a recorded missing-capability reason.
+
+### Step 5 - True marginal cost
+
+Prerequisite: immutable price/tariff capture and publication semantics.
+Likely files/modules: Nord Pool/customer-price/grid tariff adapters, economic
+frame contract and price tests.
+Data contract: purchase/sell, transfer, tax, VAT, fixed/peak fees and effective
+periods with `known_at`, publication state and no double counting.
+Tests: revisions, negative prices, missing components, export constraints, DST
+and Greenely fail-closed behavior.
+Runtime gate: unknown marginal cost allows shadow observation only.
+Completion: every planner price input is replayable at its decision cutoff.
+
+### Step 6 - Shadow ELLA planner
+
+Prerequisite: Steps 1-5 and qualifying source quality.
+Likely files/modules: new planner/plan-frame contracts, deterministic solver,
+simulation adapter and tests; no hardware service.
+Data contract: immutable plan, `plan_block_id`, planned intervals, action,
+planned trajectories, objective breakdown, referenced frame IDs and versions.
+Tests: deterministic output, 24-36 h horizon, zero writes, site isolation,
+reserve/limit violations and stale-input rejection.
+Runtime gate: write capability is technically absent, not merely disabled.
+Completion: replayable plan frames exist with `failsafe`/`no_action` paths.
+
+### Step 7 - Advisory UI
+
+Prerequisite: qualifying shadow plans and graph first-class frames.
+Likely files/modules: `elrakning-panel.js`, graph/card components, shared
+selection state and UI tests.
+Data contract: card ID/revision and plan/actual interval references; forecast
+and planned layers cannot be placeholders.
+Tests: shared graph selection, keyboard/mobile behavior, dark/light themes,
+stale plan remapping and actual-vs-planned comparison.
+Runtime gate: presentation-only, no service or canonical mutation.
+Completion: compact rail plus expanded graph explains the plan and confidence.
+
+### Step 8 - Replay and backtest
+
+Prerequisite: at least 30-60 days of eligible frames, longer when available.
+Likely files/modules: replay reader, scorecard/report artifacts and fixtures.
+Data contract: run ID, input fingerprints, model/parameter versions, cutoff,
+scenario and result quality.
+Tests: no hindsight, DST, gaps, source changes, no-battery/oracle comparisons.
+Runtime gate: zero safety violations and deterministic rerun.
+Completion: savings, peaks, PV capture, throughput/EFC and regret are measured.
+
+### Step 9 - Guarded hardware execution
+
+Prerequisite: Steps 1-8 plus verified adapter capability and supervised review.
+Likely files/modules: per-ESS command adapters, acknowledgement/event store,
+rollback/failsafe logic and integration tests.
+Data contract: command target/limit/time, context, acknowledgement/timeout,
+state before/after, manual override and fallback event.
+Tests: deduplication, wrong-site prevention, timeout, limit/ramp, outage and
+manual override.
+Runtime gate: one narrow command surface, supervised and reversible.
+Completion: execution is safe under missing/stale/contradictory telemetry.
+
+### Step 10 - Closed-loop learning and drift
+
+Prerequisite: outcome and deviation records from guarded execution.
+Likely files/modules: calibration/drift monitors, model metadata and scorecards.
+Data contract: planned-vs-actual error, realized savings, EFC, safety
+activations, model/calibration version and drift reason.
+Tests: drift thresholds, rollback to known model, privacy and site isolation.
+Runtime gate: drift disables optimization or falls back to hold/failsafe.
+Completion: retraining/calibration is evidence-backed and never silently
+changes historical frames.
+
+## 13. Data-to-UI activation gates
+
+The existing graphs may expose a layer only when its first-class source and
+quality gate exist:
+
+| UI layer | Activation condition |
+|---|---|
+| `forecast_load` | After Step 2 load frames exist with target intervals, `known_at`, model version and confidence |
+| `forecast_pv` | After Step 3 raw/corrected PV frames and confidence are available; raw and corrected remain distinguishable |
+| `planned_charge` / `planned_discharge` | After Step 6 plan frames reference valid per-ESS capability and inputs |
+| `planned_import` / `planned_export` | After Step 6 plan consequence frames include grid constraints and price context |
+| `planned_soc` | After Step 4 digital twin plus Step 6 plan trajectory exist; it is never recalculated in frontend |
+| actual-vs-planned comparison | After Step 9 outcome/acknowledgement and actual execution intervals exist |
+
+The graph uses solid lines for observed values and dashed lines for forecasts
+or plan consequences, with the same signal color. Missing/stale/ambiguous
+source data produces no line; the UI never fills a gap with a fabricated
+placeholder.
+
+## 14. Next implementation release
+
+The audit finds live generic load, grid, PV and battery roles, but not a
+verified long-term per-ESS/P0 capture contract for all safety signals. The next
+implementation must therefore be **DATA CAPTURE FOUNDATION**, before extracting
+the load forecast. It should begin with read-only observation and canonical or
+detail capture for:
+
+1. gross load, grid import/export and cumulative meter energy;
+2. total PV and every independently discoverable inverter source;
+3. aggregate battery SOC/power/capacity plus separate APX/MOD 8k and ARK/MOD
+   10k resources only when their identities and capabilities are verified;
+4. phase/grid safety, export/import limits and source health;
+5. immutable price/tariff and forecast vintages.
+
+No ELLA planner, battery command, economics activation or UI placeholder is
+part of this release. The release is complete only when storage growth,
+retention, replay and Fiskvik clean-room gates pass. Then Step 2 may publish
+the shared load forecast used by both billing and ELLA.
+
+## 15. Control and learning records to capture once ELLA exists
+
+Once shadow or execution begins, capture every plan frame and block with its
+`plan_block_id`, exact referenced immutable frame IDs, planner/model/parameter
+versions, objective breakdown, action/reason, planned charge/discharge/
+import/export/SOC and confidence. For execution also capture command target
+and limit, command time, acknowledgement/result/timeout, hardware state before
+and after, manual override, fallback/failsafe, actual interval, planned-vs-
+actual error, estimated versus realized savings, EFC/throughput and safety
+constraint activations. These are event records, not mutable UI state.
+
+## 16. Runtime non-regression requirements for capture-first work
+
+Every capture release must preserve site-independent background collection,
+Vikarbodarna attribution and Fiskvik clean-room. It must not rewrite Solar
+Evidence, previous-day baselines, Greenely proof/economics or historical
+canonical frames. A source generation change is explicit, and a missing
+source is represented as unavailable/stale rather than copied from another
+site or filled from a forecast.
+
+## 17. Non-goals of this plan
 
 This document does not:
 
