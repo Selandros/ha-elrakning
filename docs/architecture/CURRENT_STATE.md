@@ -793,8 +793,10 @@ INFERRED (roadmap): Long-term data foundation:
   A WAL-consistent canonical SQLite read-only snapshot reported
   `integrity_check=ok`, 7,233 external points, zero duplicate point IDs and
   zero `greenely.*` frames. The canonical schema opened without migration.
-- VERIFIED (release boundary, 0.0.640, 2026-09-14): C.4C.1 production code is
-  live and remains fail-closed because no Greenely proof was provisioned.
+- VERIFIED (release boundary, 0.0.640, 2026-09-14; historical): C.4C.1
+  production code was live and remained fail-closed because no Greenely proof
+  was provisioned at that release boundary. This status is superseded by the
+  current runtime reconciliation below.
   Greenely invoice-economics eligibility is `NOT YET ELIGIBLE`; no Greenely
   economics frame was created and Fiskvik remains a clean room. Proof
   provisioning, Greenely invoice capture and runtime activation are separate
@@ -844,14 +846,17 @@ INFERRED (roadmap): Long-term data foundation:
   `integration_start`, provider startup and normal refresh events. Vikarbodarna
   satisfies the target eligibility requirements; Fiskvik fails closed because
   it lacks verified location, binding and solar geometry.
-- NOT OBSERVED (natural Single Run frame, 0.0.641, 2026-09-19): The first
+- NOT OBSERVED (natural Single Run frame, 0.0.641, 2026-09-19; historical): The first
   naturally scheduled opportunity after restart produced no
   `open_meteo.single_run_day_ahead_pv.v1` frame. No public capture status or
   provider failure reason was exposed by the existing runtime read surface, so
-  no reason is fabricated. Canonical integrity and site isolation remained
+  no reason was fabricated. Canonical integrity and site isolation remained
   healthy after the opportunity. The locked release gate permits closure with
   this honest evidence limitation; the producer is live and awaiting its first
   natural frame.
+- SUPERSEDED: A later read-only runtime audit verified the natural Single Run
+  frame; the historical observation above remains unchanged as a record of
+  the 0.0.641 gate.
 - COMPLETE (0.0.641 runtime closure): Release, deploy, restart, lifecycle
   load, canonical integrity, site isolation and legacy non-regression gates
   pass. `CURRENT_STATE` is now the authoritative record; no locked contract or
@@ -1047,11 +1052,11 @@ INFERRED (roadmap): Long-term data foundation:
   forbidden Greenely PII-key count is zero in each. No proof provisioning,
   Evidence collection or Single Run trigger was invoked; Greenely economics
   remains fail-closed. The existing natural Single Run status is unchanged.
-- OPEN: The bounded amendment enables a legitimate authenticated admin
-  proof-provisioning request but does not provision proof. Installation
-  evidence and invoice occurrence/correction semantics remain separate; no
-  economics activation is authorized without the required authenticated
-  proof service call.
+- HISTORICAL OPEN STATUS: The bounded amendment enabled a legitimate
+  authenticated admin proof-provisioning request but did not provision proof
+  at the 0.0.648 boundary. This status is superseded by the current runtime
+  reconciliation below; invoice occurrence/correction semantics remain a
+  separate future design scope.
 
 ## 0.0.649 Greenely contract-meter identity state amendment
 
@@ -1077,7 +1082,7 @@ INFERRED (roadmap): Long-term data foundation:
 - VERIFIED (0.0.649 runtime): Greenely forbidden PII-key counts remain zero,
   both sites remain preserved, and no proof provisioning, Evidence collection
   or Single Run trigger was invoked. Greenely economics remains fail-closed.
-- READ-ONLY PROOF READINESS: The bounded provider snapshot establishes the
+- READ-ONLY PROOF READINESS (historical 0.0.649 state): The bounded provider snapshot established the
   facility/contract/invoice and out-of-band installation-fingerprint chain,
   while contract-meter identity is explicitly unavailable under the new
   bounded state. No proof record exists. Provisioning still requires an
@@ -1106,12 +1111,13 @@ INFERRED (roadmap): Long-term data foundation:
   marker appeared, Greenely forbidden PII-key counts remained zero, and the
   three rollback backups remain outside the discovery path. No Evidence or
   Single Run trigger was invoked.
-- SITE READINESS: Vikarbodarna has the bounded facility/contract/invoice and
-  original-invoice installation evidence, but proof remains unprovisioned
-  pending authenticated Home Assistant admin context and explicit evidence
-  recording time. Fiskvik has verified provider facility/contract scope but
-  zero invoices and zero consumption evidence; it is explicitly ineligible,
-  remains clean-room and receives no proof or economics frames.
+- SITE READINESS (historical 0.0.650 release-boundary state): Vikarbodarna
+  had the bounded facility/contract/invoice and original-invoice installation
+  evidence, but proof remained unprovisioned pending authenticated Home
+  Assistant admin context and explicit evidence recording time. Fiskvik had
+  verified provider facility/contract scope but zero invoices and zero
+  consumption evidence; it was explicitly ineligible and remained clean-room.
+  This status is superseded by the current runtime reconciliation below.
 
 ## 0.0.651 Estimated invoice month-end forecast
 
@@ -1148,3 +1154,33 @@ INFERRED (roadmap): Long-term data foundation:
   deterministic model tests, exact deployment hashes and startup/runtime
   checks. Greenely proof/economics, Fiskvik clean-room, Evidence and natural
   Single Run state were left untouched.
+
+## Current runtime reconciliation after 0.0.651
+
+- VERIFIED (read-only current runtime): Vikarbodarna's Greenely proof is
+  provisioned through an authenticated Home Assistant admin service context.
+  The production `validated_greenely_proof()` validator returns a valid proof
+  with `verification_state=EXPLICITLY_VERIFIED`.
+- VERIFIED (read-only current runtime): Vikarbodarna has 2 canonical
+  `greenely.invoice_economics.v1` frames. Both are `quality=good` and
+  `classification=measured`; duplicate semantic/revision count is zero.
+  No Greenely economics frame exists for Fiskvik.
+- VERIFIED (read-only current runtime): Vikarbodarna has 1 natural
+  `open_meteo.single_run_day_ahead_pv.v1` canonical frame with quality,
+  `known_at` and valid target interval present. Its duplicate
+  semantic/revision count is zero. Fiskvik has zero Single Run frames.
+- VERIFIED (read-only current runtime): Fiskvik remains clean-room: no
+  Greenely proof, no Greenely economics frame, and no Single Run frame. The
+  existing site-independent collection behavior is preserved.
+- VERIFIED (read-only current runtime): A WAL-consistent canonical snapshot
+  reports `PRAGMA integrity_check=ok`. No new Elräkning traceback, services.yaml
+  error, economics error or Single Run/Open-Meteo error was found in the
+  narrow current log scan.
+- EVIDENCE LIMITATION (not a product failure): A fresh authenticated visual
+  read of the numeric `Estimerad faktura` dashboard value remains
+  `NOT OBSERVED`. The 0.0.651 estimator and its deterministic test/runtime
+  path are deployed; this limitation does not invalidate the model result.
+- OPEN FUTURE DESIGN (separate): Greenely invoice occurrence,
+  correction/reissue identity semantics remain open. They do not invalidate
+  the verified installation proof or the two current Vikarbodarna economics
+  frames.
