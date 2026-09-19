@@ -1,0 +1,23 @@
+{
+  "dataset": "open_meteo.single_run_day_ahead_pv.v1",
+  "decision_rule": "known_at <= decision_at",
+  "timezone": "Europe/Stockholm",
+  "cases": [
+    {"id": "pre_decision", "run_initialization_at": "2026-09-11T00:00:00Z", "known_at": "2026-09-11T05:00:00Z", "decision_at": "2026-09-12T22:00:00Z", "expected": "VERIFIED_PRE_DECISION"},
+    {"id": "run_before_but_acquired_after", "run_initialization_at": "2026-09-11T00:00:00Z", "known_at": "2026-09-12T23:00:00Z", "decision_at": "2026-09-12T22:00:00Z", "expected": "VERIFIED_POST_DECISION"},
+    {"id": "run_after_cutoff", "run_initialization_at": "2026-09-13T00:00:00Z", "known_at": "2026-09-13T05:00:00Z", "decision_at": "2026-09-12T22:00:00Z", "expected": "VERIFIED_POST_DECISION"},
+    {"id": "missing_known_at", "run_initialization_at": "2026-09-11T00:00:00Z", "known_at": null, "decision_at": "2026-09-12T22:00:00Z", "expected": "INSUFFICIENT_PROVENANCE"},
+    {"id": "wrong_dataset", "dataset": "open_meteo.manager_forecast.v1", "expected": "REJECT_DATASET"},
+    {"id": "previous_day1_is_not_single_run", "dataset": "open_meteo.evidence_previous_day1.v1", "expected": "REJECT_DATASET"},
+    {"id": "different_site", "site_id": "other-site", "expected": "REJECT_SITE"},
+    {"id": "partial_target_day", "target_hours": 23, "expected": "REJECT_COVERAGE"},
+    {"id": "dst_23_hour_day", "local_day": "2026-03-29", "target_hours": 23, "expected": "ACCEPT_IF_COMPLETE"},
+    {"id": "dst_25_hour_day", "local_day": "2026-10-25", "target_hours": 25, "expected": "ACCEPT_IF_COMPLETE"},
+    {"id": "same_run_same_knowledge", "run": "2026-09-11T00:00:00Z", "expected": "DEDUP"},
+    {"id": "same_run_changed_response", "run": "2026-09-11T00:00:00Z", "expected": "NEW_REVISION"},
+    {"id": "different_run", "run": "2026-09-11T06:00:00Z", "expected": "NEW_FRAME"},
+    {"id": "later_candidate_cannot_replace_earlier", "expected": "KEEP_PRE_DECISION"},
+    {"id": "active_fiskvik_collection_target_vikarbodarna", "active_site_id": "fiskvik", "target_site_id": "vikarbodarna", "expected": "TARGET_EXPLICIT_SITE"},
+    {"id": "old_evidence_no_backfill", "protocol": "evidence-v1", "expected": "UNCHANGED"}
+  ]
+}
