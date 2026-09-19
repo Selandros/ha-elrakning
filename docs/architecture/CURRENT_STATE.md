@@ -963,4 +963,16 @@ INFERRED (roadmap): Long-term data foundation:
 - LOCAL GATE PASS: Python `632 passed, 46 subtests, 0 failed`; MJS `28/28`;
   compileall, JSON, YAML and `git diff --check` pass. No schema migration,
   Evidence/Single Run change, Greenely proof activation, or canonical-data
-  rewrite is included. Runtime deployment is pending.
+  rewrite is included.
+- VERIFIED (0.0.645 runtime): Release `15b5edab960e52ced8276d40505f31cdc31478d5`
+  was deployed as an exact 59-file payload with all remote hashes matching
+  before one normal Core restart. Manifest/runtime is `0.0.645`; Core returned
+  with `boot: true`. Both sites remain present. Vikarbodarna's namespaced
+  stores remain present and Fiskvik has no namespaced Open-Meteo, Forecast.Solar
+  or Solar Evidence stores. Greenely remains fail-closed with no invoice,
+  summary or consumption state attributed to either stored facility namespace.
+- VERIFIED (0.0.645 runtime): The post-restart scan found no new Elräkning
+  traceback or Greenely source-privacy leakage. No Evidence or Single Run
+  operation was manually invoked; no natural Single Run frame was observed.
+  Unrelated Home Assistant/custom `greenely` and other integration warnings in
+  the restart log are outside this release scope.
