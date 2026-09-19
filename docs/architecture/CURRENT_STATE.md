@@ -1005,5 +1005,17 @@ INFERRED (roadmap): Long-term data foundation:
   namespaces are unchanged; no canonical/Evidence/Single Run data is touched.
 - VERIFIED: Focused migration tests cover active/history PII removal,
   retention of safe attribution/economics fields, idempotence, provider
-  isolation and fail-closed state preservation. Full local gate is green;
-  runtime deployment is pending.
+  isolation and fail-closed state preservation. Full local gate is green.
+- VERIFIED (0.0.647 runtime): Release `728557b283ef0d6a0f09caf4b2def67390dd80c8`
+  was deployed as an exact 59-file payload with all hashes matching before
+  one normal Core restart. Manifest/runtime is `0.0.647`; both sites remain
+  present; rollback `0.0.646` is preserved. Greenely forbidden source keys
+  are absent from active and history records in all facility namespaces.
+  Vikarbodarna retains its provider attribution, 52 invoice records and 1153
+  normalized consumption samples; Fiskvik remains zero-history and
+  fail-closed. No Greenely proof/economics activation occurred.
+- VERIFIED (0.0.647 runtime): A new WAL-consistent read-only canonical
+  snapshot returned `PRAGMA integrity_check = ok`, one unchanged natural
+  Open-Meteo Single Run frame for Vikarbodarna and zero duplicate point IDs.
+  No canonical, Evidence or Single Run mutation was performed by the audit;
+  no new Elräkning traceback was observed.
