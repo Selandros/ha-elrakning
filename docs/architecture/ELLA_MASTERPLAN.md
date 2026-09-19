@@ -13,8 +13,8 @@ canonical contracts.
 ## 0. Current baseline and reconciliation
 
 The current repository/runtime baseline used for this plan is Elräkning
-`0.0.651` with the docs reconciliation commit `2776ea9`. The verified current
-runtime facts used here are:
+`0.0.654` after the capture-foundation releases `0.0.652`, `0.0.653` and
+`0.0.654`. The verified current runtime facts used here are:
 
 - Vikarbodarna remains the active development site and continues site-independent
   background collection.
@@ -33,6 +33,21 @@ runtime facts used here are:
   yet a first-class hourly load-forecast dataset.
 - No live ELLA planner, executor, battery command, service, or control loop
   exists. This plan therefore starts with observation and simulation.
+- The capture foundation now persists the explicitly bound generic roles
+  `house.consumption`, `solar.production`, `grid.power/import`,
+  `grid.energy_import`, `grid.energy_export`, `battery.power`, `battery.soc`
+  and `battery.capacity` through the existing canonical observation store.
+  Capture provenance includes `energy_telemetry.v1` or `ess_telemetry.v1`, a
+  source generation and an internal resource identity.
+- Runtime verification after one normal 0.0.654 Core restart found 8,115
+  canonical observations, zero duplicate semantic/revision identities, zero
+  duplicate record IDs and `PRAGMA integrity_check=ok`. The two-site registry
+  remains intact; the configured learning site has the bound roles above and
+  the other site has no such mappings or fabricated frames.
+- This closes capture for currently bound normalized P0 roles, not discovery
+  of every unbound HA entity. FusionSolar telemetry that is not explicitly
+  mapped to a generic role remains `NOT_AVAILABLE_OR_NOT_VERIFIED`; no Huawei
+  thermal coefficient or hardware limit is inferred from its presence.
 
 The 2026-09-04 Elräkning Masterplan remains valid where it specifies capture
 first, immutable provenance, site independence, canonical 15-minute data,
@@ -758,11 +773,11 @@ means that the role must be discovered or configured before ELLA may use it.
 
 | Signal family | Classification and current path | Native cadence / retention known today | ELLA capture target and provenance | Why late capture is costly |
 |---|---|---|---|---|
-| Gross house load / total consumption | `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; site consumption/meter roles, Recorder and the billing reader | HA/Recorder cadence is source-dependent; long-term retention is not guaranteed by the current role | 1-5 min detail plus canonical 15 min; `site_id`, source generation, observed/known time, unit, sign and quality | Missing gross load cannot be reconstructed from an invoice total without losing peaks and causality |
-| Grid import/export power and cumulative energy | `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; mapped grid power/energy roles and history paths | Runtime mapping exists; durable per-interval coverage is not established | Signed 1-60 s raw where available, 1-5 min detail, 15 min canonical; meter reset/rollover and source generation required | Peak, export-limit and self-consumption decisions need interval data, not later totals |
-| PV total and per-inverter/string | Total PV role is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; per-inverter/string is `NOT_AVAILABLE_OR_NOT_VERIFIED` | HA/provider cadence is mapped per site; long-term per-array retention is not proven | Per source 1-60 s raw if available, 1-5 min detail, 15 min canonical; source identity, unit, sign and generation | Provider forecasts cannot recover clipping, inverter imbalance or missed solar |
+| Gross house load / total consumption | Mapped role is now `ALREADY_CAPTURED_LONG_TERM`; site consumption/meter role, Recorder and billing reader remain source inputs | Canonical 15-minute observations are present; native cadence and longer raw retention remain source-dependent | Canonical 15 min plus measured source cadence where available; `site_id`, resource identity, source generation, observed/known time, unit, sign and quality | Missing raw/detail history still loses peaks and causality even when canonical means exist |
+| Grid import/export power and cumulative energy | Mapped power and cumulative import/export roles are now `ALREADY_CAPTURED_LONG_TERM`; phase-level roles remain unverified | Canonical power plus counter observations are present; native counter cadence is not yet measured as a separate contract | Signed power and kWh counter capture with source generation, reset/rollover and quality semantics | Later totals cannot reconstruct interval peaks, export limits or counter resets |
+| PV total and per-inverter/string | Mapped total PV role is `ALREADY_CAPTURED_LONG_TERM`; per-inverter/string is `NOT_AVAILABLE_OR_NOT_VERIFIED` | Canonical total-PV observations are present; per-array retention is not proven | Per source 1-60 s raw if available, 1-5 min detail, 15 min canonical; source identity, unit, sign and generation | Provider forecasts cannot recover clipping, inverter imbalance or missed solar |
 | Battery charge/discharge/signed power and counters | Combined signed power is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; separate counters/per-ESS paths are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Generic `battery_power_entity`/charge/discharge roles exist; per-ESS retention is not proven | Per ESS 1-60 s raw if supported, 1-5 min detail, 15 min canonical, event counters; explicit sign and reset semantics | Without charge/discharge history, efficiency, cycles and command outcomes are unknowable |
-| ESS SOC, capacity and health | SOC/capacity roles are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; SOH, temperature, cell and dynamic limits are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Mapped roles have HA history; long-term per-ESS identity and BMS provenance are not proven | SOC/power/capability snapshots at 1-60 s raw or source cadence, 1-5 min detail, 15 min canonical; capability generation, stale state and quality | A later digital twin cannot infer reserve breaches, derating or degradation history |
+| ESS SOC, capacity and health | Mapped SOC/capacity/power roles are now `ALREADY_CAPTURED_LONG_TERM`; SOH, temperature, cell and dynamic limits are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Canonical SOC/power/capacity observations and persistent resource identities are present; BMS retention is not proven | SOC/power/capability snapshots at source cadence, 1-5 min detail, 15 min canonical; capability generation, stale state and quality | A later digital twin cannot infer reserve breaches, derating or degradation history |
 | Grid phases and safety | Phase/grid diagnostics are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; fuse/export-limit semantics are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Diagnostics are available where mapped; retention is not guaranteed | Phase current/voltage/power at source cadence, event capture for outage/health, canonical 15 min summaries; safety source generation | Safety envelopes and phase violations cannot be replayed from aggregate kWh |
 | Purchase/sell price and tariffs | Nord Pool/provider price and site economic frames are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` for full ELLA replay; some immutable external frames already exist | Price periods are normally 15 min/day-ahead; tariff validity/retention differs by source | Immutable 15 min price/tariff frames with `known_at`, publication state, effective interval, VAT/unit and source version; daily/event summaries long-lived | A later tariff revision must not rewrite what the planner knew at decision time |
 | Greenely invoice/economics | `ALREADY_CAPTURED_LONG_TERM` for verified Vikarbodarna invoice/economic records; not physical telemetry | 52 invoices and 1,153 normalized samples were verified; canonical economics frames are sparse | Retain immutable occurrence/revision, contract attribution, economics and provenance; no raw PII; Fiskvik remains zero | Historical invoice context is useful calibration, but cannot replace missing interval meter data |
@@ -991,23 +1006,29 @@ placeholder.
 
 ## 14. Next implementation release
 
-The audit finds live generic load, grid, PV and battery roles, but not a
-verified long-term per-ESS/P0 capture contract for all safety signals. The next
-implementation must therefore be **DATA CAPTURE FOUNDATION**, before extracting
-the load forecast. It should begin with read-only observation and canonical or
-detail capture for:
+The capture-foundation scope is now runtime-verified for every currently bound
+generic P0 role. The next implementation should therefore be **CAPABILITY
+DISCOVERY + FIRST-CLASS LOAD FORECAST**:
 
-1. gross load, grid import/export and cumulative meter energy;
-2. total PV and every independently discoverable inverter source;
-3. aggregate battery SOC/power/capacity plus separate APX/MOD 8k and ARK/MOD
-   10k resources only when their identities and capabilities are verified;
-4. phase/grid safety, export/import limits and source health;
-5. immutable price/tariff and forecast vintages.
+1. expose a read-only generic capability audit for unbound technical HA
+   telemetry, without assuming that a provider's entity list proves its
+   semantics;
+2. bind separate ESS resources only when SOC, power, capacity, limits,
+   temperature/health and resource identity are explicitly verified;
+3. publish the first-class load forecast from the already captured gross-load
+   history, shared by billing and ELLA.
 
-No ELLA planner, battery command, economics activation or UI placeholder is
-part of this release. The release is complete only when storage growth,
-retention, replay and Fiskvik clean-room gates pass. Then Step 2 may publish
-the shared load forecast used by both billing and ELLA.
+The currently verified runtime does not prove separate APX/MOD 8k and
+ARK/MOD 10k resources, battery temperature/SOH/cell telemetry, dynamic
+charge/discharge limits, phase safety signals or export-limit capability. Those
+remain `NOT_AVAILABLE_OR_NOT_VERIFIED` until an adapter/mapping exposes them
+with units, cadence and source identity. No ELLA planner, battery command,
+economics activation or UI placeholder may use them before that gate.
+
+The 0.0.654 release is complete for its stated capture scope: storage growth,
+canonical replay, resource identity, one normal restart, site isolation and
+Fiskvik clean-room all pass. Step 2 may now publish the shared load forecast
+while the capability audit proceeds independently.
 
 ## 15. Control and learning records to capture once ELLA exists
 
