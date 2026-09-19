@@ -1090,6 +1090,9 @@ class SiteIdentityManager:
         """Snapshot current mappings while leaving functional managers authoritative."""
         current = self._current_sources()
         ledger = self.state.setdefault("ledger", [])
+        for item in ledger:
+            if isinstance(item, dict) and not item.get("resource_id"):
+                item["resource_id"] = str(uuid.uuid4())
         self._normalize_sites()
         site_id = self.state["active_site_id"]
         config = self.state.setdefault("site_configs", {}).setdefault(site_id, self._empty_site_config())

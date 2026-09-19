@@ -112,6 +112,16 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
             generations[0]["provenance"]["canonicalization_source"],
             "logical_role_contract_v1",
         )
+        self.assertTrue(generations[0]["resource_id"])
+
+        legacy = dict(manager.state["ledger"][0])
+        legacy.pop("resource_id")
+        manager.state["ledger"][0] = legacy
+        await manager.async_sync_from_current()
+        restored_resource_id = manager.state["ledger"][0]["resource_id"]
+        self.assertTrue(restored_resource_id)
+        await manager.async_sync_from_current()
+        self.assertEqual(manager.state["ledger"][0]["resource_id"], restored_resource_id)
 
         restarted = SiteIdentityManager(hass, power, meter)
         restarted.store = _Store(manager.store.data)
