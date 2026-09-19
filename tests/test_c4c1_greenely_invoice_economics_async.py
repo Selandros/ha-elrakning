@@ -148,7 +148,7 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
         digest = hashlib.sha256(json.dumps(package, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         payload = {
             "site_id": "site", "expected_binding_fingerprint": binding["binding_fingerprint"], "contract_id": "contract",
-            "facility_meter_id_fingerprint": "fm", "contract_meter_id_fingerprint_or_state": "cm",
+            "facility_meter_id_fingerprint": "fm", "contract_meter_id_fingerprint_or_state": "c" * 64,
             "invoice_installation_identity_fingerprint": "im", "verification_method": "provider_native_semantic_proof",
             "parser_identity": "parser", "normalization_identity": "normalizer",
             "evidence_reference": "c4c1a-audit-ref-v1:test", "evidence_digest": digest,

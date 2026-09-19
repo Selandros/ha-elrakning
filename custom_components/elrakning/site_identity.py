@@ -30,6 +30,7 @@ GREENELY_ALLOWED_VERIFICATION_METHODS = {
     "explicit_out_of_band_invoice_verification",
 }
 GREENELY_FACILITY_METER_IDENTITY_UNAVAILABLE = "provider_meter_identity_unavailable_v1"
+GREENELY_CONTRACT_METER_IDENTITY_UNAVAILABLE = "provider_contract_meter_identity_unavailable_v1"
 
 
 def normalize_greenely_facility_meter_identity(payload: dict[str, Any]) -> str | None:
@@ -41,6 +42,18 @@ def normalize_greenely_facility_meter_identity(payload: dict[str, Any]) -> str |
     if state is not None:
         return state if state == GREENELY_FACILITY_METER_IDENTITY_UNAVAILABLE else None
     return fingerprint if isinstance(fingerprint, str) and fingerprint.strip() else None
+
+
+def normalize_greenely_contract_meter_identity(value: Any) -> str | None:
+    """Return one canonical contract-meter fingerprint or bounded absence state."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    if value == GREENELY_CONTRACT_METER_IDENTITY_UNAVAILABLE:
+        return value
+    if len(value) == 64 and all(char in "0123456789abcdef" for char in value):
+        return value
+    return None
 
 ROLE_MAP = {
     "consumption_entity": "house.consumption",
@@ -501,10 +514,13 @@ class SiteIdentityManager:
             return None
         if not isinstance(proof.get("evidence_digest"), str) or len(proof["evidence_digest"]) != 64:
             return None
-        facility_meter_fingerprint = proof.get("facility_meter_id_fingerprint")
-        facility_meter_state = proof.get("facility_meter_identity_state")
         facility_meter_identity = normalize_greenely_facility_meter_identity(proof)
         if facility_meter_identity is None:
+            return None
+        contract_meter_identity = normalize_greenely_contract_meter_identity(
+            proof.get("contract_meter_id_fingerprint_or_state")
+        )
+        if contract_meter_identity is None:
             return None
         required = (
             "relation", "config_entry_identity", "facility_identity_fingerprint",
@@ -527,7 +543,7 @@ class SiteIdentityManager:
             "facility_identity": proof["facility_identity_fingerprint"],
             "contract_identity_scope": proof["contract_identity_fingerprint"],
             "facility_meter_identity_state": facility_meter_identity,
-            "contract_meter_identity_state": proof["contract_meter_id_fingerprint_or_state"],
+            "contract_meter_identity_state": contract_meter_identity,
             "invoice_installation_identity": proof["invoice_installation_identity_fingerprint"],
             "verification_method": proof["verification_method"],
             "proof_schema_version": proof["proof_schema_version"],
@@ -595,7 +611,9 @@ class SiteIdentityManager:
             "contract_identity_fingerprint": self.identity_fingerprint({"contract_id": str(contract_id)}),
             "facility_meter_id_fingerprint": payload.get("facility_meter_id_fingerprint"),
             "facility_meter_identity_state": payload.get("facility_meter_identity_state"),
-            "contract_meter_id_fingerprint_or_state": payload.get("contract_meter_id_fingerprint_or_state"),
+            "contract_meter_id_fingerprint_or_state": normalize_greenely_contract_meter_identity(
+                payload.get("contract_meter_id_fingerprint_or_state")
+            ),
             "invoice_installation_identity_fingerprint": payload.get("invoice_installation_identity_fingerprint"),
             "verification_method": verification_method,
             "verification_state": "EXPLICITLY_VERIFIED",
@@ -611,6 +629,8 @@ class SiteIdentityManager:
         }
         if normalize_greenely_facility_meter_identity(fields) is None:
             raise ValueError("facility_meter_identity_invalid")
+        if fields["contract_meter_id_fingerprint_or_state"] is None:
+            raise ValueError("contract_meter_identity_invalid")
         if any(not fields.get(key) for key in (
             "contract_identity_fingerprint",
             "contract_meter_id_fingerprint_or_state", "invoice_installation_identity_fingerprint",

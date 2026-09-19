@@ -1,0 +1,27 @@
+{
+  "fixture_suite": "elrakning.c4c1c_greenely_contract_meter_identity_state_amendment.v1",
+  "contract_version": 1,
+  "allowed_unavailable_state": "provider_contract_meter_identity_unavailable_v1",
+  "fingerprint": {
+    "algorithm": "sha256-v1",
+    "length": 64,
+    "alphabet": "lowercase_hex"
+  },
+  "rules": {
+    "facility_state_is_not_reused": true,
+    "free_form_state": false,
+    "raw_identity": false,
+    "semantic_identity_includes_normalized_contract_value": true,
+    "occurrence_correction_reissue_separate": true,
+    "schema_migration": false
+  },
+  "cases": [
+    {"name": "valid_contract_fingerprint", "expected": "eligible"},
+    {"name": "provider_contract_meter_identity_unavailable", "expected": "eligible"},
+    {"name": "facility_state_reused", "expected": "reject"},
+    {"name": "free_text", "expected": "reject"},
+    {"name": "short_fingerprint", "expected": "reject"},
+    {"name": "uppercase_fingerprint", "expected": "reject"},
+    {"name": "blank", "expected": "reject"}
+  ]
+}
