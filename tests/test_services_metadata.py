@@ -11,6 +11,7 @@ EXPECTED_FIELDS = {
     "expected_binding_fingerprint",
     "contract_id",
     "facility_meter_id_fingerprint",
+    "facility_meter_identity_state",
     "contract_meter_id_fingerprint_or_state",
     "invoice_installation_identity_fingerprint",
     "verification_method",
@@ -29,7 +30,9 @@ def test_services_yaml_describes_the_registered_greenely_proof_service():
     assert set(document) == {SERVICE_NAME}
     service = document[SERVICE_NAME]
     assert set(service["fields"]) == EXPECTED_FIELDS
-    assert all(field["required"] is True for field in service["fields"].values())
+    assert all(field["required"] is True for name, field in service["fields"].items() if name != "facility_meter_identity_state" and name != "facility_meter_id_fingerprint")
+    assert service["fields"]["facility_meter_id_fingerprint"]["required"] is False
+    assert service["fields"]["facility_meter_identity_state"]["required"] is False
     assert service["fields"]["evidence_package"]["selector"] == {"object": {}}
 
 

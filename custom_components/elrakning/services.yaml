@@ -13,9 +13,15 @@ greenely_proof_provision:
       selector:
         text:
     facility_meter_id_fingerprint:
-      required: true
+      required: false
       selector:
         text:
+    facility_meter_identity_state:
+      required: false
+      selector:
+        select:
+          options:
+            - provider_meter_identity_unavailable_v1
     contract_meter_id_fingerprint_or_state:
       required: true
       selector:

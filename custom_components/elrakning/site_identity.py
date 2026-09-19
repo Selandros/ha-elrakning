@@ -29,6 +29,18 @@ GREENELY_ALLOWED_VERIFICATION_METHODS = {
     "provider_native_semantic_proof",
     "explicit_out_of_band_invoice_verification",
 }
+GREENELY_FACILITY_METER_IDENTITY_UNAVAILABLE = "provider_meter_identity_unavailable_v1"
+
+
+def normalize_greenely_facility_meter_identity(payload: dict[str, Any]) -> str | None:
+    """Return one bounded facility-meter identity or an allowed absence state."""
+    fingerprint = payload.get("facility_meter_id_fingerprint")
+    state = payload.get("facility_meter_identity_state")
+    if bool(fingerprint) == bool(state):
+        return None
+    if state is not None:
+        return state if state == GREENELY_FACILITY_METER_IDENTITY_UNAVAILABLE else None
+    return fingerprint if isinstance(fingerprint, str) and fingerprint.strip() else None
 
 ROLE_MAP = {
     "consumption_entity": "house.consumption",
@@ -489,9 +501,14 @@ class SiteIdentityManager:
             return None
         if not isinstance(proof.get("evidence_digest"), str) or len(proof["evidence_digest"]) != 64:
             return None
+        facility_meter_fingerprint = proof.get("facility_meter_id_fingerprint")
+        facility_meter_state = proof.get("facility_meter_identity_state")
+        facility_meter_identity = normalize_greenely_facility_meter_identity(proof)
+        if facility_meter_identity is None:
+            return None
         required = (
             "relation", "config_entry_identity", "facility_identity_fingerprint",
-            "contract_identity_fingerprint", "facility_meter_id_fingerprint",
+            "contract_identity_fingerprint",
             "contract_meter_id_fingerprint_or_state", "invoice_installation_identity_fingerprint",
             "verification_method", "verified_at", "parser_identity", "normalization_identity",
             "verification_actor", "verification_actor_source", "evidence_reference", "evidence_digest",
@@ -509,7 +526,7 @@ class SiteIdentityManager:
             "site_binding_identity": proof["site_binding_fingerprint"],
             "facility_identity": proof["facility_identity_fingerprint"],
             "contract_identity_scope": proof["contract_identity_fingerprint"],
-            "facility_meter_identity_state": proof["facility_meter_id_fingerprint"],
+            "facility_meter_identity_state": facility_meter_identity,
             "contract_meter_identity_state": proof["contract_meter_id_fingerprint_or_state"],
             "invoice_installation_identity": proof["invoice_installation_identity_fingerprint"],
             "verification_method": proof["verification_method"],
@@ -577,6 +594,7 @@ class SiteIdentityManager:
             "facility_identity_fingerprint": self.identity_fingerprint({"facility_id": binding.get("facility_id")}),
             "contract_identity_fingerprint": self.identity_fingerprint({"contract_id": str(contract_id)}),
             "facility_meter_id_fingerprint": payload.get("facility_meter_id_fingerprint"),
+            "facility_meter_identity_state": payload.get("facility_meter_identity_state"),
             "contract_meter_id_fingerprint_or_state": payload.get("contract_meter_id_fingerprint_or_state"),
             "invoice_installation_identity_fingerprint": payload.get("invoice_installation_identity_fingerprint"),
             "verification_method": verification_method,
@@ -591,8 +609,10 @@ class SiteIdentityManager:
             "evidence_reference": evidence_reference,
             "evidence_digest": evidence_digest,
         }
+        if normalize_greenely_facility_meter_identity(fields) is None:
+            raise ValueError("facility_meter_identity_invalid")
         if any(not fields.get(key) for key in (
-            "contract_identity_fingerprint", "facility_meter_id_fingerprint",
+            "contract_identity_fingerprint",
             "contract_meter_id_fingerprint_or_state", "invoice_installation_identity_fingerprint",
             "parser_identity", "normalization_identity",
         )):
@@ -603,7 +623,7 @@ class SiteIdentityManager:
             "site_binding_identity": fields["site_binding_fingerprint"],
             "facility_identity": fields["facility_identity_fingerprint"],
             "contract_identity_scope": fields["contract_identity_fingerprint"],
-            "facility_meter_identity_state": fields["facility_meter_id_fingerprint"],
+            "facility_meter_identity_state": normalize_greenely_facility_meter_identity(fields),
             "contract_meter_identity_state": fields["contract_meter_id_fingerprint_or_state"],
             "invoice_installation_identity": fields["invoice_installation_identity_fingerprint"],
             "verification_method": fields["verification_method"],

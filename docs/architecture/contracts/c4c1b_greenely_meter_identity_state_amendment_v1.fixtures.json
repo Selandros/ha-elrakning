@@ -1,0 +1,23 @@
+{
+  "fixture_suite": "elrakning.c4c1b_greenely_meter_identity_state_amendment.v1",
+  "contract_version": 1,
+  "allowed_state": "provider_meter_identity_unavailable_v1",
+  "rules": {
+    "exactly_one_facility_representation": true,
+    "free_form_state": false,
+    "raw_identity": false,
+    "provider_native_lookup_unchanged": true,
+    "invoice_installation_fingerprint_still_required": true,
+    "authenticated_admin_required": true,
+    "persistence_change": false,
+    "schema_migration": false
+  },
+  "cases": [
+    {"name": "verified_facility_fingerprint", "expected": "eligible"},
+    {"name": "provider_meter_identity_unavailable_state", "expected": "eligible"},
+    {"name": "missing_both", "expected": "reject"},
+    {"name": "both_present", "expected": "reject"},
+    {"name": "unknown_state", "expected": "reject"},
+    {"name": "missing_invoice_installation", "expected": "reject"}
+  ]
+}
