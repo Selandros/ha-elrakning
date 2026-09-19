@@ -1112,3 +1112,39 @@ INFERRED (roadmap): Long-term data foundation:
   recording time. Fiskvik has verified provider facility/contract scope but
   zero invoices and zero consumption evidence; it is explicitly ineligible,
   remains clean-room and receives no proof or economics frames.
+
+## 0.0.651 Estimated invoice month-end forecast
+
+- ROOT CAUSE VERIFIED: `Estimerad faktura` already used the full-month field
+  `estimated_month_total_sek`, but sparse early-month coverage was extrapolated
+  only from the current observed daily import. The estimate therefore revised
+  sharply as more observations arrived.
+- IMPLEMENTED: Billing history now reads a bounded trailing 28-day Recorder
+  window. Complete local calendar days form a historical daily-kWh baseline;
+  the current rate is blended with weight `min(1, covered_days / 14)`. Without
+  history, the prior current-observation fallback remains explicit and
+  low-confidence. Known future price periods are used for the remaining
+  variable cost, with observed-price fallback only beyond that horizon. Full
+  monthly fixed fees are included once, while `total_so_far_sek` remains
+  separate.
+- IMPLEMENTED: The billing websocket returns future price periods through the
+  local month boundary and additive baseline points/coverage diagnostics. No
+  provider, schema, Store, Evidence, Greenely, Forecast.Solar or Single Run
+  data path was changed.
+- VERIFIED: Release commit `99fb67a1a0db4a446f87f1eed58d112006f2e0cb`
+  contains the six-file implementation/test/version scope. Full Python is
+  `641 passed, 46 subtests, 0 failed`; all `28/28` MJS tests, compileall,
+  JSON/YAML validation and diff-check pass.
+- VERIFIED (0.0.651 runtime): The exact AppleDouble-free 59-file payload
+  matched all remote hashes before one normal Core restart. Manifest/runtime
+  is `0.0.651`; Core returned healthy; the canonical WAL/SHM snapshot has
+  `PRAGMA integrity_check = ok`; and the 0.0.650 rollback is preserved
+  outside the discovery path. Site Stores remain present, with no new
+  services.yaml error, Elräkning traceback or Forecast.Solar persistence error
+  observed.
+- RUNTIME SCOPE: The production estimator and its sanitized `Visa data`
+  metadata are deployed. A fresh authenticated visual read of the live
+  numeric card was not performed in this gate; acceptance rests on the
+  deterministic model tests, exact deployment hashes and startup/runtime
+  checks. Greenely proof/economics, Fiskvik clean-room, Evidence and natural
+  Single Run state were left untouched.
