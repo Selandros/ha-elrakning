@@ -52,7 +52,10 @@ POWER_ROLES = {
     "solar.production": ("W", "positive_production"),
     "grid.power/import": ("W", "positive_import_negative_export"),
     "battery.power": ("W", "positive_discharge_negative_charge"),
+    "battery.charge": ("W", "positive_charge"),
+    "battery.discharge": ("W", "positive_discharge"),
 }
+ENERGY_ROLES = {"grid.energy_import", "grid.energy_export", "battery.capacity"}
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -610,7 +613,7 @@ class CanonicalCollector:
         semantics = target.get("canonicalization")
         return (
             isinstance(semantics, dict)
-            and semantics.get("unit") in {"W", "%"}
+            and semantics.get("unit") in {"W", "%", "kWh"}
             and isinstance(semantics.get("sign_convention"), str)
             and semantics.get("aggregation") in {"time_weighted_mean", "last_valid"}
             and semantics.get("classification") in {"measured", "derived"}
@@ -659,6 +662,19 @@ class CanonicalCollector:
             except (TypeError, ValueError):
                 return None
             return value if math.isfinite(value) and 0 <= value <= 100 else None
+        if role in ENERGY_ROLES:
+            unit = str(getattr(state, "attributes", {}).get("unit_of_measurement", "")).lower()
+            try:
+                value = float(state.state)
+            except (TypeError, ValueError):
+                return None
+            if unit in {"wh", "watt-hour", "watt hours"}:
+                value /= 1000
+            elif unit in {"mwh", "megawatt-hour", "megawatt hours"}:
+                value *= 1000
+            elif unit not in {"kwh", "kilowatt-hour", "kilowatt hours"}:
+                return None
+            return value if math.isfinite(value) and value >= 0 else None
         if role not in POWER_ROLES:
             return None
         value = _power_kw(state)
@@ -797,6 +813,12 @@ class CanonicalCollector:
             "provenance": {
                 "origin_type": "ha_state_event",
                 "entity_id": target["entity_id"],
+                "resource_id": target.get("resource_id") or target["generation_id"],
+                "capture_contract": (
+                    "ess_telemetry.v1"
+                    if role.startswith("battery.")
+                    else "energy_telemetry.v1"
+                ),
                 "source_generation_id": target["generation_id"],
                 "source_identity": target.get("source_identity", {}),
             },

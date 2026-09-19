@@ -165,6 +165,46 @@ ROLE_CANONICALIZATION = {
         "max_hold_seconds": 900,
         "absolute_value": False,
     },
+    "grid.energy_import": {
+        "unit": "kWh",
+        "sign_convention": "positive_import_energy",
+        "aggregation": "last_valid",
+        "classification": "measured",
+        "max_hold_seconds": 3600,
+        "absolute_value": False,
+    },
+    "grid.energy_export": {
+        "unit": "kWh",
+        "sign_convention": "positive_export_energy",
+        "aggregation": "last_valid",
+        "classification": "measured",
+        "max_hold_seconds": 3600,
+        "absolute_value": False,
+    },
+    "battery.charge": {
+        "unit": "W",
+        "sign_convention": "positive_charge",
+        "aggregation": "time_weighted_mean",
+        "classification": "measured",
+        "max_hold_seconds": None,
+        "absolute_value": True,
+    },
+    "battery.discharge": {
+        "unit": "W",
+        "sign_convention": "positive_discharge",
+        "aggregation": "time_weighted_mean",
+        "classification": "measured",
+        "max_hold_seconds": None,
+        "absolute_value": True,
+    },
+    "battery.capacity": {
+        "unit": "kWh",
+        "sign_convention": "positive_usable_or_nominal_capacity",
+        "aggregation": "last_valid",
+        "classification": "measured",
+        "max_hold_seconds": 3600,
+        "absolute_value": False,
+    },
 }
 
 
@@ -446,6 +486,7 @@ class SiteIdentityManager:
                         "logical_role": item["logical_role"],
                         "entity_id": item["entity_id"],
                         "generation_id": item["generation_id"],
+                        "resource_id": item.get("resource_id") or item["generation_id"],
                         "source_identity": deepcopy(item.get("source_identity", {})),
                         "provenance": deepcopy(item.get("provenance", {})),
                         "site": deepcopy(site),
@@ -1088,6 +1129,7 @@ class SiteIdentityManager:
                     continue
                 ledger.append({
                     "generation_id": str(uuid.uuid4()),
+                    "resource_id": str(uuid.uuid4()),
                     "site_id": site_id,
                     "logical_role": role,
                     "source_identity": identity,

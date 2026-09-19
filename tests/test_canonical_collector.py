@@ -87,7 +87,12 @@ def _target(site, role, entity, generation, mapping=None):
         "solar.production": ("W", "positive_production", "time_weighted_mean"),
         "grid.power/import": ("W", "positive_import_negative_export", "time_weighted_mean"),
         "battery.power": ("W", "positive_discharge_negative_charge", "time_weighted_mean"),
+        "battery.charge": ("W", "positive_charge", "time_weighted_mean"),
+        "battery.discharge": ("W", "positive_discharge", "time_weighted_mean"),
         "battery.soc": ("%", "unsigned_0_100", "last_valid"),
+        "grid.energy_import": ("kWh", "positive_import_energy", "last_valid"),
+        "grid.energy_export": ("kWh", "positive_export_energy", "last_valid"),
+        "battery.capacity": ("kWh", "positive_usable_or_nominal_capacity", "last_valid"),
     }
     unit, sign, aggregation = power_semantics[role]
     return {
@@ -647,6 +652,24 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
         soc = _target("site-a", "battery.soc", "sensor.soc", "gen-s")
         self.assertEqual(CanonicalCollector._value_for_target(soc, _State("57", "%", when)), 57.0)
         self.assertIsNone(CanonicalCollector._value_for_target(soc, _State("unknown", "%", when)))
+
+    def test_energy_and_capacity_roles_normalize_native_units(self):
+        when = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        imported = _target("site-a", "grid.energy_import", "sensor.import", "gen-import")
+        capacity = _target("site-a", "battery.capacity", "sensor.capacity", "gen-capacity")
+        self.assertEqual(CanonicalCollector._value_for_target(imported, _State("2500", "Wh", when)), 2.5)
+        self.assertEqual(CanonicalCollector._value_for_target(capacity, _State("10", "kWh", when)), 10.0)
+        self.assertIsNone(CanonicalCollector._value_for_target(imported, _State("10", "W", when)))
+
+    def test_capture_provenance_is_generic_and_resource_scoped(self):
+        when = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        target = _target("site-a", "battery.capacity", "sensor.capacity", "gen-capacity")
+        target["resource_id"] = "resource-a"
+        observation = CanonicalCollector(_Hass(), _Identity([]), ":memory:")._build_observation(
+            target, when, 10.0, 1.0, when, when, "good", "none"
+        )
+        self.assertEqual(observation["provenance"]["capture_contract"], "ess_telemetry.v1")
+        self.assertEqual(observation["provenance"]["resource_id"], "resource-a")
 
     def test_explicit_target_canonicalization_controls_source_transform(self):
         when = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
