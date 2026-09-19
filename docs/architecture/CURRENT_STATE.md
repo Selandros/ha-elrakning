@@ -1019,3 +1019,36 @@ INFERRED (roadmap): Long-term data foundation:
   Open-Meteo Single Run frame for Vikarbodarna and zero duplicate point IDs.
   No canonical, Evidence or Single Run mutation was performed by the audit;
   no new Elräkning traceback was observed.
+
+## 0.0.648 Greenely facility meter-identity state amendment
+
+- ROOT CAUSE VERIFIED: C.4C.1A explicit out-of-band proof required a
+  `facility_meter_id_fingerprint` even when the provider does not expose a
+  facility meter identity. The existing contract had a state form for the
+  contract meter, but no bounded state for the facility meter.
+- IMPLEMENTED: The proof boundary now accepts exactly one of a verified
+  facility-meter fingerprint or the bounded state
+  `provider_meter_identity_unavailable_v1`. Unknown/free-form states, both
+  representations, and missing representations remain fail-closed. Provider
+  native lookup, site/contract verification, invoice installation evidence,
+  Greenely economics, Evidence-v1, Single Run and canonical schema are
+  unchanged.
+- VERIFIED: Release commit `10ea758e8fb6401e47212260aa77904f9081a053`
+  contains exactly the bounded implementation, contract fixture, service
+  metadata and focused tests. Manifest/runtime is `0.0.648`; the full local
+  gate is `637 passed, 46 subtests, 0 failed`, MJS `28/28`, compileall,
+  JSON/YAML validation and diff-check pass.
+- VERIFIED (0.0.648 runtime): An exact 59-file payload matched all remote
+  hashes before one normal Core restart. Core returned healthy, the
+  `services.yaml` load error count is zero, no new Elräkning setup/import
+  error was observed, and no new E.ON thread warning was observed. A unique
+  `0.0.647` rollback backup is preserved outside the discovery path.
+- VERIFIED (0.0.648 runtime): Both Store files remain present and the
+  forbidden Greenely PII-key count is zero in each. No proof provisioning,
+  Evidence collection or Single Run trigger was invoked; Greenely economics
+  remains fail-closed. The existing natural Single Run status is unchanged.
+- OPEN: The bounded amendment enables a legitimate authenticated admin
+  proof-provisioning request but does not provision proof. Installation
+  evidence and invoice occurrence/correction semantics remain separate; no
+  economics activation is authorized without the required authenticated
+  proof service call.
