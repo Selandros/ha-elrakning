@@ -1052,3 +1052,35 @@ INFERRED (roadmap): Long-term data foundation:
   evidence and invoice occurrence/correction semantics remain separate; no
   economics activation is authorized without the required authenticated
   proof service call.
+
+## 0.0.649 Greenely contract-meter identity state amendment
+
+- ROOT CAUSE VERIFIED: The provider snapshot exposed no contract-meter
+  identity. The prior `contract_meter_id_fingerprint_or_state` path accepted
+  any non-empty string, so it had no bounded distinction between a canonical
+  fingerprint and an unavailable provider state.
+- IMPLEMENTED: Contract scope now has its own exact state,
+  `provider_contract_meter_identity_unavailable_v1`. The existing facility
+  state is not reusable for contract scope. Contract input accepts only that
+  state or a 64-character lowercase `sha256-v1` fingerprint; free text,
+  malformed fingerprints and raw identities fail closed.
+- VERIFIED: Normalized contract-meter identity/state participates in proof
+  semantic identity and therefore source-generation identity. Invoice
+  occurrence, correction and reissue semantics remain separate. No Store
+  migration, schema change, provider-native lookup change, Evidence change or
+  Single Run change was made.
+- VERIFIED (0.0.649 runtime): Release commit `bd24e767526f844c93d8a874830155df3bf8c0f5`
+  was deployed as an AppleDouble-free exact 59-file payload with all hashes
+  matching before one normal Core restart. Core returned healthy; manifest is
+  `0.0.649`; services/setup errors and new proof-provisioning log markers were
+  absent. Two rollback backups are preserved outside the discovery path.
+- VERIFIED (0.0.649 runtime): Greenely forbidden PII-key counts remain zero,
+  both sites remain preserved, and no proof provisioning, Evidence collection
+  or Single Run trigger was invoked. Greenely economics remains fail-closed.
+- READ-ONLY PROOF READINESS: The bounded provider snapshot establishes the
+  facility/contract/invoice and out-of-band installation-fingerprint chain,
+  while contract-meter identity is explicitly unavailable under the new
+  bounded state. No proof record exists. Provisioning still requires an
+  authenticated Home Assistant admin service context and a complete bounded
+  evidence package; invoice occurrence/correction/reissue remains open and
+  separate.
