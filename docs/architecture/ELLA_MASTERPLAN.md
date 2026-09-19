@@ -487,6 +487,97 @@ Card anatomy and states:
 No UI card may imply that a plan was executed when it was only shadow/advisory.
 No card may appear for Fiskvik without an eligible physical/source contract.
 
+### 5.1 Shared price/energy forecast graph
+
+The existing price graph becomes the shared price and energy-plan graph. It
+must be able to overlay the following independent, individually toggleable
+layers:
+
+1. `purchase_price`;
+2. `sell_price` / feed-in price when available;
+3. `actual_import_kw` and `forecast_import_kw`;
+4. `actual_export_kw` and `forecast_export_kw`;
+5. `actual_pv_kw` and `forecast_pv_kw`;
+6. `actual_load_kw` and `forecast_load_kw`;
+7. `actual_battery_charge_kw` and `planned_battery_charge_kw`;
+8. `actual_battery_discharge_kw` and `planned_battery_discharge_kw`.
+
+The visual contract is strict:
+
+- solid line means actual/observed;
+- dashed line means estimated/forecast/planned;
+- the estimated segment starts at the latest actual point and continues
+  forward without a visual gap when the source coverage permits it;
+- actual and estimated variants of one signal use the same signal color;
+  dash pattern and restrained opacity, not a second color palette, provide the
+  primary distinction;
+- each signal has its own legend/toggle;
+- the default layer set is `purchase_price`, actual/forecast import, actual/
+  forecast PV, and actual/forecast load. Sell price, export, battery
+  charge/discharge and detailed plan consequence layers are opt-in so the
+  default view remains readable;
+- existing card spacing, typography, borders, background and palette are
+  reused.
+
+`forecast_load` and `forecast_pv` are exogenous forecast inputs. Once ELLA
+has planned a response, import, export, charge and discharge consequences are
+not independent forecasts: they are calculated consequences of the plan and
+must be named `planned_import_kw`, `planned_export_kw`,
+`planned_battery_charge_kw` and `planned_battery_discharge_kw` in the data
+contract. The UI may present both classes as “Estimerad” where useful, but
+the serialized names and provenance must remain distinct. A future compatibility
+alias may expose `forecast_*` to older consumers only if it carries the
+explicit planned/exogenous classification.
+
+### 5.2 Battery graph and multi-ESS detail
+
+The SOC graph overlays `actual_soc` as a solid series and
+`planned_soc`/`estimated_soc` as a dashed forward series. Planned SOC must be
+derived from the same ELLA plan and the same per-ESS digital-twin transition
+model that produced the charge/discharge plan. The frontend must never
+recalculate a separate SOC trajectory.
+
+If multiple ESS resources are summarized in the compact UI, the aggregate SOC
+is capacity-weighted over valid usable capacities:
+
+```text
+aggregate_soc = sum(usable_capacity_e * soc_e) / sum(usable_capacity_e)
+```
+
+An ESS with unknown/stale usable capacity is excluded from the aggregate and
+causes the aggregate to be marked incomplete; it is not silently treated as
+zero. The detail view must retain per-ESS SOC, power, limits, efficiency,
+quality and provenance even when the compact graph shows an aggregate.
+
+### 5.3 Plan-card and graph synchronization
+
+The horizontal ELLA plan cards and the shared graph use the same plan-block
+intervals. Clicking or hovering a card highlights its interval and the
+corresponding planned charge/discharge, import/export and SOC layers. The
+card status `Planerad`, `Pågår`, `Utförd` or `Avvikelse` controls the comparison
+shown in the same interval:
+
+- planned dashed series remain the immutable plan;
+- actual solid series show observed outcome;
+- `Utförd` exposes planned versus actual values;
+- `Avvikelse` exposes the bounded deviation and reason, without rewriting the
+  plan.
+
+Option A therefore has the compact card rail above the graph in its collapsed
+form. `Visa plan` expands the shared multi-layer graph below the rail. Option B
+may use the same graph behind one summary card, while Option C may show the
+graph by default, but none may introduce a separate ELLA palette or a second
+time axis.
+
+### 5.4 Forecast rendering rules
+
+The graph must not draw a forecast/planned line when its source is stale,
+unavailable or ambiguous. A missing segment remains missing; interpolation may
+not make an unverified forecast appear continuous. Low confidence is shown
+discreetly in the legend and tooltip with source/confidence metadata, not as a
+large warning block that obscures the graph. A plan consequence is also hidden
+when its referenced plan, ESS capability or input frame is invalid.
+
 ## 6. Data -> decision -> outcome contract
 
 ```text
@@ -506,6 +597,28 @@ Evidence's accuracy/bias is a confidence/scenario input, not a replacement for
 the immutable source forecast. Greenely invoice economics informs tariff and
 economic context only; its proof and occurrence semantics remain separate from
 physical load/PV/battery attribution.
+
+## 6.1 First-class graph datasets and frame requirements
+
+The graph is only correct when each layer is backed by a first-class,
+site-scoped frame or telemetry series. The minimum set is:
+
+| Dataset/frame | Role | Required metadata |
+|---|---|---|
+| Load forecast | Exogenous load trajectory | `site_id`, target interval, `known_at`, model/source version, quality, confidence and forecast scenario |
+| Solar forecast raw | Provider-specific PV trajectory | `site_id`, target interval, `known_at`, provider/source generation, model version, quality and confidence |
+| Solar forecast corrected | Bias-adjusted PV trajectory | `site_id`, target interval, `known_at`, correction/calibration version, source-frame references, quality and confidence |
+| Purchase/sell price frame | Import cost and export value | target interval, `known_at`, publication state, tariff/VAT/unit semantics, source/version, quality and confidence |
+| ELLA plan frame | Planner decisions and consequences | `site_id`, `planned_at`, decision horizon, plan version, parameter hash, input-frame references, action blocks, quality and confidence |
+| Planned SOC trajectory | Result of the per-ESS digital twin | `site_id`, `planned_at`, target interval, plan version, ESS resource identity, model version, quality and confidence |
+| Planned grid trajectory | Plan-derived import/export consequence | `site_id`, `planned_at`, target interval, plan version, source plan reference, constraint state and confidence |
+| Actual telemetry | Observed load, PV, grid, battery power and SOC | `site_id`, observed interval, `known_at` when delayed, source identity/generation, unit/sign convention, quality and stale state |
+
+`planned_at` identifies when ELLA produced the plan; it does not replace
+`known_at` for source forecasts or `observed_at` for actual telemetry. Every
+frame must also carry its schema/contract version and remain replay-selectable
+by the decision cutoff. The graph is a consumer of these frames, not a place
+where missing provenance or SOC transitions are reconstructed.
 
 ## 7. Safety, site isolation and fail-closed rules
 
