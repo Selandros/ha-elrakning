@@ -124,9 +124,13 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.state["ledger"][0]["resource_id"], restored_resource_id)
 
         restarted = SiteIdentityManager(hass, power, meter)
-        restarted.store = _Store(manager.store.data)
+        legacy_store = dict(manager.store.data)
+        legacy_store["ledger"] = [dict(manager.store.data["ledger"][0], resource_id=None)]
+        restarted.store = _Store(legacy_store)
         await restarted.async_load()
         self.assertEqual(restarted.state["site"]["site_id"], first_site_id)
+        self.assertTrue(restarted.state["ledger"][0]["resource_id"])
+        self.assertEqual(restarted.state["ledger"][0]["resource_id"], restarted.store.data["ledger"][0]["resource_id"])
 
     async def test_existing_site_migration_persists_collection_enabled(self):
         hass = _hass({})

@@ -321,6 +321,11 @@ class SiteIdentityManager:
                 "ledger": list(cached.get("ledger", [])) if isinstance(cached.get("ledger", []), list) else [],
                 "migration_complete": cached.get("migration_complete", bool(cached.get("ledger"))),
             }
+            resource_ids_added = False
+            for item in self.state["ledger"]:
+                if isinstance(item, dict) and not item.get("resource_id"):
+                    item["resource_id"] = str(uuid.uuid4())
+                    resource_ids_added = True
             self.state["site"].setdefault("current", True)
             self.state["site"].setdefault("location_fingerprint", _location_fingerprint(self.hass))
             self._normalize_sites()
@@ -347,7 +352,7 @@ class SiteIdentityManager:
                 if not self.state["global_bindings"].get("nord_pool") and isinstance(legacy_binding, dict):
                     self.state["global_bindings"]["nord_pool"] = legacy_binding
                     migrated_global_price = True
-            if migrated_global_price:
+            if migrated_global_price or resource_ids_added:
                 await self.store.async_save(self.state)
             elif collection_enabled_migrated:
                 await self.store.async_save(self.state)
