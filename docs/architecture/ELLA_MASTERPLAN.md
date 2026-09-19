@@ -569,7 +569,59 @@ may use the same graph behind one summary card, while Option C may show the
 graph by default, but none may introduce a separate ELLA palette or a second
 time axis.
 
-### 5.4 Forecast rendering rules
+### 5.4 Shared plan-block selection across graphs
+
+ELLA cards are directly linked to both the shared price/energy graph and the
+battery/SOC graph through one presentation-level selection state. A plan card
+must carry a stable `plan_block_id`, `planned_start`, `planned_end`, action type
+and plan revision. Selection must never be resolved from display text.
+
+Clicking a card for, for example, `13:00-17:00` selects exactly that interval
+in every relevant graph. The selection is rendered as a low-opacity vertical
+time band with a restrained outline over the plotting area. It must not alter
+any series values. The selected card receives a matching selected state, and
+clicking another card moves the selection to that card's interval. Clicking
+the selected card or an empty graph area may clear it. Hover may provide a
+temporary preview highlight; click/pin remains persistent until selection is
+changed or cleared.
+
+The shared state applies at minimum to:
+
+1. the price/energy graph with purchase/sell price, import/export, PV, load,
+   battery charge and battery discharge actual plus estimated/planned layers;
+2. the battery/SOC graph with actual SOC plus planned/estimated SOC.
+
+Future timeline graphs must consume the same shared selected-plan-interval
+state rather than creating independent selections. The state is presentation
+state only and never mutates canonical frames, plans or runtime data. It must
+be shared by the compact rail and the expanded `Visa plan` view.
+
+Selection semantics depend on plan status:
+
+- `Planerad` and `Pågår` highlight where the action is planned or currently
+  occurring;
+- `Utförd` and `Avvikelse` keep the card's primary interval as the default
+  selected band and compare planned dashed series with actual solid series;
+- when actual execution start/end differs from the planned interval, the detail
+  view exposes both intervals. The primary band remains one uncluttered
+  interval, while tooltip/detail explains the deviation. A suitable label is
+  `ELLA 13:00-17:00 · Urladda batteri`.
+
+The band uses the existing palette and a theme-safe low opacity/outline so it
+is visible in dark and light themes without dominating the graph. It must be
+clipped to the plotting area and never extend outside the selected interval.
+
+Selection acceptance tests must prove:
+
+- selecting 13:00-17:00 highlights exactly the same interval in both graphs;
+- the selection survives a normal rerender/data refresh while the same plan
+  revision exists;
+- a stale or replaced plan revision clears or safely remaps the selection;
+- no highlight is rendered outside the selected interval;
+- keyboard focus, activation, clear and selected states are accessible;
+- horizontal mobile card scrolling preserves the selected card association.
+
+### 5.5 Forecast rendering rules
 
 The graph must not draw a forecast/planned line when its source is stale,
 unavailable or ambiguous. A missing segment remains missing; interpolation may
