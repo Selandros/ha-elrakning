@@ -2447,6 +2447,8 @@ class ElrakningPanel {
     this._powerStateMutationGeneration = 0;
     this._powerStateLifecycleGeneration = 0;
     this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+    this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
+    this._ellaSelection = null;
     this._powerHistoryRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._solarEvidenceEventUnsubscribePromise = null;
@@ -2637,6 +2639,16 @@ class ElrakningPanel {
             <div class="period-picker-popover" data-period-picker-popover hidden></div>
             <dialog class="period-picker-dialog" data-period-picker-dialog aria-label="Välj period"></dialog>
           </div>
+        </section>
+
+        <section class="ella-preview-section" data-ella-preview hidden aria-labelledby="ella-preview-title">
+          <div class="section-heading ella-preview-heading">
+            <div><h2 id="ella-preview-title">ELLA · Energiplan</h2><p class="status">Lärläge · Shadow · styrning avstängd</p></div>
+            <button type="button" class="card-source-action" data-ella-expand>Visa plan</button>
+          </div>
+          <div class="ella-readiness" data-ella-readiness></div>
+          <div class="ella-card-rail" data-ella-card-rail role="list" aria-label="ELLA-prognos och beredskap"></div>
+          <p class="ella-unavailable" data-ella-unavailable hidden></p>
         </section>
 
         <div class="daily-energy-row">
@@ -3606,6 +3618,89 @@ class ElrakningPanel {
           min-block-size: 0;
           min-height: 0;
           min-width: 0;
+        }
+
+        .ella-preview-section {
+          display: grid;
+          gap: 10px;
+          margin-block: 10px;
+        }
+
+        .ella-preview-heading {
+          align-items: center;
+          display: flex;
+          justify-content: space-between;
+        }
+
+        .ella-preview-heading h2 {
+          margin: 0;
+        }
+
+        .ella-preview-heading .status,
+        .ella-unavailable,
+        .ella-readiness {
+          color: var(--secondary-text-color);
+          font-size: var(--price-card-text-size);
+          margin: 2px 0 0;
+        }
+
+        .ella-readiness {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px 12px;
+        }
+
+        .ella-readiness span {
+          white-space: nowrap;
+        }
+
+        .ella-card-rail {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          padding: 1px 1px 5px;
+          scrollbar-width: thin;
+        }
+
+        .ella-preview-card {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: var(--ha-card-border-radius, 12px);
+          flex: 0 0 min(260px, 78vw);
+          padding: 10px;
+          text-align: left;
+        }
+
+        .ella-preview-card.selected {
+          border-color: var(--primary-color);
+          box-shadow: 0 0 0 1px var(--primary-color);
+        }
+
+        .ella-preview-card strong,
+        .ella-preview-card small {
+          display: block;
+        }
+
+        .ella-preview-card small {
+          color: var(--secondary-text-color);
+          margin-top: 4px;
+        }
+
+        .ella-card-status {
+          color: var(--secondary-text-color);
+          font-size: .85em;
+          margin-top: 8px;
+        }
+
+        .chart-power-forecast-load {
+          stroke-dasharray: 8 5;
+          opacity: .68;
+        }
+
+        .ella-selection-band {
+          fill: var(--primary-color);
+          opacity: .10;
+          pointer-events: none;
         }
 
         .visually-hidden {
@@ -6466,6 +6561,7 @@ class ElrakningPanel {
       const state = await this.hass.callWS({ type: "elrakning/site_identity" });
       this._siteState = state;
       this._renderSiteSettings();
+      this._renderEllaPreview();
       return state;
     } catch (error) {
       const result = this.host.querySelector("[data-site-settings-result]");
@@ -7849,10 +7945,13 @@ class ElrakningPanel {
     const plotHeight = height - plot.top - plot.bottom;
     const xStart = dayStart.getTime();
     const xEnd = points.at(-1).timestamp;
+    const selectedEnd = this._ellaSelection?.end ? new Date(this._ellaSelection.end).getTime() : 0;
+    const axisEnd = Math.max(xEnd, Number.isFinite(selectedEnd) ? selectedEnd : 0);
     const xDuration = Math.max(1, xEnd - xStart);
+    const chartDuration = Math.max(1, axisEnd - xStart);
     const x = (timestamp) => xEnd <= xStart
       ? width - plot.right
-      : plot.left + ((timestamp - xStart) / xDuration) * plotWidth;
+      : plot.left + ((timestamp - xStart) / chartDuration) * plotWidth;
     const y = (value) => plot.top + (1 - Math.max(0, Math.min(100, value)) / 100) * plotHeight;
     const intervals = points.slice(1).map((point, index) => point.timestamp - points[index].timestamp).filter((interval) => interval > 0);
     const typicalInterval = intervals.length ? intervals.slice().sort((left, right) => left - right)[Math.floor(intervals.length / 2)] : 0;
@@ -7886,7 +7985,7 @@ class ElrakningPanel {
     }).join("");
     const labelMarkup = `<div class="soc-label-rail" aria-hidden="true"><span class="soc-label top">100</span><span class="soc-label middle">50</span><span class="soc-label bottom">0</span></div>`;
     chart.innerHTML = `${labelMarkup}<svg class="soc-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Batteriets laddnivå idag">
-      ${gridMarkup}${lineMarkup}${estimatedMarkup}${singletonMarkup}<g class="soc-hover" aria-hidden="true"></g>
+      ${gridMarkup}${lineMarkup}${estimatedMarkup}${singletonMarkup}${this._ellaSelectionBandMarkup((timestamp) => x(timestamp), plot, xStart, axisEnd)}<g class="soc-hover" aria-hidden="true"></g>
     </svg><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector(".soc-chart-svg");
     const tooltip = chart.querySelector(".soc-tooltip");
@@ -7966,15 +8065,73 @@ class ElrakningPanel {
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: response?.solar_sun || { available: false },
       };
+      this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
       this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
       this._renderSolarEvidence();
+      this._renderEllaPreview();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
     this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+      this._loadForecast = { available: false, reason: "history_unavailable", frames: [] };
       this._refreshPowerEnergyState();
     }
+  }
+
+  _ellaSelectionBandMarkup(x, plot, startMs, endMs) {
+    const selectionStart = new Date(this._ellaSelection?.start || 0).getTime();
+    const selectionEnd = new Date(this._ellaSelection?.end || 0).getTime();
+    if (!Number.isFinite(selectionStart) || !Number.isFinite(selectionEnd) || selectionEnd <= selectionStart || endMs <= startMs) return "";
+    const left = Math.max(plot.left, x(Math.max(startMs, selectionStart)));
+    const right = Math.min(960 - plot.right, x(Math.min(endMs, selectionEnd)));
+    return right > left ? `<rect class="ella-selection-band" x="${left}" y="${plot.top}" width="${right - left}" height="${plot.height || 340 - plot.top - plot.bottom}" />` : "";
+  }
+
+  _renderEllaPreview() {
+    const section = this.host.querySelector("[data-ella-preview]");
+    const rail = this.host.querySelector("[data-ella-card-rail]");
+    const readiness = this.host.querySelector("[data-ella-readiness]");
+    const unavailable = this.host.querySelector("[data-ella-unavailable]");
+    if (!section || !rail || !readiness || !unavailable) return;
+    const configured = this._siteState?.site_configured === true;
+    section.hidden = !configured;
+    if (!configured) return;
+    const forecastFrame = this._loadForecast?.frames?.[0];
+    const points = Array.isArray(forecastFrame?.points) ? forecastFrame.points : [];
+    const solarAvailable = this._powerHistory?.solar_forecast?.available === true;
+    readiness.innerHTML = `<span>Lastprognos: ${points.length ? "klar" : "saknar historiskt stöd"}</span><span>Solprognos: ${solarAvailable ? "tillgänglig" : "ej tillgänglig"}</span><span>ESS-modell: saknas</span><span>Styrning: avstängd (lärläge)</span>`;
+    const cards = [];
+    if (points.length) {
+      const first = new Date(points[0].valid_at);
+      const last = new Date(points[Math.min(points.length, 16) - 1].valid_at);
+      last.setMinutes(last.getMinutes() + 15);
+      const average = points.slice(0, 16).reduce((sum, point) => sum + Number(point.value || 0), 0) / Math.min(points.length, 16) / 1000;
+      cards.push({
+        id: `load-${forecastFrame.frame_id}`,
+        start: first.toISOString(), end: last.toISOString(),
+        title: `${this._formatTime(first)}–${this._formatTime(last)} · Lastprognos`,
+        reason: `Förväntad last cirka ${this._formatNumber(average)} kW · ${forecastFrame.quality_status === "good" ? "god" : "låg"} säkerhet`,
+        status: "Lärläge",
+      });
+    }
+    cards.push({ id: "ess-readiness", title: "Batteriplan väntar på ESS-modell", reason: "Ingen planerad laddning/urladdning visas utan verifierade begränsningar.", status: "Lärläge" });
+    cards.push({ id: "pv-readiness", title: solarAvailable ? "Solprognos tillgänglig" : "Solprognos ej tillgänglig", reason: solarAvailable ? "Providerprognos visas endast som prognosdata." : "Ingen verifierad framtida PV-serie att rita.", status: "Lärläge" });
+    rail.innerHTML = cards.map((card) => `<button type="button" class="ella-preview-card${this._ellaSelection?.id === card.id ? " selected" : ""}" data-ella-card="${card.id}" data-ella-start="${card.start || ""}" data-ella-end="${card.end || ""}" role="listitem"><strong>${card.title}</strong><small>${card.reason}</small><span class="ella-card-status">${card.status}</span></button>`).join("");
+    unavailable.hidden = true;
+    rail.querySelectorAll("[data-ella-card]").forEach((card) => card.addEventListener("click", () => {
+      const id = card.dataset.ellaCard;
+      if (this._ellaSelection?.id === id) this._ellaSelection = null;
+      else if (card.dataset.ellaStart && card.dataset.ellaEnd) this._ellaSelection = { id, start: card.dataset.ellaStart, end: card.dataset.ellaEnd, revision: forecastFrame?.revision || null };
+      else this._ellaSelection = { id, start: null, end: null, revision: null };
+      this._renderEllaPreview();
+      this.renderPriceChart();
+      this._renderSocChart();
+    }));
+  }
+
+  _formatTime(value) {
+    return value.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
   }
 
   async loadSolarForecast() {
@@ -10847,6 +11004,18 @@ class ElrakningPanel {
         value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
       }));
     }
+    const loadForecastPoints = (this._loadForecast?.frames || [])
+      .flatMap((frame) => Array.isArray(frame.points) ? frame.points : [])
+      .map((point) => ({ timestamp: new Date(point.valid_at).getTime(), value_kw: Number(point.value) / 1000 }))
+      .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value_kw)
+        && point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime())
+      .sort((left, right) => left.timestamp - right.timestamp);
+    if (loadForecastPoints.length) {
+      const actualBeforeForecast = (powerDisplayPoints.consumption || [])
+        .filter((point) => new Date(point.timestamp).getTime() < loadForecastPoints[0].timestamp)
+        .at(-1);
+      if (actualBeforeForecast) loadForecastPoints.unshift({ ...actualBeforeForecast, value_kw: Number(actualBeforeForecast.value_kw) });
+    }
     this._powerCanonicalPointMaps = Object.fromEntries(
       Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
         points.filter((point) => point.raw_timestamp !== null).map((point) => [point.timestamp, point]),
@@ -10886,6 +11055,9 @@ class ElrakningPanel {
       meterLinesFor("export_kw", "chart-meter-export", visibleLayers.export),
       powerLinesFor("solar", "chart-power-solar", visibleLayers.solar),
       powerLinesFor("consumption", "chart-power-consumption", visibleLayers.consumption),
+      visibleLayers.consumption && loadForecastPoints.length
+        ? this.buildMeterDisplayMarkup(loadForecastPoints, "value_kw", "chart-power-consumption chart-power-forecast-load", x, meterY)
+        : "",
       powerLinesFor("charging", "chart-power-charging", visibleLayers.charging),
       powerLinesFor("discharging", "chart-power-discharging", visibleLayers.discharging),
     ].join("");
@@ -11002,7 +11174,7 @@ class ElrakningPanel {
       <g data-price-dynamic="grid">${meterGrid}</g>
       ${bars}
       <g data-price-dynamic="areas">${meterAreas}</g>
-      <g data-price-dynamic="lines">${meterLines}</g>
+      <g data-price-dynamic="lines">${this._ellaSelectionBandMarkup(x, plot, dayStart.getTime(), dayEnd.getTime())}${meterLines}</g>
       ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
     </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;

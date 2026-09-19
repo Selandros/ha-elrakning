@@ -3,6 +3,7 @@
 import asyncio
 import json
 from functools import partial
+from datetime import timezone
 from pathlib import Path
 
 from homeassistant.components import frontend
@@ -10,6 +11,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
+from homeassistant.util import dt as dt_util
 
 from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
 from .canonical_collector import CanonicalCollector
@@ -26,6 +28,7 @@ from .solar_pvgis import SolarPvgisManager
 from .solar_shadow import SolarShadowManager
 from .solar_evidence import SolarEvidenceManager
 from .solar_weather import SolarWeatherManager
+from .load_forecast import build_site_load_forecast
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
@@ -55,6 +58,29 @@ async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> No
     """Refresh the coordinator once at the local start of each day."""
     await coordinator.async_request_refresh()
     coordinator.async_schedule_midnight_recovery()
+
+
+async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector) -> None:
+    """Persist truthful load-profile forecasts for every eligible site."""
+    configs = site_identity_manager.collection_site_configs()
+    target_getter = getattr(site_identity_manager, "collection_targets", None)
+    targets = target_getter() if callable(target_getter) else []
+    site_ids = {target["site_id"] for target in targets
+                if isinstance(target, dict) and target.get("logical_role") == "house.consumption"}
+    now = dt_util.now().astimezone(timezone.utc)
+    for site_id in sorted(site_ids):
+        config = configs.get(site_id, {}) if isinstance(configs, dict) else {}
+        location = config.get("location", {}) if isinstance(config, dict) else {}
+        timezone_name = location.get("timezone") if isinstance(location, dict) else None
+        if not isinstance(timezone_name, str) or not timezone_name:
+            continue
+        try:
+            await hass.async_add_executor_job(
+                build_site_load_forecast, canonical_collector.storage, site_id, timezone_name, now
+            )
+        except Exception:
+            # Forecast availability is fail-closed and must not prevent startup.
+            continue
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
@@ -199,6 +225,16 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, lambda _now: greenely_economics.async_schedule_capture(), hour=0, minute=5, second=0
     )
     await solar_forecast_manager.async_capture_collection_baselines()
+    frontend_data["load_forecast_startup_task"] = hass.async_create_task(
+        _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
+    )
+    if unsubscribe := frontend_data.pop("load_forecast_cadence_unsub", None):
+        unsubscribe()
+    frontend_data["load_forecast_cadence_unsub"] = async_track_time_change(
+        hass, lambda _now: hass.async_create_task(
+            _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
+        ), hour=None, minute=0, second=30
+    )
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
     )
@@ -301,6 +337,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if solar_open_meteo_manager := frontend_data.pop("solar_open_meteo_manager", None):
         await solar_open_meteo_manager.async_shutdown()
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
+        unsubscribe()
+    if unsubscribe := frontend_data.pop("load_forecast_cadence_unsub", None):
         unsubscribe()
     if entry_coordinator is not None:
         entry_coordinator.cancel_midnight_recovery()

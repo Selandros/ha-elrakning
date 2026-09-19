@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from datetime import date, timedelta
 
 import voluptuous as vol
@@ -74,6 +75,7 @@ BILLING_HISTORY_COMMAND = f"{DOMAIN}/billing_history"
 POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
+LOAD_FORECAST_COMMAND = f"{DOMAIN}/load_forecast"
 SITE_IDENTITY_COMMAND = f"{DOMAIN}/site_identity"
 SITE_RENAME_COMMAND = f"{DOMAIN}/site_rename"
 SITE_CREATE_COMMAND = f"{DOMAIN}/site_create"
@@ -128,6 +130,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_save)
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
+    websocket_api.async_register_command(hass, websocket_load_forecast)
     websocket_api.async_register_command(hass, websocket_site_identity)
     websocket_api.async_register_command(hass, websocket_site_rename)
     websocket_api.async_register_command(hass, websocket_site_create)
@@ -1190,7 +1193,51 @@ async def websocket_power_history(hass, connection, msg):
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
     result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
     result["solar_sun"] = build_sun_context(hass)
+    result["load_forecast"] = await _async_load_forecast_state(hass)
     connection.send_result(msg["id"], result)
+
+
+async def _async_load_forecast_state(hass) -> dict:
+    """Serialize the active site's immutable load forecast, if available."""
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
+    if not site_id or collector is None:
+        return {"available": False, "reason": "site_unconfigured", "frames": []}
+    now = dt_util.now().astimezone()
+    try:
+        frames = await hass.async_add_executor_job(
+            partial(
+                collector.storage.read_external_input_frames,
+                now,
+                source_scope="site",
+                site_id=site_id,
+                logical_role="load.forecast",
+            )
+        )
+    except Exception:
+        return {"available": False, "reason": "history_unavailable", "frames": []}
+    serialized = []
+    for frame in frames:
+        serialized.append({
+            "frame_id": frame["frame_id"], "revision": frame["revision"],
+            "site_id": frame["site_id"], "known_at": frame["known_at"].isoformat(),
+            "valid_from": frame["valid_from"].isoformat() if frame.get("valid_from") else None,
+            "valid_to": frame["valid_to"].isoformat() if frame.get("valid_to") else None,
+            "payload_schema": frame["payload_schema"], "quality_status": frame["quality_status"],
+            "quality": frame["quality"], "provenance": frame["provenance"],
+            "points": [{"point_id": point["point_id"], "point_key": point["point_key"],
+                        "valid_at": point["valid_at"].isoformat(), "value": point["value"],
+                        "unit": point["unit"], "quality_status": point["quality_status"],
+                        "point": point["point"]} for point in frame["points"]],
+        })
+    return {"available": bool(serialized), "reason": None if serialized else "no_supported_history", "frames": serialized}
+
+
+@websocket_api.websocket_command({vol.Required("type"): LOAD_FORECAST_COMMAND})
+@websocket_api.async_response
+async def websocket_load_forecast(hass, connection, msg):
+    connection.send_result(msg["id"], await _async_load_forecast_state(hass))
 
 
 @websocket_api.websocket_command({vol.Required("type"): SOLAR_FORECAST_STATE_COMMAND})
