@@ -903,6 +903,21 @@ INFERRED (roadmap): Long-term data foundation:
   subscriptions, provider data, auth, bindings, stores and site semantics are
   unchanged. Focused worker-thread regression tests cover E.ON startup/interval
   callbacks and the shared elhandel lifecycle.
-- RELEASE STATUS: `0.0.643` is the pending release-only version bump for this
-  minimal fix. Solar Evidence, Single Run, Greenely and canonical schema are
-  separate and unchanged.
+- RELEASE STATUS: `0.0.643` is released, deployed and runtime-verified for
+  this minimal fix. Solar Evidence, Single Run, Greenely and canonical schema
+  are separate and unchanged.
+- VERIFIED (0.0.643 runtime): Release commit
+  `2ffb99aa45f71f35b875c937ffe1ea30d3a881b2` was deployed as an exact
+  58-file payload; all source hashes matched after one normal Core restart and
+  the runtime manifest reported `0.0.643`. The post-restart log window has no
+  new E.ON/elhandel wrong-thread `async_create_task` or `never awaited`
+  warning; the remaining matching lines are older log history.
+- VERIFIED (0.0.643 runtime): Both sites remain in the registry, Vikarbodarna
+  retains its namespaced solar stores, Fiskvik remains the clean-room site, and
+  no Greenely proof/economics activation or manual Evidence/Single Run capture
+  occurred. The existing `services.yaml` error is baseline: `services.yaml`
+  is absent in both the 0.0.642 rollback payload and the repository release
+  payload. The canonical database was not modified; direct post-restart
+  SQLite integrity execution remains unavailable on the HA host, so the prior
+  WAL-consistent integrity result is the last direct DB evidence. No natural
+  Single Run frame was observed during this window.
