@@ -1,0 +1,50 @@
+greenely_proof_provision:
+  fields:
+    site_id:
+      required: true
+      selector:
+        text:
+    expected_binding_fingerprint:
+      required: true
+      selector:
+        text:
+    contract_id:
+      required: true
+      selector:
+        text:
+    facility_meter_id_fingerprint:
+      required: true
+      selector:
+        text:
+    contract_meter_id_fingerprint_or_state:
+      required: true
+      selector:
+        text:
+    invoice_installation_identity_fingerprint:
+      required: true
+      selector:
+        text:
+    verification_method:
+      required: true
+      selector:
+        text:
+    parser_identity:
+      required: true
+      selector:
+        text:
+    normalization_identity:
+      required: true
+      selector:
+        text:
+    evidence_reference:
+      required: true
+      selector:
+        text:
+    evidence_digest:
+      required: true
+      selector:
+        text:
+    evidence_package:
+      required: true
+      selector:
+        object: {}

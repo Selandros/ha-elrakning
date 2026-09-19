@@ -921,3 +921,18 @@ INFERRED (roadmap): Long-term data foundation:
   SQLite integrity execution remains unavailable on the HA host, so the prior
   WAL-consistent integrity result is the last direct DB evidence. No natural
   Single Run frame was observed during this window.
+
+## 0.0.644 services.yaml packaging fix
+
+- ROOT CAUSE VERIFIED: Elräkning registers the existing
+  `elrakning.greenely_proof_provision` service from
+  `greenely_invoice_economics.py`, while no `services.yaml` has ever existed
+  in the repository or release payload. Home Assistant therefore attempts to
+  load the service description and reports the missing-file error.
+- IMPLEMENTED (pending release): Added metadata for that existing service and
+  all twelve existing required fields. No service handler, schema, service
+  semantics, provider data, site state, storage, Solar Evidence, Single Run,
+  Greenely proof state or canonical schema was changed.
+- RELEASE STATUS: `0.0.644` is pending release, deploy and runtime
+  verification. The baseline `services.yaml` error is expected to disappear
+  after the new payload is loaded.
