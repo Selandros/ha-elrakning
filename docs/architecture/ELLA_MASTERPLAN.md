@@ -1029,7 +1029,132 @@ canonical frames. A source generation change is explicit, and a missing
 source is represented as unavailable/stale rather than copied from another
 site or filled from a forecast.
 
-## 17. Non-goals of this plan
+## 17. Global vendor-neutral architecture rule
+
+This rule applies to the entire Elräkning dashboard and to ELLA. Core logic,
+data contracts, canonical history, planners, graphs, cards, labels and layout
+must never hard-code a manufacturer, provider, model family or integration.
+The installation must remain replaceable at the adapter and binding boundary:
+grid operator, electricity retailer, price/tariff source, meter/P1/Modbus
+source, PV array, inverter, ESS/BMS, weather/solar provider and Home Assistant
+entity IDs may all change without changing core semantics.
+
+Vendor names are permitted only as adapter metadata, configuration, provenance,
+documentation or test-fixture labels. They are never the semantic contract or
+the branch condition of a planner, generic forecast, canonical identity, graph
+decision path or card layout.
+
+### 17.1 Generic role and capability contracts
+
+Core consumes normalized roles, not vendor fields. The minimum role vocabulary
+includes:
+
+```text
+grid_import_power       grid_export_power
+house_load_power        pv_power
+ess_soc                 ess_charge_power
+ess_discharge_power     ess_capacity_usable_kwh
+ess_max_charge_kw       ess_max_discharge_kw
+ess_temperature         ess_health
+purchase_price          sell_price
+grid_fee                tax
+vat                     load_forecast
+pv_forecast             plan_charge
+plan_discharge          plan_import
+plan_export             plan_soc
+```
+
+An adapter translates provider/API/entity/state into these normalized roles,
+units, signs, timestamps, quality and source generation. Capability queries,
+not brand checks, determine behavior. Examples include
+`supports_dynamic_charge_limit`, `supports_soc_target`,
+`supports_export_limit` and `supports_per_ess_soc`.
+
+The planner and frontend must not contain `if growatt`, `if huawei`, `if
+solis`, `if eon`, `if greenely` or equivalent vendor branching. A missing
+capability fails closed, hides the dependent feature, or degrades to a generic
+safe mode. Adding a vendor means adding an adapter, mapping and tests; it must
+not require changing planner semantics or generic UI behavior.
+
+### 17.2 Whole-dashboard UI rule
+
+Every present and future card and graph is role-driven. `Elnät`, `Elhandel`,
+`Pris`, `Sol`, `Förbrukning`, `Batteri`, `SOC`, `Estimerad faktura` and `ELLA`
+consume normalized contracts and remain useful after provider replacement.
+Provider or device information may appear as secondary metadata in `Visa data`
+or configuration, but the main card function, label, spacing, palette and
+layout never depend on the name.
+
+The price/energy graph draws generic series for import, export, PV, load,
+battery charge/discharge and prices. `Estimerad faktura` consumes normalized
+trade, tariff, grid-fee, tax and VAT contracts, not provider-specific fields.
+ELLA consumes normalized load, PV, price and ESS capabilities. The existing
+solid-actual/dashed-estimated-or-planned semantics and shared card-to-graph
+selection state remain provider-neutral.
+
+### 17.3 Replacement, configuration and multi-source behavior
+
+- A site binds generic roles to adapters and replaceable entity mappings;
+  discovery may suggest a mapping but may not lock it without verification.
+- Entity-ID changes do not rewrite history or change model semantics.
+- Replacing a source creates a new `source_generation`/binding identity;
+  historical frames retain their original source metadata.
+- Multiple sources for one role use explicit priority, selection and quality
+  rules. There is no hard-coded provider preference.
+- Each ESS has a stable internal resource identity independent of its display
+  name. Per-ESS data remains separate even if the UI aggregates it.
+- Background collection enumerates eligible site bindings and never uses the
+  active UI site as its source selector.
+
+### 17.4 Canonical and provenance boundary
+
+Each canonical frame separates semantic role/dataset identity,
+source/provider generation, site/resource identity, capture/known time, target
+interval, quality/confidence and vendor metadata. Vendor metadata is provenance
+and diagnostics; it is not part of the semantic key unless the source
+generation contract explicitly requires it. A source replacement therefore
+creates a new generation without silently mixing old and new observations.
+
+### 17.5 Compatibility test matrix
+
+The architecture gate must include tests for:
+
+- provider replacement without a core or UI change;
+- entity replacement without history rewrite;
+- different grid and trade providers on one site;
+- mixed ESS vendors on one site;
+- one ESS missing a capability while another has it;
+- source-generation changes with preserved historical replay;
+- dashboard cards rendering only from normalized contracts;
+- identical planner decisions for semantically equivalent normalized inputs,
+  independent of vendor;
+- absence of vendor-name branching in planner/frontend decision logic except
+  adapter, configuration and metadata presentation.
+
+The compatibility fixtures must use bounded generic role/capability data and
+must not smuggle raw provider identifiers into canonical keys, UI state or
+assertion output.
+
+### 17.6 Static quality gate
+
+Future CI must scan forbidden core paths, including planner code, generic
+forecast code, UI graph decision logic and canonical semantic logic, for known
+vendor/provider names. Matches fail the gate unless the file is an explicit
+adapter, provider/configuration boundary, documentation file or test fixture.
+The audit is a guard against accidental coupling, not a ban on truthful
+provenance metadata at the adapter boundary.
+
+### 17.7 Roadmap binding
+
+Step 1, Data Capture Foundation, first normalizes roles/capabilities and
+source generations. Steps 2 and later consume only those generic contracts.
+The ESS digital twin is per-resource and vendor-neutral. The guarded executor
+exposes an adapter interface and capability checks; the planner never calls a
+Growatt, Huawei, Solis or other device API directly. A complete installation
+replacement must therefore preserve the same dashboard, ELLA plans, graphs
+and canonical history while changing only adapters and bindings.
+
+## 18. Non-goals of this plan
 
 This document does not:
 
