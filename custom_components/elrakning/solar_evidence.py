@@ -536,7 +536,7 @@ class SolarEvidenceManager:
     ) -> dict[str, Any]:
         old = days.get(key, {})
         merged = {**old, **record}
-        for field in ("actual_kwh", "forecast_solar_frozen_kwh"):
+        for field in ("actual_kwh", "forecast_solar_frozen_kwh", "collected_at"):
             if old.get(field) is not None:
                 merged[field] = old[field]
         days[key] = merged

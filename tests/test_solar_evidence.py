@@ -350,6 +350,7 @@ class SolarEvidenceTests(unittest.TestCase):
             "2026-09-12": {
                 "actual_kwh": 10.0,
                 "forecast_solar_frozen_kwh": 20.0,
+                "collected_at": "2026-09-13T00:05:00+02:00",
                 "open_meteo_status": "partial",
             }
         }
@@ -357,6 +358,7 @@ class SolarEvidenceTests(unittest.TestCase):
             "site_id": "site-vik",
             "actual_kwh": 99.0,
             "forecast_solar_frozen_kwh": 88.0,
+            "collected_at": "2026-09-14T00:05:00+02:00",
             "open_meteo_status": "complete",
         }
         import asyncio
@@ -365,6 +367,7 @@ class SolarEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(result["actual_kwh"], 10.0)
         self.assertEqual(result["forecast_solar_frozen_kwh"], 20.0)
+        self.assertEqual(result["collected_at"], "2026-09-13T00:05:00+02:00")
         self.assertEqual(result["open_meteo_status"], "complete")
         self.assertEqual(hass.bus.events, [])
         self.assertEqual(manager._site_id, "site-fisk")

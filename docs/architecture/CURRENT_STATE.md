@@ -857,3 +857,18 @@ INFERRED (roadmap): Long-term data foundation:
   pass. `CURRENT_STATE` is now the authoritative record; no locked contract or
   architecture decision was changed. Next work is to observe a natural valid
   Single Run frame, not to invoke a manual capture.
+
+## 0.0.642 Solar Evidence collected_at fix
+
+- IMPLEMENTED (0.0.642, local release scope): The Solar Evidence day-row merge
+  now preserves an existing `collected_at` value on recapture. The first
+  collection timestamp is therefore immutable, while the existing behavior for
+  completing an incomplete day remains unchanged. No historical row was
+  rewritten, backfilled or migrated by this fix.
+- VERIFIED (focused regression): A recapture with a different collection time
+  retains the original `collected_at`, `actual_kwh` and frozen
+  `forecast_solar_frozen_kwh` values while allowing the existing status merge.
+  Evidence-v1, frozen baselines and previous_day1 semantics are otherwise
+  unchanged. Greenely and Single Run are separate scopes.
+- RELEASE STATUS: `0.0.642` is the pending release-only version bump for this
+  fix; HA deploy and Core restart are not part of this release step.
