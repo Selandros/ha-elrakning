@@ -1,0 +1,34 @@
+{
+  "dataset": "open_meteo.single_run_day_ahead_pv.v1",
+  "source_generation_id": "om-generation-a",
+  "site_id": "site-vik",
+  "target_date": "2026-09-14",
+  "target_interval": ["2026-09-13T22:00:00Z", "2026-09-14T22:00:00Z"],
+  "logical_role": "solar.irradiance.day_ahead_pv_forecast",
+  "decision_at": "2026-09-13T22:00:00Z",
+  "ordering": ["known_at", "run_initialization_at", "frame_fingerprint"],
+  "compatibility": {
+    "schema_migration": "NO",
+    "persistence_change": "NO",
+    "frame_format_change": "NO",
+    "producer_change": "NO",
+    "old_data_rewrite": "NO",
+    "evidence_v1_change": "NO"
+  },
+  "cases": [
+    {"id": "A_no_candidates", "frames": [], "expected": "MISSING"},
+    {"id": "B_only_insufficient", "frames": [{"provenance": "missing_known_at"}], "expected": "INSUFFICIENT_PROVENANCE"},
+    {"id": "C_only_valid_post", "frames": [{"provenance": "valid", "known_at": "2026-09-13T23:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "post"}], "expected": "VERIFIED_POST_DECISION"},
+    {"id": "D_valid_pre_and_post", "frames": [{"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T00:00:00Z", "frame_fingerprint": "pre"}, {"provenance": "valid", "known_at": "2026-09-13T23:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "post"}], "expected": "VERIFIED_PRE_DECISION", "selected": "pre"},
+    {"id": "E_ambiguous_pre_tie", "frames": [{"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "x"}, {"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "y"}], "expected": "AMBIGUOUS"},
+    {"id": "F_post_plus_same_scope_insufficient", "frames": [{"provenance": "valid", "known_at": "2026-09-13T23:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "post"}, {"provenance": "missing_known_at"}], "expected": "INSUFFICIENT_PROVENANCE"},
+    {"id": "G_pre_plus_same_scope_insufficient", "frames": [{"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "pre"}, {"provenance": "missing_known_at"}], "expected": "INSUFFICIENT_PROVENANCE"},
+    {"id": "H_wrong_site_insufficient_is_ignored", "frames": [{"site_id": "other-site", "provenance": "missing_known_at"}, {"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "pre"}], "expected": "VERIFIED_PRE_DECISION", "selected": "pre"},
+    {"id": "I_wrong_dataset_insufficient_is_ignored", "frames": [{"dataset": "open_meteo.manager_forecast.v1", "provenance": "missing_known_at"}, {"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "pre"}], "expected": "VERIFIED_PRE_DECISION", "selected": "pre"},
+    {"id": "J_wrong_target_insufficient_is_ignored", "frames": [{"target_date": "2026-09-13", "provenance": "missing_known_at"}, {"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "pre"}], "expected": "VERIFIED_PRE_DECISION", "selected": "pre"},
+    {"id": "K_multiple_valid_post_only", "frames": [{"provenance": "valid", "known_at": "2026-09-13T23:00:00Z", "run_initialization_at": "2026-09-13T00:00:00Z", "frame_fingerprint": "a"}, {"provenance": "valid", "known_at": "2026-09-14T01:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "b"}], "expected": "VERIFIED_POST_DECISION"},
+    {"id": "L_insufficient_plus_ambiguous_pre", "frames": [{"provenance": "missing_known_at"}, {"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "x"}, {"provenance": "valid", "known_at": "2026-09-13T21:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "y"}], "expected": "INSUFFICIENT_PROVENANCE"},
+    {"id": "M_missing_is_not_insufficient", "frames": [], "expected": "MISSING"},
+    {"id": "N_non_pre_is_not_model_eligible", "frames": [{"provenance": "valid", "known_at": "2026-09-13T23:00:00Z", "run_initialization_at": "2026-09-13T06:00:00Z", "frame_fingerprint": "post"}], "expected": "VERIFIED_POST_DECISION", "model_eligible": false}
+  ]
+}
