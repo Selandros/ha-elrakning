@@ -409,7 +409,7 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["history"]["point_count"], 2)
         self.assertEqual(result["history"]["max_abs_kw"], 1.5)
 
-    async def test_billing_history_reads_from_local_month_start_to_now(self):
+    async def test_billing_history_reads_from_trailing_baseline_window_to_now(self):
         recorder = types.ModuleType("homeassistant.components.recorder")
         history = types.ModuleType("homeassistant.components.recorder.history")
         captured = []
@@ -421,7 +421,7 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
                     types.SimpleNamespace(
                         state="2",
                         attributes={"unit_of_measurement": "kW"},
-                        last_updated=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                        last_updated=datetime(2026, 7, 10, tzinfo=timezone.utc),
                     ),
                     types.SimpleNamespace(
                         state="3",
@@ -455,9 +455,11 @@ class MeterTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     sys.modules[name] = original
         self.assertTrue(result["success"])
-        self.assertEqual(captured, [(datetime(2026, 8, 1, tzinfo=timezone.utc), datetime(2026, 8, 23, 12, tzinfo=timezone.utc), ["sensor.power"])])
-        self.assertEqual(len(result["points"]), 2)
-        self.assertEqual(result["coverage"]["point_count"], 2)
+        self.assertEqual(captured, [(datetime(2026, 7, 4, tzinfo=timezone.utc), datetime(2026, 8, 23, 12, tzinfo=timezone.utc), ["sensor.power"])])
+        self.assertEqual(len(result["points"]), 1)
+        self.assertEqual(len(result["baseline_points"]), 1)
+        self.assertEqual(result["coverage"]["point_count"], 1)
+        self.assertEqual(result["baseline_coverage"]["point_count"], 1)
 
     async def test_recorder_instance_executor_is_used(self):
         recorder = types.ModuleType("homeassistant.components.recorder")

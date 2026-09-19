@@ -1262,7 +1262,7 @@ export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Dat
   return energyKwh;
 }
 
-export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixedFee = null, now = new Date()) {
+export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixedFee = null, now = new Date(), historicalMeterPoints = []) {
   const current = new Date(now);
   const nowMs = current.getTime();
   if (!Array.isArray(periods) || !periods.length || !Array.isArray(meterPoints)) return null;
@@ -1270,6 +1270,10 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
   const gridGross = Number(gridPrice?.variable_total_ore_per_kwh_gross);
   const points = meterPoints
+    .map((point) => ({ timestamp: new Date(point.timestamp).getTime(), importKw: Number(point.import_kw) }))
+    .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.importKw))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const historicalPoints = (Array.isArray(historicalMeterPoints) ? historicalMeterPoints : [])
     .map((point) => ({ timestamp: new Date(point.timestamp).getTime(), importKw: Number(point.import_kw) }))
     .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.importKw))
     .sort((left, right) => left.timestamp - right.timestamp);
@@ -1338,6 +1342,33 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
       grid_cost_sek: importKwh * gridGross / 100,
     });
   }
+  const integrateCompleteDay = (sourcePoints, dayStartMs, dayEndMs) => {
+    if (sourcePoints.length < 2) return null;
+    let total = 0;
+    let coveredUntil = dayStartMs;
+    for (let index = 1; index < sourcePoints.length; index += 1) {
+      const left = sourcePoints[index - 1];
+      const right = sourcePoints[index];
+      if (right.timestamp - left.timestamp > 30 * 60 * 1000) continue;
+      const overlapStart = Math.max(dayStartMs, left.timestamp);
+      const overlapEnd = Math.min(dayEndMs, right.timestamp);
+      if (overlapEnd <= overlapStart || right.timestamp <= left.timestamp) continue;
+      const valueAt = (timestamp) => left.importKw + (right.importKw - left.importKw) * ((timestamp - left.timestamp) / (right.timestamp - left.timestamp));
+      total += (valueAt(overlapStart) + valueAt(overlapEnd)) / 2 * ((overlapEnd - overlapStart) / 3600000);
+      if (overlapStart <= coveredUntil + 1 && overlapEnd > coveredUntil) coveredUntil = overlapEnd;
+    }
+    return coveredUntil >= dayEndMs - 1 ? total : null;
+  };
+  const historicalDailyValues = [];
+  for (let dayOffset = 28; dayOffset > 0; dayOffset -= 1) {
+    const dayStart = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1 - dayOffset);
+    const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
+    const value = integrateCompleteDay(historicalPoints, dayStart.getTime(), dayEnd.getTime());
+    if (value !== null && Number.isFinite(value)) historicalDailyValues.push(value);
+  }
+  const historicalBaselineDailyKwh = historicalDailyValues.length
+    ? historicalDailyValues.reduce((sum, value) => sum + value, 0) / historicalDailyValues.length
+    : null;
   const importedKwh = coveredEnergyPeriods > 0 ? coveredEnergyKwh : null;
   const tradeVariableSek = rows.reduce((sum, row) => sum + row.trade_cost_sek, 0);
   const gridVariableSek = rows.reduce((sum, row) => sum + row.grid_cost_sek, 0);
@@ -1372,33 +1403,80 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const fixedSoFarSek = (accruedTradeFixed || 0) + (accruedGridFixed || 0);
   const missingPastDays = missingPastMs / 86400000;
   const forecastMissingPastKwh = observedDailyImportKwh === null ? null : observedDailyImportKwh * missingPastDays;
-  const forecastFutureKwh = observedDailyImportKwh === null ? null : observedDailyImportKwh * remainingDays;
-  const forecastImportKwh = importedKwh !== null && forecastMissingPastKwh !== null && forecastFutureKwh !== null && tradeWeighted !== null && gridWeighted !== null
-    ? importedKwh + forecastMissingPastKwh + forecastFutureKwh
+  const blendWeight = historicalBaselineDailyKwh !== null && observedDailyImportKwh !== null
+    ? Math.min(1, coveredDays / 14)
+    : historicalBaselineDailyKwh !== null ? 0 : observedDailyImportKwh !== null ? 1 : null;
+  const forecastDailyKwh = historicalBaselineDailyKwh !== null && observedDailyImportKwh !== null
+    ? historicalBaselineDailyKwh * (1 - blendWeight) + observedDailyImportKwh * blendWeight
+    : historicalBaselineDailyKwh ?? observedDailyImportKwh;
+  const baselineMissingPastKwh = forecastDailyKwh === null ? null : forecastDailyKwh * missingPastDays;
+  const forecastFutureKwh = forecastDailyKwh === null ? null : forecastDailyKwh * remainingDays;
+  const fallbackTradeOre = tradeWeighted ?? null;
+  const fallbackGridOre = gridWeighted ?? gridGross;
+  let knownFutureTradeSek = 0;
+  let knownFutureGridSek = 0;
+  let knownFutureDurationMs = 0;
+  if (forecastDailyKwh !== null) {
+    for (const period of periods) {
+      const startMs = Math.max(nowMs, new Date(period.start).getTime(), monthStart.getTime());
+      const endMs = Math.min(nextMonth.getTime(), new Date(period.end).getTime());
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) continue;
+      const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+      if (!Number.isFinite(tradeOre) || !Number.isFinite(fallbackGridOre)) continue;
+      const importKwh = forecastDailyKwh * ((endMs - startMs) / 86400000);
+      knownFutureTradeSek += importKwh * tradeOre / 100;
+      knownFutureGridSek += importKwh * fallbackGridOre / 100;
+      knownFutureDurationMs += endMs - startMs;
+    }
+  }
+  const remainingDurationMs = Math.max(0, nextMonth.getTime() - nowMs);
+  const unknownFutureKwh = forecastDailyKwh === null ? null : forecastDailyKwh * Math.max(0, remainingDurationMs - knownFutureDurationMs) / 86400000;
+  const missingPastTradeSek = baselineMissingPastKwh === null || fallbackTradeOre === null ? null : baselineMissingPastKwh * fallbackTradeOre / 100;
+  const missingPastGridSek = baselineMissingPastKwh === null || fallbackGridOre === null ? null : baselineMissingPastKwh * fallbackGridOre / 100;
+  const unknownFutureTradeSek = unknownFutureKwh === null || fallbackTradeOre === null ? null : unknownFutureKwh * fallbackTradeOre / 100;
+  const unknownFutureGridSek = unknownFutureKwh === null || fallbackGridOre === null ? null : unknownFutureKwh * fallbackGridOre / 100;
+  const forecastImportKwh = importedKwh !== null && baselineMissingPastKwh !== null && forecastFutureKwh !== null
+    ? importedKwh + baselineMissingPastKwh + forecastFutureKwh
     : null;
-  const forecastVariableSek = forecastImportKwh === null
-    ? null
-    : forecastImportKwh * (tradeWeighted + gridWeighted) / 100;
+  const forecastTradeRemainingSek = missingPastTradeSek === null || unknownFutureTradeSek === null
+    ? null : missingPastTradeSek + knownFutureTradeSek + unknownFutureTradeSek;
+  const forecastGridRemainingSek = missingPastGridSek === null || unknownFutureGridSek === null
+    ? null : missingPastGridSek + knownFutureGridSek + unknownFutureGridSek;
+  const forecastVariableSek = forecastTradeRemainingSek === null || forecastGridRemainingSek === null
+    ? null : tradeVariableSek + gridVariableSek + forecastTradeRemainingSek + forecastGridRemainingSek;
   const forecastFixedSek = (fixedTrade || 0) + (gridFixed || 0);
+  const totalSoFarSek = variableSoFarSek + fixedSoFarSek;
+  const estimatedMonthTotalSek = forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek;
   return {
     month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
     imported_kwh_so_far: importedKwh,
     trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek + (accruedTradeFixed || 0) },
     grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek + (accruedGridFixed || 0) },
-    total_so_far_sek: variableSoFarSek + fixedSoFarSek,
-    estimated_month_total_sek: forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek,
+    total_so_far_sek: totalSoFarSek,
+    estimated_month_total_sek: estimatedMonthTotalSek,
     forecast_import_kwh: forecastImportKwh,
     forecast_remaining_kwh: forecastImportKwh === null ? null : Math.max(0, forecastImportKwh - importedKwh),
-    forecast_missing_past_kwh: forecastMissingPastKwh,
+    forecast_missing_past_kwh: baselineMissingPastKwh,
     forecast_future_kwh: forecastFutureKwh,
     forecast_remaining_days: remainingDays,
-    forecast_remaining_trade_variable_sek: forecastImportKwh === null || tradeWeighted === null ? null : Math.max(0, forecastImportKwh - importedKwh) * tradeWeighted / 100,
-    forecast_remaining_grid_variable_sek: forecastImportKwh === null || gridWeighted === null ? null : Math.max(0, forecastImportKwh - importedKwh) * gridWeighted / 100,
-    forecast_remaining_total_sek: forecastVariableSek === null ? null : forecastVariableSek - variableSoFarSek,
-    missing_past_estimated_kwh: forecastMissingPastKwh,
-    forecast_method: "actual imported energy and volume-weighted observed gross prices; missing past and future energy use the observed covered-duration average",
+    forecast_remaining_trade_variable_sek: forecastTradeRemainingSek,
+    forecast_remaining_grid_variable_sek: forecastGridRemainingSek,
+    forecast_remaining_total_sek: estimatedMonthTotalSek === null ? null : estimatedMonthTotalSek - totalSoFarSek,
+    missing_past_estimated_kwh: baselineMissingPastKwh,
+    historical_baseline_daily_kwh: historicalBaselineDailyKwh,
+    historical_baseline_day_count: historicalDailyValues.length,
+    observed_current_daily_kwh: observedDailyImportKwh,
+    blend_weight: blendWeight,
+    forecast_daily_kwh: forecastDailyKwh,
+    forecast_source: historicalBaselineDailyKwh !== null && observedDailyImportKwh !== null
+      ? "historical_baseline_blended"
+      : historicalBaselineDailyKwh !== null ? "historical_baseline_only" : observedDailyImportKwh !== null ? "current_observed_fallback_low_confidence" : "unavailable",
+    forecast_fallback: historicalBaselineDailyKwh === null ? "historical_baseline_unavailable" : null,
+    actual_so_far_sek: totalSoFarSek,
+    remaining_estimated_sek: estimatedMonthTotalSek === null ? null : estimatedMonthTotalSek - totalSoFarSek,
+    forecast_method: "actual imported energy; trailing complete-day historical baseline blended with current observations; known future prices used where available and recent observed prices used only beyond the known horizon",
     forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 && coveredDurationMs >= elapsedMs - 1 ? "complete_available_data" : "partial_data",
-    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: elapsedMs ? coveredDurationMs / elapsedMs * 100 : 0, first_period: coveredStartMs ? new Date(coveredStartMs).toISOString() : null, last_period: coveredEndMs ? new Date(coveredEndMs).toISOString() : null, observed_duration_ms: coveredDurationMs, covered_duration_ms: coveredDurationMs, missing_past_duration_ms: missingPastMs, remaining_future_duration_ms: remainingDays * 86400000, elapsed_month_duration_ms: elapsedMs, periods: { observed_covered: { duration_ms: coveredDurationMs, kwh: importedKwh }, missing_past: { duration_ms: missingPastMs, estimated_kwh: forecastMissingPastKwh }, future_remaining: { duration_ms: remainingDays * 86400000, estimated_kwh: forecastFutureKwh } } },
+    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: elapsedMs ? coveredDurationMs / elapsedMs * 100 : 0, first_period: coveredStartMs ? new Date(coveredStartMs).toISOString() : null, last_period: coveredEndMs ? new Date(coveredEndMs).toISOString() : null, observed_duration_ms: coveredDurationMs, covered_duration_ms: coveredDurationMs, missing_past_duration_ms: missingPastMs, remaining_future_duration_ms: remainingDays * 86400000, elapsed_month_duration_ms: elapsedMs, periods: { observed_covered: { duration_ms: coveredDurationMs, kwh: importedKwh }, missing_past: { duration_ms: missingPastMs, estimated_kwh: baselineMissingPastKwh }, future_remaining: { duration_ms: remainingDays * 86400000, estimated_kwh: forecastFutureKwh } } },
     trade_weighted_average_ore_per_kwh: tradeWeighted,
     grid_weighted_average_ore_per_kwh: gridWeighted,
     total_weighted_average_ore_per_kwh: tradeWeighted === null || gridWeighted === null ? null : tradeWeighted + gridWeighted,
@@ -1820,6 +1898,14 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       forecast_trade_variable_sek: estimate.forecast_remaining_trade_variable_sek ?? null,
       forecast_grid_variable_sek: estimate.forecast_remaining_grid_variable_sek ?? null,
       total_sek: estimate.forecast_remaining_total_sek ?? null,
+      historical_baseline_daily_kwh: estimate.historical_baseline_daily_kwh ?? null,
+      observed_current_daily_kwh: estimate.observed_current_daily_kwh ?? null,
+      blend_weight: estimate.blend_weight ?? null,
+      forecast_daily_kwh: estimate.forecast_daily_kwh ?? null,
+      source: estimate.forecast_source || null,
+      fallback: estimate.forecast_fallback || null,
+      actual_so_far_sek: estimate.actual_so_far_sek ?? null,
+      remaining_estimated_sek: estimate.remaining_estimated_sek ?? null,
       spot_price_source: billingHistory.spot_price_source || null,
       fallback_price: billingHistory.fallback_price ?? null,
       confidence: estimate.forecast_confidence,
@@ -8725,6 +8811,8 @@ class ElrakningPanel {
       billingHistory?.energy_points,
       this._eonGridPrice,
       this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
+      new Date(),
+      billingHistory?.baseline_energy_points,
     );
     const configured = this._meterState?.configured === true;
     card.hidden = !configured || !billingHistory;

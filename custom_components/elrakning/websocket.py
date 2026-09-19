@@ -1077,10 +1077,11 @@ async def websocket_billing_history(hass, connection, msg):
         return
     start = date.fromisoformat(billing["start"][:10])
     end = date.fromisoformat(billing["end"][:10])
+    month_end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
     price_periods = []
     missing_price_dates = 0
     target = start
-    while target <= end:
+    while target < month_end:
         data = await coordinator.async_get_price_data(target)
         serialized = _serialize_price_data(hass, data)
         periods = serialized.get("periods", [])
@@ -1099,6 +1100,7 @@ async def websocket_billing_history(hass, connection, msg):
         "start": billing["start"],
         "end": billing["end"],
         "energy_points": billing.get("points", []),
+        "baseline_energy_points": billing.get("baseline_points", []),
         "energy_source": {
             "method": "integrated_grid_power",
             "entity_id": billing.get("entity_id"),
@@ -1107,6 +1109,7 @@ async def websocket_billing_history(hass, connection, msg):
         },
         "integration_method": "trapezoidal_power_integration",
         "energy_coverage": billing.get("coverage", {}),
+        "baseline_energy_coverage": billing.get("baseline_coverage", {}),
         "price_periods": price_periods,
         "price_source": "nord_pool_historical_daily_periods",
         "invoice_estimate": {"today": invoice_today},

@@ -428,6 +428,55 @@ assert.equal(invoiceEstimate.grid.fixed_fee_sek, 226.25);
 assert.equal(invoiceEstimate.trade_weighted_average_ore_per_kwh, 32);
 assert.equal(invoiceEstimate.grid_weighted_average_ore_per_kwh, 100);
 assert.equal(invoiceEstimate.completeness.export_credit, false);
+const constantPoints = (start, hours, value) => Array.from({ length: Math.round(hours * 12) + 1 }, (_, index) => ({
+  timestamp: new Date(new Date(start).getTime() + index * 5 * 60 * 1000).toISOString(),
+  import_kw: value,
+}));
+const baselinePoints = [
+  ...constantPoints(new Date(2026, 6, 20, 0, 0).toISOString(), 24, 2),
+  ...constantPoints(new Date(2026, 6, 21, 0, 0).toISOString(), 24, 2),
+];
+const earlyMonthEstimate = buildInvoiceEstimate(
+  [
+    { start: new Date(2026, 7, 1, 0, 0).toISOString(), end: new Date(2026, 7, 1, 12, 0).toISOString(), trade_customer_price_ore_per_kwh: 20 },
+    { start: new Date(2026, 7, 1, 12, 0).toISOString(), end: new Date(2026, 7, 1, 18, 0).toISOString(), trade_customer_price_ore_per_kwh: 30 },
+  ],
+  constantPoints(new Date(2026, 7, 1, 0, 0).toISOString(), 12, 2),
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 100 },
+  50,
+  new Date(2026, 7, 1, 12, 0),
+  baselinePoints,
+);
+assert.equal(earlyMonthEstimate.forecast_source, "historical_baseline_blended");
+assert.equal(earlyMonthEstimate.historical_baseline_day_count, 2);
+assert.ok(earlyMonthEstimate.estimated_month_total_sek > earlyMonthEstimate.total_so_far_sek * 2);
+assert.ok(Math.abs(earlyMonthEstimate.forecast_daily_kwh - 48) < 0.01);
+assert.equal(earlyMonthEstimate.trade.fixed_fee_sek, 50);
+assert.equal(earlyMonthEstimate.grid.fixed_fee_sek, 100);
+assert.ok(earlyMonthEstimate.estimated_month_total_sek > 0);
+const noBaselineEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 100 },
+  null,
+  new Date("2026-08-01T00:15:00Z"),
+  [],
+);
+assert.equal(noBaselineEstimate.forecast_source, "current_observed_fallback_low_confidence");
+assert.equal(noBaselineEstimate.forecast_fallback, "historical_baseline_unavailable");
+const futurePriceEstimate = buildInvoiceEstimate(
+  [
+    { start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 },
+    { start: "2026-08-01T00:15:00Z", end: "2026-08-01T00:30:00Z", trade_customer_price_ore_per_kwh: 200 },
+  ],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
+  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 },
+  null,
+  new Date("2026-08-01T00:15:00Z"),
+  baselinePoints,
+);
+assert.ok(futurePriceEstimate.forecast_remaining_trade_variable_sek > 0);
+assert.equal(futurePriceEstimate.forecast_import_kwh > futurePriceEstimate.imported_kwh_so_far, true);
 const incompleteInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z" }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],

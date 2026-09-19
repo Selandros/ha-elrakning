@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
@@ -503,12 +503,15 @@ class MeterManager:
                 "start": start.isoformat(),
                 "end": now.isoformat(),
                 "points": [],
-                "coverage": {"energy_start": None, "energy_end": None, "point_count": 0},
+                "baseline_points": [],
+                "coverage": {"energy_start": None, "energy_end": None, "point_count": 0, "baseline_start": None, "baseline_end": None, "baseline_point_count": 0},
+                "baseline_coverage": {"energy_start": None, "energy_end": None, "point_count": 0},
             }
         return await self._async_billing_history_fetch(entity_id, start, now, bool(self.mapping.get(METER_INVERT_FIELD)))
 
     async def _async_billing_history_fetch(self, entity_id: str, start, end, invert_power: bool) -> dict[str, Any]:
-        """Read the selected meter power entity for the complete billing month."""
+        """Read the billing month and a bounded trailing baseline window."""
+        baseline_start = start - timedelta(days=28)
         try:
             from homeassistant.components.recorder import get_instance, history
 
@@ -517,7 +520,7 @@ class MeterManager:
                 partial(
                     history.get_significant_states,
                     self.hass,
-                    start,
+                    baseline_start,
                     end,
                     entity_ids=[entity_id],
                     include_start_time_state=True,
@@ -543,16 +546,36 @@ class MeterManager:
             ),
             key=lambda point: point["timestamp"],
         )
+        current_points = []
+        baseline_points = []
+        for point in points:
+            try:
+                point_time = datetime.fromisoformat(point["timestamp"])
+            except (TypeError, ValueError):
+                continue
+            if point_time >= start:
+                current_points.append(point)
+            else:
+                baseline_points.append(point)
         return {
             "success": True,
             "entity_id": entity_id,
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "points": points,
+            "points": current_points,
+            "baseline_points": baseline_points,
             "coverage": {
-                "energy_start": points[0]["timestamp"] if points else None,
-                "energy_end": points[-1]["timestamp"] if points else None,
-                "point_count": len(points),
+                "energy_start": current_points[0]["timestamp"] if current_points else None,
+                "energy_end": current_points[-1]["timestamp"] if current_points else None,
+                "point_count": len(current_points),
+                "baseline_start": baseline_points[0]["timestamp"] if baseline_points else None,
+                "baseline_end": baseline_points[-1]["timestamp"] if baseline_points else None,
+                "baseline_point_count": len(baseline_points),
+            },
+            "baseline_coverage": {
+                "energy_start": baseline_points[0]["timestamp"] if baseline_points else None,
+                "energy_end": baseline_points[-1]["timestamp"] if baseline_points else None,
+                "point_count": len(baseline_points),
             },
         }
 
