@@ -871,4 +871,22 @@ INFERRED (roadmap): Long-term data foundation:
   Evidence-v1, frozen baselines and previous_day1 semantics are otherwise
   unchanged. Greenely and Single Run are separate scopes.
 - COMPLETE (0.0.642 release): The fix is committed and pushed. HA deploy and
-  Core restart are intentionally not part of this release step.
+  Core restart were handled in the separate runtime gate below.
+
+- VERIFIED (0.0.642 runtime, 2026-09-19): The exact 58-file Git payload was
+  deployed after all remote SHA-256 checks passed. Remote manifest/runtime is
+  `0.0.642`, `ha core check` passed, and one normal Home Assistant Core restart
+  completed successfully. Vikarbodarna and Fiskvik remain in the site registry.
+  Vikarbodarna's namespaced Forecast.Solar, Open-Meteo, Solar Evidence and
+  provenance Stores remained byte-identical across deploy/restart; Fiskvik
+  remains without those namespaced stores. No Greenely activation, manual
+  Evidence collection, manual Single Run trigger, canonical-data cleanup or
+  database write was performed.
+- VERIFIED WITH LIMITATION (0.0.642 runtime): The post-restart HA log scan
+  showed no new Elräkning traceback or privacy leakage. The repeated
+  `services.yaml` warning is the same baseline warning as 0.0.641. Direct
+  post-restart SQLite `PRAGMA integrity_check` was not independently executed
+  because the HA host exposes neither `sqlite3` nor `python3`; the canonical
+  database files were not touched and the prior WAL-consistent integrity
+  result remains the last direct database evidence. No natural Single Run
+  frame was observed during this deploy/restart window.
