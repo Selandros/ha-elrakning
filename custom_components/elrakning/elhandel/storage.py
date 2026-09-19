@@ -11,6 +11,8 @@ from .provider_registry import sanitize_provider_source
 
 ELECTRICITY_STORAGE_VERSION = 2
 ELECTRICITY_STORE_KEY = "elrakning.elhandel"
+GREENELY_PROVIDER = "greenely"
+_GREENELY_SAMPLE_FIELDS = ("source_timestamp", "localtime", "usage_wh", "usage_kwh")
 
 
 def empty_electricity_store() -> dict[str, Any]:
@@ -114,6 +116,10 @@ class StorageManager:
         """Load one active namespace from the canonical store."""
         stored = await self.store.async_load()
         if _is_current_store(stored):
+            migrated = migrate_electricity_store(stored)
+            if migrated != stored:
+                await self.store.async_save(migrated)
+                stored = migrated
             return state_from_record(_select_record(stored, facility_id, provider, use_active_namespace))
         return None
 
@@ -216,6 +222,61 @@ def _canonical_root(value: dict[str, Any]) -> dict[str, Any]:
         "active_facility_id": value.get("active_facility_id"),
         "active_provider": value.get("active_provider"),
     }
+
+
+def migrate_electricity_store(value: Any) -> dict[str, Any] | Any:
+    """Sanitize legacy Greenely records without touching other namespaces."""
+    if not _is_current_store(value):
+        return value
+    migrated = deepcopy(value)
+    for facility in migrated.get("facilities", {}).values():
+        if not isinstance(facility, dict):
+            continue
+        providers = facility.get("providers", {})
+        if not isinstance(providers, dict):
+            continue
+        record = providers.get(GREENELY_PROVIDER)
+        if isinstance(record, dict):
+            providers[GREENELY_PROVIDER] = _migrate_greenely_record(record)
+    return migrated
+
+
+def _migrate_greenely_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Apply the Greenely source policy to active and historical record data."""
+    migrated = deepcopy(record)
+    active = migrated.get("active")
+    if isinstance(active, dict):
+        for key in ("source", "summary", "processing", "error", "consumption_error"):
+            if key in active:
+                active[key] = sanitize_provider_source(GREENELY_PROVIDER, active[key])
+        source = active.get("source")
+        if isinstance(source, dict):
+            source["consumption"] = {
+                "samples": _greenely_samples(
+                    source.get("consumption", {}).get("samples", [])
+                    if isinstance(source.get("consumption"), dict)
+                    else []
+                )
+            }
+    history = migrated.get("history")
+    if isinstance(history, dict):
+        invoices = history.get("invoices")
+        if isinstance(invoices, list):
+            history["invoices"] = [_storage_invoice(item) for item in invoices if isinstance(item, dict)]
+        consumption = history.get("consumption")
+        samples = consumption.get("samples", []) if isinstance(consumption, dict) else consumption
+        history["consumption"] = {"samples": _greenely_samples(samples)}
+    return migrated
+
+
+def _greenely_samples(samples: Any) -> list[dict[str, Any]]:
+    if not isinstance(samples, list):
+        return []
+    return [
+        {key: item[key] for key in _GREENELY_SAMPLE_FIELDS if key in item}
+        for item in samples
+        if isinstance(item, dict)
+    ]
 
 
 def _select_record(

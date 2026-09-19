@@ -9,6 +9,7 @@ from custom_components.elrakning.elhandel.storage import (
     history_metadata,
     record_from_state,
     state_from_record,
+    migrate_electricity_store,
 )
 
 
@@ -82,3 +83,69 @@ def test_history_metadata_is_scoped_and_contains_only_counts():
 def test_empty_history_is_not_reported():
     store = _store_with(("facility-a", "greenely", {"active": {}, "history": {"invoices": [], "consumption": {"samples": []}}}))
     assert history_metadata(store) == []
+
+
+def test_greenely_store_migration_sanitizes_active_and_history_idempotently():
+    legacy = empty_electricity_store()
+    legacy["facilities"] = {
+        "facility-a": {
+            "providers": {
+                "greenely": {
+                    "active": {
+                        "provider": "greenely",
+                        "facility_id": "facility-a",
+                        "source": {
+                            "facility": {
+                                "id": "facility-a",
+                                "email": "hidden",
+                                "meter_id": "meter-hidden",
+                            },
+                            "contracts": [{"_contract_id": "contract-a", "customer_id": "hidden", "status": "OPERATIONAL"}],
+                            "consumption": {"samples": [{"localtime": "2026-08-01T00:00:00", "usage_kwh": 1.2, "email": "hidden"}]},
+                        },
+                        "summary": {"tariff": {"variable_cost": 17}, "customer_id": "hidden"},
+                    },
+                    "history": {
+                        "invoices": [{"invoice_date": "2026-08-01", "amount_due_sek": 12.0, "_contract_id": "contract-a", "_invoice_key": "invoice-a", "meter_id": "hidden"}],
+                        "consumption": {"samples": [{"localtime": "2026-08-01T00:00:00", "usage_wh": 1200, "usage_kwh": 1.2, "email": "hidden"}]},
+                    },
+                },
+                "other_provider": {"active": {"source": {"email": "keep"}}, "history": {"invoices": [{"id": "keep"}], "consumption": {"samples": [{"email": "keep"}]}}},
+            }
+        }
+    }
+    original_other = deepcopy(legacy["facilities"]["facility-a"]["providers"]["other_provider"])
+
+    migrated = migrate_electricity_store(legacy)
+    record = migrated["facilities"]["facility-a"]["providers"]["greenely"]
+    assert record["active"]["facility_id"] == "facility-a"
+    assert record["active"]["source"]["facility"]["id"] == "facility-a"
+    assert record["active"]["source"]["contracts"] == [{"_contract_id": "contract-a", "status": "OPERATIONAL"}]
+    assert record["active"]["summary"] == {"tariff": {"variable_cost": 17}}
+    assert record["history"]["invoices"] == [{"invoice_date": "2026-08-01", "amount_due_sek": 12.0, "_contract_id": "contract-a", "_invoice_key": "invoice-a"}]
+    assert record["history"]["consumption"]["samples"] == [{"localtime": "2026-08-01T00:00:00", "usage_wh": 1200, "usage_kwh": 1.2}]
+    assert migrated["facilities"]["facility-a"]["providers"]["other_provider"] == original_other
+    assert migrate_electricity_store(migrated) == migrated
+
+
+def test_storage_manager_load_persists_greenely_migration_only():
+    class _Store:
+        def __init__(self, data):
+            self.data = data
+
+        async def async_load(self):
+            return deepcopy(self.data)
+
+        async def async_save(self, data):
+            self.data = deepcopy(data)
+
+    store = empty_electricity_store()
+    store["facilities"] = {"facility-a": {"providers": {"greenely": {"active": {"source": {"email": "hidden"}}, "history": {"invoices": [], "consumption": {"samples": []}}}}}}
+    manager = __import__("custom_components.elrakning.elhandel.storage", fromlist=["StorageManager"]).StorageManager.__new__(
+        __import__("custom_components.elrakning.elhandel.storage", fromlist=["StorageManager"]).StorageManager
+    )
+    manager.store = _Store(store)
+    asyncio.run(manager.async_load(facility_id="facility-a", provider="greenely", use_active_namespace=False))
+    assert "email" not in manager.store.data["facilities"]["facility-a"]["providers"]["greenely"]["active"]["source"]
+import asyncio
+from copy import deepcopy

@@ -991,3 +991,19 @@ INFERRED (roadmap): Long-term data foundation:
   rewritten and Greenely economics remains fail-closed.
 - IMPLEMENTATION STATUS: Local release gates pending. Single Run has since
   produced one natural, valid Vikarbodarna frame; no Fiskvik frame exists.
+
+## 0.0.647 Greenely legacy Store privacy migration
+
+- ROOT CAUSE VERIFIED: 0.0.646 hardened future Greenely source captures but
+  did not rewrite already persisted Greenely records. The existing electricity
+  Store is version 2 and has no separate HA migration hook.
+- IMPLEMENTED: `StorageManager.async_load()` now applies an idempotent,
+  Greenely-only load migration to every facility namespace's active and
+  history record. It reuses the Greenely sanitizer, preserves required
+  facility/provider/contract/invoice economics and normalized consumption, and
+  leaves all other providers unchanged. The Store version and other
+  namespaces are unchanged; no canonical/Evidence/Single Run data is touched.
+- VERIFIED: Focused migration tests cover active/history PII removal,
+  retention of safe attribution/economics fields, idempotence, provider
+  isolation and fail-closed state preservation. Full local gate is green;
+  runtime deployment is pending.
