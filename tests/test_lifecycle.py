@@ -2,6 +2,7 @@ import asyncio
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
+import threading
 import unittest
 
 _MODULE_PATH = Path(__file__).parents[1] / "custom_components" / "elrakning" / "elhandel" / "lifecycle.py"
@@ -14,12 +15,43 @@ LifecycleManager = _MODULE.LifecycleManager
 
 
 class _Hass:
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+
     @staticmethod
     def async_create_task(coroutine):
         return asyncio.create_task(coroutine)
 
+    def create_task(self, coroutine):
+        if threading.get_ident() == self.loop._thread_id:
+            return asyncio.create_task(coroutine)
+        result = {}
+        completed = threading.Event()
+
+        def schedule():
+            result["task"] = asyncio.create_task(coroutine)
+            completed.set()
+
+        self.loop.call_soon_threadsafe(schedule)
+        if not completed.wait(1):
+            raise AssertionError("thread-safe task scheduling timed out")
+        return result["task"]
+
 
 class LifecycleManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_refresh_task_uses_thread_safe_task_api_from_worker(self):
+        hass = _Hass()
+        lifecycle = LifecycleManager(hass)
+        received = []
+
+        async def callback(generation):
+            received.append(generation)
+
+        task = await asyncio.to_thread(lifecycle.start_refresh, callback)
+        await task
+
+        self.assertEqual(received, [0])
+
     async def test_refresh_task_starts_once_until_complete(self):
         lifecycle = LifecycleManager(_Hass())
         started = asyncio.Event()

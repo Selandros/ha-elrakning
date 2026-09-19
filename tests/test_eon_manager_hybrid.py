@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -78,6 +79,68 @@ def _load_manager():
 
 
 manager_module = _load_manager()
+
+
+class _ThreadSafeHass:
+    def __init__(self, loop):
+        self.loop = loop
+        self.async_create_task_calls = 0
+        self.tasks = []
+
+    def async_create_task(self, coroutine):
+        self.async_create_task_calls += 1
+        coroutine.close()
+        raise AssertionError("async_create_task used from a thread-sensitive path")
+
+    def create_task(self, coroutine):
+        if threading.get_ident() == self.loop._thread_id:
+            task = asyncio.create_task(coroutine)
+            self.tasks.append(task)
+            return task
+        result = {}
+        completed = threading.Event()
+
+        def schedule():
+            result["task"] = asyncio.create_task(coroutine)
+            self.tasks.append(result["task"])
+            completed.set()
+
+        self.loop.call_soon_threadsafe(schedule)
+        if not completed.wait(1):
+            raise AssertionError("thread-safe task scheduling timed out")
+        return result["task"]
+
+
+def test_eon_refresh_callbacks_use_thread_safe_task_api():
+    async def exercise():
+        hass = _ThreadSafeHass(asyncio.get_running_loop())
+        manager = object.__new__(manager_module.EonGridManager)
+        manager.hass = hass
+        manager._refresh_unsub = None
+        manager._web_refresh_unsub = None
+        calls = []
+        callbacks = []
+        original = manager_module.async_track_time_interval
+        manager_module.async_track_time_interval = (
+            lambda _hass, callback, _interval: callbacks.append(callback) or (lambda: None)
+        )
+
+        async def refresh():
+            calls.append("refresh")
+
+        manager.async_refresh = refresh
+        try:
+            await asyncio.to_thread(manager.async_start_refresh)
+            await hass.tasks[0]
+            await asyncio.to_thread(callbacks[0], None)
+            await hass.tasks[1]
+        finally:
+            manager_module.async_track_time_interval = original
+
+        assert calls == ["refresh", "refresh"]
+        assert hass.async_create_task_calls == 0
+
+    asyncio.run(exercise())
 
 
 def _load_registry():

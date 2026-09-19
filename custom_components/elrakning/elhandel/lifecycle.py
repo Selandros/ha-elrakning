@@ -46,14 +46,14 @@ class LifecycleManager:
 
     def start_refresh(self, callback: LifecycleCallback):
         if self._refresh_task is None or self._refresh_task.done():
-            self._refresh_task = self._hass.async_create_task(
+            self._refresh_task = self._hass.create_task(
                 callback(self._generation)
             )
         return self._refresh_task
 
     def start_consumption_refresh(self, callback: LifecycleCallback):
         if self._consumption_task is None or self._consumption_task.done():
-            self._consumption_task = self._hass.async_create_task(
+            self._consumption_task = self._hass.create_task(
                 callback(self._generation)
             )
         return self._consumption_task

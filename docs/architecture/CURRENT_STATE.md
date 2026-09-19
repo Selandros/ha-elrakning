@@ -890,3 +890,19 @@ INFERRED (roadmap): Long-term data foundation:
   database files were not touched and the prior WAL-consistent integrity
   result remains the last direct database evidence. No natural Single Run
   frame was observed during this deploy/restart window.
+
+## 0.0.643 E.ON/elhandel thread-safe scheduling fix
+
+- ROOT CAUSE VERIFIED (0.0.642 runtime): HA logged wrong-thread calls from
+  `elnat/eon_manager.py:81` and `elhandel/lifecycle.py:49/56`. The traceback
+  entered through `concurrent.futures.thread.py`; the affected callbacks then
+  called `hass.async_create_task`, causing blocked task creation and
+  `coroutine was never awaited` warnings.
+- IMPLEMENTED (0.0.643): The affected E.ON/elhandel scheduling paths now use
+  HA's thread-safe `hass.create_task` API. Refresh ownership, interval
+  subscriptions, provider data, auth, bindings, stores and site semantics are
+  unchanged. Focused worker-thread regression tests cover E.ON startup/interval
+  callbacks and the shared elhandel lifecycle.
+- RELEASE STATUS: `0.0.643` is the pending release-only version bump for this
+  minimal fix. Solar Evidence, Single Run, Greenely and canonical schema are
+  separate and unchanged.

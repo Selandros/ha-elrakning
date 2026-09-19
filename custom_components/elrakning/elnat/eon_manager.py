@@ -78,10 +78,10 @@ class EonGridManager:
         if self._refresh_unsub is None:
             self._refresh_unsub = async_track_time_interval(
                 self.hass,
-                lambda _: self.hass.async_create_task(self.async_refresh()),
+                lambda _: self.hass.create_task(self.async_refresh()),
                 timedelta(hours=1),
             )
-        self.hass.async_create_task(self.async_refresh())
+        self.hass.create_task(self.async_refresh())
 
     async def async_save_cookie_header(self, cookie_header: str) -> dict[str, Any]:
         session = EonSession(self.hass)
@@ -633,7 +633,7 @@ class EonGridManager:
 
         def _refresh_callback(_now) -> None:
             self._web_refresh_unsub = None
-            self.hass.async_create_task(self.async_refresh())
+            self.hass.create_task(self.async_refresh())
 
         self._web_refresh_unsub = async_call_later(self.hass, delay, _refresh_callback)
 
