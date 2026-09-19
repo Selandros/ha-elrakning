@@ -804,3 +804,56 @@ INFERRED (roadmap): Long-term data foundation:
   limitations. 0.0.640 is released, deployed and runtime-loaded. The next
   scope is explicit Greenely proof activation; no CURRENT_STATE change is
   included in that scope until separately authorized.
+
+## 0.0.641 causal solar provenance release
+
+- COMPLETE (release/deploy, 0.0.641, 2026-09-19): Implementation commit
+  `14e2364692ae1a5245611ce4c98fe761338a4fae` and release commit
+  `eba7d95048bead5d06e7e97187c3d0be102adb5e` are deployed. The exact clean
+  `custom_components/elrakning/` payload contained 58 files and all 58
+  SHA-256 values matched before and after one normal Home Assistant Core
+  restart. Manifest/runtime version is `0.0.641`. No second restart, manual
+  collector call, backfill, Greenely proof provisioning, schema change, or
+  persistent-data cleanup was performed.
+- VERIFIED (runtime integrity, 0.0.641, 2026-09-19): HA Core returned healthy
+  after restart. A WAL-consistent read-only canonical snapshot reported
+  `integrity_check=ok`, existing schema migrations v1/v2 only, zero duplicate
+  point IDs, zero duplicate frame semantic-key/revision pairs, and zero broken
+  supersedes links. Both sites remain in the persistent site registry.
+- VERIFIED (site isolation, 0.0.641, 2026-09-19): Vikarbodarna retains its
+  verified location, Open-Meteo binding, solar geometry and namespaced Stores.
+  Fiskvik remains without verified location/Open-Meteo binding/solar geometry;
+  its Open-Meteo, Forecast.Solar and provenance Stores remain absent. No
+  fabricated Fiskvik frames were observed.
+- VERIFIED (Forecast.Solar and legacy preservation, 0.0.641, 2026-09-19):
+  Vikarbodarna Forecast.Solar roles and existing weather/evidence stores remain
+  present, while the canonical database contains no Forecast.Solar frames for
+  Fiskvik. Evidence-v1, previous_day1 and the frozen historical population were
+  not manually triggered, rewritten or backfilled. The known E.ON/elhandel
+  `async_create_task` thread warnings remain a separate pre-existing scope.
+- VERIFIED (services.yaml classification, 0.0.641, 2026-09-19): No
+  `services.yaml` exists in the deployed 0.0.641 tree, the saved 0.0.640
+  backup, the repository, or repository history. The HA message is therefore
+  a baseline missing-service-description warning, not a 0.0.641 regression.
+  Runtime service registration remains implemented in Python; no service was
+  invoked during this gate.
+- VERIFIED (Single Run lifecycle, static/runtime load, 0.0.641, 2026-09-19):
+  `CanonicalCollector` owns one startup task and one hourly time trigger at
+  `minute=0, second=12`; the single-run capture is protected by its own lock
+  and shares the collector's storage flush lock. Setup diagnostics recorded
+  `integration_start`, provider startup and normal refresh events. Vikarbodarna
+  satisfies the target eligibility requirements; Fiskvik fails closed because
+  it lacks verified location, binding and solar geometry.
+- NOT OBSERVED (natural Single Run frame, 0.0.641, 2026-09-19): The first
+  naturally scheduled opportunity after restart produced no
+  `open_meteo.single_run_day_ahead_pv.v1` frame. No public capture status or
+  provider failure reason was exposed by the existing runtime read surface, so
+  no reason is fabricated. Canonical integrity and site isolation remained
+  healthy after the opportunity. The locked release gate permits closure with
+  this honest evidence limitation; the producer is live and awaiting its first
+  natural frame.
+- COMPLETE (0.0.641 runtime closure): Release, deploy, restart, lifecycle
+  load, canonical integrity, site isolation and legacy non-regression gates
+  pass. `CURRENT_STATE` is now the authoritative record; no locked contract or
+  architecture decision was changed. Next work is to observe a natural valid
+  Single Run frame, not to invoke a manual capture.
