@@ -976,3 +976,18 @@ INFERRED (roadmap): Long-term data foundation:
   operation was manually invoked; no natural Single Run frame was observed.
   Unrelated Home Assistant/custom `greenely` and other integration warnings in
   the restart log are outside this release scope.
+
+## 0.0.646 Greenely source PII hardening
+
+- ROOT CAUSE VERIFIED (read-only runtime audit): Existing Greenely provider
+  source state still retained personal source fields such as email/name,
+  phone/IP and address fields. The site binding still contains only the
+  configured facility identity; no provider-proven contract/meter/install to
+  invoice-installation (`Anl.id`) relation is present.
+- IMPLEMENTED: Greenely source sanitization now removes those personal source
+  fields together with customer/meter/account identifiers and existing secret
+  fields, while retaining the separate facility binding identity required for
+  attribution. This is forward-only; no existing Store or invoice history was
+  rewritten and Greenely economics remains fail-closed.
+- IMPLEMENTATION STATUS: Local release gates pending. Single Run has since
+  produced one natural, valid Vikarbodarna frame; no Fiskvik frame exists.

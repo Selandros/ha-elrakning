@@ -8,6 +8,9 @@ SENSITIVE_PARTS = (
     "password", "jwt", "token", "authorization", "cookie", "secret",
     "personnummer", "personal_number", "ssn", "ocr", "pdf_url", "bankid",
     "customer_id", "customerid", "meter_id", "meterid", "account_id", "accountid",
+    "email", "first_name", "firstname", "last_name", "lastname", "cell_phone",
+    "phone", "mobile", "ip_address", "ipaddress", "address", "street",
+    "zip_code", "zipcode", "postal_code",
 )
 
 
