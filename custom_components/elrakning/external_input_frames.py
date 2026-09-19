@@ -550,14 +550,16 @@ def build_open_meteo_frame(
     fetched_at = fetched_at.astimezone(timezone.utc)
     captured_at = (captured_at or fetched_at).astimezone(timezone.utc)
     known_at = (known_at or captured_at).astimezone(timezone.utc)
-    if fetched_at > known_at or captured_at > known_at:
+    if fetched_at > known_at or (captured_at > known_at and not target.get("allow_capture_after_knowledge")):
         raise ValueError("open_meteo_timestamp_order_invalid")
     request_fingerprint = target["section_request_fingerprint"]
     generation_id = target["generation_id"]
-    semantic_key = (
-        f"{OPEN_METEO_DATASET}|{target['site_id']}|{generation_id}|"
-        f"{OPEN_METEO_LOGICAL_ROLE}|{request_fingerprint}"
-    )
+    dataset = target.get("dataset", OPEN_METEO_DATASET)
+    logical_role = target.get("logical_role", OPEN_METEO_LOGICAL_ROLE)
+    semantic_suffix = target.get("semantic_run_identity")
+    semantic_key = f"{dataset}|{target['site_id']}|{generation_id}|{logical_role}|{request_fingerprint}"
+    if semantic_suffix:
+        semantic_key = f"{semantic_key}|run:{semantic_suffix}"
     knowledge = {
         "semantic_key": semantic_key,
         "quality_status": normalized.get("quality_status", "good"),
@@ -572,6 +574,8 @@ def build_open_meteo_frame(
             }
             for point in points
         ],
+        "derived_target_day_pv_kwh": normalized.get("derived_target_day_pv_kwh"),
+        "run_initialization_at": normalized.get("run_initialization_at"),
     }
     knowledge_fingerprint = hashlib.sha256(json.dumps(knowledge, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest()
     frame_seed = json.dumps(knowledge, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -588,7 +592,7 @@ def build_open_meteo_frame(
         "source_generation_id": generation_id,
         "source_scope": "site",
         "site_id": target["site_id"],
-        "logical_role": OPEN_METEO_LOGICAL_ROLE,
+        "logical_role": logical_role,
         "classification": "forecast",
         "published_at": None,
         "fetched_at": fetched_at,
@@ -601,8 +605,8 @@ def build_open_meteo_frame(
         "provenance": {
             "origin_type": "open_meteo_http_response",
             "provider": "open-meteo",
-            "endpoint": "https://api.open-meteo.com/v1/metno",
-            "model": "metno",
+            "endpoint": target.get("endpoint", "https://api.open-meteo.com/v1/metno"),
+            "model": target.get("model", "metno"),
             "site_id": target["site_id"],
             "timezone": target["timezone"],
             "latitude": target["latitude"],
@@ -612,11 +616,22 @@ def build_open_meteo_frame(
             "section_request_fingerprint": request_fingerprint,
             "source_generation_id": generation_id,
             "source_timezone": normalized.get("api_metadata", {}).get("timezone", target["timezone"]),
+            "run_initialization_at": normalized.get("run_initialization_at"),
+            "provider_response_received_at": fetched_at.isoformat(),
+            "target_date": normalized.get("target_date"),
+            "decision_at": (
+                target["decision_at"].astimezone(timezone.utc).isoformat()
+                if isinstance(target.get("decision_at"), datetime)
+                else target.get("decision_at")
+            ),
+            "derived_target_day_pv_kwh": normalized.get("derived_target_day_pv_kwh"),
+            "transformation_version": target.get("transformation_version"),
+            "normalization_version": target.get("normalization_version"),
             "raw_unit": "W/m²",
             "source_timestamp_semantics": "provider_local_or_offset_aware",
             "knowledge_fingerprint": knowledge_fingerprint,
         },
-        "payload_schema": "open_meteo.global_tilted_irradiance.v1",
+        "payload_schema": target.get("payload_schema", "open_meteo.global_tilted_irradiance.v1"),
     }
     frame_points = [
         {

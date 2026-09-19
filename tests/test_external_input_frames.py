@@ -68,6 +68,66 @@ class ExternalInputFrameTests(unittest.TestCase):
         self.assertEqual(result["written"], 2)
         self.assertEqual(self.storage.count_external_frames(), 2)
 
+    def test_unrelated_dataset_does_not_ignore_provider_response_timestamp(self):
+        target = {
+            "site_id": "site-a",
+            "logical_role": "external.test.input",
+            "source_generation_id": "generation-a",
+            "payload_schema": "external.test.v1",
+        }
+        first = {
+            "frame_id": "frame-test-1",
+            "schema_version": 1,
+            "dataset_version": 1,
+            "semantic_key": "external.test.input|site-a",
+            "revision": 1,
+            "source_generation_id": target["source_generation_id"],
+            "source_scope": "site",
+            "site_id": target["site_id"],
+            "logical_role": target["logical_role"],
+            "classification": "forecast",
+            "published_at": None,
+            "fetched_at": datetime(2026, 9, 13, 10, tzinfo=UTC),
+            "known_at": datetime(2026, 9, 13, 10, tzinfo=UTC),
+            "captured_at": datetime(2026, 9, 13, 10, tzinfo=UTC),
+            "valid_from": datetime(2026, 9, 13, 12, tzinfo=UTC),
+            "valid_to": datetime(2026, 9, 13, 13, tzinfo=UTC),
+            "quality_status": "good",
+            "quality": {},
+            "provenance": {
+                "provider": "test-provider",
+                "provider_response_received_at": "2026-09-13T10:00:00+00:00",
+            },
+            "payload_schema": target["payload_schema"],
+        }
+        point = {
+            "point_id": "frame-test-1-p001",
+            "point_key": "2026-09-13T12:00:00+00:00",
+            "valid_at": datetime(2026, 9, 13, 12, tzinfo=UTC),
+            "value": 1.0,
+            "unit": "kW",
+            "quality_status": "good",
+            "point": {"value": 1.0},
+        }
+        self.storage.ensure_source_generation({
+            "site_id": target["site_id"], "logical_role": target["logical_role"],
+            "generation_id": target["source_generation_id"],
+            "source_identity": {"identity_key": "test", "identity_strength": "strong"},
+            "source_resolution_kind": "native_bucket", "source_resolution_seconds": 3600,
+            "timezone_state": "verified",
+        }, first["captured_at"])
+        self.assertTrue(self.storage.insert_external_frame(first, [point]))
+        second = {
+            **first,
+            "frame_id": "frame-test-1",
+            "provenance": {
+                **first["provenance"],
+                "provider_response_received_at": "2026-09-13T10:05:00+00:00",
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "canonical_frame_revision_conflict"):
+            self.storage.insert_external_frame(second, [point])
+
     def test_smhi_generations_are_site_owned_and_hourly_ignores_current_sensor_mapping(self):
         base = {"site_id": "site-a", "config_entry_id": "smhi-1", "weather_entity": "weather.home", "source": "smhi"}
         current_a, _ = build_smhi_current_frame({**base, "sensor_entities": {"cloud_total": "sensor.a"}}, {"temperature": 18}, datetime(2026, 9, 13, 10, tzinfo=UTC))
@@ -208,7 +268,7 @@ class ExternalInputFrameTests(unittest.TestCase):
         metadata_only = dict(normalized)
         metadata_only["api_metadata"] = {"timezone": "Europe/Stockholm", "generationtime_ms": 0.2}
         unchanged = build_open_meteo_frame(target, metadata_only, fetched + timedelta(hours=1))
-        self.assertEqual(persist_open_meteo_frames(self.storage, [unchanged], fetched + timedelta(hours=1))["unchanged"], 1)
+        self.assertEqual(persist_open_meteo_frames(self.storage, [unchanged], fetched + timedelta(hours=1))["revised"], 1)
         generation = self.storage.connection.execute(
             "SELECT source_resolution_kind, source_resolution_seconds, timezone_state FROM source_generations WHERE source_generation_id = ?",
             ("om-generation-a",),
@@ -221,7 +281,11 @@ class ExternalInputFrameTests(unittest.TestCase):
         rows = self.storage.connection.execute(
             "SELECT site_id, logical_role, revision FROM external_input_frames ORDER BY revision"
         ).fetchall()
-        self.assertEqual(rows, [("site-a", "solar.irradiance.forecast", 1), ("site-a", "solar.irradiance.forecast", 2)])
+        self.assertEqual(rows, [
+            ("site-a", "solar.irradiance.forecast", 1),
+            ("site-a", "solar.irradiance.forecast", 2),
+            ("site-a", "solar.irradiance.forecast", 3),
+        ])
 
     def test_forecast_solar_supported_roles_write_site_scoped_frames(self):
         observed_at = datetime(2026, 9, 5, 9, 59, tzinfo=UTC)

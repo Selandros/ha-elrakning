@@ -248,7 +248,11 @@ class ForecastSolarTests(unittest.TestCase):
         hass, _manager = self._manager(states, [])
         targets = [{
             "site_id": "site-vik",
-            "binding": {"entities": {"today_kwh": "sensor.vik_today", "tomorrow_kwh": "sensor.vik_tomorrow"}},
+            "binding": {
+                "config_entry_id": "forecast-entry",
+                "binding_fingerprint": "binding-v1",
+                "entities": {"today_kwh": "sensor.vik_today", "tomorrow_kwh": "sensor.vik_tomorrow"},
+            },
         }]
         manager = solar_forecast.SolarForecastManager(
             hass, collection_targets_getter=lambda: targets
@@ -280,6 +284,10 @@ class ForecastSolarTests(unittest.TestCase):
         self.assertEqual(days["2026-08-30"]["forecast_kwh"], 12)
         self.assertEqual(days["2026-08-30"]["capture_type"], "day_ahead")
         self.assertEqual(days["2026-08-30"]["site_id"], "site-vik")
+        self.assertEqual(
+            days["2026-08-30"]["source_generation_id"],
+            solar_forecast.source_generation_id("site-vik", targets[0]["binding"]),
+        )
         self.assertIsNone(manager._site_id)
         self.assertEqual(manager._entities, {})
 

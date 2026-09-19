@@ -538,6 +538,15 @@ class CanonicalStorage:
         ).fetchone()
         if row is None:
             return False
+        expected_provenance = dict(frame.get("provenance", {}))
+        stored_provenance = json.loads(row[19])
+        # A single-run response receipt is transport metadata that can change
+        # when the same provider run is observed again.  Keep this exception
+        # scoped to that immutable dataset; every other dataset compares its
+        # provenance byte-for-byte as part of its revision identity.
+        if frame.get("payload_schema") == "open_meteo.single_run_day_ahead_pv.v1":
+            expected_provenance.pop("provider_response_received_at", None)
+            stored_provenance.pop("provider_response_received_at", None)
         expected = (
             int(frame.get("schema_version", SCHEMA_VERSION)),
             int(frame.get("dataset_version", DATASET_VERSION)), frame["semantic_key"],
@@ -548,9 +557,9 @@ class CanonicalStorage:
             self._timestamp_optional(frame.get("valid_from")),
             self._timestamp_optional(frame.get("valid_to")), frame["quality_status"],
             json.dumps(frame.get("quality", {}), sort_keys=True),
-            json.dumps(frame.get("provenance", {}), sort_keys=True), frame["payload_schema"],
+            json.dumps(expected_provenance, sort_keys=True), frame["payload_schema"],
         )
-        comparable = row[1:11] + (row[11], row[15], row[16], row[17], row[18], row[19], row[20])
+        comparable = row[1:11] + (row[11], row[15], row[16], row[17], row[18], json.dumps(stored_provenance, sort_keys=True), row[20])
         if comparable != expected:
             return False
         stored = connection.execute(

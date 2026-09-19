@@ -37,6 +37,13 @@ from .solar_open_meteo import (
     build_open_meteo_targets,
     normalize_open_meteo_payload,
 )
+from .solar_single_run import (
+    DATASET as SINGLE_RUN_DATASET,
+    async_fetch_single_run_target,
+    build_single_run_targets,
+    candidate_run_times,
+    decision_at_for_target,
+)
 from .solar_weather import build_weather_targets, normalize_current_weather, normalize_hourly_forecast
 
 
@@ -71,6 +78,8 @@ class CanonicalCollector:
         self._open_meteo_capture_status: dict[str, Any] | None = None
         self._open_meteo_lock = asyncio.Lock()
         self._open_meteo_unsub = None
+        self._single_run_lock = asyncio.Lock()
+        self._single_run_capture_status: dict[str, Any] | None = None
         self._weather_unsub = None
         self._weather_capture_lock = asyncio.Lock()
         self._weather_capture_status: dict[str, Any] | None = None
@@ -89,6 +98,69 @@ class CanonicalCollector:
     def open_meteo_capture_status(self) -> dict[str, Any] | None:
         """Return the latest in-memory Open-Meteo capture diagnostics."""
         return copy.deepcopy(self._open_meteo_capture_status)
+
+    def single_run_capture_status(self) -> dict[str, Any] | None:
+        return copy.deepcopy(self._single_run_capture_status)
+
+    def _single_run_targets(self) -> list[dict[str, Any]]:
+        getter = getattr(self.site_identity_manager, "collection_site_configs", None)
+        return build_single_run_targets(getter() if getter else {})
+
+    async def async_capture_single_run_day_ahead(self, *, trigger: str = "startup") -> dict[str, Any]:
+        """Capture available causal Open-Meteo run vintages site-independently."""
+        async with self._single_run_lock:
+            now = dt_util.now().astimezone(timezone.utc)
+            targets = self._single_run_targets()
+            result = {"trigger": trigger, "target_count": len(targets), "target_site_ids": sorted({item["site_id"] for item in targets}), "sections": {}, "last_error": None}
+            frames = []
+            for target in targets:
+                target_date = dt_util.as_local(now).date() + timedelta(days=1)
+                decision_at = decision_at_for_target(target_date, target["timezone"])
+                key = f"{target['site_id']}:{target['single_run_request_fingerprint']}:{target_date.isoformat()}"
+                section = {"status": "missing", "written": 0, "revised": 0, "deduplicated": 0}
+                result["sections"][key] = section
+                if now >= decision_at:
+                    section["status"] = "post_decision_window"
+                    continue
+                for run_time in candidate_run_times(now, decision_at):
+                    try:
+                        normalized, received_at = await async_fetch_single_run_target(self.hass, target, target_date, run_time)
+                        capture_target = dict(target)
+                        capture_target.update({
+                            "dataset": SINGLE_RUN_DATASET,
+                            "decision_at": decision_at,
+                            "semantic_run_identity": normalized["run_initialization_at"],
+                            "section_request_fingerprint": target["single_run_request_fingerprint"],
+                            "payload_schema": "open_meteo.single_run_day_ahead_pv.v1",
+                        })
+                        frame_pair = build_open_meteo_frame(capture_target, normalized, received_at, received_at, received_at)
+                        frames.append((key, frame_pair))
+                        section["status"] = "fetched"
+                        break
+                    except Exception as error:
+                        section["last_error"] = type(error).__name__
+                if section["status"] == "missing":
+                    result["last_error"] = section.get("last_error", "run_unavailable")
+            if frames:
+                try:
+                    async with self._flush_lock:
+                        persisted = await self.hass.async_add_executor_job(
+                            persist_open_meteo_frames, self.storage, [pair for _key, pair in frames], now
+                        )
+                    for key, (frame, _points) in frames:
+                        item = result["sections"][key]
+                        frame_result = persisted.get("frames", {}).get(frame["semantic_key"], persisted)
+                        item["written"] = int(frame_result.get("written", 0))
+                        item["revised"] = int(frame_result.get("revised", 0))
+                        item["deduplicated"] = int(frame_result.get("unchanged", 0))
+                        item["status"] = "success" if item["written"] or item["revised"] else "deduplicated"
+                except Exception as error:
+                    result["last_error"] = str(error)
+                    for key, _pair in frames:
+                        result["sections"][key]["status"] = "error"
+            result["status"] = "success" if frames and not result["last_error"] else "partial_failure" if frames else "no_eligible_run"
+            self._single_run_capture_status = copy.deepcopy(result)
+            return result
 
     def weather_capture_status(self) -> dict[str, Any] | None:
         """Return the latest in-memory SMHI canonical capture diagnostics."""
@@ -267,6 +339,7 @@ class CanonicalCollector:
     async def _async_open_meteo_cadence(self, _now) -> None:
         """Run the hourly capture as a real Home Assistant coroutine job."""
         await self.async_capture_open_meteo(trigger="hourly_cadence")
+        await self.async_capture_single_run_day_ahead(trigger="hourly_cadence")
 
     async def async_capture_forecast_solar(
         self,

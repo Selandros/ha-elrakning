@@ -202,6 +202,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
     )
+    single_run_capture = getattr(canonical_collector, "async_capture_single_run_day_ahead", None)
+    if single_run_capture is not None:
+        frontend_data["single_run_startup_task"] = hass.async_create_task(
+            single_run_capture(trigger="startup")
+        )
     frontend_data["weather_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_weather(trigger="startup")
     )
@@ -262,6 +267,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove("elrakning", "greenely_proof_provision")
     frontend_data.pop("config_entry", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+    if startup_task := frontend_data.pop("single_run_startup_task", None):
         startup_task.cancel()
         try:
             await startup_task

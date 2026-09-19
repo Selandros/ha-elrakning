@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
@@ -13,12 +13,20 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 
 from .site_context import async_load_site_store
+from .solar_provenance import (
+    FORECAST_SOLAR_DATASET,
+    OPEN_METEO_EVIDENCE_DATASET,
+    append_immutable,
+    build_provenance_record,
+)
 from homeassistant.util import dt as dt_util
 
 from .solar_pvgis import build_installation
 
 
 STORE_KEY = "elrakning.solar_evidence"
+PROVENANCE_STORE_KEY = "elrakning.solar_evidence_provenance"
+PROVENANCE_STORE_VERSION = 1
 PROTOCOL_VERSION = "evidence-v1"
 OPEN_METEO_ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 ACTIVE_THRESHOLD_KW = 0.05
@@ -175,6 +183,8 @@ class SolarEvidenceManager:
         self._collection_site_configs_getter = collection_site_configs_getter
         self._collection_lock = asyncio.Lock()
         self.store = Store(hass, 1, STORE_KEY)
+        self.provenance_store = Store(hass, PROVENANCE_STORE_VERSION, PROVENANCE_STORE_KEY)
+        self._provenance: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self._days: dict[str, dict[str, Any]] = {}
         self._task = None
         self._unsub = None
@@ -204,8 +214,19 @@ class SolarEvidenceManager:
             self._site_context_enabled = True
             if self._site_id is None:
                 self._days = {}
+                self._provenance = {}
                 return
             self.store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, self._site_id)
+            self.provenance_store, provenance = await async_load_site_store(
+                self.hass, PROVENANCE_STORE_KEY, PROVENANCE_STORE_VERSION, self._site_id
+            )
+            self._provenance = {}
+            if isinstance(provenance, dict) and isinstance(provenance.get("observations"), dict):
+                self._provenance = {
+                    str(target): dict(sources)
+                    for target, sources in provenance["observations"].items()
+                    if isinstance(sources, dict)
+                }
             self._days = {}
             if cached and isinstance(cached.get("days"), dict):
                 self._days = {
@@ -307,6 +328,9 @@ class SolarEvidenceManager:
         power_state = target.get("power") if isinstance(target.get("power"), dict) else {}
         async with self._collection_lock:
             store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
+            provenance_store, provenance_cached = await async_load_site_store(
+                self.hass, PROVENANCE_STORE_KEY, PROVENANCE_STORE_VERSION, site_id
+            )
             days = {
                 key: dict(value)
                 for key, value in ((cached or {}).get("days", {}) or {}).items()
@@ -355,38 +379,152 @@ class SolarEvidenceManager:
                 quality["exclusion_reasons"].append("actual_unavailable")
             record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and unavailable == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
             om = await self._fetch_open_meteo(target_date, power_state)
-            record.update({f"open_meteo_{key_name}": value for key_name, value in om.items()})
-            baseline = await self._frozen_forecast_baseline(site_id, key, start)
+            record.update({
+                f"open_meteo_{key_name}": value
+                for key_name, value in om.items()
+                if key_name != "fetched_at"
+            })
+            forecast_item = await self._forecast_baseline_record(site_id, key)
+            baseline = self._usable_forecast_baseline(forecast_item, start)
             record["forecast_solar_frozen_kwh"] = baseline
             if baseline is not None and actual is not None:
                 record["common_forecast_solar_day"] = True
+            fs_fingerprint = await self._persist_forecast_provenance(
+                site_id, key, provenance_store, provenance_cached, forecast_item, baseline, start
+            )
+            om_fingerprint = await self._persist_open_meteo_provenance(
+                site_id, key, provenance_store, provenance_cached, om, start
+            )
+            await self._persist_provenance_link(site_id, key, fs_fingerprint, om_fingerprint, start)
             return await self._save_target_day(site_id, store, days, key, record)
 
     async def _fetch_open_meteo(self, target_date: date, power_state: dict[str, Any]) -> dict[str, Any]:
         installation = build_installation(self.hass, power_state)
         if not installation:
-            return {"status": "installation_inputs_missing", "values": 0, "missing": 24}
+            return {"status": "installation_inputs_missing", "values": 0, "missing": 24, "fetched_at": None}
         params = {"latitude": str(installation["latitude"]), "longitude": str(installation["longitude"]), "start_date": target_date.isoformat(), "end_date": target_date.isoformat(), "hourly": "global_tilted_irradiance_previous_day1", "models": "metno_seamless", "tilt": str(PANEL_TILT), "azimuth": str(OPEN_METEO_AZIMUTH), "timezone": "Europe/Stockholm"}
         try:
             session = async_get_clientsession(self.hass)
             async with session.get(OPEN_METEO_ENDPOINT, params=params, timeout=30) as response:
                 if response.status != 200:
-                    return {"status": f"http_{response.status}", "values": 0, "missing": 24}
-                return parse_previous_runs(await response.json(), target_date.isoformat())
+                    return {"status": f"http_{response.status}", "values": 0, "missing": 24, "fetched_at": None}
+                fetched_at = dt_util.now().astimezone(timezone.utc)
+                result = parse_previous_runs(await response.json(), target_date.isoformat())
+                result["fetched_at"] = fetched_at.isoformat()
+                return result
         except Exception:
-            return {"status": "request_failed", "values": 0, "missing": 24}
+            return {"status": "request_failed", "values": 0, "missing": 24, "fetched_at": None}
 
-    async def _frozen_forecast_baseline(self, site_id: str, key: str, start: datetime) -> float | None:
+    async def _forecast_baseline_record(self, site_id: str, key: str) -> dict[str, Any] | None:
         reader = getattr(self.forecast_manager, "async_site_baseline_record", None)
         if callable(reader):
             item = await reader(site_id, key)
         else:
             baselines = getattr(self.forecast_manager, "_baselines", {})
             item = baselines.get(key) if isinstance(baselines, dict) else None
+        return dict(item) if isinstance(item, dict) else None
+
+    @staticmethod
+    def _usable_forecast_baseline(item: dict[str, Any] | None, start: datetime) -> float | None:
         if not isinstance(item, dict) or item.get("capture_type") != "day_ahead":
             return None
         captured = dt_util.parse_datetime(item.get("captured_at"))
-        return _number(item.get("forecast_kwh")) if captured and captured < start else None
+        value = _number(item.get("forecast_kwh"))
+        return value if captured and captured < start and value is not None else None
+
+    async def _persist_forecast_provenance(
+        self, site_id, key, store, cached, item, baseline, decision_at
+    ) -> str | None:
+        if baseline is None or not isinstance(item, dict):
+            return None
+        captured = dt_util.parse_datetime(item.get("captured_at"))
+        if captured is None:
+            return None
+        _latest_store, latest = await async_load_site_store(
+            self.hass, PROVENANCE_STORE_KEY, PROVENANCE_STORE_VERSION, site_id
+        )
+        observations = {
+            str(target): dict(sources)
+            for target, sources in ((latest or {}).get("observations", {}) or {}).items()
+            if isinstance(sources, dict)
+        }
+        source_records = list(observations.get(key, {}).get("forecast_solar", []))
+        source_record = build_provenance_record(
+                site_id=site_id,
+                source="forecast_solar",
+                dataset=FORECAST_SOLAR_DATASET,
+                target=f"local_day:{key}",
+                value=baseline,
+                unit="kWh",
+                captured_at=captured,
+                known_at=captured,
+                source_generation_id=item.get("source_generation_id"),
+                valid_from=decision_at.isoformat(),
+                valid_to=None,
+                payload={"capture_type": item.get("capture_type"), "source": item.get("source")},
+            )
+        append_immutable(source_records, source_record)
+        source_records = source_records[-32:]
+        observations.setdefault(key, {})["forecast_solar"] = source_records
+        await store.async_save({"schema": "solar_evidence.provenance.v1", "observations": observations})
+        return source_record["frame_fingerprint"]
+
+    async def _persist_open_meteo_provenance(
+        self, site_id, key, store, cached, result, decision_at
+    ) -> str | None:
+        if not isinstance(result, dict) or result.get("status") != "complete":
+            return None
+        fetched_raw = result.get("fetched_at")
+        fetched_at = dt_util.parse_datetime(fetched_raw)
+        value = _number(result.get("nominal_kwh"))
+        if fetched_at is None or value is None:
+            return None
+        _latest_store, latest = await async_load_site_store(
+            self.hass, PROVENANCE_STORE_KEY, PROVENANCE_STORE_VERSION, site_id
+        )
+        observations = {
+            str(target): dict(sources)
+            for target, sources in ((latest or {}).get("observations", {}) or {}).items()
+            if isinstance(sources, dict)
+        }
+        source_records = list(observations.get(key, {}).get("open_meteo", []))
+        source_record = build_provenance_record(
+                site_id=site_id,
+                source="open_meteo",
+                dataset=OPEN_METEO_EVIDENCE_DATASET,
+                target=f"local_day:{key}",
+                value=value,
+                unit="kWh",
+                captured_at=fetched_at,
+                known_at=fetched_at,
+                fetched_at=fetched_at,
+                source_generation_id=None,
+                valid_from=decision_at.isoformat(),
+                valid_to=None,
+                payload={"previous_day1": True, "status": result.get("status")},
+            )
+        append_immutable(source_records, source_record)
+        observations.setdefault(key, {})["open_meteo"] = source_records[-32:]
+        await store.async_save({"schema": "solar_evidence.provenance.v1", "observations": observations})
+        return source_record["frame_fingerprint"]
+
+    async def _persist_provenance_link(self, site_id, key, fs_fingerprint, om_fingerprint, decision_at) -> None:
+        if not fs_fingerprint and not om_fingerprint:
+            return
+        store, cached = await async_load_site_store(
+            self.hass, PROVENANCE_STORE_KEY, PROVENANCE_STORE_VERSION, site_id
+        )
+        links = dict((cached or {}).get("links", {}) or {})
+        links[key] = {
+            "forecast_solar_frame_fingerprint": fs_fingerprint,
+            "open_meteo_frame_fingerprint": om_fingerprint,
+            "decision_at": decision_at.isoformat(),
+        }
+        observations = dict((cached or {}).get("observations", {}) or {})
+        await store.async_save({"schema": "solar_evidence.provenance.v1", "observations": observations, "links": links})
+
+    async def _frozen_forecast_baseline(self, site_id: str, key: str, start: datetime) -> float | None:
+        return self._usable_forecast_baseline(await self._forecast_baseline_record(site_id, key), start)
 
     async def _save_target_day(
         self,

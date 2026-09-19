@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from datetime import datetime, timedelta
 import re
 from typing import Any
@@ -21,6 +23,21 @@ UPDATE_EVENT = "elrakning_solar_forecast_update"
 BASELINE_DAYS = 14
 ENERGY_FACTORS = {"wh": 0.001, "kwh": 1.0, "mwh": 1000.0}
 POWER_FACTORS = {"w": 0.001, "kw": 1.0, "mw": 1000.0}
+
+
+def source_generation_id(site_id: str, binding: dict[str, Any]) -> str:
+    """Derive a stable source generation from source-defining binding fields."""
+    identity = {
+        "site_id": site_id,
+        "source": "forecast_solar",
+        "config_entry_id": binding.get("config_entry_id"),
+        "binding_fingerprint": binding.get("binding_fingerprint"),
+        "entities": sorted((binding.get("entities") or {}).items()),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:32]
+    return f"fs-{digest}"
 
 
 def _number(value: Any) -> float | None:
@@ -200,15 +217,17 @@ class SolarForecastManager:
                 changed = self._trim_baseline_days(days, today)
                 facts = self._read_facts(entities)
                 captured_at = dt_util.now()
+                generation_id = source_generation_id(site_id, binding)
                 tomorrow = facts.get("tomorrow_kwh")
                 if isinstance(tomorrow, (int, float)) and tomorrow >= 0:
                     changed |= self._capture_into(
-                        days, site_id, today + timedelta(days=1), tomorrow, "day_ahead", captured_at
+                        days, site_id, today + timedelta(days=1), tomorrow, "day_ahead", captured_at,
+                        generation_id,
                     )
                 current = facts.get("today_kwh")
                 if isinstance(current, (int, float)) and current >= 0:
                     changed |= self._capture_into(
-                        days, site_id, today, current, "first_today", captured_at
+                        days, site_id, today, current, "first_today", captured_at, generation_id
                     )
                 if changed:
                     await store.async_save({"days": days})
@@ -323,6 +342,7 @@ class SolarForecastManager:
         forecast_kwh: float,
         capture_type: str,
         captured_at: datetime,
+        source_generation_id: str | None = None,
     ) -> bool:
         key = target_date.isoformat()
         existing = days.get(key)
@@ -334,11 +354,13 @@ class SolarForecastManager:
             "source": "forecast_solar",
             "capture_type": capture_type,
             "site_id": site_id,
+            "source_generation_id": source_generation_id,
         }
         if (
             existing
             and existing.get("forecast_kwh") == next_value["forecast_kwh"]
             and existing.get("capture_type") == capture_type
+            and existing.get("source_generation_id") == source_generation_id
         ):
             return False
         days[key] = next_value
