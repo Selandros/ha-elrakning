@@ -56,6 +56,16 @@
     "digest_of_single_raw_identifier_allowed": false,
     "required": true
   },
+  "evidence_package": {
+    "package_version": "c4c1a-evidence-package-v1",
+    "exact_keys": ["package_version", "procedure", "relation", "semantic_identity", "recorded_at"],
+    "procedure": "operator_compared_provider_and_invoice_sections",
+    "relation": "greenely_meter_id_to_invoice_installation_id",
+    "recorded_at": "timezone_aware_evidence_recording_time",
+    "semantic_identity": "must_equal_deterministic_proof_semantic_identity",
+    "extra_keys": false,
+    "raw_identity_keys": false
+  },
   "provider_lookup_states": ["LOOKUP_OK", "LOOKUP_FAILED"],
   "provisioning_steps": [
     "authenticated_service_call", "explicit_site_id", "admin_required",

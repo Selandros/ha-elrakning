@@ -144,7 +144,28 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
         hass.user = SimpleNamespace(is_admin=True)
         binding = {"provider": "greenely", "config_entry_id": "entry", "facility_id": "facility"}
         binding["binding_fingerprint"] = SiteIdentityManager.binding_fingerprint(binding)
-        package = {"contract_version": 1, "facility": "h", "invoice": "h"}
+        semantic = {
+            "relation": "greenely_meter_id_to_invoice_installation_id",
+            "provider_config_entry_identity": SiteIdentityManager.identity_fingerprint({"config_entry_id": "entry"}),
+            "site_binding_identity": binding["binding_fingerprint"],
+            "facility_identity": SiteIdentityManager.identity_fingerprint({"facility_id": "facility"}),
+            "contract_identity_scope": SiteIdentityManager.identity_fingerprint({"contract_id": "contract"}),
+            "facility_meter_identity_state": "fm",
+            "contract_meter_identity_state": "c" * 64,
+            "invoice_installation_identity": "im",
+            "verification_method": "provider_native_semantic_proof",
+            "proof_schema_version": 1,
+            "fingerprint_version": "sha256-v1",
+            "parser_identity": "parser",
+            "normalization_identity": "normalizer",
+        }
+        package = {
+            "package_version": "c4c1a-evidence-package-v1",
+            "procedure": "operator_compared_provider_and_invoice_sections",
+            "relation": "greenely_meter_id_to_invoice_installation_id",
+            "semantic_identity": SiteIdentityManager.identity_fingerprint(semantic),
+            "recorded_at": "2026-09-13T10:00:00Z",
+        }
         digest = hashlib.sha256(json.dumps(package, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         payload = {
             "site_id": "site", "expected_binding_fingerprint": binding["binding_fingerprint"], "contract_id": "contract",
@@ -704,7 +725,7 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
         invalid_payloads = [
             (dict(payload, evidence_digest=None), "evidence_digest_invalid"),
             (dict(payload, evidence_digest=" " ), "evidence_digest_invalid"),
-            (dict(payload, evidence_package={"contract_version": 1, "facility": "h"}), "evidence_digest_mismatch"),
+            (dict(payload, evidence_package={"contract_version": 1, "facility": "h"}), "evidence_package_invalid"),
             (dict(payload, evidence_reference="https://example.invalid/evidence"), "evidence_reference_invalid"),
         ]
         with patch("custom_components.elrakning.elhandel.providers.greenely_invoice_economics.GreenelyClient", client):

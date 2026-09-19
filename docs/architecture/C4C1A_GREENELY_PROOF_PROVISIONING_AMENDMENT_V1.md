@@ -79,6 +79,16 @@ versioned verification-evidence package. The digest must not be merely a
 digest of one raw identifier. Missing or malformed actor, reference, or digest
 prevents `EXPLICITLY_VERIFIED`.
 
+The exact package is `c4c1a-evidence-package-v1` with exactly these keys:
+`package_version`, `procedure`, `relation`, `semantic_identity`, and
+`recorded_at`. The only allowed procedure is
+`operator_compared_provider_and_invoice_sections`; `relation` must equal the
+proof relation; `semantic_identity` must equal the deterministic semantic
+proof identity; and `recorded_at` must be an explicit timezone-aware evidence
+recording time. Extra keys, raw identity keys, unknown procedures, malformed
+timestamps and mismatched semantic identities are rejected. `recorded_at` is
+not `invoice_date`, `verified_at` or `captured_at`.
+
 ## Semantic versus audit identity
 
 `proof_semantic_identity` contains the attribution-defining facts:

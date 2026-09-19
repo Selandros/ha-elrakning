@@ -31,6 +31,16 @@ GREENELY_ALLOWED_VERIFICATION_METHODS = {
 }
 GREENELY_FACILITY_METER_IDENTITY_UNAVAILABLE = "provider_meter_identity_unavailable_v1"
 GREENELY_CONTRACT_METER_IDENTITY_UNAVAILABLE = "provider_contract_meter_identity_unavailable_v1"
+GREENELY_EVIDENCE_PACKAGE_VERSION = "c4c1a-evidence-package-v1"
+GREENELY_EVIDENCE_PACKAGE_PROCEDURE = "operator_compared_provider_and_invoice_sections"
+GREENELY_EVIDENCE_PACKAGE_KEYS = frozenset({
+    "package_version", "procedure", "relation", "semantic_identity", "recorded_at",
+})
+GREENELY_EVIDENCE_FORBIDDEN_KEYS = frozenset({
+    "facility_id", "contract_id", "user_id", "email", "address", "street",
+    "meter_id", "installation_id", "anl.id", "ocr_number", "credential", "jwt",
+    "signed_url",
+})
 
 
 def normalize_greenely_facility_meter_identity(payload: dict[str, Any]) -> str | None:
@@ -54,6 +64,53 @@ def normalize_greenely_contract_meter_identity(value: Any) -> str | None:
     if len(value) == 64 and all(char in "0123456789abcdef" for char in value):
         return value
     return None
+
+
+def validate_greenely_evidence_package(
+    package: Any, expected_semantic_identity: str,
+) -> str | None:
+    """Validate and digest the exact bounded C4C1A evidence package."""
+    if not isinstance(package, dict) or set(package) != GREENELY_EVIDENCE_PACKAGE_KEYS:
+        return None
+    if package.get("package_version") != GREENELY_EVIDENCE_PACKAGE_VERSION:
+        return None
+    if package.get("procedure") != GREENELY_EVIDENCE_PACKAGE_PROCEDURE:
+        return None
+    if package.get("relation") != GREENELY_PROOF_RELATION:
+        return None
+    semantic_identity = package.get("semantic_identity")
+    if semantic_identity != expected_semantic_identity:
+        return None
+    if (
+        not isinstance(semantic_identity, str)
+        or len(semantic_identity) != 64
+        or any(char not in "0123456789abcdef" for char in semantic_identity)
+    ):
+        return None
+    recorded_at = package.get("recorded_at")
+    if not isinstance(recorded_at, str) or not recorded_at.strip():
+        return None
+    try:
+        parsed_recorded_at = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed_recorded_at.tzinfo is None:
+        return None
+
+    def contains_forbidden_key(value: Any) -> bool:
+        if isinstance(value, dict):
+            if any(str(key).lower() in GREENELY_EVIDENCE_FORBIDDEN_KEYS for key in value):
+                return True
+            return any(contains_forbidden_key(item) for item in value.values())
+        if isinstance(value, list):
+            return any(contains_forbidden_key(item) for item in value)
+        return False
+
+    if contains_forbidden_key(package):
+        return None
+    return hashlib.sha256(
+        json.dumps(package, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 ROLE_MAP = {
     "consumption_entity": "house.consumption",
@@ -596,11 +653,6 @@ class SiteIdentityManager:
             raise ValueError("evidence_reference_invalid")
         if not isinstance(evidence_digest, str) or len(evidence_digest) != 64 or any(c not in "0123456789abcdef" for c in evidence_digest.lower()):
             raise ValueError("evidence_digest_invalid")
-        if not isinstance(evidence_package, dict) or evidence_package.get("contract_version") != 1:
-            raise ValueError("evidence_package_invalid")
-        package_digest = hashlib.sha256(json.dumps(evidence_package, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        if package_digest != evidence_digest:
-            raise ValueError("evidence_digest_mismatch")
         fields = {
             "site_id": site_id,
             "provider": "greenely",
@@ -652,6 +704,13 @@ class SiteIdentityManager:
             "parser_identity": fields["parser_identity"],
             "normalization_identity": fields["normalization_identity"],
         }
+        package_digest = validate_greenely_evidence_package(
+            evidence_package, self.identity_fingerprint(semantic)
+        )
+        if package_digest is None:
+            raise ValueError("evidence_package_invalid")
+        if package_digest != evidence_digest:
+            raise ValueError("evidence_digest_mismatch")
         audit = {key: fields[key] for key in ("verification_actor", "verified_at", "evidence_reference", "evidence_digest")}
         fields["proof_semantic_identity"] = self.identity_fingerprint(semantic)
         fields["proof_audit_identity"] = self.identity_fingerprint(audit)
