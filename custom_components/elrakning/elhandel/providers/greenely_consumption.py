@@ -23,10 +23,12 @@ def normalize_greenely_consumption(payload: Any) -> list[dict[str, Any]]:
             continue
         if not isinstance(localtime, str) or not localtime:
             continue
-        sample = {"source_timestamp": str(item.get("timestamp") or ""), "localtime": localtime, "usage_wh": usage, "usage_kwh": usage / 1000}
-        for key, value in item.items():
-            if key not in {"timestamp", "usage", "localtime"} and isinstance(value, (str, int, float, bool)):
-                sample[key] = value
+        sample = {
+            "source_timestamp": str(item.get("timestamp") or ""),
+            "localtime": localtime,
+            "usage_wh": usage,
+            "usage_kwh": usage / 1000,
+        }
         result.append(sample)
     result.sort(key=lambda item: item["localtime"])
     return result

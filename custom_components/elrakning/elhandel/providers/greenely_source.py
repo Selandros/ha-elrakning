@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-SENSITIVE_PARTS = ("password", "jwt", "token", "authorization", "cookie", "secret", "personnummer", "personal_number", "ssn", "ocr", "pdf_url", "bankid")
+SENSITIVE_PARTS = (
+    "password", "jwt", "token", "authorization", "cookie", "secret",
+    "personnummer", "personal_number", "ssn", "ocr", "pdf_url", "bankid",
+    "customer_id", "customerid", "meter_id", "meterid", "account_id", "accountid",
+)
 
 
 def sanitize_greenely_source(value: Any, key: str | None = None) -> Any:

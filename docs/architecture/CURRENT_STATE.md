@@ -945,3 +945,22 @@ INFERRED (roadmap): Long-term data foundation:
   Solar Evidence or Single Run operation was manually invoked, and no natural
   Single Run frame was observed. The 0.0.643 rollback is preserved outside the
   discovery path.
+
+## 0.0.645 Greenely privacy sanitization and baseline-test contract alignment
+
+- IMPLEMENTED: Greenely consumption normalization now emits only the locked
+  normalized timestamp/localtime/usage fields and cannot copy arbitrary source
+  scalar fields such as email into samples or summaries. Greenely contract
+  sanitization now removes customer, meter and account identifiers in addition
+  to existing credentials, BankID and signed-document fields while retaining
+  the separate facility binding identity needed for attribution.
+- VERIFIED: The remaining seven 0.0.644 baseline failures were classified as
+  two production privacy bugs and five stale test expectations. Tests were
+  updated only where they asserted obsolete implementation location or
+  provider-neutral internal-shape expectations. E.ON provider identifiers and
+  semantic source fields remain preserved under the existing provenance
+  contract; only authentication secrets are redacted there.
+- LOCAL GATE PASS: Python `632 passed, 46 subtests, 0 failed`; MJS `28/28`;
+  compileall, JSON, YAML and `git diff --check` pass. No schema migration,
+  Evidence/Single Run change, Greenely proof activation, or canonical-data
+  rewrite is included. Runtime deployment is pending.

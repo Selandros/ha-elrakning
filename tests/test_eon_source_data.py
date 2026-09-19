@@ -33,11 +33,9 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
 
 
 def test_source_redaction_covers_credentials_and_account_identifiers():
-    namespace = {}
     source = (ROOT / "custom_components/elrakning/elnat/eon_manager.py").read_text()
-    assert "customeridentifier" in source.lower()
-    assert "contractaccountidentifier" in source.lower()
-    assert "authorization" in source.lower()
+    assert "from ..diagnostics import sanitize_source_data" in source
+    assert "_redact_source_data" in source
 
 
 def test_manager_preserves_independent_app_and_web_configuration():

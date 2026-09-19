@@ -703,9 +703,19 @@ class _FailingSaveClient:
 
 def test_consumption_summary_sanitizes_samples_and_rejects_schema():
     summary = _summarize_consumption(
-        {"data": [{"timestamp": "2026-08-20T00:00:00Z", "value": 1.2, "email": "hidden"}]}
+        {"data": [{
+            "timestamp": "2026-08-20T00:00:00Z",
+            "localtime": "2026-08-20T00:00:00",
+            "usage": 1200,
+            "email": "hidden",
+        }]}
     )
-    assert summary["sample_items"] == [{"timestamp": "2026-08-20T00:00:00Z", "value": 1.2}]
+    assert summary["sample_items"] == [{
+        "source_timestamp": "2026-08-20T00:00:00Z",
+        "localtime": "2026-08-20T00:00:00",
+        "usage_wh": 1200,
+        "usage_kwh": 1.2,
+    }]
     assert _summarize_consumption({"data": {"value": 1.2}}) is None
 
 
@@ -743,6 +753,8 @@ def test_invoice_sanitization_removes_sensitive_fields_and_normalizes_cost():
     assert "jwt" not in invoice
     assert _sanitize_contract(contract)["status"] == "OPERATIONAL"
     assert "customer_id" not in _sanitize_contract(contract)
+    assert "meter_id" not in _sanitize_contract(contract)
+    assert "bankid_order_ref" not in _sanitize_contract(contract)
 
 
 def test_cached_state_contains_no_credentials_or_raw_invoice_fields():

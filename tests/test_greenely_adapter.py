@@ -40,7 +40,7 @@ def test_complete_greenely_state_maps_to_provider_data():
     }
     assert data.active_data == {
         "configured": True,
-        "contracts": [{"id": "contract-a"}],
+        "contracts": [{"_contract_id": "contract-a", "status": "OPERATIONAL"}],
         "source_invoices": [{"invoice_date": "2026-08-01"}],
         "agreement_name": "Kvartsprisavtal",
         "latest_period": {},
@@ -49,7 +49,12 @@ def test_complete_greenely_state_maps_to_provider_data():
         "processing": {"last_error": None},
         "last_update": "2026-08-23T10:00:00+00:00",
     }
-    assert data.invoices == [{"invoice_date": "2026-08-01", "amount_due_sek": 12.0}]
+    assert data.invoices == [{
+        "invoice_date": "2026-08-01",
+        "amount_due_sek": 12.0,
+        "_contract_id": "contract-a",
+        "_invoice_key": "invoice-a",
+    }]
     assert data.consumption == {
         "summary": {"month": "2026-08", "month_to_date_kwh": 10.0},
         "samples": [{"value": 1.2}],

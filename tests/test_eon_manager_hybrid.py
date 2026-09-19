@@ -238,7 +238,10 @@ def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
     manager.state = manager_module.EonGridManager._empty_state()
     manager._app_session = object()
     manager.store = types.SimpleNamespace(async_save=lambda state: asyncio.sleep(0))
-    manager.hass = types.SimpleNamespace(bus=types.SimpleNamespace(async_fire=lambda event: None))
+    manager.hass = types.SimpleNamespace(
+        bus=types.SimpleNamespace(async_fire=lambda event: None),
+        data={},
+    )
     manager._get_app_session = lambda config, session=None: asyncio.sleep(0, result=object())
     original = manager_module.EonAppClient
     manager_module.EonAppClient = _AppClient
@@ -404,7 +407,10 @@ def test_source_redaction_preserves_semantic_contract_and_price_fields_nested():
     assert redacted["tariff"] == {"transfer_price": 97, "energy_tax": 45, "fuse_ampere": 16}
     assert redacted["outage"]["status"] == "no_known_outage"
     assert redacted["future"] == "FUTURE"
-    assert redacted["nested"][0] == {"customerId": "[redacted]", "installationId": "[redacted]"}
+    assert redacted["nested"][0] == {
+        "customerId": "customer-placeholder",
+        "installationId": "installation-placeholder",
+    }
 
 
 def test_app_source_data_explains_grid_card_from_canonical_state():

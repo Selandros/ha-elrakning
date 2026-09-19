@@ -143,14 +143,15 @@ def test_site_independent_forecast_and_evidence_providers_are_wired():
 def test_baseline_capture_precedes_evidence_startup_catch_up():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
+    coordinator_source = source_path.with_name("coordinator.py").read_text(encoding="utf-8")
 
     baseline = source.index("await solar_forecast_manager.async_capture_collection_baselines()")
     catch_up = source.index("await solar_evidence_manager.async_startup_catch_up()")
     assert baseline < catch_up
-    assert "for delay in (15, 30, 60, 120, 240)" in source
+    assert "for delay in (15, 30, 60, 120, 240)" in coordinator_source
     assert "cancel_midnight_recovery" in source
-    assert "_NEXT_DAY_PREFETCH_START_HOUR = 14" in source
-    assert "at most once per local hour" in source
+    assert "_NEXT_DAY_PREFETCH_START_HOUR = 14" in coordinator_source
+    assert "at most once per local hour" in coordinator_source
 
 
 def test_coordinator_interval_remains_fifteen_minutes():
