@@ -929,10 +929,19 @@ INFERRED (roadmap): Long-term data foundation:
   `greenely_invoice_economics.py`, while no `services.yaml` has ever existed
   in the repository or release payload. Home Assistant therefore attempts to
   load the service description and reports the missing-file error.
-- IMPLEMENTED (pending release): Added metadata for that existing service and
+- IMPLEMENTED: Added metadata for that existing service and
   all twelve existing required fields. No service handler, schema, service
   semantics, provider data, site state, storage, Solar Evidence, Single Run,
   Greenely proof state or canonical schema was changed.
-- RELEASE STATUS: `0.0.644` is pending release, deploy and runtime
-  verification. The baseline `services.yaml` error is expected to disappear
-  after the new payload is loaded.
+- COMPLETE (0.0.644 release/runtime): Release `bc08d99b0d801adfd9b3832bc00223e31c9df6ab`
+  was deployed as an exact 59-file payload with all source hashes matching
+  after one normal Core restart. Manifest/runtime is `0.0.644` and
+  `ha core check` passed.
+- VERIFIED (0.0.644 runtime): The post-restart log window contains no new
+  `Failed to load services.yaml for integration: elrakning` message and no
+  new Elräkning traceback. The last matching services.yaml lines belong to
+  the pre-deploy log history. Both sites and existing namespaced stores remain
+  present; Fiskvik remains clean-room and Greenely remains fail-closed. No
+  Solar Evidence or Single Run operation was manually invoked, and no natural
+  Single Run frame was observed. The 0.0.643 rollback is preserved outside the
+  discovery path.
