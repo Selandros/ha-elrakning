@@ -1084,3 +1084,31 @@ INFERRED (roadmap): Long-term data foundation:
   authenticated Home Assistant admin service context and a complete bounded
   evidence package; invoice occurrence/correction/reissue remains open and
   separate.
+
+## 0.0.650 Greenely evidence-package contract alignment
+
+- ROOT CAUSE VERIFIED: The locked C4C1A pure contract required the exact
+  `c4c1a-evidence-package-v1` five-key package, while production checked only
+  for a different `contract_version` key.
+- IMPLEMENTED: Production now requires exact package keys, exact package
+  version, the single allowed comparison procedure, the locked proof relation,
+  timezone-aware evidence `recorded_at`, deterministic lowercase SHA256
+  semantic identity matching the normalized proof inputs, and a canonical
+  digest. Extra keys, raw identity keys, unknown procedure/relation, malformed
+  timestamps, arbitrary semantic identities and digest mismatches fail closed.
+  Facility/contract meter-state semantics are unchanged.
+- VERIFIED: Release commit `6786e0b1a478be0961f2e22c12ae8eb1474282d9` passed
+  `641 passed, 46 subtests, 0 failed`, MJS `28/28`, compileall, JSON/YAML
+  validation and diff-check. The exact AppleDouble-free 59-file payload
+  matched before one normal Core restart.
+- VERIFIED (0.0.650 runtime): Core returned healthy with manifest `0.0.650`;
+  services/setup errors were zero, no proof record or proof-provisioning log
+  marker appeared, Greenely forbidden PII-key counts remained zero, and the
+  three rollback backups remain outside the discovery path. No Evidence or
+  Single Run trigger was invoked.
+- SITE READINESS: Vikarbodarna has the bounded facility/contract/invoice and
+  original-invoice installation evidence, but proof remains unprovisioned
+  pending authenticated Home Assistant admin context and explicit evidence
+  recording time. Fiskvik has verified provider facility/contract scope but
+  zero invoices and zero consumption evidence; it is explicitly ineligible,
+  remains clean-room and receives no proof or economics frames.
