@@ -870,5 +870,5 @@ INFERRED (roadmap): Long-term data foundation:
   `forecast_solar_frozen_kwh` values while allowing the existing status merge.
   Evidence-v1, frozen baselines and previous_day1 semantics are otherwise
   unchanged. Greenely and Single Run are separate scopes.
-- RELEASE STATUS: `0.0.642` is the pending release-only version bump for this
-  fix; HA deploy and Core restart are not part of this release step.
+- COMPLETE (0.0.642 release): The fix is committed and pushed. HA deploy and
+  Core restart are intentionally not part of this release step.
