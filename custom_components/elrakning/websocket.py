@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from functools import partial
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfoNotFoundError
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
@@ -35,6 +36,7 @@ from .invoice import build_today_variable_cost
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
+from .ella_site_state import build_site_state
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -93,6 +95,7 @@ ELLA_LOADS_LIST_COMMAND = f"{DOMAIN}/ella_loads/list"
 ELLA_LOADS_STATE_COMMAND = f"{DOMAIN}/ella_loads/state"
 ELLA_LOADS_UPSERT_COMMAND = f"{DOMAIN}/ella_loads/upsert"
 ELLA_LOADS_REMOVE_COMMAND = f"{DOMAIN}/ella_loads/remove"
+ELLA_SITE_STATE_COMMAND = f"{DOMAIN}/ella_site_state"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,6 +156,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ella_loads_state)
     websocket_api.async_register_command(hass, websocket_ella_loads_upsert)
     websocket_api.async_register_command(hass, websocket_ella_loads_remove)
+    websocket_api.async_register_command(hass, websocket_ella_site_state)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -1325,6 +1329,87 @@ async def websocket_ella_capabilities(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": str(err)})
         return
     connection.send_result(msg["id"], {"success": True, **inventory})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_SITE_STATE_COMMAND, vol.Optional("site_id"): str, vol.Optional("date"): str})
+@websocket_api.async_response
+async def websocket_ella_site_state(hass, connection, msg):
+    """Return the read-only, site-scoped Stage 2 decision state."""
+    identity = _ella_site_manager(hass)
+    registry = _ella_load_registry(hass)
+    site_id, error = _ella_requested_site(hass, msg)
+    if error or identity is None or registry is None:
+        connection.send_result(msg["id"], {"success": False, "error": error or "site_state_unavailable"})
+        return
+    config = getattr(identity, "state", {}).get("site_configs", {}).get(site_id, {})
+    timezone_name = (config.get("location") or {}).get("timezone")
+    if not isinstance(timezone_name, str) or not timezone_name:
+        connection.send_result(msg["id"], {"success": False, "error": "site_timezone_unavailable", "site_id": site_id})
+        return
+    try:
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(timezone_name)
+        target = datetime.now(zone).date()
+        if msg.get("date"):
+            target = date.fromisoformat(msg["date"])
+    except (TypeError, ValueError, KeyError):
+        connection.send_result(msg["id"], {"success": False, "error": "invalid_date_or_timezone", "site_id": site_id})
+        return
+    decision_at = dt_util.now()
+    entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+    coordinator = entry.runtime_data if entry else None
+    price_data = await coordinator.async_get_price_data(target) if coordinator else PriceData(None, None, target, (), "price_unavailable")
+    binding = identity.global_binding("nord_pool") if callable(getattr(identity, "global_binding", None)) else None
+    source_id = binding.get("binding_fingerprint") if isinstance(binding, dict) else None
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    if collector is None:
+        connection.send_result(msg["id"], {"success": False, "error": "canonical_storage_unavailable", "site_id": site_id})
+        return
+    from .ella_capabilities import build_capability_inventory
+    forecast = await _async_load_forecast_state(hass, site_id)
+    try:
+        inventory = build_capability_inventory(
+            identity, registry, site_id, load_forecast=forecast,
+            entity_available=lambda entity_id: _ella_entity_available(hass, entity_id),
+        )
+        from .ella_site_state import local_day_slots
+        day_slots = local_day_slots(target, timezone_name)
+        actual_rows = await hass.async_add_executor_job(
+            collector.storage.read_site_energy_history,
+            site_id, day_slots[0][0] - timedelta(days=60), day_slots[-1][1],
+        )
+        model_points = build_historical_model_points(actual_rows, timezone_name, day_slots[0][0], day_slots[-1][1])
+        all_frames = await hass.async_add_executor_job(
+            partial(collector.storage.read_external_input_frames, decision_at, source_scope="site", site_id=site_id)
+        )
+        solar_frames = [frame for frame in all_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
+        economic_frames = [frame for frame in all_frames if frame.get("payload_schema") == "eon.grid_economic_active_snapshot.v1"]
+        configured_loads = registry.list_for_site(site_id)
+        availability_by_id = {
+            item.get("load_id"): item
+            for item in (inventory.get("individual_loads", {}).get("items", []) if isinstance(inventory.get("individual_loads"), dict) else [])
+            if isinstance(item, dict)
+        }
+        state_loads = [
+            {**load, **availability_by_id.get(load.get("load_id"), {})}
+            for load in configured_loads
+        ]
+        state = build_site_state(
+            site_id, timezone_name, target, decision_at,
+            periods=price_data.periods if price_data and not price_data.error else (),
+            price_source_generation_id=source_id,
+            actual_rows=actual_rows,
+            load_frames=forecast.get("frames", []),
+            model_points=model_points,
+            capability_snapshot=inventory,
+            individual_loads=state_loads,
+            solar_forecast_frames=solar_frames,
+            economic_frames=economic_frames,
+        )
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err), "site_id": site_id})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
 
 
 async def _ella_loads_response(hass, msg):

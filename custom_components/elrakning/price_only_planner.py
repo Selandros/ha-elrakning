@@ -164,6 +164,30 @@ def _load_points_for_block(
     expected = int((end - start).total_seconds() / LOAD_SLOT_SECONDS)
     if expected <= 0:
         return None
+    selected = select_load_slot_points(
+        start, end, frames, site_id, decision_at, actual_rows=actual_rows, model_points=model_points
+    )
+    if not all(selected):
+        return None
+    return [point for point in selected if point is not None]
+
+
+def select_load_slot_points(
+    start: datetime,
+    end: datetime,
+    frames: Iterable[dict[str, Any]],
+    site_id: str,
+    decision_at: datetime,
+    *,
+    actual_rows: Iterable[dict[str, Any]] | None = None,
+    model_points: Iterable[dict[str, Any]] | None = None,
+) -> list[dict[str, Any] | None]:
+    """Select one truthful point per quarter-hour without filling gaps."""
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        return []
+    expected = int((end - start).total_seconds() / LOAD_SLOT_SECONDS)
+    if expected <= 0:
+        return []
     candidates: list[dict[str, Any]] = []
     for frame in frames or []:
         if not isinstance(frame, dict) or frame.get("site_id") != site_id:
@@ -224,8 +248,7 @@ def _load_points_for_block(
         }
     by_time.update(actual_by_time)
     expected_times = [start + timedelta(seconds=LOAD_SLOT_SECONDS * index) for index in range(expected)]
-    selected = [by_time.get(value) for value in expected_times]
-    return [point for point in selected if point is not None] if all(selected) and len(by_time) == expected else None
+    return [by_time.get(value) for value in expected_times]
 
 
 def enrich_plan_with_load(
