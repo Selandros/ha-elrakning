@@ -4,6 +4,8 @@ import fs from "node:fs";
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 
 assert.match(panel, /ELLA · Energiplan/);
+assert.match(panel, /ella_binding_verified/);
+assert.match(panel, /const ellaBound = this\._siteState\?\.ella_binding_verified === true/);
 assert.match(panel, /Lärläge · Shadow · styrning avstängd/);
 assert.match(panel, /load_forecast/);
 assert.match(panel, /chart-power-forecast-load/);

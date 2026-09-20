@@ -80,6 +80,7 @@ SITE_IDENTITY_COMMAND = f"{DOMAIN}/site_identity"
 SITE_RENAME_COMMAND = f"{DOMAIN}/site_rename"
 SITE_CREATE_COMMAND = f"{DOMAIN}/site_create"
 SITE_ACTIVATE_COMMAND = f"{DOMAIN}/site_activate"
+ELLA_BINDING_SET_COMMAND = f"{DOMAIN}/ella_binding_set"
 SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
 SOLAR_EVIDENCE_STATE_COMMAND = f"{DOMAIN}/solar_evidence_state"
 UPDATE_EVENT = "elrakning_price_update"
@@ -135,6 +136,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_site_rename)
     websocket_api.async_register_command(hass, websocket_site_create)
     websocket_api.async_register_command(hass, websocket_site_activate)
+    websocket_api.async_register_command(hass, websocket_ella_binding_set)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -1201,6 +1203,9 @@ async def _async_load_forecast_state(hass) -> dict:
     """Serialize the active site's immutable load forecast, if available."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    ella_binding_getter = getattr(identity, "active_ella_binding", None) if identity else None
+    if not callable(ella_binding_getter) or ella_binding_getter() is None:
+        return {"available": False, "reason": "ella_unbound", "frames": []}
     site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
     if not site_id or collector is None:
         return {"available": False, "reason": "site_unconfigured", "frames": []}
@@ -1325,6 +1330,28 @@ async def websocket_site_activate(hass, connection, msg):
         return
     try:
         state = await manager.async_activate_site(msg["site_id"])
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): ELLA_BINDING_SET_COMMAND,
+        vol.Required("site_id"): str,
+        vol.Required("enabled"): bool,
+    }
+)
+@websocket_api.async_response
+async def websocket_ella_binding_set(hass, connection, msg):
+    """Explicitly grant/revoke planner-only ELLA capability for one site."""
+    manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if manager is None:
+        connection.send_result(msg["id"], {"success": False, "error": "site_manager_unavailable"})
+        return
+    try:
+        state = await manager.async_set_ella_planner_binding(msg["site_id"], msg["enabled"])
     except ValueError as err:
         connection.send_result(msg["id"], {"success": False, "error": str(err)})
         return

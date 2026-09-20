@@ -115,6 +115,85 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["generation_id"] for item in state["source_ledger"]], ["generation-b"])
         self.assertEqual([item["generation_id"] for item in state["logical_roles"]], ["generation-b"])
 
+    def test_ella_requires_explicit_verified_versioned_binding(self):
+        manager = object.__new__(SiteIdentityManager)
+        manager.state = {
+            "active_site_id": "site-b",
+            "sites": [{"site_id": "site-b", "name": "B"}],
+            "site_configs": {
+                "site-b": {
+                    "power": {"solar_entities": ["sensor.solar"]},
+                    "meter": {},
+                    "bindings": {},
+                }
+            },
+        }
+
+        self.assertIsNone(manager.active_ella_binding())
+        self.assertFalse(manager.public_state()["ella_binding_verified"])
+
+        manager.state["site_configs"]["site-b"]["bindings"]["ella"] = {
+            "binding_version": 1,
+            "capability": "ella_planner",
+            "enabled": True,
+            "verification_state": "verified",
+            "actuator_write_enabled": False,
+            "binding_fingerprint": "0" * 64,
+        }
+
+        self.assertEqual(manager.active_ella_binding()["binding_version"], 1)
+        self.assertTrue(manager.public_state()["ella_binding_verified"])
+
+    def test_ella_binding_does_not_follow_general_site_configuration(self):
+        manager = object.__new__(SiteIdentityManager)
+        manager.state = {
+            "active_site_id": "fiskvik",
+            "sites": [{"site_id": "fiskvik", "name": "Fiskvik"}],
+            "site_configs": {
+                "fiskvik": {
+                    "power": {"solar_entities": ["sensor.solar"]},
+                    "meter": {"import_power": "sensor.grid"},
+                    "bindings": {"grid": {"provider": "generic-grid"}},
+                }
+            },
+        }
+
+        self.assertTrue(manager.public_state()["site_configured"])
+        self.assertFalse(manager.public_state()["ella_binding_verified"])
+
+    def test_ella_binding_validation_rejects_invalid_or_actuator_enabled_state(self):
+        self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding({
+            "binding_version": 1, "capability": "ella_planner", "enabled": True,
+            "verification_state": "verified", "actuator_write_enabled": False,
+            "binding_fingerprint": "foo",
+        }))
+        self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding({
+            "binding_version": 1, "capability": "ella_planner", "enabled": True,
+            "verification_state": "verified", "actuator_write_enabled": True,
+            "binding_fingerprint": "0" * 64,
+        }))
+
+    async def test_ella_binding_enable_disable_is_explicit_and_versioned(self):
+        class _Store:
+            async def async_save(self, _state):
+                return None
+        manager = object.__new__(SiteIdentityManager)
+        manager.store = _Store()
+        manager.state = {
+            "active_site_id": "site-a",
+            "sites": [{"site_id": "site-a", "name": "A"}],
+            "site_configs": {"site-a": {"power": {}, "meter": {}, "bindings": {}}},
+        }
+        enabled = await manager.async_set_ella_planner_binding("site-a", True)
+        self.assertTrue(enabled["ella_binding_verified"])
+        binding = manager.state["site_configs"]["site-a"]["bindings"]["ella"]
+        self.assertTrue(SiteIdentityManager.is_valid_ella_planner_binding(binding, require_enabled=True))
+        disabled = await manager.async_set_ella_planner_binding("site-a", False)
+        self.assertFalse(disabled["ella_binding_verified"])
+        self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding(
+            manager.state["site_configs"]["site-a"]["bindings"]["ella"], require_enabled=True
+        ))
+
     async def test_price_fetch_requires_explicit_site_binding(self):
         entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
         services = _Services({"SE2": [{

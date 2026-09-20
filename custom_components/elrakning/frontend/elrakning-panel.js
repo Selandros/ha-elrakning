@@ -2796,6 +2796,7 @@ class ElrakningPanel {
           <button type="button" data-site-activate disabled>Gör till aktiv installation</button>
           <p class="site-settings-result" data-site-settings-result aria-live="polite"></p>
           <label class="site-settings-config-toggle"><input type="checkbox" data-site-config-cards-toggle> Visa konfigurationskort på tavlan</label>
+          <label class="site-settings-config-toggle"><input type="checkbox" data-site-ella-planner-toggle> Tillåt ELLA-planering för denna installation (ingen batteristyrning)</label>
           <button type="button" data-site-settings-close>Stäng</button>
         </div>
       </div>
@@ -6580,10 +6581,12 @@ class ElrakningPanel {
     const select = this.host.querySelector("[data-site-select]");
     const activate = this.host.querySelector("[data-site-activate]");
     const configToggle = this.host.querySelector("[data-site-config-cards-toggle]");
+    const ellaToggle = this.host.querySelector("[data-site-ella-planner-toggle]");
     if (name) name.textContent = current.name || "Namnlös installation";
     if (id) id.textContent = currentId || "–";
     if (created) created.textContent = current.created_at ? `Skapad ${current.created_at}` : "";
     if (configToggle) configToggle.checked = this._configurationCardsVisible;
+    if (ellaToggle) ellaToggle.checked = state.ella_binding_verified === true;
     if (!select) return;
     const sites = Array.isArray(state.available_sites) ? state.available_sites : [];
     select.replaceChildren(...sites.map((site) => {
@@ -6597,7 +6600,7 @@ class ElrakningPanel {
   }
 
   _setSiteSettingsBusy(busy) {
-    for (const control of this.host.querySelectorAll("[data-site-activate], [data-site-rename], [data-site-create], [data-site-select]")) control.disabled = busy;
+    for (const control of this.host.querySelectorAll("[data-site-activate], [data-site-rename], [data-site-create], [data-site-select], [data-site-ella-planner-toggle]")) control.disabled = busy;
   }
 
   async _openSiteSettings() {
@@ -6615,7 +6618,8 @@ class ElrakningPanel {
     const rename = this.host.querySelector("[data-site-rename]");
     const create = this.host.querySelector("[data-site-create]");
     const configToggle = this.host.querySelector("[data-site-config-cards-toggle]");
-    if (!dialog || !close || !select || !activate || !rename || !create || !configToggle) return;
+    const ellaToggle = this.host.querySelector("[data-site-ella-planner-toggle]");
+    if (!dialog || !close || !select || !activate || !rename || !create || !configToggle || !ellaToggle) return;
     const result = this.host.querySelector("[data-site-settings-result]");
     const currentId = () => this._siteState?.current_site?.site_id || this._siteState?.site_id || null;
     close.addEventListener("click", () => { dialog.hidden = true; });
@@ -6624,6 +6628,21 @@ class ElrakningPanel {
     configToggle.addEventListener("change", () => {
       this._applyConfigurationCardsVisibility(configToggle.checked);
       this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
+    });
+    ellaToggle.addEventListener("change", async () => {
+      const id = currentId();
+      if (!id) return;
+      this._setSiteSettingsBusy(true);
+      try {
+        const response = await this.hass.callWS({ type: "elrakning/ella_binding_set", site_id: id, enabled: ellaToggle.checked });
+        if (!response?.success) throw new Error(response?.error || "ella_binding_failed");
+        this._siteState = response;
+        this._renderSiteSettings();
+        if (result) result.textContent = ellaToggle.checked ? "ELLA-planering aktiverad. Ingen batteristyrning." : "ELLA-planering avaktiverad.";
+      } catch (error) {
+        ellaToggle.checked = !ellaToggle.checked;
+        if (result) result.textContent = `ELLA-planering kunde inte ändras: ${error.message}`;
+      } finally { this._setSiteSettingsBusy(false); }
     });
     rename.addEventListener("click", async () => {
       const id = currentId();
@@ -8094,9 +8113,9 @@ class ElrakningPanel {
     const readiness = this.host.querySelector("[data-ella-readiness]");
     const unavailable = this.host.querySelector("[data-ella-unavailable]");
     if (!section || !rail || !readiness || !unavailable) return;
-    const configured = this._siteState?.site_configured === true;
-    section.hidden = !configured;
-    if (!configured) return;
+    const ellaBound = this._siteState?.ella_binding_verified === true;
+    section.hidden = !ellaBound;
+    if (!ellaBound) return;
     const forecastFrame = this._loadForecast?.frames?.[0];
     const points = Array.isArray(forecastFrame?.points) ? forecastFrame.points : [];
     const solarAvailable = this._powerHistory?.solar_forecast?.available === true;

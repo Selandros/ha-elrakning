@@ -795,6 +795,73 @@ class SiteIdentityManager:
         binding = bindings.get(service) if isinstance(bindings, dict) else None
         return dict(binding) if isinstance(binding, dict) else None
 
+    def active_ella_binding(self) -> dict[str, Any] | None:
+        """Return ELLA only for an explicitly verified versioned site binding."""
+        binding = self.active_binding("ella")
+        return binding if self.is_valid_ella_planner_binding(binding, require_enabled=True) else None
+
+    @staticmethod
+    def is_valid_ella_planner_binding(binding: dict[str, Any] | None, *, require_enabled: bool = False) -> bool:
+        """Validate the explicit planner-only capability without inferring hardware access."""
+        if not isinstance(binding, dict):
+            return False
+        if binding.get("binding_version") != 1:
+            return False
+        if binding.get("capability") != "ella_planner":
+            return False
+        if binding.get("actuator_write_enabled") is not False:
+            return False
+        if binding.get("verification_state") not in {"verified", "disabled"}:
+            return False
+        if not isinstance(binding.get("enabled"), bool):
+            return False
+        if require_enabled and (binding.get("enabled") is not True or binding.get("verification_state") != "verified"):
+            return False
+        fingerprint = binding.get("binding_fingerprint")
+        return isinstance(fingerprint, str) and len(fingerprint) == 64 and all(
+            char in "0123456789abcdef" for char in fingerprint
+        )
+
+    async def async_set_ella_planner_binding(self, site_id: str, enabled: bool) -> dict[str, Any]:
+        """Persist an explicit site-scoped planner capability; never grants actuator access."""
+        self._normalize_sites()
+        if not isinstance(site_id, str) or not any(item.get("site_id") == site_id for item in self.state["sites"]):
+            raise ValueError("site_not_found")
+        if not isinstance(enabled, bool):
+            raise ValueError("invalid_ella_binding")
+        config = self.state.setdefault("site_configs", {}).setdefault(site_id, self._empty_site_config())
+        bindings = config.setdefault("bindings", {})
+        if enabled:
+            binding = {
+                "binding_version": 1,
+                "capability": "ella_planner",
+                "enabled": True,
+                "verification_state": "verified",
+                "actuator_write_enabled": False,
+                "configured_at": _now(),
+            }
+            binding["binding_fingerprint"] = self.binding_fingerprint(binding)
+            if not self.is_valid_ella_planner_binding(binding, require_enabled=True):
+                raise ValueError("invalid_ella_binding")
+            bindings["ella"] = binding
+        else:
+            binding = dict(bindings.get("ella", {}))
+            binding.update({
+                "binding_version": 1,
+                "capability": "ella_planner",
+                "enabled": False,
+                "verification_state": "disabled",
+                "actuator_write_enabled": False,
+            })
+            binding["binding_fingerprint"] = self.binding_fingerprint(binding)
+            if not self.is_valid_ella_planner_binding(binding):
+                raise ValueError("invalid_ella_binding")
+            bindings["ella"] = binding
+        await self.store.async_save(self.state)
+        if site_id == self.state.get("active_site_id"):
+            return self.public_state()
+        return self.public_state()
+
     def global_binding(self, service: str) -> dict[str, Any] | None:
         """Return a global binding shared by all sites."""
         binding = self.state.get("global_bindings", {}).get(service)
@@ -1180,6 +1247,7 @@ class SiteIdentityManager:
                 or any(self.state.get("site_configs", {}).get(active_site_id, {}).get("power", {}).get(field) for field in POWER_FIELDS)
                 or any(self.state.get("site_configs", {}).get(active_site_id, {}).get("meter", {}).get(field) for field in METER_FIELDS)
             ),
+            "ella_binding_verified": self.active_ella_binding() is not None,
             "bindings": deepcopy(self.state.get("site_configs", {}).get(active_site_id, {}).get("bindings", {})),
             "global_bindings": deepcopy(self.state.get("global_bindings", {})),
             "logical_roles": [item for item in ledger if item.get("site_id") == active_site_id and item.get("effective_to") is None],
