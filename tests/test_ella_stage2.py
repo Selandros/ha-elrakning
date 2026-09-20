@@ -11,7 +11,7 @@ install_elrakning_package_stub()
 install_optional_dependency_stubs()
 
 from custom_components.elrakning.coordinator import PricePeriod
-from custom_components.elrakning.ella_site_state import build_site_state, local_day_slots
+from custom_components.elrakning.ella_site_state import build_site_state, local_day_slots, resolve_timezone
 
 
 UTC = timezone.utc
@@ -158,3 +158,36 @@ def test_price_component_requires_matching_interval():
     )
     assert state["slots"][0]["price"]["value"] == 2.0
     assert state["slots"][1]["price"]["availability"] == "unavailable"
+
+
+def test_timezone_resolution_prefers_site_and_falls_back_to_configured_ha_timezone():
+    assert resolve_timezone("Europe/Oslo", "Europe/Stockholm") == ("Europe/Oslo", "site_location")
+    assert resolve_timezone(None, "Europe/Stockholm") == ("Europe/Stockholm", "home_assistant_config_default")
+
+
+def test_complete_multi_pv_net_load_and_partial_resource_coverage():
+    site = "site-a"
+    decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    start, end = local_day_slots(date(2026, 9, 20), "Europe/Stockholm")[0]
+    rows = [
+        _row(site, "house.consumption", start, 1000, "load"),
+        _row(site, "solar.production", start, 200, "solar-1"),
+        _row(site, "solar.production", start, 300, "solar-2"),
+    ]
+    capability = {"capabilities": [{"capability_id": "solar.actual", "source": {"resources": [{"generation_id": "solar-1"}, {"generation_id": "solar-2"}]}}]}
+    complete = build_site_state(site, "Europe/Stockholm", date(2026, 9, 20), decision, actual_rows=rows, capability_snapshot=capability)
+    assert complete["slots"][0]["net_load"]["value_w"] == 500
+    partial = build_site_state(site, "Europe/Stockholm", date(2026, 9, 20), decision, actual_rows=rows[:2], capability_snapshot=capability)
+    assert partial["slots"][0]["solar"]["availability"] == "partial"
+    assert partial["slots"][0]["net_load"]["availability"] == "unavailable"
+
+
+def test_source_facts_are_limited_to_horizon_and_latest_current_fact():
+    site = "site-a"
+    decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    slots = local_day_slots(date(2026, 9, 20), "Europe/Stockholm")
+    old = {"frame_id": "old", "site_id": site, "payload_schema": "forecast_solar.observed_fact.v1", "logical_role": "forecast_solar.today", "known_at": decision, "valid_from": slots[0][0] - timedelta(days=2), "valid_to": slots[0][0] - timedelta(days=1)}
+    current_old = {"frame_id": "current-old", "site_id": site, "payload_schema": "forecast_solar.observed_fact.v1", "logical_role": "forecast_solar.power_now", "known_at": decision - timedelta(minutes=2), "valid_from": None, "valid_to": None}
+    current_new = {**current_old, "frame_id": "current-new", "known_at": decision - timedelta(minutes=1)}
+    state = build_site_state(site, "Europe/Stockholm", date(2026, 9, 20), decision, solar_forecast_frames=[old, current_old, current_new])
+    assert [item["frame_id"] for item in state["source_facts"]] == ["current-new"]

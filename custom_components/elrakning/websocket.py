@@ -36,7 +36,7 @@ from .invoice import build_today_variable_cost
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
-from .ella_site_state import build_site_state
+from .ella_site_state import build_site_state, resolve_timezone
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -1342,8 +1342,11 @@ async def websocket_ella_site_state(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": error or "site_state_unavailable"})
         return
     config = getattr(identity, "state", {}).get("site_configs", {}).get(site_id, {})
-    timezone_name = (config.get("location") or {}).get("timezone")
-    if not isinstance(timezone_name, str) or not timezone_name:
+    site_timezone = (config.get("location") or {}).get("timezone")
+    installation_timezone = getattr(getattr(hass, "config", None), "time_zone", None)
+    try:
+        timezone_name, timezone_source = resolve_timezone(site_timezone, installation_timezone)
+    except ValueError:
         connection.send_result(msg["id"], {"success": False, "error": "site_timezone_unavailable", "site_id": site_id})
         return
     try:
@@ -1405,6 +1408,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             individual_loads=state_loads,
             solar_forecast_frames=solar_frames,
             economic_frames=economic_frames,
+            timezone_source=timezone_source,
         )
     except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as err:
         connection.send_result(msg["id"], {"success": False, "error": str(err), "site_id": site_id})

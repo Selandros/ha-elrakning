@@ -15,6 +15,19 @@ SCHEMA = "ella_site_state.v1"
 INTERVAL_SECONDS = 900
 
 
+def resolve_timezone(site_timezone: str | None, installation_timezone: str | None) -> tuple[str, str]:
+    """Resolve an explicit site timezone or the configured HA installation timezone."""
+    for candidate, source in ((site_timezone, "site_location"), (installation_timezone, "home_assistant_config_default")):
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        try:
+            ZoneInfo(candidate)
+        except (KeyError, TypeError, ValueError):
+            continue
+        return candidate, source
+    raise ValueError("site_timezone_unavailable")
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat() if value is not None else None
 
@@ -163,6 +176,7 @@ def build_site_state(
     individual_loads: Iterable[dict[str, Any]] = (),
     solar_forecast_frames: Iterable[dict[str, Any]] = (),
     economic_frames: Iterable[dict[str, Any]] = (),
+    timezone_source: str = "site_location",
 ) -> dict[str, Any]:
     """Build a read-only state snapshot from already verified facts."""
     slots = []
@@ -183,25 +197,67 @@ def build_site_state(
         else:
             load = {**load, "availability": "available"}
         solar_resources = _canonical_resources(rows, "solar.production", site_id, start, end)
-        solar = {"availability": "available", "resources": solar_resources, "source": "canonical"} if solar_resources else {"availability": "unavailable", "reason": "canonical_role_missing"}
+        expected_solar = {
+            item.get("generation_id") or item.get("source_generation_id")
+            for item in (((capability_snapshot or {}).get("capabilities") or []))
+            if isinstance(item, dict) and item.get("capability_id") == "solar.actual"
+            for item in ((item.get("source") or {}).get("resources") or [])
+            if isinstance(item, dict)
+        }
+        present_solar = {item.get("source_generation_id") for item in solar_resources}
+        solar_complete = bool(solar_resources) and (not expected_solar or expected_solar <= present_solar)
+        solar = (
+            {"availability": "available", "resources": solar_resources, "source": "canonical", "aggregate": {"availability": "available", "value_w": sum(point.get("value", 0) for item in solar_resources for point in item.get("points", [])), "source_generation_ids": sorted(present_solar)}}
+            if solar_complete else
+            {"availability": "partial" if solar_resources else "unavailable", "reason": "incomplete_resource_coverage" if solar_resources else "canonical_role_missing", "resources": solar_resources}
+        )
         ess = {}
         for role in ("battery.power", "battery.soc", "battery.capacity"):
             resources = _canonical_resources(rows, role, site_id, start, end)
             ess[role] = {"availability": "available", "resources": resources} if resources else {"availability": "unavailable", "reason": "canonical_role_missing"}
         price = _price_slot(periods, start, end, price_source_generation_id)
+        net_load = {"availability": "unavailable", "reason": "load_or_solar_unavailable"}
+        if load.get("availability") == "available" and solar.get("aggregate", {}).get("availability") == "available":
+            load_value = _number(load.get("value"))
+            solar_value = _number(solar["aggregate"].get("value_w"))
+            if load_value is not None and solar_value is not None and load.get("unit") == "W":
+                net_load = {
+                    "availability": "available", "value_w": load_value - solar_value,
+                    "source": "load_minus_solar", "sign_convention": "positive_import_need_negative_surplus",
+                    "load_source": load.get("source"), "load_source_generation_id": load.get("source_generation_id"),
+                    "solar_source_generation_ids": solar["aggregate"].get("source_generation_ids", []),
+                }
         slots.append({
             "start": _iso(start), "end": _iso(end),
             "price": price or {"availability": "unavailable", "reason": "verified_price_period_missing"},
             "load": load,
             "solar": solar,
             "ess": ess,
-            "net_load": {"availability": "unavailable", "reason": "load_or_solar_unavailable"},
+            "net_load": net_load,
             "cost_stack": {"availability": "available" if price else "unavailable", "completeness": "partial" if price else "unavailable", "components": ([price] if price else [])},
         })
-    source_facts = []
+    horizon_start = slots[0]["start"] if slots else None
+    horizon_end = slots[-1]["end"] if slots else None
+    source_candidates = []
     for frame in solar_forecast_frames:
         if frame.get("site_id") == site_id and frame.get("payload_schema") == "forecast_solar.observed_fact.v1":
-            source_facts.append({"frame_id": frame.get("frame_id"), "logical_role": frame.get("logical_role"), "valid_from": _iso(frame.get("valid_from")), "valid_to": _iso(frame.get("valid_to")), "known_at": _iso(frame.get("known_at"))})
+            valid_from = _iso(frame.get("valid_from"))
+            valid_to = _iso(frame.get("valid_to"))
+            overlaps = (valid_from is None and valid_to is None) or (valid_to is not None and valid_from is not None and valid_from < horizon_end and valid_to > horizon_start)
+            if overlaps:
+                source_candidates.append(frame)
+    latest_facts = {}
+    for frame in source_candidates:
+        key = (frame.get("logical_role"), frame.get("semantic_key") or frame.get("point_key") or "current")
+        previous = latest_facts.get(key)
+        rank = (_iso(frame.get("known_at")) or "", int(frame.get("revision") or 0), frame.get("frame_id") or "")
+        previous_rank = ((_iso(previous.get("known_at")) or "", int(previous.get("revision") or 0), previous.get("frame_id") or "") if previous else ())
+        if previous is None or rank > previous_rank:
+            latest_facts[key] = frame
+    source_facts = [
+        {"frame_id": frame.get("frame_id"), "logical_role": frame.get("logical_role"), "valid_from": _iso(frame.get("valid_from")), "valid_to": _iso(frame.get("valid_to")), "known_at": _iso(frame.get("known_at")), "provenance": frame.get("provenance") or {}}
+        for frame in latest_facts.values()
+    ]
     economic_facts = []
     for frame in economic_frames:
         if frame.get("site_id") != site_id or frame.get("payload_schema") != "eon.grid_economic_active_snapshot.v1":
@@ -217,7 +273,7 @@ def build_site_state(
             "provenance": frame.get("provenance") or {},
         })
     state = {
-        "schema": SCHEMA, "site_id": site_id, "timezone": timezone_name,
+        "schema": SCHEMA, "site_id": site_id, "timezone": timezone_name, "timezone_source": timezone_source,
         "known_at": _iso(decision_at), "interval_seconds": INTERVAL_SECONDS,
         "horizon": {"start": slots[0]["start"] if slots else None, "end": slots[-1]["end"] if slots else None, "date": target_date.isoformat()},
         "capabilities": capability_snapshot or {},
