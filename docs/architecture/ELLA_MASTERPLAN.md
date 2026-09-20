@@ -78,6 +78,8 @@ The following is historical context, not the new target architecture:
 | 0.0.694 | First Stage 1 capability/load foundation deployment; not accepted because runtime exposed legacy ELLA-binding eligibility and incomplete capability semantics. | The versioned inventory/load-registry direction and no-write boundary were retained. |
 | 0.0.695 | Corrective Stage 1 deployment; not accepted as a further startup forecast-capture legacy-binding gate was found after deployment. | Fingerprinted bindings, multi-resource inventory and configured-versus-available entity semantics were retained. |
 | 0.0.696 | Stage 1 capability registry and individual-load foundation accepted after authenticated two-site runtime verification. | Site-scoped capability inventory, explicit binding verification, no-write invariants and deterministic resource preservation. |
+| 0.0.697 | Stage 2 first deployment; not accepted because Fiskvik had no resolved timezone, `net_load` was hardcoded unavailable, and `source_facts` was not horizon-bounded. | Unified state contract, canonical precedence, DST slot construction and no-write boundary were retained. |
+| 0.0.698 | Stage 2 unified 15-minute site state and forecasts accepted after authenticated two-site Safari/WS verification. | Site timezone fallback provenance, complete multi-resource solar/net-load semantics, bounded source facts, truthful optional-layer absence and deterministic site isolation. |
 
 The historical “price-only first, solar next, ESS later” roadmap is superseded
 as a product ordering. Solar and ESS remain capabilities in the same planner,
@@ -350,7 +352,7 @@ Tests: enable/disable/invalid capability, stale/wrong-site load, missing
 measurement, absent actuator, recommend-only, constraint validation,
 cross-site isolation and deterministic reconfiguration.
 
-### Stage 2 — Unified 15-minute site state and forecasts
+### Stage 2 — Unified 15-minute site state and forecasts (accepted 0.0.698)
 
 Entry: capability and load resource identity are stable.
 
@@ -360,7 +362,11 @@ Reuse canonical load model and existing price provenance.
 
 Exit: no duplicate forecast model, no zero-fill, deterministic replay,
 actual/forecast/model precedence preserved, and optional layers disappear
-cleanly when absent.
+cleanly when absent. Runtime acceptance for 0.0.698 additionally confirmed
+96-slot Vikarbodarna and Fiskvik states, explicit site-timezone versus
+configured-HA-timezone provenance, complete multi-PV aggregation and
+net-load on compatible elapsed slots, bounded source facts, and no execution
+or write eligibility.
 
 Tests: full/partial/stale forecasts, actual gaps, wrong-site data, DST,
 published versus unpublished tomorrow price, no observation/no learning,
@@ -472,8 +478,9 @@ The current seven-card result is explained by the current third-based price
 classification and contiguous grouping. It is not itself a defect. Future
 card count must emerge from material action changes and constraints.
 
-Stage 0 architecture/contracts and Stage 1 capability/load foundation are
-implemented and accepted. The next active implementation scope is **Stage 2 —
-Unified 15-minute site state and forecasts**. Solar-first and ESS-first
-implementation remain superseded as ordering decisions; they are optional
-capabilities within the staged architecture and must not bypass Stage 2.
+Stage 0 architecture/contracts, Stage 1 capability/load foundation and Stage 2
+unified site state are implemented and accepted. The next active implementation
+scope is **Stage 3 — Action planner in shadow/recommend-only mode**. Solar-first
+and ESS-first implementation remain superseded as ordering decisions; they are
+optional capabilities within the staged architecture and must not bypass the
+accepted state foundation.

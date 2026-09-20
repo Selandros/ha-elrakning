@@ -1415,3 +1415,42 @@ INFERRED (roadmap): Long-term data foundation:
 - The next active implementation scope is **Stage 2 — Unified 15-minute site
   state and forecasts**. Stage 2 must preserve the accepted site isolation,
   provenance, fail-closed and no-write boundaries.
+
+## 0.0.697–0.0.698 Stage 2 unified 15-minute site state and forecasts
+
+- `0.0.697` was the first Stage 2 deployment and was not accepted. Runtime
+  verification found that Fiskvik failed at the timezone gate, `net_load` was
+  hardcoded unavailable even for compatible multi-PV elapsed slots, and
+  `source_facts` exposed unbounded historical Forecast.Solar frames.
+- `0.0.698` is the accepted Stage 2 runtime baseline after authenticated
+  Safari/WS verification on both sites. It preserves the existing planner and
+  seven-card segmentation; this release adds only the unified read-only state
+  foundation.
+- The accepted `ella_site_state.v1` contract returns a site-scoped,
+  deterministic 15-minute state with explicit `known_at`, timezone provenance,
+  horizon and source identities. Vikarbodarna returned 96 slots with 57
+  actual, 15 historical-model and 24 forward-forecast load slots; all 96
+  price slots were available.
+- Vikarbodarna runtime confirmed complete multi-resource solar aggregation in
+  70 elapsed slots, preservation of both PV generation identities, and
+  `net_load` in 57 compatible elapsed slots using the explicit
+  `positive_import_need_negative_surplus` sign convention. Future slots remain
+  unavailable when no slot-resolved solar forecast exists; coarse Forecast.Solar
+  facts are never distributed into fabricated quarter-hours.
+- Vikarbodarna ESS power/SOC/capacity remain facts-only for compatible elapsed
+  slots, with no future trajectory. `execution_eligible=false` and
+  `actuator_writes_enabled=false` remain invariant.
+- Fiskvik returned a valid 96-slot price-only state using
+  `timezone_source=home_assistant_config_default` because its site timezone is
+  absent. Load was unavailable for all slots with
+  `no_verified_actual_forecast_or_model`; solar, ESS, net_load, source facts
+  and economic facts were explicitly unavailable/empty without fabricated
+  zeros. Only the shared verified Nord Pool price generation was present; no
+  Vikarbodarna resources leaked into the state.
+- Stage 2 runtime acceptance also confirmed bounded, deduplicated
+  horizon-relevant `source_facts` (six relevant Vikarbodarna facts for the
+  verified requested date), truthful unresolved economic-frame handling and
+  no actuator/device writes.
+- Stage 2 is closed and accepted. The next active implementation scope is
+  **Stage 3 — Action planner in shadow/recommend-only mode**. Stage 3+ remain
+  target architecture only until separately implemented and runtime accepted.
