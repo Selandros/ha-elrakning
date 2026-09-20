@@ -565,9 +565,15 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
             producer = Greenely.instances[0]
             self.assertEqual(producer.schedule_calls, 1)
             self.assertEqual(len(tracked), 3)
+            cadence_keys = {
+                (item["kwargs"]["hour"], tuple(item["kwargs"]["minute"])
+                 if isinstance(item["kwargs"]["minute"], list) else item["kwargs"]["minute"],
+                 item["kwargs"]["second"])
+                for item in tracked
+            }
             self.assertEqual(
-                {(item["kwargs"]["hour"], item["kwargs"]["minute"], item["kwargs"]["second"]) for item in tracked},
-                {(0, 5, 0), (0, 0, 0), (None, 0, 30)},
+                cadence_keys,
+                {(0, 5, 0), (0, 0, 0), (None, (0, 15, 30, 45), 30)},
             )
             economics_schedule = next(item for item in tracked if item["kwargs"]["hour"] == 0 and item["kwargs"]["minute"] == 5)
             economics_schedule["callback"](None)

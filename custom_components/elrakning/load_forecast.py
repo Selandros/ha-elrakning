@@ -82,12 +82,12 @@ def _baseline_point(profile, local_time: datetime) -> tuple[float | None, str, i
 
 
 def _qualified_actual(row: dict[str, Any], decision_at: datetime) -> bool:
-    """Accept only completed, well-covered canonical observations for learning."""
+    """Accept completed, well-covered canonical observations for learning."""
     coverage = row.get("coverage_ratio")
     return (
         row.get("logical_role") == "house.consumption"
         and row.get("unit") == "W"
-        and row.get("quality_status") == "good"
+        and row.get("quality_status") in {"good", "partial"}
         and isinstance(row.get("interval_start"), datetime)
         and isinstance(row.get("interval_end"), datetime)
         and row["interval_end"] <= decision_at
@@ -128,6 +128,12 @@ def _intraday_calibration(history: list[dict[str, Any]], timezone_name: str, kno
                 "actual_w": actual,
                 "baseline_w": baseline,
                 "ratio": actual / baseline,
+                "quality_status": row.get("quality_status"),
+                "learning_eligible": True,
+                "qualification_reason": (
+                    "partial_high_coverage" if row.get("quality_status") == "partial"
+                    else "good_high_coverage"
+                ),
                 "support_method": support_method,
                 "sample_support": support,
                 "coverage_ratio": float(row["coverage_ratio"]),
@@ -350,6 +356,7 @@ def build_load_forecast_frame(
         "observed_days": len(observed_days), "source_generations": sorted(source_generations),
         "intraday_factor": calibration["factor"], "intraday_evidence_count": calibration["evidence_count"],
         "intraday_confidence": calibration["confidence"], "intraday_reason": calibration["reason"],
+        "intraday_evidence": calibration.get("evidence", []),
     }
     content = json.dumps([{key: value for key, value in point.items() if key != "point_id"}
                           for point in points], sort_keys=True, default=str, separators=(",", ":"))

@@ -260,7 +260,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["load_forecast_cadence_unsub"] = async_track_time_change(
         hass, lambda _now: _schedule_load_forecast_capture(
             hass, site_identity_manager, canonical_collector
-        ), hour=None, minute=0, second=30
+        ), hour=None, minute=[0, 15, 30, 45], second=30
     )
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")

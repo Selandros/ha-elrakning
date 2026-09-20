@@ -9,7 +9,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage
-from custom_components.elrakning.load_forecast import build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, persist_load_forecast
+from custom_components.elrakning.load_forecast import _qualified_actual, build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, persist_load_forecast
 
 
 UTC = timezone.utc
@@ -91,6 +91,29 @@ class LoadForecastTests(unittest.TestCase):
         self.assertIsNotNone(frame)
         self.assertEqual(frame["quality"]["intraday_evidence_count"], 0)
         self.assertEqual(frame["quality"]["intraday_factor"], 1.0)
+
+    def test_partial_high_coverage_actual_is_learning_eligible(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        base = {
+            "logical_role": "house.consumption", "interval_start": now - timedelta(minutes=15),
+            "interval_end": now, "unit": "W", "value": 600, "coverage_ratio": 0.99,
+        }
+        self.assertTrue(_qualified_actual({**base, "quality_status": "partial"}, now))
+        self.assertTrue(_qualified_actual({**base, "quality_status": "good"}, now))
+        self.assertFalse(_qualified_actual({**base, "quality_status": "partial", "coverage_ratio": 0.89}, now))
+        self.assertFalse(_qualified_actual({**base, "quality_status": "bad"}, now))
+        self.assertFalse(_qualified_actual({**base, "quality_status": "unknown"}, now))
+
+    def test_partial_high_coverage_slots_drive_intraday_correction_with_provenance(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        history = self._adaptive_history(now, [600, 600, 600])
+        for row in history[-3:]:
+            row["quality_status"] = "partial"
+        frame, _points = build_load_forecast_frame("site-a", "Europe/Stockholm", history, now, horizon_hours=12)
+        self.assertEqual(frame["quality"]["intraday_evidence_count"], 3)
+        self.assertLess(frame["quality"]["intraday_factor"], 1.0)
+        self.assertTrue(all(item["quality_status"] == "partial" for item in frame["quality"]["intraday_evidence"]))
+        self.assertTrue(all(item["qualification_reason"] == "partial_high_coverage" for item in frame["quality"]["intraday_evidence"]))
 
     def test_correction_returns_toward_neutral_after_recent_alignment(self):
         now = datetime(2026, 9, 20, 12, tzinfo=UTC)

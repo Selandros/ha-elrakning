@@ -9694,8 +9694,14 @@ class ElrakningPanel {
       );
       this._loadForecastEventUnsubscribePromise = hass.connection.subscribeEvents(
         (event) => {
-          const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
-          if (!event?.data?.site_id || !activeSiteId || event.data.site_id === activeSiteId) this.loadPowerHistory();
+          const eventSiteId = event?.data?.site_id || null;
+          const planSiteId = this._pricePlan?.site_id || null;
+          const activeSiteId = this._siteState?.site_id
+            || this._siteState?.current_site?.site_id
+            || planSiteId;
+          if (eventSiteId && (!activeSiteId || eventSiteId !== activeSiteId)) return;
+          if (!eventSiteId && !activeSiteId) return;
+          void Promise.allSettled([this.loadPowerHistory(), this.loadPricePlan()]);
         },
         "elrakning_load_forecast_update",
       );
