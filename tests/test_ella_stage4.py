@@ -100,6 +100,74 @@ async def test_snapshot_retention_is_bounded_and_deterministic():
     assert len(snapshots) == 14
 
 
+@run_async
+async def test_snapshot_retention_uses_decision_time_not_lexical_plan_id():
+    store = EllaDebugSnapshotStore(object())
+    retained_hash = None
+    newest = None
+    for index in range(16):
+        state = _state()
+        state["known_at"] = f"2026-09-{index + 1:02d}T00:00:00+00:00"
+        plan = build_action_plan(state)
+        plan["plan_id"] = "z-old" if index == 0 else f"a-plan-{index:02d}"
+        await store.async_put_plan(state, plan)
+        if index == 2:
+            block = plan["plan_blocks"][0]
+            retained_hash = store.get("site-a", plan["plan_id"], plan["revision"], block["plan_block_id"])["snapshot_hash"]
+        if index == 15:
+            newest = plan
+    snapshots = store.state["sites"]["site-a"]["snapshots"]
+    plan_ids = {item["plan_id"] for item in snapshots.values()}
+    assert len(plan_ids) == 14
+    assert "z-old" not in plan_ids
+    assert newest["plan_id"] in plan_ids
+    newest_block = newest["plan_blocks"][0]
+    assert store.get("site-a", newest["plan_id"], 1, newest_block["plan_block_id"]) is not None
+    retained = next(item for item in snapshots.values() if item["plan_id"] == "a-plan-02")
+    assert retained["snapshot_hash"] == retained_hash
+
+
+@run_async
+async def test_snapshot_retention_keeps_new_timestamped_plan_ahead_of_legacy_data_and_reloads():
+    store = EllaDebugSnapshotStore(object())
+    legacy_plan = build_action_plan(_state())
+    legacy_plan["plan_id"] = "legacy-plan"
+    await store.async_put_plan(_state(), legacy_plan)
+    for snapshot in store.state["sites"]["site-a"]["snapshots"].values():
+        snapshot.pop("generated_at", None)
+        snapshot.pop("decision_at", None)
+        snapshot.pop("known_at", None)
+    for index in range(14):
+        state = _state()
+        state["known_at"] = f"2026-10-{index + 1:02d}T00:00:00+00:00"
+        plan = build_action_plan(state)
+        plan["plan_id"] = f"timestamped-{index:02d}"
+        await store.async_put_plan(state, plan)
+    snapshots = store.state["sites"]["site-a"]["snapshots"]
+    assert "legacy-plan" not in {item["plan_id"] for item in snapshots.values()}
+    persisted = copy.deepcopy(store.state)
+    reloaded = EllaDebugSnapshotStore(object())
+    reloaded.state = persisted
+    newest = next(item for item in snapshots.values() if item["plan_id"] == "timestamped-13")
+    assert reloaded.get("site-a", "timestamped-13", newest["revision"], newest["plan_block_id"])["snapshot_hash"] == newest["snapshot_hash"]
+
+
+@run_async
+async def test_snapshot_retention_isolated_between_sites():
+    store = EllaDebugSnapshotStore(object())
+    for site_id in ("site-a", "site-b"):
+        for index in range(15):
+            state = _state(site_id)
+            state["known_at"] = f"2026-11-{index + 1:02d}T00:00:00+00:00"
+            plan = build_action_plan(state)
+            plan["plan_id"] = f"{site_id}-{index:02d}"
+            await store.async_put_plan(state, plan)
+    for site_id in ("site-a", "site-b"):
+        snapshots = store.state["sites"][site_id]["snapshots"]
+        assert len({item["plan_id"] for item in snapshots.values()}) == 14
+    assert store.get("site-a", "site-b-14", 1, "missing") is None
+
+
 def test_snapshot_redacts_sensitive_keys_and_preserves_absence():
     state = _state()
     state["capabilities"]["api_token"] = "secret-value"

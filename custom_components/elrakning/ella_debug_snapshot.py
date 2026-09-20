@@ -5,6 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.helpers.storage import Store
@@ -19,6 +20,35 @@ SENSITIVE_KEY = re.compile(r"(?:password|passcode|authorization|cookie|secret|to
 
 def _stable(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _plan_retention_key(plan_id: str, snapshots: list[dict[str, Any]]) -> tuple[int, datetime, int, str]:
+    """Sort timestamped plans chronologically and legacy plans before them."""
+    timestamps = []
+    for snapshot in snapshots:
+        parsed = (
+            _parse_timestamp(snapshot.get("generated_at"))
+            or _parse_timestamp(snapshot.get("decision_at"))
+            or _parse_timestamp(snapshot.get("known_at"))
+        )
+        if parsed is not None:
+            timestamps.append(parsed)
+    latest = max(timestamps) if timestamps else datetime.min.replace(tzinfo=timezone.utc)
+    revisions = [snapshot.get("revision") for snapshot in snapshots if isinstance(snapshot.get("revision"), int)]
+    revision = max(revisions, default=-1)
+    # Missing legacy timestamps sort before every valid timestamp, so a new
+    # decision-time plan cannot evict itself ahead of old legacy data.
+    return (1 if timestamps else 0, latest, revision, plan_id)
 
 
 def _redact(value: Any, key: str = "") -> Any:
@@ -115,9 +145,13 @@ class EllaDebugSnapshotStore:
             key = self._key(plan.get("plan_id"), plan.get("revision"), block_id)
             if key not in snapshots:
                 snapshots[key] = build_snapshot(state, plan, block)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for snapshot in snapshots.values():
+            if isinstance(snapshot, dict) and isinstance(snapshot.get("plan_id"), str):
+                grouped.setdefault(snapshot["plan_id"], []).append(snapshot)
         plan_ids = sorted(
-            {snapshot.get("plan_id") for snapshot in snapshots.values() if isinstance(snapshot, dict)},
-            key=lambda plan_id: _stable(next(snapshot for snapshot in snapshots.values() if snapshot.get("plan_id") == plan_id)),
+            grouped,
+            key=lambda plan_id: _plan_retention_key(plan_id, grouped[plan_id]),
         )
         for old_plan_id in plan_ids[:-MAX_PLANS_PER_SITE]:
             for key in [key for key, snapshot in snapshots.items() if snapshot.get("plan_id") == old_plan_id]:
