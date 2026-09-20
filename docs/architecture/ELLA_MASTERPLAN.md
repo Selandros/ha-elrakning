@@ -13,8 +13,9 @@ canonical contracts.
 ## 0. Current baseline and reconciliation
 
 The current repository/runtime baseline used for this plan is Elräkning
-`0.0.654` after the capture-foundation releases `0.0.652`, `0.0.653` and
-`0.0.654`. The verified current runtime facts used here are:
+`0.0.658`, after the capture-foundation releases `0.0.652`, `0.0.653`,
+`0.0.654` and the site-isolation correction releases `0.0.657` and `0.0.658`.
+The verified current runtime facts used here are:
 
 - Vikarbodarna remains the active development site and continues site-independent
   background collection.
@@ -1188,3 +1189,169 @@ This document does not:
 - claim that two Growatt systems are already modeled;
 - claim that the live dashboard numeric forecast was independently queried by
   this planning document.
+
+## 19. Target product architecture after accepted 0.0.658
+
+This section is the current product direction for future ELLA implementation.
+Where earlier sections use different product language or introduce a separate
+ELLA container, learning/shadow presentation, a user planner toggle, or a
+manual planner binding as a product gate, this section supersedes those parts.
+The earlier text remains as historical design context and is not evidence that
+the target behavior is implemented in the current runtime.
+
+### 19.1 Historical boundary and preserved safety rules
+
+The `0.0.657` and `0.0.658` releases addressed real site-isolation defects:
+the backend capability gate, load-forecast production gate, fingerprint and
+admin protections, and the bound-to-unbound SPA state reset. Those safety
+properties remain mandatory. In particular, site changes must clear stale
+planner, forecast, readiness and derived state before loading the new site's
+state, and no site may receive another site's frames.
+
+The manual planner binding used by those releases was a transitional safety
+mechanism. It is not the long-term product switch. The current verified
+runtime remains the accepted `0.0.658` runtime; the target architecture below
+is not implemented merely because it is documented here.
+
+### 19.2 ELLA is an always-on, site-scoped planner
+
+ELLA is always available as a planner for every site. There is no user-facing
+ELLA enable/disable toggle and no long-term manual `ella` binding that decides
+whether the planner exists. Planner eligibility is derived automatically from
+verified, site-scoped capabilities and bindings for the currently selected
+site. A site name, `site_configured`, a solar/meter/grid/Greenely binding, or
+historical presence of a transition binding is never sufficient by itself.
+
+The capability ladder is additive and fail-closed:
+
+| Verified current-site capability | Planner output |
+|---|---|
+| `price` | Price-only day plan: cheap/expensive periods, price changes and useful flexible-consumption windows |
+| `price` + `load` | The same plan enriched with expected consumption, kWh and cost |
+| `price` + `load` + `solar` | PV, net-load, expected surplus and deficit enrichments |
+| Above + `battery`/ESS | Actual charge, discharge and hold decisions using verified SOC, capacity, power limits, reserves and constraints |
+| Future verified flexible-load/weather capabilities | Additional inputs to the same planner, never a parallel planner |
+
+Missing, stale, ambiguous or unverified capabilities reduce the planner to
+the highest level that can be proven. They never produce zero placeholders,
+demo SOC, fabricated constraints or a claim that an unavailable action was
+planned. Thus Fiskvik is not “without ELLA”: with verified Nord Pool price
+periods it receives truthful price-only plan cards, while absent load, solar
+or ESS data remains absent. Vikarbodarna automatically receives the richer
+levels supported by its verified inputs.
+
+Every site switch rebuilds the planner input snapshot and all cards from the
+new site's capabilities. The old site's state is invalidated immediately;
+the active UI site never selects background data and never authorizes a
+different site's planner output.
+
+### 19.3 Planner and actuation are separate contracts
+
+The planner is active independently of physical control. Battery or device
+telemetry proves an input capability only; it never grants write authority.
+A real plan may therefore exist without an actuator. A later vendor-neutral
+dispatch layer may attempt to execute a plan through an actuator interface,
+but no actuator is represented as installed merely by being observable.
+Without an actuator, execution is an explicit safe no-op such as
+`not_executed_no_actuator`; it is never reported as physically performed.
+Dispatch must fail closed on missing, stale, ambiguous or unsafe capability
+state and must retain plan status separately from execution status.
+
+### 19.4 Unified dashboard product surface
+
+The future ELLA UI is not a separate “ELLA · Energiplan” section, a
+“Lärläge”/“Shadow” container, a `Visa plan` ELLA panel, or a second status
+hero. The primary ELLA surface is a row of dynamic plan/action cards directly
+under the existing price card or price graph. The old static price narrative
+(`Normalt pris nu`, `Nästa 2 h`, `Från`) is replaced by these cards and must
+not be rendered in parallel with them.
+
+The cards use the existing dashboard card radius, spacing, typography,
+palette and responsive behavior. They may show price-only observations on
+Fiskvik and richer plan content on Vikarbodarna, but the UI remains generic
+and does not expose vendor names as semantics. A card may contain:
+
+| Field | Requirement |
+|---|---|
+| `plan_block_id` | Stable identity; never derived from display text |
+| `start`, `end` | Exact site-local interval with timezone semantics |
+| `action` / `category` | Generic planner action or observation category |
+| `title`, `explanation` | Human-readable result of verified inputs |
+| `capabilities` / input references | Verified site-scoped roles and immutable source references |
+| numeric values | Price, load, PV, SOC target, power or energy only when available |
+| constraints / reserves | Explicit values and source; absent when unknown |
+| `execution_status` | Separate field for later actuator result; absent until execution exists |
+
+Unknown values are absent or explicitly `unknown`; they are never replaced by
+zero or an invented estimate. The card's plan status and any future execution
+status are separate, so a valid plan can coexist with
+`not_executed_no_actuator`.
+
+### 19.5 Shared card-to-graph interaction
+
+Every plan card is clickable. Selecting a card selects its exact
+`start -> end` interval in the price/energy graph using a low-opacity,
+semi-transparent vertical selection band clipped to the plotting area. The
+data series do not change. The selected card receives selected state; choosing
+another card moves the band, and clicking the active card may clear it.
+
+The same presentation selection state is consumed by price, load, solar and
+battery/SOC views. It is not matched on labels and never mutates canonical
+data. The interaction is identical for price-only, load-aware, solar-aware
+and battery-aware cards. It must remain usable with keyboard focus and mobile
+horizontal scrolling, and must clear or safely remap when the plan revision or
+site changes. This preserves the site-switch protections from 0.0.658 while
+making the price graph the primary context for the plan.
+
+### 19.6 Staged roadmap after accepted 0.0.658
+
+These are separate implementation scopes. No step is implemented by this
+documentation change, and no step may be treated as a reason to create fake
+data in an earlier step.
+
+#### A — UI/product shell and price-only cards
+
+Prerequisite: verified current-site price periods and the existing graph/card
+rendering contracts. Add the cards directly under the price card/graph,
+replace the old static price narrative, implement the shared selection band,
+and remove the separate ELLA heading/toggle/lärläge/shadow presentation.
+Price-only cards must work for every site with verified price data. Completion
+requires deterministic site-switch tests, exact card intervals, graph-band
+tests and no fabricated load/solar/ESS values. No battery planning or writes
+are in scope.
+
+#### B — Load-aware enrichment
+
+Prerequisite: first-class load forecast frames with site scope, target interval,
+`known_at`, model/source version, support and confidence. Enrich the same
+price cards with expected load, kWh and cost. Billing and planner consume the
+same load forecast source. Completion requires replay cutoff tests, missing/
+stale fail-closed tests and historical billing non-regression.
+
+#### C — Solar and net-load enrichment
+
+Prerequisite: verified raw/corrected PV forecast and actual PV frames with
+provenance and confidence. Add net-load, surplus and deficit explanations to
+the same cards. Raw PV remains immutable and corrected values remain distinct.
+Completion requires source-generation, timezone/DST, stale and cross-site
+tests; no correction is invented when only a raw forecast exists.
+
+#### D — ESS model and real plan without actuator
+
+Prerequisite: explicit per-resource ESS inputs for SOC, usable capacity,
+charge/discharge limits, reserves, efficiency and safety constraints. Produce
+real charge/discharge/hold plan blocks from those inputs, not a shadow-only
+variant and not demo hardware values. Completion requires deterministic
+constraint, reserve, missing-input and plan-versus-execution-separation tests.
+The planner still has no physical write path in this scope.
+
+#### E — Vendor-neutral actuator and dispatch
+
+Prerequisite: a separately verified actuator capability and an adapter
+contract, with acknowledgement, timeout, deduplication, wrong-site guards and
+safe fallback. Add dispatch as a separate scope; never call a vendor API from
+the planner. Completion requires explicit execution outcomes and a proof that
+no-actuator/no-acknowledgement states cannot be reported as executed.
+
+No megarelease is allowed. Each stage has its own focused/full test gate,
+release, deployment and runtime verification when it changes production.
