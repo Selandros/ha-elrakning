@@ -78,10 +78,16 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
         if not isinstance(timezone_name, str) or not timezone_name:
             continue
         try:
-            result = await hass.async_add_executor_job(
-                build_site_load_forecast, canonical_collector.storage, site_id, timezone_name, now
+            domain = globals().get("DOMAIN", "elrakning")
+            learning_store = getattr(hass, "data", {}).get(domain, {}).get("ella_learning_store")
+            persistent_calibration = (
+                learning_store.persistent_calibration(site_id, timezone_name, now)
+                if learning_store else None
             )
-            learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
+            result = await hass.async_add_executor_job(
+                build_site_load_forecast, canonical_collector.storage, site_id, timezone_name, now,
+                persistent_calibration,
+            )
             if learning_store is not None:
                 await learning_store.async_record(site_id, result.get("evaluation") or {}, result.get("calibration") or {})
             if result.get("written"):

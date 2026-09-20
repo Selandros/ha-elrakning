@@ -9,7 +9,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage
-from custom_components.elrakning.load_forecast import _qualified_actual, build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, persist_load_forecast
+from custom_components.elrakning.load_forecast import _intraday_calibration, _qualified_actual, build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, persist_load_forecast
 
 
 UTC = timezone.utc
@@ -212,6 +212,8 @@ class LoadForecastTests(unittest.TestCase):
         result = build_forecast_evaluation([frame], actual, now, "site-a")
         self.assertEqual(result["summary"]["count"], 1)
         self.assertEqual(result["records"][0]["actual_w"], 600)
+        self.assertEqual(result["records"][0]["predicted_w"], 1000)
+        self.assertEqual(result["records"][0]["actual_energy_kwh"], 0.15)
         self.assertTrue(result["records"][0]["learning_eligible"])
         self.assertEqual(build_forecast_evaluation([frame], [], now, "site-a")["summary"]["count"], 0)
 
@@ -226,6 +228,33 @@ class LoadForecastTests(unittest.TestCase):
         result = build_forecast_evaluation([frame], actual, now, "site-a")
         assert result["summary"]["ineligible_actual_count"] == 1
         assert result["learning_eligibility"]["forecast"] is False
+
+    def test_forecast_evaluation_rejects_hindsight_frame_and_exposes_scorecards(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        valid_at = now - timedelta(minutes=30)
+        frame = {"site_id": "site-a", "frame_id": "frame-a", "revision": 1, "payload_schema": "load_forecast.v1",
+                 "known_at": valid_at + timedelta(minutes=1),
+                 "points": [{"valid_at": valid_at, "value": 900, "point": {"baseline_w": 1000, "corrected_forecast_w": 900}}]}
+        actual = [{"site_id": "site-a", "logical_role": "house.consumption", "interval_start": valid_at,
+                   "interval_end": valid_at + timedelta(minutes=15), "unit": "W", "value": 600,
+                   "quality_status": "good", "coverage_ratio": 1.0}]
+        result = build_forecast_evaluation([frame], actual, now, "site-a")
+        self.assertEqual(result["summary"]["count"], 0)
+        self.assertEqual(result["summary"]["hindsight_excluded_count"], 1)
+        self.assertIn("counterfactual", result)
+        self.assertEqual(result["counterfactual"]["status"], "counterfactual_unavailable")
+
+        frame["known_at"] = valid_at - timedelta(minutes=30)
+        result = build_forecast_evaluation([frame], actual, now, "site-a")
+        self.assertEqual(result["baseline_scorecard"]["mae_w"], 400)
+        self.assertEqual(result["corrected_scorecard"]["mae_w"], 300)
+
+    def test_intraday_materiality_gate_suppresses_tiny_change(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        history = self._adaptive_history(now, [950, 950, 950])
+        calibration = _intraday_calibration(history, "Europe/Stockholm", now)
+        self.assertEqual(calibration["factor"], 1.0)
+        self.assertEqual(calibration["reason"], "below_materiality_threshold")
 
 
 if __name__ == "__main__":

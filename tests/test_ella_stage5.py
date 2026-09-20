@@ -47,3 +47,22 @@ def test_learning_store_does_not_create_execution_failure_without_actuator():
         result = store.public_state("site-a")
         assert result["available"] is False
     asyncio.run(run())
+
+
+def test_persistent_calibration_is_prior_day_site_scoped_and_bounded():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        for index in range(3):
+            await store.async_record("site-a", {
+                "records": [{
+                    "frame_id": f"prior-{index}", "revision": 1,
+                    "valid_at": f"2026-09-{3 + index * 7:02d}T18:00:00+00:00",
+                    "baseline_w": 1000, "actual_w": 600, "learning_eligible": True,
+                }],
+            }, {})
+        calibration = store.persistent_calibration("site-a", "Europe/Stockholm", __import__("datetime").datetime(2026, 9, 20, 12, tzinfo=__import__("datetime").timezone.utc))
+        assert calibration["by_slot"]
+        assert next(iter(calibration["by_slot"].values()))["factor"] < 1.0
+        assert store.persistent_calibration("site-b", "Europe/Stockholm", __import__("datetime").datetime(2026, 9, 20, 12, tzinfo=__import__("datetime").timezone.utc))["by_slot"] == {}
+    asyncio.run(run())

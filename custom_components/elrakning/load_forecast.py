@@ -146,6 +146,11 @@ def _intraday_calibration(history: list[dict[str, Any]], timezone_name: str, kno
     robust_ratio = median(ratios)
     shrink = min(0.75, (len(ratios) - 2) / 6)
     factor = min(1.45, max(0.55, 1.0 + (robust_ratio - 1.0) * shrink))
+    if abs(factor - 1.0) < 0.05:
+        return {
+            "factor": 1.0, "raw_ratio_median": robust_ratio, "evidence_count": len(ratios),
+            "confidence": "medium_confidence", "reason": "below_materiality_threshold", "evidence": evidence,
+        }
     classification = "within_expected_error"
     if robust_ratio < 0.85:
         classification = "systematic_overprediction"
@@ -174,12 +179,17 @@ def build_forecast_evaluation(
     matured_count = 0
     no_observation_count = 0
     ineligible_actual_count = 0
+    hindsight_count = 0
     for frame in frames:
         if frame.get("site_id") != site_id or frame.get("payload_schema") != PAYLOAD_SCHEMA:
             continue
+        frame_known_at = frame.get("known_at")
         for point in frame.get("points") or []:
             valid_at = point.get("valid_at")
             if not isinstance(valid_at, datetime) or valid_at >= decision_at:
+                continue
+            if not isinstance(frame_known_at, datetime) or frame_known_at >= valid_at:
+                hindsight_count += 1
                 continue
             matured_count += 1
             actual = actual_by_start.get(valid_at)
@@ -206,8 +216,11 @@ def build_forecast_evaluation(
                 "site_id": site_id, "frame_id": frame.get("frame_id"), "revision": frame.get("revision"),
                 "forecast_known_at": frame.get("known_at").isoformat() if isinstance(frame.get("known_at"), datetime) else frame.get("known_at"),
                 "valid_at": valid_at.isoformat(), "model_version": detail.get("model_version") or frame.get("quality", {}).get("model_version"),
+                "source_method": detail.get("support_method"), "sample_support": detail.get("sample_support"),
+                "predicted_w": predicted, "predicted_energy_kwh": predicted * 0.25 / 1000.0,
                 "baseline_w": detail.get("baseline_w"), "corrected_forecast_w": predicted,
-                "actual_w": actual_value, "signed_error_w": signed_error,
+                "actual_w": actual_value, "actual_energy_kwh": actual_value * 0.25 / 1000.0,
+                "signed_error_w": signed_error,
                 "absolute_error_w": abs(signed_error), "relative_error": relative,
                 "actual_quality": {"quality_status": actual.get("quality_status"), "coverage_ratio": actual.get("coverage_ratio")},
                 "learning_eligible": True, "learning_reason": "qualified_actual_observed", "error_classification": classification,
@@ -215,6 +228,18 @@ def build_forecast_evaluation(
     records = sorted(records, key=lambda item: (item["valid_at"], item["frame_id"] or "", item["revision"] or 0))[-256:]
     errors = [item["signed_error_w"] for item in records]
     actual_total = sum(item["actual_w"] for item in records)
+    def scorecard(prediction_key: str, selected: list[dict[str, Any]]) -> dict[str, Any]:
+        usable = [item for item in selected if isinstance(item.get(prediction_key), (int, float))]
+        selected_errors = [item["actual_w"] - item[prediction_key] for item in usable]
+        denominator = sum(item["actual_w"] for item in usable)
+        return {
+            "count": len(usable),
+            "mean_signed_bias_w": sum(selected_errors) / len(selected_errors) if selected_errors else None,
+            "median_signed_bias_w": median(selected_errors) if selected_errors else None,
+            "mae_w": sum(abs(error) for error in selected_errors) / len(selected_errors) if selected_errors else None,
+            "wape": sum(abs(error) for error in selected_errors) / denominator if denominator > 1 else None,
+        }
+    recent_records = records[-32:]
     return {
         "schema": "ella_forecast_evaluation.v1", "site_id": site_id,
         "model_version": MODEL_VERSION, "known_at": decision_at.isoformat(),
@@ -226,11 +251,20 @@ def build_forecast_evaluation(
             "mae_w": sum(abs(error) for error in errors) / len(errors) if errors else None,
             "wape": sum(abs(error) for error in errors) / actual_total if actual_total > 1 else None,
             "no_observation_count": no_observation_count,
+            "hindsight_excluded_count": hindsight_count,
         },
+        "baseline_scorecard": scorecard("baseline_w", records),
+        "corrected_scorecard": scorecard("corrected_forecast_w", records),
+        "recent_scorecard": scorecard("corrected_forecast_w", recent_records),
         "records": records,
         "learning_eligibility": {"forecast": bool(records), "reason": "qualified_actual_observed" if records else ("no_observation" if no_observation_count else "insufficient_actual_quality")},
         "planner_quality": {"status": "not_evaluable", "reason": "no_stage5_counterfactual_or_execution_evidence"},
         "execution_quality": {"status": "NOT_APPLICABLE", "reason": "no_actuator_execution_in_stage_5"},
+        "counterfactual": {
+            "schema": "ella_counterfactual_evaluation.v1", "status": "counterfactual_unavailable",
+            "eligible": False, "actual_observed": True, "simulated_plan_followed": None,
+            "missing_reasons": ["no_configured_individual_loads", "ess_policy_constraints_incomplete"],
+        },
     }
 
 
@@ -278,6 +312,7 @@ def build_load_forecast_frame(
     history: list[dict[str, Any]],
     known_at: datetime,
     horizon_hours: int = 36,
+    persistent_calibration: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Build a 15-minute forecast only from observed canonical load points.
 
@@ -325,12 +360,17 @@ def build_load_forecast_frame(
             support = "all_weekdays_slot"
         if candidates:
             baseline = sum(item[0] for item in candidates) / len(candidates)
-            value = baseline * calibration["factor"]
+            persistent_key = f"{local.weekday()}:{slot}"
+            persistent = (persistent_calibration or {}).get("by_slot", {}).get(persistent_key, {})
+            persistent_factor = float(persistent.get("factor", 1.0)) if isinstance(persistent, dict) else 1.0
+            value = baseline * persistent_factor * calibration["factor"]
             points.append({
                 "point_id": "", "point_key": cursor.isoformat(), "valid_at": cursor,
                 "value": value, "unit": "W", "quality_status": "good",
                 "point": {"forecast_w": value, "baseline_w": baseline,
                           "corrected_forecast_w": value, "intraday_factor": calibration["factor"],
+                          "persistent_factor": persistent_factor,
+                          "persistent_calibration_evidence_count": persistent.get("evidence_count", 0) if isinstance(persistent, dict) else 0,
                           "correction_evidence_count": calibration["evidence_count"],
                           "confidence_status": calibration["confidence"],
                           "sample_support": len(candidates), "support_method": support,
@@ -342,6 +382,7 @@ def build_load_forecast_frame(
     calibration_identity = {
         "factor": calibration["factor"], "evidence_count": calibration["evidence_count"],
         "evidence": [item["valid_at"] for item in calibration.get("evidence", [])],
+        "persistent": (persistent_calibration or {}).get("by_slot", {}),
     }
     generation_id = _generation_id(site_id, source_generations, calibration_identity)
     semantic_key = f"{DATASET}|site:{site_id}|generation:{generation_id}|target:{target_start.date().isoformat()}"
@@ -357,6 +398,7 @@ def build_load_forecast_frame(
         "intraday_factor": calibration["factor"], "intraday_evidence_count": calibration["evidence_count"],
         "intraday_confidence": calibration["confidence"], "intraday_reason": calibration["reason"],
         "intraday_evidence": calibration.get("evidence", []),
+        "persistent_calibration": persistent_calibration or {"version": "load-profile-v2-cross-day-v1", "by_slot": {}, "sample_count": 0},
     }
     content = json.dumps([{key: value for key, value in point.items() if key != "point_id"}
                           for point in points], sort_keys=True, default=str, separators=(",", ":"))
@@ -411,14 +453,14 @@ def persist_load_forecast(storage: CanonicalStorage, frame: dict[str, Any], poin
     return storage.insert_external_frame(frame, points)
 
 
-def build_site_load_forecast(storage: CanonicalStorage, site_id: str, timezone_name: str, now: datetime) -> dict[str, Any]:
+def build_site_load_forecast(storage: CanonicalStorage, site_id: str, timezone_name: str, now: datetime, persistent_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build and persist one site's forecast without active-site dependence."""
     history = storage.read_site_energy_history(site_id, now - timedelta(days=60), now)
     previous_frames = storage.read_external_input_frames(
         now, source_scope="site", site_id=site_id, logical_role=LOGICAL_ROLE,
     )
     evaluation = build_forecast_evaluation(previous_frames, history, now, site_id)
-    frame, points = build_load_forecast_frame(site_id, timezone_name, history, now)
+    frame, points = build_load_forecast_frame(site_id, timezone_name, history, now, persistent_calibration=persistent_calibration)
     if frame is None:
         return {"site_id": site_id, "available": False, "reason": "insufficient_historical_support", "point_count": 0, "evaluation": evaluation}
     written = persist_load_forecast(storage, frame, points, now)
