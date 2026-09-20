@@ -1350,3 +1350,28 @@ INFERRED (roadmap): Long-term data foundation:
   regression test. Planner, load, provenance, centering, selection,
   site-isolation and backend behavior were unchanged. No solar, ESS or
   actuator behavior is implied.
+
+## 0.0.692 latest runtime baseline and architecture reset
+
+- VERIFIED (runtime): `0.0.692`, release commit `b3b730f`, is deployed and
+  served by Home Assistant. The release contains only the narrow dashboard
+  spacing scope following the accepted 0.0.670 price-card DOM baseline. Its
+  tracked implementation changes are not evidence that the future ELLA
+  architecture is implemented.
+- VERIFIED (release gate): Python `671 passed`, `46 subtests`, `0 failed`;
+  all MJS tests, compileall, JSON/YAML validation and diff-check passed. The
+  clean payload matched `61/61` SHA256 values, `ha core check` passed, exactly
+  one normal Core restart was performed, HTTP returned `200`, and the relevant
+  Elräkning/thread-safety log scan was clean. `HEAD == origin/main` at
+  `b3b730f`; the known untracked user artifacts remain untouched.
+- VERIFIED (scope): The accepted runtime remains capability-driven price-only
+  planning with canonical load enrichment, site isolation, stale-response
+  protection and the established card/graph interaction. It does not yet
+  implement individual-load planning, action-based segmentation, decision-time
+  debug snapshots, the learning/evaluation loop, solar/ESS action enrichment
+  or physical actuation.
+- CURRENT ROADMAP RESET: The authoritative next scope is now the ELLA
+  masterplan's Stage 0 architecture/contracts reset, then Stage 1 capability
+  registry and individual-load foundation. The former solar-first/ESS-later
+  ordering is superseded. This is a target-plan change only; no implementation
+  is claimed here.

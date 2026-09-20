@@ -1,1455 +1,471 @@
-# ELLA - Energi, Last, Lagring & Automation
-
-Status: planning contract, no control path authorized
-
-Date: 2026-09-19
-
-This document is the planning baseline for a future battery planning and
-control system inside Elräkning. ELLA is deliberately a separate decision
-layer. It does not authorize battery writes, change the current integration,
-or replace the existing Solar Evidence, Single Run, tariff, provider, or
-canonical contracts.
-
-## 0. Current baseline and reconciliation
-
-The current repository/runtime baseline used for this plan is Elräkning
-`0.0.658`, after the capture-foundation releases `0.0.652`, `0.0.653`,
-`0.0.654` and the site-isolation correction releases `0.0.657` and `0.0.658`.
-The verified current runtime facts used here are:
-
-- Vikarbodarna remains the active development site and continues site-independent
-  background collection.
-- Fiskvik remains a clean room for unconfigured provider/weather/solar/battery
-  inputs. No ELLA data or decisions may be fabricated for it.
-- Vikarbodarna has verified Greenely proof and two natural
-  `greenely.invoice_economics.v1` canonical frames. Greenely is usable as
-  bounded economic context, not as a replacement for physical meter data.
-- Vikarbodarna has a verified natural
-  `open_meteo.single_run_day_ahead_pv.v1` frame. Forecast.Solar, Open-Meteo,
-  weather, Solar Evidence, and canonical integrity gates remain separate.
-- The `0.0.651` invoice estimator is a full-month estimate. It uses current
-  Recorder meter observations, a trailing 28-complete-day baseline, a blend
-  weight that grows with covered days, known future price periods, and explicit
-  confidence/fallback metadata. This is useful input for ELLA, but it is not
-  yet a first-class hourly load-forecast dataset.
-- No live ELLA planner, executor, battery command, service, or control loop
-  exists. This plan therefore starts with observation and simulation.
-- The capture foundation now persists the explicitly bound generic roles
-  `house.consumption`, `solar.production`, `grid.power/import`,
-  `grid.energy_import`, `grid.energy_export`, `battery.power`, `battery.soc`
-  and `battery.capacity` through the existing canonical observation store.
-  Capture provenance includes `energy_telemetry.v1` or `ess_telemetry.v1`, a
-  source generation and an internal resource identity.
-- Runtime verification after one normal 0.0.654 Core restart found 8,115
-  canonical observations, zero duplicate semantic/revision identities, zero
-  duplicate record IDs and `PRAGMA integrity_check=ok`. The two-site registry
-  remains intact; the configured learning site has the bound roles above and
-  the other site has no such mappings or fabricated frames.
-- This closes capture for currently bound normalized P0 roles, not discovery
-  of every unbound HA entity. FusionSolar telemetry that is not explicitly
-  mapped to a generic role remains `NOT_AVAILABLE_OR_NOT_VERIFIED`; no Huawei
-  thermal coefficient or hardware limit is inferred from its presence.
-
-The 2026-09-04 Elräkning Masterplan remains valid where it specifies capture
-first, immutable provenance, site independence, canonical 15-minute data,
-deterministic MPC/LP/MILP, shadow mode without write capability, replay before
-optimization, safety limits above ML, and long-term battery-health accounting.
-The older plan's statements derived from the 0.0.594 audit are historical,
-not current runtime claims. ELLA treats them as requirements to re-verify, not
-as evidence that a current dataset already exists.
-
-## 1. Data map: available, reusable, and missing
-
-The following table distinguishes a reusable source from a source that is
-already suitable as an ELLA decision contract.
-
-| Data | Current source/path | Resolution and retention | Provenance/current quality | ELLA use now | Missing for control |
-|---|---|---|---|---|---|
-| PV actual | Site `power.solar_entities`, `PowerManager`, power history and canonical power roles | HA state cadence; history depends on Recorder/canonical coverage | Site-scoped source mapping, unit validation, signed power normalization | Actual PV and self-consumption observation | Long-term guaranteed canonical 15-minute PV contract and per-array capability identity |
-| Forecast.Solar | HA Forecast.Solar entities through site binding; `forecast_solar.observed_facts.v1` | Provider/entity cadence; immutable canonical revisions | Provider-native HA-state capture time, site generation and target semantics | Candidate forecast and bias input | A stable decision-ready interval/scenario contract and longer verified seasonal retention |
-| Open-Meteo manager forecast | `open_meteo.manager_forecast.v1` | Hourly future forecast, manager horizon | Site location/geometry, source generation, known_at and target interval | Weather/irradiance forecast feature | Decision-time scenario/uncertainty packaging and stable long-horizon retention |
-| Open-Meteo Single Run | `open_meteo.single_run_day_ahead_pv.v1` | Single day-ahead target interval | Response receipt, run initialization, target interval, causal status | High-value day-ahead PV input | More natural frames and a consumer contract for planner selection |
-| Solar Evidence | Solar Evidence v1 stores and completed audit rows | Daily completed-day evidence | Historical baseline/progress, quality and common-source comparison | Bias/confidence calibration only | A formal ELLA confidence adapter; never rewrite Evidence |
-| Total consumption/load | Site power `consumption_entity`, meter `power_entity`, HA Recorder, `energy_history`, canonical house/grid roles | Live state plus Recorder history; current billing reader requests current month + trailing 28 days | Unit/sign validation; runtime gross-load semantics are useful, but template dependency provenance is limited | Current load and short baseline | First-class immutable load series, explicit gross/net semantics, robust stale policy |
-| Billing estimator load forecast | Frontend `buildInvoiceEstimate`, billing websocket, 28-day complete-day baseline | Current month plus bounded trailing baseline | Deterministic, test-covered, confidence/fallback metadata | Reuse its normalized source/model, not its invoice UI output | Extract shared engine and publish hourly/15-minute forecast frames |
-| Spot price | Nord Pool coordinator and `get_price_indices_for_date`, 15-minute normalized periods | Daily fetched periods; coordinator cache is bounded | Area/currency, normalized units, fetch/capture context; canonical persistence path exists | Price periods and known future horizon | Fully explicit publication-state contract and durable replay selection for every decision |
-| Retail/electricity price | Customer-price builder plus verified provider tariff | Applied per price period | Provider eligibility, VAT and ex-VAT semantics | Variable import cost | Explicit effective-period revisions and planner-side source contract |
-| Grid cost, tax, VAT, fixed fees | E.ON grid binding and `site_economic_frames`; customer-price/grid serialization | Current snapshot/effective contract data | Gross/VAT/source status validation; missing components remain unavailable | True marginal import cost and fixed monthly context | Time-valid tariff frame, export compensation contract, demand/peak tariff contract |
-| Greenely invoices/economics | Greenely Store plus `greenely.invoice_economics.v1` | 52 persisted Vikarbodarna invoices and 1,153 normalized samples were verified; two canonical economics frames | Proof is `EXPLICITLY_VERIFIED`; privacy migration passed; Fiskvik is zero | Invoice/economic calibration and historical context | Correction/reissue occurrence semantics remain open; not a physical meter substitute |
-| Battery SOC | Site `power.soc_entity`, `PowerManager`, `%` validation and history | HA cadence/history when mapped | Range/unit validation and `max_hold_seconds=900` role contract | Live SOC and replay feature | Per-ESS identity, stale/unknown policy, BMS acknowledgement and source generation |
-| Battery charge/discharge power | Combined signed `battery_power_entity` or separate charge/discharge entities | HA cadence/history when mapped | Sign convention is explicit: positive discharge, negative charge; unit normalization exists | Actual battery flow and cycle accounting | Per-ESS split, command limits, ramp/min-duration and acknowledgement |
-| Battery capacity | `power.capacity_entity`, normalized to kWh | Live state/history when mapped | Unit validation exists | Usable-capacity input if the entity is truthful | Distinguish nominal/usable/available capacity and calibration confidence |
-| Battery efficiency | No verified first-class runtime dataset | Not established | Not established | None beyond configured assumption in a future model | Charge, discharge and standby-loss estimates calibrated from energy balance |
-| Inverter limits | Generic power mappings exist; explicit limits are not a complete ELLA capability model | Not established per ESS | Not established as immutable capability frames | None safely for control | Max charge/discharge, ramp, minimum command duration, reserve and derating |
-| Export/grid constraints | Grid import/export roles and phase/fuse diagnostics exist | Live/history depending on mapped entities | Sign normalization and phase diagnostics exist | Observation and peak analysis | Explicit export-limit/import-limit policy and enforcement capability |
-| Temperature/weather | SMHI current/hourly canonical weather plus Open-Meteo weather/irradiance paths | Current and hourly provider cadence | Site timezone, fetched/known/validity metadata; Fiskvik no fabricated weather | Load/PV feature and derating input when valid | Temperature-to-load model, battery-temperature source and stale/derating policy |
-| Site isolation | `site_identity`, collection-enabled target enumeration, site-scoped bindings/generations | Persistent site configuration | Runtime-verified site-independent collection and Fiskvik clean room | Required boundary for every ELLA input/plan | ELLA-specific resource registry and cross-site aggregate policy |
-| Provenance/quality | Canonical frame fields, source generations, known/captured/fetched times, quality/status | Dataset dependent | Strong for current canonical external inputs; gaps remain for long-term load/battery | Plan eligibility, replay cutoff and fail-closed logic | One normalized ELLA input-frame envelope and source-specific stale thresholds |
-
-### 1.1 Battery systems and the two Growatt question
-
-The current code models battery input generically per site, not as a verified
-multi-ESS resource graph. It supports one combined signed battery-power entity
-or separate charge/discharge entities, one SOC entity and one capacity entity.
-The current repository/runtime evidence does not prove two independently
-modeled Growatt systems with separate identities, limits, SOC, usable capacity,
-or inverter acknowledgements.
-
-ELLA must therefore represent each physical ESS separately internally once the
-entities are verified. An aggregate UI is allowed only after the per-ESS
-ledger is complete. A missing second-system identity is not permission to sum
-two sensors by name or numerical coincidence.
-
-### 1.2 Direct reuse versus required extraction
-
-The `0.0.651` billing estimator already has the correct conceptual pieces for
-a consumption forecast, but its API is currently coupled to the billing UI
-and a bounded Recorder query. ELLA must extract the normalized time-series
-and forecast policy into a first-class, versioned dataset. The invoice card
-and ELLA must then consume the same forecast frame; they must never maintain
-two diverging load models.
-
-## 2. ELLA architecture and invariants
-
-```mermaid
-flowchart LR
-  A[HA entities and provider frames] --> B[Site-scoped normalized observations]
-  B --> C[Quality, stale and provenance gate]
-  C --> D[24-36h normalized input horizon]
-  D --> E[Deterministic ELLA planner]
-  E --> F[Immutable plan blocks]
-  F --> G[Zero-write shadow / later guarded executor]
-  G --> H[Actual outcome and acknowledgement]
-  H --> I[Deviation, scorecard and calibration]
-  I --> C
-```
-
-Every planner input must carry site scope, source identity/generation,
-observed/known/captured times where applicable, unit, sign convention,
-quality, stale state, and model/contract version. A plan is not executable
-unless all required inputs pass their source-specific eligibility gate.
-
-Active UI site is never a planner input. A background planner enumerates
-collection-enabled sites and binds every plan to exactly one site and one
-resource registry snapshot.
-
-The planner works at a canonical 15-minute step in V1, with a 24-36 hour
-horizon. A 30-minute presentation or execution block may contain two canonical
-steps, but must retain the underlying step references. Replanning occurs at
-new price publication, new solar/load forecast, material state deviation, and
-the normal bounded cadence; only the first executable step is ever sent to a
-future executor.
-
-Decision types are explicit and mutually auditable:
-
-- `charge_from_solar`
-- `charge_from_grid`
-- `discharge_to_load`
-- `hold_soc`
-- `create_solar_headroom`
-- `reserve_energy`
-- `no_action`
-- `failsafe`
-
-`create_solar_headroom` means a bounded pre-emptive discharge decision made to
-preserve expected PV capture. It may not violate reserve SOC, export policy,
-or inverter limits. `failsafe` is not an optimizer preference; it is the
-result of an invalid/stale input or hardware safety condition.
-
-## 3. Phase roadmap
-
-### Phase 0 - data contracts, observation and invariants
-
-Objective: make every input safe to reason about before forecasting or
-planning.
-
-Inputs: existing site bindings, PowerManager/MeterManager roles, canonical
-frames, Recorder observations, Nord Pool periods, weather, provider tariffs,
-SOC and battery configuration.
-
-Outputs: versioned ELLA observation envelope; source-generation and site
-registry snapshot; explicit unit/sign/stale/quality fields; a per-ESS
-capability record.
-
-Contracts: no active-site dependency; no raw provider credentials or PII;
-`known_at` and `observed_at` remain distinct; missing, stale, unavailable or
-ambiguous source identity is represented explicitly, never filled silently.
-
-Tests: unit normalization, sign conventions, source replacement, site
-isolation, DST, unavailable/unknown/stale values, meter reset/rollover and
-duplicate observation behavior.
-
-Runtime gate: read-only observation only; Vikarbodarna must remain valid and
-Fiskvik must remain zero when its source is not eligible.
-
-Fail-closed: no plan if load, SOC, site scope or safety capability is invalid.
-
-UI/non-goal: no ELLA UI and no commands.
-
-### Phase 1 - first-class Load Forecast dataset
-
-Objective: extract the proven `0.0.651` consumption estimator into a shared
-forecast producer used by billing and ELLA.
-
-Inputs: Recorder/canonical load observations, historical complete-day baseline,
-time-of-day/day-of-week/season features when available, temperature, calendar,
-site calibration, and current quality.
-
-Outputs: hourly or 15-minute load forecast over 24-36 hours with central,
-low and high scenarios; `known_at`; model version; baseline source; coverage;
-confidence; fallback reason; target intervals and site scope.
-
-Contracts: the invoice estimator and ELLA reference the same immutable forecast
-frame. A monthly estimate may aggregate it, but must not create a second model.
-Missing history uses an explicit low-confidence global/current fallback and
-never pretends to be measured.
-
-Tests/gates: day-one, missing history, DST 23/24/25 hours, gaps, unavailable
-source, temperature scenarios, replay cutoff, site isolation and consistency
-between billing and ELLA consumers.
-
-Fail-closed: no automatic battery plan from a low-confidence load forecast
-unless a conservative policy explicitly permits `hold_soc` only.
-
-UI/non-goal: retain the current invoice card; no planner controls.
-
-### Phase 2 - corrected Solar Forecast and bias model
-
-Objective: provide a decision-ready PV forecast while preserving each provider
-source and Evidence history.
-
-Inputs: Forecast.Solar observations, Open-Meteo manager/Single Run, SMHI/weather,
-PV geometry, actual PV, Solar Evidence accuracy/bias and site calibration.
-
-Outputs: provider-specific immutable input frames, blended central/low/high PV
-scenarios, bias/confidence metadata, and a decision cutoff selection.
-
-Contracts: no Evidence rewrite, no previous-day1 substitution into another
-dataset, no fabricated Fiskvik data, and no cross-generation supersedes.
-
-Tests/gates: known-at replay, pre/post-decision status, weather/provider gaps,
-solar horizon, DST, natural Single Run selection and site isolation.
-
-Fail-closed: conservative PV scenario or `hold_soc`; never charge from an
-unverified forecast as though it were measured.
-
-UI/non-goal: continue existing solar cards; show ELLA confidence only in later
-advisory UI.
-
-### Phase 3 - Battery/ESS physical model per system
-
-Objective: build a measurable digital twin for each ESS, not one opaque
-aggregate.
-
-Inputs: per-ESS SOC, nominal/usable/available capacity, charge/discharge power,
-efficiency, standby loss, reserve/min/max SOC, inverter limits, temperature,
-derating, command interval and acknowledgement.
-
-Outputs: predicted SOC trajectory, energy balance, charge/discharge feasibility,
-throughput/EFC, degradation-cost estimate and capability fingerprint.
-
-Contracts: per-ESS resource ID, signed power convention, hard bounds, energy
-conservation tolerance and explicit unknown state. Aggregate site values are
-derived from per-ESS records.
-
-Tests/gates: round-trip efficiency, SOC limits, clipping, simultaneous systems,
-missing telemetry, command duration, ramp limits, DST-neutral energy balance,
-and measured-vs-predicted SOC drift.
-
-Fail-closed: no discharge/charge plan when SOC, capacity, efficiency or hard
-limit is unknown; use `failsafe`/`hold_soc` only.
-
-UI/non-goal: no hardware command path.
-
-### Phase 4 - price and true marginal cost model
-
-Objective: normalize the actual economic objective without double counting.
-
-Inputs: Nord Pool 15-minute periods, publication/known-at state, Greenely
-retailer economics, E.ON transfer/tax/VAT/fixed fees, export compensation,
-degradation cost and peak policy.
-
-Outputs: import marginal cost, export value, fixed-cost context, degradation
-penalty and price confidence for each horizon step.
-
-Contracts: VAT/unit basis is explicit; known future periods are selected by
-decision time; unknown horizon uses a documented fallback; negative prices and
-export are valid; invoice occurrence/correction ambiguity cannot silently
-change a historical tariff frame.
-
-Tests/gates: publication cutoff replay, tariff revisions, missing components,
-negative prices, fixed-fee non-duplication, export limit, DST and Greenely
-fail-closed behavior.
-
-Fail-closed: if true marginal cost or export value is unknown, allow only
-non-economic self-consumption shadow scenarios, not live economic execution.
-
-UI/non-goal: no new tariff editor in this phase.
-
-### Phase 5 - ELLA planner in shadow mode
-
-Objective: produce immutable plans with a technically impossible write path.
-
-Inputs: normalized forecast frames, live state, ESS capabilities, prices,
-site policy and safety limits.
-
-Outputs: plan blocks with `decision_at`, horizon, action, target power/SOC,
-reason, objective breakdown, input-frame references, model/calibration hashes,
-predicted cost, throughput and reserve margin.
-
-Contracts: shadow adapter has no command method. Attempting a write is a
-contract error. Plans are site-scoped, reproducible and immutable.
-
-Tests/gates: zero-write enforcement, deterministic solver output, no cross-site
-inputs, plan stability/hysteresis, reserve violations zero, stale input
-rejection and replay determinism.
-
-Fail-closed: emit an immutable `failsafe`/`no_action` plan with reason, never a
-partially specified command.
-
-UI/non-goal: no action buttons.
-
-### Phase 6 - backtest and scorecards
-
-Objective: prove value and safety against history before advice or control.
-
-Inputs: at least 30-60 days where real data exists; target is a full season
-when retention allows it. Replay uses only frames with `known_at <= decision_at`.
-
-Outputs: scorecards for no-battery, self-consumption, cheapest-hours,
-threshold, ELLA and perfect-hindsight oracle; savings, import/export, peak,
-throughput/EFC, missed solar, degradation-adjusted savings, regret and safety.
-
-Contracts: run ID, dataset/model/calibration/parameter versions, deterministic
-seed where relevant, source fingerprints, scenario and result quality.
-
-Tests/gates: DST, source change, gaps, stale signals, forecast publication,
-counterfactual gross-load correctness and zero safety violations.
-
-Fail-closed: an incomplete or hindsight-contaminated run is non-qualifying,
-not silently scored as success.
-
-UI/non-goal: internal scorecards first; no live recommendations yet.
-
-### Phase 7 - advisory UI only
-
-Objective: show understandable plans without allowing control.
-
-Inputs: qualifying shadow plans and scorecards.
-
-Outputs: compact plan cards, expanded timeline, why/confidence/source details,
-planned-vs-actual after observation.
-
-Contracts: UI cannot mutate plan or device state; stale plans visibly expire;
-site name and action scope are explicit.
-
-Tests/gates: rendering, accessibility, mobile width, empty/fail-safe states,
-Fiskvik no-fabrication and plan-to-frame provenance links.
-
-Fail-closed: hide actionable advice when a required input is stale or identity
-is ambiguous.
-
-UI/non-goal: no enable/execute control.
-
-### Phase 8 - guarded execution
-
-Objective: add a narrow hardware adapter only after shadow/backtest acceptance.
-
-Inputs: an approved plan, live revalidation, per-ESS capability, acknowledgement
-channel and user policy.
-
-Outputs: at most the first plan step as a command, acknowledgement, timeout,
-actual result and deviation event.
-
-Contracts: explicit arming, manual override, command idempotency, rate limit,
-minimum duration/change, reserve enforcement, wrong-site prevention and
-rollback/safe fallback.
-
-Tests/gates: hardware-in-the-loop or supervised adapter tests, command timeout,
-unavailable inverter, stale SOC, changed site binding and duplicate command.
-
-Fail-closed: no acknowledgement or any boundary violation means no further
-commands and deterministic safe fallback.
-
-UI/non-goal: no autonomous learning of safety limits.
-
-### Phase 9 - closed-loop learning and drift detection
-
-Objective: improve forecasts and calibration without changing safety bounds.
-
-Inputs: planned-vs-actual outcomes, forecast errors, SOC residuals, efficiency,
-temperature, throughput and site changes.
-
-Outputs: calibration events, drift alerts, model candidates and versioned
-promotion decisions.
-
-Contracts: old plans remain reproducible; global model and site calibration are
-separate; no automatic safety-limit widening; promotion requires scorecard
-evidence and rollback.
-
-Tests/gates: drift thresholds, leave-one-site-out evaluation, seasonal split,
-no leakage, model rollback and safety invariants unchanged.
-
-Fail-closed: freeze learning promotion and keep the last safe model/calibration
-when data quality or drift is ambiguous.
-
-UI/non-goal: no opaque self-modifying controller.
-
-## 4. Planner decision model
-
-At each 15-minute step the planner solves a constrained horizon problem. The
-first version should use deterministic LP/MPC logic; forecast models provide
-scenarios and confidence but never override physical limits.
-
-For each ESS `e` and step `t`, the model must represent:
-
-- SOC, usable energy, charge/discharge power and efficiency;
-- min, max and reserve SOC;
-- standby loss and degradation cost;
-- inverter ramp/minimum duration/derating constraints;
-- site load, PV, grid import/export and shared export limit;
-- price, tariff, tax, VAT, fixed-cost context and export value;
-- uncertainty reserve and stale-input state.
-
-The physical balance is explicit. In a simplified form:
-
-```text
-SOC[t+1] = SOC[t]
-  + charge_power[t] * charge_efficiency[t] * step_hours
-  - discharge_power[t] / discharge_efficiency[t] * step_hours
-  - standby_loss[t]
-```
-
-Grid flow must be calculated from gross load and PV, not inferred from a
-battery-affected net meter when the planner is evaluating a counterfactual:
-
-```text
-virtual_grid = gross_load - pv + total_charge - total_discharge
-```
-
-The planner must preserve a shared site grid constraint while solving separate
-ESS states. If an ESS capability is missing, it is excluded from executable
-planning and may appear only in an explicitly marked incomplete shadow run.
-
-## 5. UI integration in the existing dashboard
-
-The existing panel already uses compact live-power tiles for Sol, Förbrukning,
-Nät, Batteri and `Estimerad faktura`, followed by price, energy, history,
-provider, Evidence and diagnostic cards. Its visual language uses the HA card
-background, existing divider/text variables, compact headings, rounded cards,
-and restrained accents:
-
-- solar: muted green;
-- consumption: coral/red;
-- import: orange;
-- export: blue;
-- charging/discharging: purple/pink;
-- primary dashboard accent: HA primary color.
-
-ELLA should reuse these tokens and spacing rather than introduce a separate
-hero visual system.
-
-### Option A - compact decision rail (recommended)
-
-Add a small `ELLA · Energiplan` section after the live-power row and before the
-price chart. The collapsed section contains a horizontal rail with 3-5 cards;
-additional blocks scroll horizontally. Each card contains:
-
-```text
-17:00-19:30 · Urladda batteri
-Mål-SOC 72 -> 38 %
-Varför: dyraste importperioden
-Planerad besparing 5,80 kr
-Planerad
-```
-
-After observation it becomes:
-
-```text
-Utförd · plan 5,80 kr / utfall 5,10 kr
-Avvikelse: +0,70 kr
-```
-
-The section has one `Visa plan` expansion control. The default height is close
-to an existing compact card; the expanded state shows a Huawei-inspired but
-Elräkning-styled timeline using the existing chart colors.
-
-### Option B - one compact summary card
-
-One card shows the next action, current SOC, plan confidence, and a small
-progress strip. Expansion opens all blocks. This has the lowest vertical cost
-but hides the multi-step plan and is less useful for debugging.
-
-### Option C - full timeline card
-
-A full-width card immediately before the price chart shows the entire 24-36
-hour plan and a graph by default. It is closest to Scheduling Analysis but
-uses more space and makes ELLA visually dominate the existing dashboard.
-
-Recommendation: Option A. It preserves the dashboard's current density,
-supports quick scanning, and still gives a detailed timeline on demand.
-
-Card anatomy and states:
-
-1. local time range and action;
-2. target SOC/power and affected ESS label;
-3. one-line reason;
-4. planned cost/saving or `not available`;
-5. status: `Planerad`, `Pågår`, `Utförd`, `Avvikelse`, `Ej tillgänglig`;
-6. small confidence/source marker;
-7. expanded details: input frame timestamps, forecast confidence, planned vs
-   actual and deviation reason.
-
-No UI card may imply that a plan was executed when it was only shadow/advisory.
-No card may appear for Fiskvik without an eligible physical/source contract.
-
-### 5.1 Shared price/energy forecast graph
-
-The existing price graph becomes the shared price and energy-plan graph. It
-must be able to overlay the following independent, individually toggleable
-layers:
-
-1. `purchase_price`;
-2. `sell_price` / feed-in price when available;
-3. `actual_import_kw` and `forecast_import_kw`;
-4. `actual_export_kw` and `forecast_export_kw`;
-5. `actual_pv_kw` and `forecast_pv_kw`;
-6. `actual_load_kw` and `forecast_load_kw`;
-7. `actual_battery_charge_kw` and `planned_battery_charge_kw`;
-8. `actual_battery_discharge_kw` and `planned_battery_discharge_kw`.
-
-The visual contract is strict:
-
-- solid line means actual/observed;
-- dashed line means estimated/forecast/planned;
-- the estimated segment starts at the latest actual point and continues
-  forward without a visual gap when the source coverage permits it;
-- actual and estimated variants of one signal use the same signal color;
-  dash pattern and restrained opacity, not a second color palette, provide the
-  primary distinction;
-- each signal has its own legend/toggle;
-- the default layer set is `purchase_price`, actual/forecast import, actual/
-  forecast PV, and actual/forecast load. Sell price, export, battery
-  charge/discharge and detailed plan consequence layers are opt-in so the
-  default view remains readable;
-- existing card spacing, typography, borders, background and palette are
-  reused.
-
-`forecast_load` and `forecast_pv` are exogenous forecast inputs. Once ELLA
-has planned a response, import, export, charge and discharge consequences are
-not independent forecasts: they are calculated consequences of the plan and
-must be named `planned_import_kw`, `planned_export_kw`,
-`planned_battery_charge_kw` and `planned_battery_discharge_kw` in the data
-contract. The UI may present both classes as “Estimerad” where useful, but
-the serialized names and provenance must remain distinct. A future compatibility
-alias may expose `forecast_*` to older consumers only if it carries the
-explicit planned/exogenous classification.
-
-### 5.2 Battery graph and multi-ESS detail
-
-The SOC graph overlays `actual_soc` as a solid series and
-`planned_soc`/`estimated_soc` as a dashed forward series. Planned SOC must be
-derived from the same ELLA plan and the same per-ESS digital-twin transition
-model that produced the charge/discharge plan. The frontend must never
-recalculate a separate SOC trajectory.
-
-If multiple ESS resources are summarized in the compact UI, the aggregate SOC
-is capacity-weighted over valid usable capacities:
-
-```text
-aggregate_soc = sum(usable_capacity_e * soc_e) / sum(usable_capacity_e)
-```
-
-An ESS with unknown/stale usable capacity is excluded from the aggregate and
-causes the aggregate to be marked incomplete; it is not silently treated as
-zero. The detail view must retain per-ESS SOC, power, limits, efficiency,
-quality and provenance even when the compact graph shows an aggregate.
-
-### 5.3 Plan-card and graph synchronization
-
-The horizontal ELLA plan cards and the shared graph use the same plan-block
-intervals. Clicking or hovering a card highlights its interval and the
-corresponding planned charge/discharge, import/export and SOC layers. The
-card status `Planerad`, `Pågår`, `Utförd` or `Avvikelse` controls the comparison
-shown in the same interval:
-
-- planned dashed series remain the immutable plan;
-- actual solid series show observed outcome;
-- `Utförd` exposes planned versus actual values;
-- `Avvikelse` exposes the bounded deviation and reason, without rewriting the
-  plan.
-
-Option A therefore has the compact card rail above the graph in its collapsed
-form. `Visa plan` expands the shared multi-layer graph below the rail. Option B
-may use the same graph behind one summary card, while Option C may show the
-graph by default, but none may introduce a separate ELLA palette or a second
-time axis.
-
-### 5.4 Shared plan-block selection across graphs
-
-ELLA cards are directly linked to both the shared price/energy graph and the
-battery/SOC graph through one presentation-level selection state. A plan card
-must carry a stable `plan_block_id`, `planned_start`, `planned_end`, action type
-and plan revision. Selection must never be resolved from display text.
-
-Clicking a card for, for example, `13:00-17:00` selects exactly that interval
-in every relevant graph. The selection is rendered as a low-opacity vertical
-time band with a restrained outline over the plotting area. It must not alter
-any series values. The selected card receives a matching selected state, and
-clicking another card moves the selection to that card's interval. Clicking
-the selected card or an empty graph area may clear it. Hover may provide a
-temporary preview highlight; click/pin remains persistent until selection is
-changed or cleared.
-
-The shared state applies at minimum to:
-
-1. the price/energy graph with purchase/sell price, import/export, PV, load,
-   battery charge and battery discharge actual plus estimated/planned layers;
-2. the battery/SOC graph with actual SOC plus planned/estimated SOC.
-
-Future timeline graphs must consume the same shared selected-plan-interval
-state rather than creating independent selections. The state is presentation
-state only and never mutates canonical frames, plans or runtime data. It must
-be shared by the compact rail and the expanded `Visa plan` view.
-
-Selection semantics depend on plan status:
-
-- `Planerad` and `Pågår` highlight where the action is planned or currently
-  occurring;
-- `Utförd` and `Avvikelse` keep the card's primary interval as the default
-  selected band and compare planned dashed series with actual solid series;
-- when actual execution start/end differs from the planned interval, the detail
-  view exposes both intervals. The primary band remains one uncluttered
-  interval, while tooltip/detail explains the deviation. A suitable label is
-  `ELLA 13:00-17:00 · Urladda batteri`.
-
-The band uses the existing palette and a theme-safe low opacity/outline so it
-is visible in dark and light themes without dominating the graph. It must be
-clipped to the plotting area and never extend outside the selected interval.
-
-Selection acceptance tests must prove:
-
-- selecting 13:00-17:00 highlights exactly the same interval in both graphs;
-- the selection survives a normal rerender/data refresh while the same plan
-  revision exists;
-- a stale or replaced plan revision clears or safely remaps the selection;
-- no highlight is rendered outside the selected interval;
-- keyboard focus, activation, clear and selected states are accessible;
-- horizontal mobile card scrolling preserves the selected card association.
-
-### 5.5 Forecast rendering rules
-
-The graph must not draw a forecast/planned line when its source is stale,
-unavailable or ambiguous. A missing segment remains missing; interpolation may
-not make an unverified forecast appear continuous. Low confidence is shown
-discreetly in the legend and tooltip with source/confidence metadata, not as a
-large warning block that obscures the graph. A plan consequence is also hidden
-when its referenced plan, ESS capability or input frame is invalid.
-
-## 6. Data -> decision -> outcome contract
-
-```text
-Forecast inputs
-  -> normalized time series and quality gate
-  -> site/ESS capability snapshot
-  -> ELLA planner
-  -> immutable plan blocks
-  -> zero-write shadow, later guarded executor
-  -> actual telemetry and acknowledgement
-  -> planned-vs-actual deviation
-  -> scorecards and calibration/drift
-```
-
-The invoice forecast and ELLA share the same load-forecast frame. Solar
-Evidence's accuracy/bias is a confidence/scenario input, not a replacement for
-the immutable source forecast. Greenely invoice economics informs tariff and
-economic context only; its proof and occurrence semantics remain separate from
-physical load/PV/battery attribution.
-
-## 6.1 First-class graph datasets and frame requirements
-
-The graph is only correct when each layer is backed by a first-class,
-site-scoped frame or telemetry series. The minimum set is:
-
-| Dataset/frame | Role | Required metadata |
+# ELLA masterplan
+
+Status: authoritative target architecture and staged implementation plan.
+
+Updated: 2026-09-20
+
+This document describes what ELLA is being built toward. It must not be read
+as evidence that a future stage is implemented. Verified implementation and
+runtime facts remain in `docs/architecture/CURRENT_STATE.md`.
+
+## 1. Product definition
+
+ELLA is a capability-driven, site-scoped energy planner. It is not a price
+block widget and not a solar or battery feature. For the current site, ELLA
+uses exactly the verified data and capabilities that are present and valid,
+and progressively degrades when layers are absent.
+
+The same planner serves every site. A site gets a different plan because its
+verified capability set, observations, constraints and learned parameters
+differ, never because generic code recognizes a site name.
+
+Examples:
+
+- Vikarbodarna is the full reference and learning site when its verified
+  electricity, grid, total-load, historical, solar, battery/SOC and later
+  individual-load inputs are available.
+- Fiskvik remains fully useful with electricity, grid, total consumption and
+  individual loads even when it has no solar or battery. ELLA can plan load
+  shifting and prioritisation there.
+- Missing solar or ESS does not make a site “without ELLA”. It removes only
+  the decisions and explanations that require those capabilities.
+
+The long-term product is always-on as a planner. A user toggle is not the
+product eligibility mechanism. The manual ELLA binding introduced during
+0.0.657/0.0.658 is historical transition state only. Capability eligibility
+must come from verified site-scoped data/bindings.
+
+## 2. Non-negotiable invariants
+
+1. Every observation, capability, model, plan, block and learning result is
+   bound to exactly one `site_id` and, where applicable, one resource ID.
+2. Vikarbodarna may be a reference site for method development and evaluation,
+   but its numeric history, model parameters, corrections and battery
+   behaviour never leak to Fiskvik or another site.
+3. Generalise algorithms, schemas and contracts, not a site's numeric
+   behaviour. Fiskvik learns from Fiskvik observations.
+4. `No capability -> no execution expectation.`
+5. `No observation -> no learning signal.`
+6. `No actuator -> no actuation failure.` A recommendation without an
+   actuator is `NOT_APPLICABLE` or `recommend_only`, never an execution error.
+7. Missing, stale, ambiguous, partial or wrong-site data is absent or
+   unavailable. It is never zero-filled, copied from another site, or silently
+   relabelled.
+8. `known_at`, `observed_at`, target interval, source generation, provenance,
+   quality and model version remain distinct and reproducible.
+9. Planner and actuation are separate contracts. Device data never grants
+   write permission.
+10. Hard safety constraints and explicit site/user permissions always override
+    optimisation. No implicit actuator activation is allowed.
+11. Background collection and planning enumerate eligible sites explicitly;
+    `active_site_id` is never an implicit backend site selector.
+12. Existing Greenely proof/economics, Solar Evidence, Single Run, canonical
+    integrity and clean-room guardrails remain intact.
+
+## 3. Historical boundary and accepted foundation
+
+The following is historical context, not the new target architecture:
+
+| Boundary | Historical result | What remains valid |
 |---|---|---|
-| Load forecast | Exogenous load trajectory | `site_id`, target interval, `known_at`, model/source version, quality, confidence and forecast scenario |
-| Solar forecast raw | Provider-specific PV trajectory | `site_id`, target interval, `known_at`, provider/source generation, model version, quality and confidence |
-| Solar forecast corrected | Bias-adjusted PV trajectory | `site_id`, target interval, `known_at`, correction/calibration version, source-frame references, quality and confidence |
-| Purchase/sell price frame | Import cost and export value | target interval, `known_at`, publication state, tariff/VAT/unit semantics, source/version, quality and confidence |
-| ELLA plan frame | Planner decisions and consequences | `site_id`, `planned_at`, decision horizon, plan version, parameter hash, input-frame references, action blocks, quality and confidence |
-| Planned SOC trajectory | Result of the per-ESS digital twin | `site_id`, `planned_at`, target interval, plan version, ESS resource identity, model version, quality and confidence |
-| Planned grid trajectory | Plan-derived import/export consequence | `site_id`, `planned_at`, target interval, plan version, source plan reference, constraint state and confidence |
-| Actual telemetry | Observed load, PV, grid, battery power and SOC | `site_id`, observed interval, `known_at` when delayed, source identity/generation, unit/sign convention, quality and stale state |
-
-`planned_at` identifies when ELLA produced the plan; it does not replace
-`known_at` for source forecasts or `observed_at` for actual telemetry. Every
-frame must also carry its schema/contract version and remain replay-selectable
-by the decision cutoff. The graph is a consumer of these frames, not a place
-where missing provenance or SOC transitions are reconstructed.
-
-## 7. Safety, site isolation and fail-closed rules
-
-- No planner may read `active_site_id` to choose a background target.
-- Every input, plan and outcome is bound to one site and one source generation.
-- Fiskvik remains zero when location, source binding, physical geometry,
-  invoice proof, or battery capability is absent.
-- Missing/stale SOC, meter, PV, load, price or inverter acknowledgement blocks
-  execution. The safe fallback is simple hold/no-action, not a forecast guess.
-- Export limit zero is a real constraint, not an instruction to discard PV.
-- Grid-import limits and phase/fuse protection are hard constraints separate
-  from economic optimization.
-- Shadow mode has no service/action write path by construction.
-- Manual override always wins and is recorded as an event.
-- Raw PII, credentials, signed URLs, provider OCR, meter/install identifiers
-  and opaque secrets never enter ELLA plans, UI diagnostics or canonical
-  provenance.
-
-## 8. Backtest and acceptance gates
-
-Before advisory mode:
-
-1. collect or verify at least 30-60 days of eligible per-site observations;
-2. replay only information known at each historical decision time;
-3. compare no-battery, self-consumption, threshold, cheapest-hours, ELLA and
-   perfect-hindsight baselines;
-4. report cost/savings, import/export, peak, missed PV, throughput/EFC,
-   degradation-adjusted value, command count, regret and forecast error;
-5. require zero reserve/limit/site-identity violations;
-6. verify DST and provider/source-generation changes;
-7. repeat the same run deterministically from the same immutable inputs.
-
-An advisory release requires a qualifying shadow scorecard. A guarded executor
-requires supervised runtime evidence, one-step command acknowledgement, safe
-fallback and rollback evidence. A natural provider frame may be observed, but
-manual forecast/Evidence/Single Run fabrication is never an acceptance method.
-
-## 9. Recommended first implementation release
-
-The first ELLA implementation should not be a battery-control release. The
-recommended first scope is a data-contract and shared-load-forecast release:
-
-1. extract the `0.0.651` estimator into a provider-neutral first-class load
-   forecast producer;
-2. publish hourly/15-minute forecast frames with scenarios, confidence,
-   known_at and source references;
-3. make the invoice card consume that same frame;
-4. add a read-only per-ESS capability audit, without assuming two Growatt
-   systems exist;
-5. add no planner, service, write path or ELLA card yet.
-
-Only after this is runtime-stable should the next release add the V1 ESS
-digital twin and zero-write shadow planner.
-
-## 10. Open gates before any live control
-
-- Explicit gross-house-load and grid import/export semantics per site.
-- First-class long-term load/PV/grid/battery/SOC canonical retention.
-- Per-ESS resource discovery and separate identity for each inverter/battery.
-- Usable versus nominal capacity and calibrated charge/discharge/standby loss.
-- Min/max/reserve SOC and inverter command capabilities.
-- Export and grid-import policy, including phase/fuse protection.
-- Persistent price publication/known-at frames and valid export compensation.
-- Load forecast dataset shared with billing and ELLA.
-- Solar bias/confidence adapter sourced from Evidence without rewriting Evidence.
-- 30-60 day replay/backtest with zero safety violations.
-- Shadow adapter with no physical write method.
-- User-visible advisory semantics that distinguish planned, executed and
-  deviated actions.
-- Authenticated runtime evidence for every site before it can become an ELLA
-  execution target.
-
-## 11. Capture-first data-gap audit
-
-This audit is a planning classification, not proof that an unverified live
-entity exists. `ALREADY_CAPTURED_LONG_TERM` means that the current canonical
-or immutable store has sufficient site-scoped provenance and retention for
-replay. Recorder-only or bounded UI history is deliberately not counted as
-long-term capture. `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` means that the role is
-mapped, readable, or used by existing code, but its detail, provenance,
-retention, or per-resource identity is insufficient. `NOT_AVAILABLE_OR_NOT_VERIFIED`
-means that the role must be discovered or configured before ELLA may use it.
-
-### 11.1 Current classification
-
-| Signal family | Classification and current path | Native cadence / retention known today | ELLA capture target and provenance | Why late capture is costly |
-|---|---|---|---|---|
-| Gross house load / total consumption | Mapped role is now `ALREADY_CAPTURED_LONG_TERM`; site consumption/meter role, Recorder and billing reader remain source inputs | Canonical 15-minute observations are present; native cadence and longer raw retention remain source-dependent | Canonical 15 min plus measured source cadence where available; `site_id`, resource identity, source generation, observed/known time, unit, sign and quality | Missing raw/detail history still loses peaks and causality even when canonical means exist |
-| Grid import/export power and cumulative energy | Mapped power and cumulative import/export roles are now `ALREADY_CAPTURED_LONG_TERM`; phase-level roles remain unverified | Canonical power plus counter observations are present; native counter cadence is not yet measured as a separate contract | Signed power and kWh counter capture with source generation, reset/rollover and quality semantics | Later totals cannot reconstruct interval peaks, export limits or counter resets |
-| PV total and per-inverter/string | Mapped total PV role is `ALREADY_CAPTURED_LONG_TERM`; per-inverter/string is `NOT_AVAILABLE_OR_NOT_VERIFIED` | Canonical total-PV observations are present; per-array retention is not proven | Per source 1-60 s raw if available, 1-5 min detail, 15 min canonical; source identity, unit, sign and generation | Provider forecasts cannot recover clipping, inverter imbalance or missed solar |
-| Battery charge/discharge/signed power and counters | Combined signed power is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; separate counters/per-ESS paths are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Generic `battery_power_entity`/charge/discharge roles exist; per-ESS retention is not proven | Per ESS 1-60 s raw if supported, 1-5 min detail, 15 min canonical, event counters; explicit sign and reset semantics | Without charge/discharge history, efficiency, cycles and command outcomes are unknowable |
-| ESS SOC, capacity and health | Mapped SOC/capacity/power roles are now `ALREADY_CAPTURED_LONG_TERM`; SOH, temperature, cell and dynamic limits are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Canonical SOC/power/capacity observations and persistent resource identities are present; BMS retention is not proven | SOC/power/capability snapshots at source cadence, 1-5 min detail, 15 min canonical; capability generation, stale state and quality | A later digital twin cannot infer reserve breaches, derating or degradation history |
-| Grid phases and safety | Phase/grid diagnostics are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; fuse/export-limit semantics are `NOT_AVAILABLE_OR_NOT_VERIFIED` | Diagnostics are available where mapped; retention is not guaranteed | Phase current/voltage/power at source cadence, event capture for outage/health, canonical 15 min summaries; safety source generation | Safety envelopes and phase violations cannot be replayed from aggregate kWh |
-| Purchase/sell price and tariffs | Nord Pool/provider price and site economic frames are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` for full ELLA replay; some immutable external frames already exist | Price periods are normally 15 min/day-ahead; tariff validity/retention differs by source | Immutable 15 min price/tariff frames with `known_at`, publication state, effective interval, VAT/unit and source version; daily/event summaries long-lived | A later tariff revision must not rewrite what the planner knew at decision time |
-| Greenely invoice/economics | `ALREADY_CAPTURED_LONG_TERM` for verified Vikarbodarna invoice/economic records; not physical telemetry | 52 invoices and 1,153 normalized samples were verified; canonical economics frames are sparse | Retain immutable occurrence/revision, contract attribution, economics and provenance; no raw PII; Fiskvik remains zero | Historical invoice context is useful calibration, but cannot replace missing interval meter data |
-| Forecast.Solar raw / corrected | Raw immutable forecast/provenance is `ALREADY_CAPTURED_LONG_TERM` for current verified Vikarbodarna paths; corrected model is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` | Natural canonical frames and evidence exist; corrected forecast contract is not yet first-class | Preserve raw frames; add separate corrected frames with source frame IDs, `known_at`, calibration version, confidence and target interval | Raw provider history cannot be recreated after a forecast revision |
-| Open-Meteo, Single Run and weather | Open-Meteo/Single Run frames and weather are `ALREADY_CAPTURED_LONG_TERM` only for the verified frames/roles; broader cadence is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED` | Verified natural Single Run exists; broader seasonal retention is not established | Immutable target-day frames, weather observations and forecasts with response/known times, target timezone, model/source generation and confidence | Missing weather vintages prevent causal forecast-error analysis |
-| Load forecast | Existing billing estimator is `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; its output is not yet a first-class immutable dataset | Current month/trailing 28-day model; no long-term forecast-frame retention | Hourly/15 min frames, 24-36 h horizon, model/calibration version, `known_at`, scenarios and confidence | Future ELLA and billing cannot reproduce past decisions without forecast vintages |
-| Temperature and load features | Weather/temperature sources are `AVAILABLE_BUT_NOT_SAFELY_CAPTURED`; calendar effects are derivable but not persisted as an ELLA feature contract | Provider cadence varies; retention is dataset-dependent | Persist technical weather/calendar features used by a model with source/known time; never infer occupancy | Historical model inputs disappear even if the forecast output remains |
-| Flexible/large loads | `NOT_AVAILABLE_OR_NOT_VERIFIED`; EV, heat pump, hot water and smartplug roles are not established as ELLA resources | No safe current entity/resource contract verified | Capture only after explicit site-scoped adapter/config, with availability and control capability | Late discovery creates an unexplainable load-model break |
-| Plan, command and outcome data | `NOT_AVAILABLE_OR_NOT_VERIFIED`; no ELLA executor exists | No ELLA cadence yet | Once shadow mode exists, persist every immutable plan, block, referenced frame, model/parameter version, command, acknowledgement, override, fallback and actual interval | Execution safety and savings cannot be audited after the fact |
-
-The classification above is deliberately conservative. The present repo has
-strong immutable external-input contracts, but that does not prove that all
-live meter and ESS roles are already retained as long-lived canonical data.
-
-### 11.2 Per-ESS audit: APX/MOD 8k and ARK/MOD 10k
-
-The two named Growatt paths must be discovered as separate resources, not
-assumed from labels or aggregate values. For each APX/MOD 8k and ARK/MOD 10k
-path, the capture audit must establish:
-
-- stable resource identity and firmware/product capability generation;
-- SOC, signed power, usable/nominal capacity, SOH, battery temperature,
-  pack voltage/current, and cell min/max/delta where exposed;
-- dynamic charge/discharge power/current limits, inverter limits, BMS
-  permission/derating flags, alarms/faults/warnings and availability;
-- operating/work mode, configured min/max/reserve SOC and hardware targets;
-- whether each system has independent meter/grid constraints or shares one
-  site meter, export limit and phase/fuse envelope.
-
-Current status is `NOT_AVAILABLE_OR_NOT_VERIFIED` for separate APX/ARK
-resource completeness. If runtime exposes only aggregate battery power/SOC,
-that is a capture gap, not evidence that the two systems can be safely split.
-The first data-capture release must record the observed shape and leave the
-resource uneligible until every safety-critical field has an explicit state.
-
-### 11.3 Start collecting now
-
-These are technical data-risk priorities, not product-value rankings.
-
-| Priority | Capture now | Minimum reason |
-|---|---|---|
-| P0 | Gross load, grid import/export, cumulative meter energy, total PV, aggregate battery power/SOC, per-ESS identity when available, price/tariff frames, phase/grid safety signals, source health and all immutable forecast vintages | Needed for safety, replay, site isolation and causal debugging; cannot be reconstructed later |
-| P0 | ESS limits/reserve/derating/alarms and plan/input provenance once discovered | A planner must prove why a decision was safe and what capability it used |
-| P1 | Per-inverter/string PV, ESS temperature/SOH/cell data, weather observations, load features, Greenely economic/invoice revisions and corrected forecast outputs | Improves calibration, health and attribution without being the minimum write-safety boundary |
-| P2 | Flexible-load detail, advanced diagnostics, richer UI-only summaries and optional high-frequency data after growth is measured | Useful for optimization, but not a reason to fabricate a control capability |
-
-### 11.4 Capture policy and retention proposal
-
-Capture-first is an explicit ELLA policy: when a technical signal exists now
-and may later matter for replay, safety, model calibration or debugging, save
-it by default. Downsampling is possible later; absent raw history cannot be
-reconstructed. Capture must remain technical-only and must never persist PII,
-credentials, signed URLs or raw provider identity values.
-
-Raw/detail/canonical/event layers are separate. An initial conservative
-proposal, subject to measured storage growth, is:
-
-- source raw/detail at 1-60 seconds for relevant live/ESS signals: 30-90
-  days when the source cadence supports it;
-- normalized detail at 1-5 minutes: at least 1-2 years;
-- canonical 15-minute observations and forecasts: several years, practically
-  append-only while storage remains acceptable;
-- daily summaries, health/fault events, plan/command/outcome records and model
-  metadata: long-lived/indefinite;
-- immutable price, tariff and forecast vintages: several years for replay.
-
-Every persisted signal carries schema/contract version, site/resource scope,
-unit, sign convention, source generation, `known_at`/`observed_at` as
-applicable, quality/stale state and capture method. Source changes create a
-new generation; they are never silently mixed. Recorder may be a useful
-short-term source, but it is not the only long-term P0 store when retention is
-short or deployment-specific.
-
-The capture foundation must measure row counts, bytes/day, WAL growth,
-compression/downsampling effects and worst-case source cadence for at least
-one representative site before changing retention. A retention change is not
-complete until a replay sample proves that the required decision inputs remain
-available.
-
-## 12. Operational implementation order
-
-The following steps supersede the earlier broad “first implementation” list
-where it implied that a load model should be built before preserving the live
-signals it depends on.
-
-### Step 1 - Data preservation foundation
-
-Prerequisite: read-only role/entity audit and storage-growth measurement.
-Likely files/modules: canonical frame/storage/collector paths, site identity,
-power/meter managers, price/tariff adapters, tests and architecture fixtures.
-Data contract: site/resource-scoped immutable observations for P0 signals with
-unit/sign, source generation, `observed_at`/`known_at`, quality and stale state.
-Tests: all P0 roles, duplicates, resets, DST, source replacement, two-site
-isolation and retention/replay cutoff.
-Runtime gate: observe Vikarbodarna targets without active-site dependence;
-Fiskvik remains empty when not eligible; storage growth is measured.
-Completion: every available P0 role is durably replayable or explicitly marked
-unavailable, with no fabricated values.
-
-### Step 2 - First-class load forecast
-
-Prerequisite: Step 1 gross-load history and source semantics.
-Likely files/modules: billing history/estimator, canonical collector, forecast
-contracts, websocket/UI readers and focused forecast tests.
-Data contract: immutable hourly/15-minute load forecast, 24-36 h horizon,
-`known_at`, model/calibration version, confidence/scenarios and input-frame
-references; billing and ELLA consume the same frame.
-Tests: missing history, day/DST lengths, gaps, replay cutoff, stable blending,
-site isolation and billing/ELLA consistency.
-Runtime gate: forecast frames are produced naturally and stale/low-confidence
-inputs fail closed.
-Completion: billing and ELLA have one versioned load-forecast source.
-
-### Step 3 - Solar correction and confidence
-
-Prerequisite: raw Forecast.Solar, Open-Meteo/Single Run and actual PV history.
-Likely files/modules: solar provenance/evidence, forecast selector, calibration
-adapter and forecast contract tests.
-Data contract: raw immutable frames remain untouched; corrected frames reference
-raw frames and carry calibration version, confidence and target interval.
-Tests: provider revision, pre/post decision, bias, missing weather, DST and
-Fiskvik clean-room.
-Runtime gate: corrected output is absent when evidence is stale/ambiguous.
-Completion: ELLA can select raw/corrected scenarios without rewriting Evidence.
-
-### Step 4 - ESS capability model and digital twin
-
-Prerequisite: separate APX/MOD 8k and ARK/MOD 10k resource audit from Step 1.
-Likely files/modules: site/resource registry, power manager, new capability
-contract/fixtures and simulator tests.
-Data contract: per-ESS SOC, capacity, efficiency, limits, derating, health,
-mode, availability and safety generation; aggregate values are derived only.
-Tests: energy balance, clipping, reserve, missing telemetry, shared meter,
-simultaneous systems and predicted-vs-observed SOC drift.
-Runtime gate: no ESS becomes eligible on aggregate-only data.
-Completion: both systems are either independently modeled or explicitly
-ineligible with a recorded missing-capability reason.
-
-### Step 5 - True marginal cost
-
-Prerequisite: immutable price/tariff capture and publication semantics.
-Likely files/modules: Nord Pool/customer-price/grid tariff adapters, economic
-frame contract and price tests.
-Data contract: purchase/sell, transfer, tax, VAT, fixed/peak fees and effective
-periods with `known_at`, publication state and no double counting.
-Tests: revisions, negative prices, missing components, export constraints, DST
-and Greenely fail-closed behavior.
-Runtime gate: unknown marginal cost allows shadow observation only.
-Completion: every planner price input is replayable at its decision cutoff.
-
-### Step 6 - Shadow ELLA planner
-
-Prerequisite: Steps 1-5 and qualifying source quality.
-Likely files/modules: new planner/plan-frame contracts, deterministic solver,
-simulation adapter and tests; no hardware service.
-Data contract: immutable plan, `plan_block_id`, planned intervals, action,
-planned trajectories, objective breakdown, referenced frame IDs and versions.
-Tests: deterministic output, 24-36 h horizon, zero writes, site isolation,
-reserve/limit violations and stale-input rejection.
-Runtime gate: write capability is technically absent, not merely disabled.
-Completion: replayable plan frames exist with `failsafe`/`no_action` paths.
-
-### Step 7 - Advisory UI
-
-Prerequisite: qualifying shadow plans and graph first-class frames.
-Likely files/modules: `elrakning-panel.js`, graph/card components, shared
-selection state and UI tests.
-Data contract: card ID/revision and plan/actual interval references; forecast
-and planned layers cannot be placeholders.
-Tests: shared graph selection, keyboard/mobile behavior, dark/light themes,
-stale plan remapping and actual-vs-planned comparison.
-Runtime gate: presentation-only, no service or canonical mutation.
-Completion: compact rail plus expanded graph explains the plan and confidence.
-
-### Step 8 - Replay and backtest
-
-Prerequisite: at least 30-60 days of eligible frames, longer when available.
-Likely files/modules: replay reader, scorecard/report artifacts and fixtures.
-Data contract: run ID, input fingerprints, model/parameter versions, cutoff,
-scenario and result quality.
-Tests: no hindsight, DST, gaps, source changes, no-battery/oracle comparisons.
-Runtime gate: zero safety violations and deterministic rerun.
-Completion: savings, peaks, PV capture, throughput/EFC and regret are measured.
-
-### Step 9 - Guarded hardware execution
-
-Prerequisite: Steps 1-8 plus verified adapter capability and supervised review.
-Likely files/modules: per-ESS command adapters, acknowledgement/event store,
-rollback/failsafe logic and integration tests.
-Data contract: command target/limit/time, context, acknowledgement/timeout,
-state before/after, manual override and fallback event.
-Tests: deduplication, wrong-site prevention, timeout, limit/ramp, outage and
-manual override.
-Runtime gate: one narrow command surface, supervised and reversible.
-Completion: execution is safe under missing/stale/contradictory telemetry.
-
-### Step 10 - Closed-loop learning and drift
-
-Prerequisite: outcome and deviation records from guarded execution.
-Likely files/modules: calibration/drift monitors, model metadata and scorecards.
-Data contract: planned-vs-actual error, realized savings, EFC, safety
-activations, model/calibration version and drift reason.
-Tests: drift thresholds, rollback to known model, privacy and site isolation.
-Runtime gate: drift disables optimization or falls back to hold/failsafe.
-Completion: retraining/calibration is evidence-backed and never silently
-changes historical frames.
-
-## 13. Data-to-UI activation gates
-
-The existing graphs may expose a layer only when its first-class source and
-quality gate exist:
-
-| UI layer | Activation condition |
-|---|---|
-| `forecast_load` | After Step 2 load frames exist with target intervals, `known_at`, model version and confidence |
-| `forecast_pv` | After Step 3 raw/corrected PV frames and confidence are available; raw and corrected remain distinguishable |
-| `planned_charge` / `planned_discharge` | After Step 6 plan frames reference valid per-ESS capability and inputs |
-| `planned_import` / `planned_export` | After Step 6 plan consequence frames include grid constraints and price context |
-| `planned_soc` | After Step 4 digital twin plus Step 6 plan trajectory exist; it is never recalculated in frontend |
-| actual-vs-planned comparison | After Step 9 outcome/acknowledgement and actual execution intervals exist |
-
-The graph uses solid lines for observed values and dashed lines for forecasts
-or plan consequences, with the same signal color. Missing/stale/ambiguous
-source data produces no line; the UI never fills a gap with a fabricated
-placeholder.
-
-## 14. Next implementation release
-
-The capture-foundation scope is now runtime-verified for every currently bound
-generic P0 role. The next implementation should therefore be **CAPABILITY
-DISCOVERY + FIRST-CLASS LOAD FORECAST**:
-
-1. expose a read-only generic capability audit for unbound technical HA
-   telemetry, without assuming that a provider's entity list proves its
-   semantics;
-2. bind separate ESS resources only when SOC, power, capacity, limits,
-   temperature/health and resource identity are explicitly verified;
-3. publish the first-class load forecast from the already captured gross-load
-   history, shared by billing and ELLA.
-
-The currently verified runtime does not prove separate APX/MOD 8k and
-ARK/MOD 10k resources, battery temperature/SOH/cell telemetry, dynamic
-charge/discharge limits, phase safety signals or export-limit capability. Those
-remain `NOT_AVAILABLE_OR_NOT_VERIFIED` until an adapter/mapping exposes them
-with units, cadence and source identity. No ELLA planner, battery command,
-economics activation or UI placeholder may use them before that gate.
-
-The 0.0.654 release is complete for its stated capture scope: storage growth,
-canonical replay, resource identity, one normal restart, site isolation and
-Fiskvik clean-room all pass. Step 2 may now publish the shared load forecast
-while the capability audit proceeds independently.
-
-## 15. Control and learning records to capture once ELLA exists
-
-Once shadow or execution begins, capture every plan frame and block with its
-`plan_block_id`, exact referenced immutable frame IDs, planner/model/parameter
-versions, objective breakdown, action/reason, planned charge/discharge/
-import/export/SOC and confidence. For execution also capture command target
-and limit, command time, acknowledgement/result/timeout, hardware state before
-and after, manual override, fallback/failsafe, actual interval, planned-vs-
-actual error, estimated versus realized savings, EFC/throughput and safety
-constraint activations. These are event records, not mutable UI state.
-
-## 16. Runtime non-regression requirements for capture-first work
-
-Every capture release must preserve site-independent background collection,
-Vikarbodarna attribution and Fiskvik clean-room. It must not rewrite Solar
-Evidence, previous-day baselines, Greenely proof/economics or historical
-canonical frames. A source generation change is explicit, and a missing
-source is represented as unavailable/stale rather than copied from another
-site or filled from a forecast.
-
-## 17. Global vendor-neutral architecture rule
-
-This rule applies to the entire Elräkning dashboard and to ELLA. Core logic,
-data contracts, canonical history, planners, graphs, cards, labels and layout
-must never hard-code a manufacturer, provider, model family or integration.
-The installation must remain replaceable at the adapter and binding boundary:
-grid operator, electricity retailer, price/tariff source, meter/P1/Modbus
-source, PV array, inverter, ESS/BMS, weather/solar provider and Home Assistant
-entity IDs may all change without changing core semantics.
-
-Vendor names are permitted only as adapter metadata, configuration, provenance,
-documentation or test-fixture labels. They are never the semantic contract or
-the branch condition of a planner, generic forecast, canonical identity, graph
-decision path or card layout.
-
-### 17.1 Generic role and capability contracts
-
-Core consumes normalized roles, not vendor fields. The minimum role vocabulary
-includes:
+| 0.0.657 | Not accepted because Fiskvik retained stale ELLA rendering; explicit manual planner binding was introduced as a transition mechanism. | Fingerprinted binding hardening and fail-closed site isolation principles. |
+| 0.0.658 | Accepted site-switch isolation: bound-to-unbound state clears and late responses cannot repopulate it. | Generation/token protection and site-scoped stale-state clearing. |
+| 0.0.660 | Accepted capability-driven price-only planner using verified Nord Pool provenance; Fiskvik could plan without the legacy ELLA binding. | Price capability provenance and deterministic site-scoped plan IDs. |
+| 0.0.662 | Accepted price-only card shell and graph selection interaction. | Cards, selection clearing and site-switch protections. |
+| 0.0.668–0.0.669 | Accepted actual/forecast/historical-model load enrichment and provenance-safe block totals. | Per-slot precedence and no zero-fill. |
+| 0.0.670 onward | Accepted price-card DOM/spacing and later narrow dashboard spacing fixes. | The current dashboard visual baseline, not a planner eligibility rule. |
+| 0.0.692 | Latest runtime baseline for this reset: dashboard spacing patch deployed and runtime healthy. | All accepted capture, planner, load, provenance and site-isolation behavior above. |
+
+The historical “price-only first, solar next, ESS later” roadmap is superseded
+as a product ordering. Solar and ESS remain capabilities in the same planner,
+but individual-load and action foundations now come first.
+
+## 4. Capability model
+
+Capabilities are verified, site-scoped facts. They are discovered from
+canonical data, explicit resource/configuration contracts and runtime health;
+they are never inferred from a site name, a generic `site_configured` flag,
+an unrelated solar/meter/grid/Greenely binding, or a UI toggle.
+
+The initial capability vocabulary is:
+
+- spot/electricity market price;
+- grid tariff, time-differentiated network cost and demand/peak component when
+  actually modelled;
+- total house consumption;
+- individual load measurement;
+- individual load actuator/control endpoint;
+- solar actual and solar forecast;
+- battery/ESS actual, SOC, capacity and limits;
+- battery/ESS actuator/control rights;
+- EV/charger, deadline and target;
+- weather or other inputs only when relevant, verified and quality-gated.
+
+Each capability record must carry at least a stable capability/resource ID,
+site ID, contract/version, source identity and generation, verification state,
+quality/staleness, units/sign convention where relevant, valid interval and
+whether it is `observe_only`, `recommend_only` or `controllable`. Control
+rights are never implied by measurement capability.
+
+The planner consumes a capability snapshot. Replanning occurs when a verified
+capability appears, disappears, becomes stale, changes generation or changes
+its explicit permission/constraint set.
+
+## 5. Economic signal and cost stack
+
+The UI `Handel/Nät` switch is presentation only. It must never select or
+disable ELLA's optimisation signal.
+
+ELLA uses all verified relevant marginal costs for the current site:
+
+- Nord Pool/spot or verified electricity price when that is the only valid
+  economic layer;
+- electricity price plus the site's verified time-dependent grid cost when
+  the grid layer is modelled;
+- future tax, demand tariff, export compensation, degradation or other costs
+  only when their effective period, units and provenance are verified.
+
+Missing cost components remain missing. They are not mirrored from another
+site or estimated as zero. A plan must identify which cost layers were used.
+
+## 6. Individual loads are first-class planning objects
+
+An individual load record must support, as applicable:
+
+- stable `load_id` and display name;
+- measurement sensor(s), or explicit `none`;
+- actuator/control endpoint, or explicit `none`;
+- criticality/priority;
+- flexibility: fixed, reducible, shiftable, interruptible or a more precise
+  contract value;
+- control mode: `observe_only`, `recommend_only` or `controllable`;
+- measured or nominal power and energy need when verified;
+- deadline/ready-by;
+- allowed time windows;
+- minimum runtime and minimum off-time;
+- comfort and safety constraints;
+- maximum starts/cycles/ramp limits where relevant;
+- provenance, quality and staleness.
+
+Criticality, flexibility and control rights are separate dimensions. One
+priority list is not sufficient.
+
+The planner must be able to keep critical loads running, reduce or pause
+lower-priority flexible loads, move loads to better periods, and recommend a
+move when no actuator exists. It may control a load only when a valid control
+capability and explicit permission are present. “Reduce consumption” is not a
+complete action: the plan identifies the load or remains a recommendation
+without claiming a generic reduction.
+
+## 7. Total load, decomposition and optional layers
+
+Total-load forecasting remains valid without individual loads. When individual
+measurements exist, ELLA may model known loads and a residual/base-load
+component, but it must not attribute unmeasured consumption to a device.
+
+For each 15-minute slot, a load estimate may use only this precedence:
+
+1. verified canonical actual for an elapsed slot;
+2. verified forward `load_forecast.v1` for a future slot;
+3. the existing verified site-scoped historical model when it supports the
+   local time/weekday bucket;
+4. unavailable when none supports the slot.
+
+Mixed totals retain slot-level provenance. Actual is never labelled as
+forecast and model estimate is never labelled as actual. No gap becomes zero.
+
+Solar is optional. When actual/forecast solar exists, net load is
+`load - solar`. Forecast error/bias may be learned only when both forecast and
+actual are verified. Solar uncertainty affects confidence/reserve; it is not
+presented as exact production.
+
+## 8. Battery/ESS capability boundary
+
+A real battery plan requires, at minimum, verified current SOC, usable
+capacity, min/max SOC and reserve, max charge/discharge power, efficiency/losses
+when known or safely learned, grid-charge permission, and actuator availability
+with control rights.
+
+ESS records are per physical resource. Aggregate UI values are derived only
+from valid per-ESS records. Unknown usable capacity excludes an ESS from a
+capacity-weighted aggregate and marks the aggregate incomplete; it is not
+treated as zero.
+
+Actions include `charge`, `standby/hold`, `discharge` and
+`reserve/keep capacity`. Standby is an active decision, for example preserving
+capacity for a later peak. An unavailable ESS capability removes ESS actions
+but does not remove price/load planning for the site.
+
+## 9. Horizon, history and replanning
+
+ELLA uses canonical site history as far back as quality and retention permit.
+Forecasts extend forward only over verified horizons. Tomorrow's spot price is
+used only after it is actually published and verified. Before publication,
+ELLA may plan from other known layers but may not fabricate tomorrow's price.
+
+Every plan stores `known_at` and source/model provenance so the decision-time
+knowledge can be reconstructed. New prices, forecasts, material observed
+deviation, capability changes and explicit valid state changes may trigger a
+deterministic replan. Replanning must not rewrite an old plan snapshot.
+
+## 10. Plan and action contracts
+
+The generic plan contract is site-scoped and versioned. A plan carries a
+stable plan ID, plan/model version, generated/decision time, horizon, source
+generation references, capability snapshot, constraints and immutable plan
+blocks.
+
+Each block carries at least a stable `plan_block_id`, site ID, start/end,
+primary action/category, short title/reason, verified input/capability
+references, relevant price/cost/load/solar/SOC/power/energy values when
+present, constraints/reserves and separate execution status when an actuator
+contract exists.
+
+Unknown fields are absent or explicitly unknown, never invented. A plan may
+contain multiple internal sub-actions, but the normal UI exposes one primary
+action and a short human reason.
+
+### 10.1 Segmentation
+
+The current implementation groups contiguous 15-minute price labels and can
+therefore produce seven cards from 96 periods. That is current behaviour, not
+the future product rule.
+
+The target rule is: create a new block when ELLA's plan materially changes,
+not at a fixed number of cards and not once per quarter-hour. A boundary may
+be caused by a material cost-regime change, primary action change, battery
+charge/standby/discharge change, SOC/reserve boundary, solar surplus/deficit
+change, load/flexible-load action, individual load transition, deadline or
+network tariff constraint. Adjacent slots with the same decision, reason and
+constraints should be coalesced.
+
+## 11. Clean card UI contract
+
+The normal card is deliberately compact:
 
 ```text
-grid_import_power       grid_export_power
-house_load_power        pv_power
-ess_soc                 ess_charge_power
-ess_discharge_power     ess_capacity_usable_kwh
-ess_max_charge_kw       ess_max_discharge_kw
-ess_temperature         ess_health
-purchase_price          sell_price
-grid_fee                tax
-vat                     load_forecast
-pv_forecast             plan_charge
-plan_discharge          plan_import
-plan_export             plan_soc
+00:00–06:00 · Billig prisperiod
+Ladda batteriet
+Inför morgonens pristopp
 ```
 
-An adapter translates provider/API/entity/state into these normalized roles,
-units, signs, timestamps, quality and source generation. Capability queries,
-not brand checks, determine behavior. Examples include
-`supports_dynamic_charge_limit`, `supports_soc_target`,
-`supports_export_limit` and `supports_per_ess_soc`.
-
-The planner and frontend must not contain `if growatt`, `if huawei`, `if
-solis`, `if eon`, `if greenely` or equivalent vendor branching. A missing
-capability fails closed, hides the dependent feature, or degrades to a generic
-safe mode. Adding a vendor means adding an adapter, mapping and tests; it must
-not require changing planner semantics or generic UI behavior.
-
-### 17.2 Whole-dashboard UI rule
-
-Every present and future card and graph is role-driven. `Elnät`, `Elhandel`,
-`Pris`, `Sol`, `Förbrukning`, `Batteri`, `SOC`, `Estimerad faktura` and `ELLA`
-consume normalized contracts and remain useful after provider replacement.
-Provider or device information may appear as secondary metadata in `Visa data`
-or configuration, but the main card function, label, spacing, palette and
-layout never depend on the name.
-
-The price/energy graph draws generic series for import, export, PV, load,
-battery charge/discharge and prices. `Estimerad faktura` consumes normalized
-trade, tariff, grid-fee, tax and VAT contracts, not provider-specific fields.
-ELLA consumes normalized load, PV, price and ESS capabilities. The existing
-solid-actual/dashed-estimated-or-planned semantics and shared card-to-graph
-selection state remain provider-neutral.
-
-### 17.3 Replacement, configuration and multi-source behavior
-
-- A site binds generic roles to adapters and replaceable entity mappings;
-  discovery may suggest a mapping but may not lock it without verification.
-- Entity-ID changes do not rewrite history or change model semantics.
-- Replacing a source creates a new `source_generation`/binding identity;
-  historical frames retain their original source metadata.
-- Multiple sources for one role use explicit priority, selection and quality
-  rules. There is no hard-coded provider preference.
-- Each ESS has a stable internal resource identity independent of its display
-  name. Per-ESS data remains separate even if the UI aggregates it.
-- Background collection enumerates eligible site bindings and never uses the
-  active UI site as its source selector.
-
-### 17.4 Canonical and provenance boundary
-
-Each canonical frame separates semantic role/dataset identity,
-source/provider generation, site/resource identity, capture/known time, target
-interval, quality/confidence and vendor metadata. Vendor metadata is provenance
-and diagnostics; it is not part of the semantic key unless the source
-generation contract explicitly requires it. A source replacement therefore
-creates a new generation without silently mixing old and new observations.
-
-### 17.5 Compatibility test matrix
-
-The architecture gate must include tests for:
-
-- provider replacement without a core or UI change;
-- entity replacement without history rewrite;
-- different grid and trade providers on one site;
-- mixed ESS vendors on one site;
-- one ESS missing a capability while another has it;
-- source-generation changes with preserved historical replay;
-- dashboard cards rendering only from normalized contracts;
-- identical planner decisions for semantically equivalent normalized inputs,
-  independent of vendor;
-- absence of vendor-name branching in planner/frontend decision logic except
-  adapter, configuration and metadata presentation.
-
-The compatibility fixtures must use bounded generic role/capability data and
-must not smuggle raw provider identifiers into canonical keys, UI state or
-assertion output.
-
-### 17.6 Static quality gate
-
-Future CI must scan forbidden core paths, including planner code, generic
-forecast code, UI graph decision logic and canonical semantic logic, for known
-vendor/provider names. Matches fail the gate unless the file is an explicit
-adapter, provider/configuration boundary, documentation file or test fixture.
-The audit is a guard against accidental coupling, not a ban on truthful
-provenance metadata at the adapter boundary.
-
-### 17.7 Roadmap binding
-
-Step 1, Data Capture Foundation, first normalizes roles/capabilities and
-source generations. Steps 2 and later consume only those generic contracts.
-The ESS digital twin is per-resource and vendor-neutral. The guarded executor
-exposes an adapter interface and capability checks; the planner never calls a
-Growatt, Huawei, Solis or other device API directly. A complete installation
-replacement must therefore preserve the same dashboard, ELLA plans, graphs
-and canonical history while changing only adapters and bindings.
-
-## 18. Non-goals of this plan
-
-This document does not:
-
-- configure or control any battery;
-- create services or commands;
-- add a version, schema, Store, canonical dataset or migration;
-- activate Greenely economics beyond its existing verified/fail-closed scope;
-- trigger Solar Evidence, Single Run, model training or backfill;
-- change Fiskvik's clean-room state;
-- claim that two Growatt systems are already modeled;
-- claim that the live dashboard numeric forecast was independently queried by
-  this planning document.
-
-## 19. Target product architecture after accepted 0.0.658
-
-This section is the current product direction for future ELLA implementation.
-Where earlier sections use different product language or introduce a separate
-ELLA container, learning/shadow presentation, a user planner toggle, or a
-manual planner binding as a product gate, this section supersedes those parts.
-The earlier text remains as historical design context and is not evidence that
-the target behavior is implemented in the current runtime.
-
-### 19.1 Historical boundary and preserved safety rules
-
-The `0.0.657` and `0.0.658` releases addressed real site-isolation defects:
-the backend capability gate, load-forecast production gate, fingerprint and
-admin protections, and the bound-to-unbound SPA state reset. Those safety
-properties remain mandatory. In particular, site changes must clear stale
-planner, forecast, readiness and derived state before loading the new site's
-state, and no site may receive another site's frames.
-
-The manual planner binding used by those releases was a transitional safety
-mechanism. It is not the long-term product switch. The current verified
-runtime remains the accepted `0.0.658` runtime; the target architecture below
-is not implemented merely because it is documented here.
-
-### 19.2 ELLA is an always-on, site-scoped planner
-
-ELLA is always available as a planner for every site. There is no user-facing
-ELLA enable/disable toggle and no long-term manual `ella` binding that decides
-whether the planner exists. Planner eligibility is derived automatically from
-verified, site-scoped capabilities and bindings for the currently selected
-site. A site name, `site_configured`, a solar/meter/grid/Greenely binding, or
-historical presence of a transition binding is never sufficient by itself.
-
-The capability ladder is additive and fail-closed:
-
-| Verified current-site capability | Planner output |
-|---|---|
-| `price` | Price-only day plan: cheap/expensive periods, price changes and useful flexible-consumption windows |
-| `price` + `load` | The same plan enriched with expected consumption, kWh and cost |
-| `price` + `load` + `solar` | PV, net-load, expected surplus and deficit enrichments |
-| Above + `battery`/ESS | Actual charge, discharge and hold decisions using verified SOC, capacity, power limits, reserves and constraints |
-| Future verified flexible-load/weather capabilities | Additional inputs to the same planner, never a parallel planner |
-
-Missing, stale, ambiguous or unverified capabilities reduce the planner to
-the highest level that can be proven. They never produce zero placeholders,
-demo SOC, fabricated constraints or a claim that an unavailable action was
-planned. Thus Fiskvik is not “without ELLA”: with verified Nord Pool price
-periods it receives truthful price-only plan cards, while absent load, solar
-or ESS data remains absent. Vikarbodarna automatically receives the richer
-levels supported by its verified inputs.
-
-Every site switch rebuilds the planner input snapshot and all cards from the
-new site's capabilities. The old site's state is invalidated immediately;
-the active UI site never selects background data and never authorizes a
-different site's planner output.
-
-### 19.3 Planner and actuation are separate contracts
-
-The planner is active independently of physical control. Battery or device
-telemetry proves an input capability only; it never grants write authority.
-A real plan may therefore exist without an actuator. A later vendor-neutral
-dispatch layer may attempt to execute a plan through an actuator interface,
-but no actuator is represented as installed merely by being observable.
-Without an actuator, execution is an explicit safe no-op such as
-`not_executed_no_actuator`; it is never reported as physically performed.
-Dispatch must fail closed on missing, stale, ambiguous or unsafe capability
-state and must retain plan status separately from execution status.
-
-### 19.4 Unified dashboard product surface
-
-The future ELLA UI is not a separate “ELLA · Energiplan” section, a
-“Lärläge”/“Shadow” container, a `Visa plan` ELLA panel, or a second status
-hero. The primary ELLA surface is a row of dynamic plan/action cards directly
-under the existing price card or price graph. The old static price narrative
-(`Normalt pris nu`, `Nästa 2 h`, `Från`) is replaced by these cards and must
-not be rendered in parallel with them.
-
-The cards use the existing dashboard card radius, spacing, typography,
-palette and responsive behavior. They may show price-only observations on
-Fiskvik and richer plan content on Vikarbodarna, but the UI remains generic
-and does not expose vendor names as semantics. A card may contain:
-
-| Field | Requirement |
-|---|---|
-| `plan_block_id` | Stable identity; never derived from display text |
-| `start`, `end` | Exact site-local interval with timezone semantics |
-| `action` / `category` | Generic planner action or observation category |
-| `title`, `explanation` | Human-readable result of verified inputs |
-| `capabilities` / input references | Verified site-scoped roles and immutable source references |
-| numeric values | Price, load, PV, SOC target, power or energy only when available |
-| constraints / reserves | Explicit values and source; absent when unknown |
-| `execution_status` | Separate field for later actuator result; absent until execution exists |
-
-Unknown values are absent or explicitly `unknown`; they are never replaced by
-zero or an invented estimate. The card's plan status and any future execution
-status are separate, so a valid plan can coexist with
-`not_executed_no_actuator`.
-
-### 19.5 Shared card-to-graph interaction
-
-Every plan card is clickable. Selecting a card selects its exact
-`start -> end` interval in the price/energy graph using a low-opacity,
-semi-transparent vertical selection band clipped to the plotting area. The
-data series do not change. The selected card receives selected state; choosing
-another card moves the band, and clicking the active card may clear it.
-
-The same presentation selection state is consumed by price, load, solar and
-battery/SOC views. It is not matched on labels and never mutates canonical
-data. The interaction is identical for price-only, load-aware, solar-aware
-and battery-aware cards. It must remain usable with keyboard focus and mobile
-horizontal scrolling, and must clear or safely remap when the plan revision or
-site changes. This preserves the site-switch protections from 0.0.658 while
-making the price graph the primary context for the plan.
-
-### 19.6 Staged roadmap after accepted 0.0.658
-
-These are separate implementation scopes. No step is implemented by this
-documentation change, and no step may be treated as a reason to create fake
-data in an earlier step.
-
-#### A — UI/product shell and price-only cards
-
-Prerequisite: verified current-site price periods and the existing graph/card
-rendering contracts. Add the cards directly under the price card/graph,
-replace the old static price narrative, implement the shared selection band,
-and remove the separate ELLA heading/toggle/lärläge/shadow presentation.
-Price-only cards must work for every site with verified price data. Completion
-requires deterministic site-switch tests, exact card intervals, graph-band
-tests and no fabricated load/solar/ESS values. No battery planning or writes
-are in scope.
-
-#### B — Load-aware enrichment
-
-Prerequisite: first-class load forecast frames with site scope, target interval,
-`known_at`, model/source version, support and confidence. Enrich the same
-price cards with expected load, kWh and cost. Billing and planner consume the
-same load forecast source. Completion requires replay cutoff tests, missing/
-stale fail-closed tests and historical billing non-regression.
-
-#### C — Solar and net-load enrichment
-
-Prerequisite: verified raw/corrected PV forecast and actual PV frames with
-provenance and confidence. Add net-load, surplus and deficit explanations to
-the same cards. Raw PV remains immutable and corrected values remain distinct.
-Completion requires source-generation, timezone/DST, stale and cross-site
-tests; no correction is invented when only a raw forecast exists.
-
-#### D — ESS model and real plan without actuator
-
-Prerequisite: explicit per-resource ESS inputs for SOC, usable capacity,
-charge/discharge limits, reserves, efficiency and safety constraints. Produce
-real charge/discharge/hold plan blocks from those inputs, not a shadow-only
-variant and not demo hardware values. Completion requires deterministic
-constraint, reserve, missing-input and plan-versus-execution-separation tests.
-The planner still has no physical write path in this scope.
-
-#### E — Vendor-neutral actuator and dispatch
-
-Prerequisite: a separately verified actuator capability and an adapter
-contract, with acknowledgement, timeout, deduplication, wrong-site guards and
-safe fallback. Add dispatch as a separate scope; never call a vendor API from
-the planner. Completion requires explicit execution outcomes and a proof that
-no-actuator/no-acknowledgement states cannot be reported as executed.
-
-No megarelease is allowed. Each stage has its own focused/full test gate,
-release, deployment and runtime verification when it changes production.
-
-### 19.7 A1 completion record: capability-driven price-only foundation
-
-Roadmap stage A1 is accepted in release `0.0.660`. The backend now exposes a
-deterministic `ella.price_only_plan.v1` from verified Nord Pool periods using
-the site identity/global price-binding contract and its canonical fingerprint.
-Missing or mismatched price provenance fails closed. A site does not need the
-transitional manual ELLA binding to receive a price-only plan; this was
-runtime-verified for Fiskvik as well as Vikarbodarna, including the
-Vikarbodarna -> Fiskvik -> Vikarbodarna switch sequence.
-
-A1 produces only price-derived blocks. It does not claim load, solar, battery,
-SOC, ESS constraints, actuator execution or dispatch. The next staged scope is
-the UI/product shell and price-only card presentation described in stage A;
-load-aware enrichment remains stage B, followed by solar/net-load stage C,
-ESS planning stage D and separate actuator/dispatch stage E. These later
-stages remain unimplemented and must not be represented as current runtime
-capabilities.
-
-### 19.8 UI/product shell completion record: price-only cards
-
-The price-only UI/product-shell scope is accepted in runtime release
-`0.0.662`. It places the existing site-scoped price-only plan blocks in a
-dedicated card rail below the price chart, without introducing a separate
-ELLA section, shadow-mode product status or a second planner. The seven-card
-runtime result was visually verified with the rail outside the chart plot
-area.
-
-Card-to-graph selection is also runtime-verified: a selected card creates an
-exact interval selection band, selecting it again clears the band, and
-pointer interaction outside the cards or wheel/scroll interaction clears the
-selection without changing plan data. Site switching clears the old card and
-selection state before applying the new site's cards; no stale cross-site
-selection was observed. The accepted `0.0.658` generation/site-isolation
-protections remain in force.
-
-Release `0.0.661` is historical and superseded by `0.0.662` for this layout
-and selection scope; it is not the final accepted runtime baseline.
-
-This record does not mark any later roadmap stage complete. Load-aware
-enrichment remains the next staged scope (B), followed by solar/net-load
-enrichment (C), ESS planning (D), and separate vendor-neutral actuator/
-dispatch (E). No load, solar, ESS, actuator or dispatch behavior is implied
-by the accepted `0.0.662` UI shell.
-
-### 19.9 Current accepted state after 0.0.669
-
-This section supersedes the earlier roadmap wording that described stage B
-as the next unimplemented scope. It records only behavior that has passed
-the 0.0.669 runtime gate; stages C–E remain future work.
-
-- ELLA is a planner concept, not an on/off product toggle. The transitional
-  site binding and the 0.0.658 stale/cross-site protections remain historical
-  safety mechanisms; price-only eligibility is based on verified, site-scoped
-  price capability.
-- The accepted UI presents plan cards directly below the price graph. There
-  is no separate ELLA product section, shadow/lärläge presentation or
-  planner toggle in the accepted product shell. Price-only cards work when
-  verified Nord Pool data exists; load enrichment is added only when the
-  current site's canonical load evidence qualifies.
-- Stage B load-aware enrichment is accepted through `0.0.669`. Per-slot
-  load estimates use the single established source with precedence
-  `actual > forecast > historical model`; a block may carry a mixed total
-  when its interval is covered by more than one of those sources. Every
-  numeric result is provenance-labelled, and a slot with no verified support
-  remains unavailable rather than becoming zero. No source is inferred from
-  site name, vendor name or another site's data.
-- Plan cards containing the current time are auto-centred once after a new
-  plan/date/site render. Card selection marks the corresponding price-graph
-  interval; selecting another card moves the band, selecting it again or
-  interacting outside the cards/scrolling clears it. Site changes invalidate
-  the old cards and selection before applying the new site.
-- The 0.0.670 layout is the accepted DOM baseline: `.price-section` contains
-  the complete price card, including chart, legend and period controls, and
-  the plan rail is its sibling after the closed section. Authenticated Safari
-  measured exactly `20 px` from the price-section bottom to the rail
-  (`.price-section bottom=630.75`, rail top `650.75`); the rail is not inside
-  the price graph. The earlier 0.0.669 arrangement, with graph controls after
-  the rail, is historical and not the final visual baseline.
-
-The next staged scope is C, solar and net-load enrichment. It must add only
-verified raw/corrected PV inputs and preserve the same site-scoped,
-provenance-aware and fail-closed rules. ESS planning, physical actuation and
-dispatch remain unimplemented; no current UI or plan may imply them.
-
-### 19.10 Price-card structure acceptance record: 0.0.670
-
-Release `0.0.670` closes the remaining price-card structure issue without
-changing planner or load semantics. The required hierarchy is:
-
-`price-section (heading/statistics -> chart-frame -> legend/period controls)`
-` -> spacing -> price-plan-rail -> following dashboard cards`.
-
-The rail remains directly associated with the price section but is never
-inserted between the plot and the price section's own controls. This is a
-layout-only acceptance record; solar/net-load enrichment remains stage C,
-ESS planning remains stage D, and vendor-neutral actuation/dispatch remains
-stage E.
+The three front-facing levels are time/cost context, primary action and a
+short human reason. Provenance, mixed/actual/forecast, confidence, execution
+technology and long numeric diagnostics do not belong on the normal front.
+Normal operation is a valid action. The card must never imply execution when
+the action was only planned or recommended.
+
+The plan rail remains a sibling below the complete price card, including
+chart, legend and period controls. It uses existing dashboard tokens and
+site-safe stale-response/generation protection. A card is clickable and
+selection highlights its exact interval in the relevant graph without changing
+graph data. Outside click, scroll, site switch, date change and plan revision
+clear or safely replace selection.
+
+## 12. Debug and “Visa data” contract
+
+When Debug is active, clicking an ELLA card exposes `Visa data` using the same
+pattern as other cards. `Kopiera data` returns complete copyable JSON/text for
+that block.
+
+The payload is a decision-time snapshot: exactly what ELLA knew when the plan
+was created, not a fresh read of sensors when the dialog opens. Where present,
+it may include site/plan/block IDs, planner/model version, start/end,
+generated/known time, effective prices and cost components, total-load and
+individual-load inputs, solar, ESS, proposed actions, constraints, actuator
+mode/status, expected impact, counterfactual fields and learning eligibility.
+Unavailable fields are absent or explicitly unavailable. Credentials, raw
+provider secrets and unnecessary personal data are excluded.
+
+## 13. Learning and evaluation loop
+
+The explicit loop is:
+
+```text
+Predict -> Plan -> Observe -> Explain error -> Learn -> Replan
+```
+
+Three dimensions remain separate: forecast/model quality, planner/decision
+quality, and execution/actuator quality.
+
+If ELLA recommends battery charging but no actuator exists, this is not an
+execution failure. Sensors may still show what happened. If the model and
+inputs are strong enough, ELLA may estimate a counterfactual result for “if
+the plan had been followed”; that result is model/counterfactual, not actual.
+If an actuator exists and a command fails, execution quality is classified
+separately. If an observation is missing, there is no learning update for that
+signal. Learning never widens hard device/safety constraints.
+
+## 14. Control safety
+
+The progression per capability/load is `Observe -> Recommend -> Control`.
+There is no implicit activation, no vendor-specific control assumption and no
+write path in the architecture reset or early stages. A later actuator must
+be vendor-neutral, explicitly permitted, site/resource scoped, guarded,
+acknowledged and fail-closed. Without dispatch, status is
+`NOT_APPLICABLE`/`recommend_only`, never a claim of physical execution.
+
+## 15. Staged roadmap and gates
+
+The stages below supersede the older solar-first/ESS-later ordering. Each is a
+separate release scope; no megarelease is implied.
+
+### Stage 0 — Architecture reset and contracts
+
+Entry: accepted 0.0.692 foundation, existing site isolation, canonical
+provenance, price-only planner and load enrichment.
+
+Deliver: capability registry contract, site isolation rules, plan/action schema,
+individual-load schema, learning/evaluation semantics and clean card/debug
+contract.
+
+Exit: contracts are versioned and vendor-neutral; unknown/quality/provenance
+semantics are explicit; legacy binding is transition history only; no future
+stage is presented as implemented.
+
+Tests: schema fixtures, missing/stale/wrong-site/partial input, absent
+actuator, recommend-only, no fabricated values, deterministic IDs and debug
+snapshot reproducibility.
+
+### Stage 1 — Capability registry and individual-load foundation
+
+Entry: Stage 0 contracts accepted.
+
+Deliver: backend capability/resource model and explicit load configuration for
+measurement, actuator, criticality, flexibility, control mode and constraints.
+No actuator writes.
+
+Exit: each load is site-scoped and independently verifiable; observe,
+recommend and controllable modes are distinct; Fiskvik can model its own
+loads without Vikarbodarna data; absent control yields recommendation or no
+execution expectation.
+
+Tests: enable/disable/invalid capability, stale/wrong-site load, missing
+measurement, absent actuator, recommend-only, constraint validation,
+cross-site isolation and deterministic reconfiguration.
+
+### Stage 2 — Unified 15-minute site state and forecasts
+
+Entry: capability and load resource identity are stable.
+
+Deliver: one site state for total and individual loads, effective cost stack,
+optional solar, optional ESS, quality/provenance/known-at and forecast frames.
+Reuse canonical load model and existing price provenance.
+
+Exit: no duplicate forecast model, no zero-fill, deterministic replay,
+actual/forecast/model precedence preserved, and optional layers disappear
+cleanly when absent.
+
+Tests: full/partial/stale forecasts, actual gaps, wrong-site data, DST,
+published versus unpublished tomorrow price, no observation/no learning,
+site isolation and deterministic replan triggers.
+
+### Stage 3 — Action planner in shadow/recommend-only mode
+
+Entry: Stage 2 has a qualifying site state.
+
+Deliver: materially-change-based action segmentation for load shifting,
+reduction and prioritisation; solar/net-load decisions when available; battery
+charge/hold/discharge/reserve concepts only when ESS capabilities qualify.
+Clean cards expose primary action and short reason.
+
+Exit: plans are immutable, site-scoped, reproducible and constraint checked;
+absent actuators yield recommend-only/`NOT_APPLICABLE`; no write service
+exists; Fiskvik remains useful without solar/ESS.
+
+Tests: missing capability, stale/partial data, absent actuator,
+recommend-only, wrong-site data, deterministic replan, action-boundary
+segmentation, no fabricated values and exact card/graph interval selection.
+
+### Stage 4 — Debug snapshot and explainability
+
+Entry: Stage 3 plan blocks and stable revisions.
+
+Deliver: Debug `Visa data` and `Kopiera data` for a plan block using a stored
+decision-time snapshot.
+
+Exit: copied payload reproduces decision inputs and provenance; opening the
+dialog does not substitute current sensor state; secrets and unnecessary PII
+are excluded.
+
+Tests: snapshot reproducibility after state changes/restart, missing optional
+capability, wrong-site rejection, redaction, stable JSON and copy output.
+
+### Stage 5 — Evaluation and site-scoped learning loop
+
+Entry: qualifying plans, observations and decision snapshots exist.
+
+Deliver: forecast/model, planner/decision and execution scorecards; error
+explanation; site-scoped calibration; deterministic replan; counterfactual
+evaluation when inputs are strong enough.
+
+Exit: actual and counterfactual are visibly distinct; no execution failure is
+assigned without an actuator; no learning update occurs without observation;
+model promotion cannot widen safety constraints.
+
+Tests: forecast error, planner regret, actuator-failure separation, missing
+observation, counterfactual insufficiency, site leakage, replay determinism,
+rollback and seasonal/site holdout evaluation.
+
+### Stage 6 — Solar/ESS enrichment and physical calibration
+
+Entry: Stage 5 quality evidence and verified site-specific capabilities.
+
+Deliver: solar bias/uncertainty and per-ESS physical calibration, including
+SOC, usable capacity, limits, efficiency, reserve and planned trajectory.
+Only capable sites receive these actions; Fiskvik remains fully functional
+without them.
+
+Exit: no cross-site parameter transfer, bounded energy balance, unknown
+capacity/limits fail closed, and planned SOC comes from the planner's model.
+
+Tests: actual/forecast overlap, solar uncertainty, ESS efficiency/loss,
+multiple ESS, stale SOC, reserve/limit violation, temperature/derating and
+counterfactual replay.
+
+### Stage 7 — Controlled execution
+
+Entry: explicit site/resource permissions, accepted shadow/backtest evidence
+and a vendor-neutral actuator contract.
+
+Deliver: guarded per-load/per-ESS dispatch, acknowledgement, timeout,
+idempotency, rate limits, failure classification, rollback and safe fallback.
+
+Exit: writes occur only through explicitly armed actuator capabilities;
+execution is acknowledged or marked failed; planner and execution quality
+remain separate; any boundary violation stops further commands.
+
+Tests: supervised hardware-in-loop or adapter tests, wrong-site prevention,
+stale state, permission removal, duplicate command, timeout, actuator failure,
+rollback, manual override and zero-write tests on unarmed sites.
+
+## 16. Acceptance philosophy for every future stage
+
+Every implementation release must explicitly test, where applicable: missing
+capability; stale/partial data; wrong-site data and Vikarbodarna/Fiskvik
+isolation; absent actuator and recommend-only semantics; actuator failure when
+an actuator exists; no observation means no learning; deterministic plan IDs,
+segmentation and replan; no fabricated values or hidden zero-fill; reproducible
+decision-time debug snapshot; and preservation of Greenely, Solar Evidence,
+Single Run, canonical integrity and battery-write guardrails.
+
+Runtime acceptance must distinguish static tests, deployed runtime state and
+authenticated UI evidence. A stage is not accepted merely because code exists
+or cards render.
+
+## 17. Current implementation boundary
+
+At runtime baseline 0.0.692, the accepted implementation is still, in
+substance, capability-driven price-block planning with load enrichment and
+the established dashboard/card interaction and site safety. It is not yet the
+vNext action planner, individual-load controller, learning loop or physical
+control architecture described above.
+
+The current seven-card result is explained by the current third-based price
+classification and contiguous grouping. It is not itself a defect. Future
+card count must emerge from material action changes and constraints.
+
+The next implementation scope after this documentation reset is **Stage 0 —
+Architecture reset and contracts**, followed by Stage 1 individual-load and
+capability foundation. Solar-first and ESS-first implementation must not be
+started before those contracts are accepted.
