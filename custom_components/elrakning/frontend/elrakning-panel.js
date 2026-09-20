@@ -3705,7 +3705,8 @@ class ElrakningPanel {
           display: grid;
           gap: 0;
           overflow-x: auto;
-          scrollbar-width: thin;
+          padding-block: 1px;
+          scrollbar-width: none;
         }
 
         .price-plan-rail:has(> :not([hidden]) ~ :not([hidden])) {
