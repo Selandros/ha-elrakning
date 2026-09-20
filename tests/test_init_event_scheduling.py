@@ -90,7 +90,7 @@ def test_load_forecast_cadence_uses_thread_safe_create_task_from_worker_thread()
     asyncio.run(exercise())
 
 
-def test_load_forecast_capture_requires_explicit_site_binding():
+def test_load_forecast_capture_uses_site_scoped_house_role_without_ella_binding():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
     function = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_async_capture_load_forecasts")
@@ -111,11 +111,8 @@ def test_load_forecast_capture_requires_explicit_site_binding():
             return {"fiskvik": {"location": {"timezone": "Europe/Stockholm"}}, "vik": {"location": {"timezone": "Europe/Stockholm"}}}
         def collection_targets(self):
             return [{"site_id": "fiskvik", "logical_role": "house.consumption"}, {"site_id": "vik", "logical_role": "house.consumption"}]
-        def ella_binding_for_site(self, site_id):
-            return {"binding_fingerprint": "verified"} if site_id == "vik" else None
-
     asyncio.run(namespace["_async_capture_load_forecasts"](Hass(), Manager(), type("Collector", (), {"storage": object()})()))
-    assert [args[1] for args in calls] == ["vik"]
+    assert [args[1] for args in calls] == ["fiskvik", "vik"]
 
 
 def _load_midnight_refresh():

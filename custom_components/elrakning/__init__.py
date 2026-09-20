@@ -65,14 +65,11 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
     """Persist truthful load-profile forecasts for every eligible site."""
     configs = site_identity_manager.collection_site_configs()
     target_getter = getattr(site_identity_manager, "collection_targets", None)
-    binding_getter = getattr(site_identity_manager, "ella_binding_for_site", None)
     targets = target_getter() if callable(target_getter) else []
     site_ids = {target["site_id"] for target in targets
                 if isinstance(target, dict) and target.get("logical_role") == "house.consumption"}
     now = dt_util.now().astimezone(timezone.utc)
     for site_id in sorted(site_ids):
-        if not callable(binding_getter) or binding_getter(site_id) is None:
-            continue
         config = configs.get(site_id, {}) if isinstance(configs, dict) else {}
         location = config.get("location", {}) if isinstance(config, dict) else {}
         timezone_name = location.get("timezone") if isinstance(location, dict) else None
