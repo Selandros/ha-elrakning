@@ -1556,6 +1556,7 @@ assert.match(panelSource, /confirm: true/);
 assert.match(panelSource, /window\.confirm\(`Byt aktiv installation/);
 assert.match(panelSource, /Installationen skapades\. Välj den och bekräfta byte/);
 assert.match(panelSource, /await this\._refreshBackendState\(true\)/);
+assert.match(panelSource, /result\.textContent = "Installationen är aktiv\.";[\s\S]*window\.location\.reload\(\)/);
 const siteDialogSource = panelSource.slice(panelSource.indexOf("  _bindSiteSettingsDialog() {"), panelSource.indexOf("    rename.addEventListener", panelSource.indexOf("  _bindSiteSettingsDialog() {")));
 assert.doesNotMatch(siteDialogSource, /callWS\(\{ type: "elrakning\/site_activate"/);
 assert.match(siteDialogSource, /select\.addEventListener\("change"/);

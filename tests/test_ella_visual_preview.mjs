@@ -8,6 +8,7 @@ const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), pan
 assert.match(panel, /type: "elrakning\/ella_plan"/);
 assert.match(panel, /data-price-plan-rail/);
 assert.match(panel, /price-chart-frame[\s\S]*price-plan-rail/);
+assert.match(panel, /<\/section>\s*<div class="price-plan-rail" data-price-plan-rail/);
 assert.match(panel, /price-plan-card/);
 assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);

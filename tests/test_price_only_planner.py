@@ -8,7 +8,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 install_optional_dependency_stubs()
 
-from custom_components.elrakning.price_only_planner import build_price_only_plan
+from custom_components.elrakning.price_only_planner import build_price_only_plan, enrich_plan_with_load
 from custom_components.elrakning.site_identity import SiteIdentityManager
 from custom_components.elrakning.websocket import websocket_ella_plan
 
@@ -25,6 +25,15 @@ def periods(values, start=None):
 
 
 class PriceOnlyPlannerTests(unittest.TestCase):
+    def _load_frame(self, site_id="site-a", quality_status="good", points=None):
+        points = points or [
+            {"valid_at": "2026-09-20T00:00:00+00:00", "value": 1000, "unit": "W", "quality_status": "good"},
+            {"valid_at": "2026-09-20T00:15:00+00:00", "value": 2000, "unit": "W", "quality_status": "good"},
+        ]
+        return {"site_id": site_id, "payload_schema": "load_forecast.v1", "quality_status": quality_status,
+                "frame_id": "frame-a", "source_generation_id": "load-gen-a", "quality": {"status": quality_status},
+                "known_at": "2026-09-19T12:00:00+00:00", "points": points}
+
     def test_valid_prices_create_deterministic_price_only_blocks(self):
         now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
         values = [0.20, 0.21, 0.70, 0.72, 0.40, 0.41]
@@ -61,6 +70,30 @@ class PriceOnlyPlannerTests(unittest.TestCase):
         invalid = [SimpleNamespace(start=datetime(2026, 9, 20), end=datetime(2026, 9, 20, 0, 15), price=0.2)]
         result = build_price_only_plan("site-a", invalid, now, source_generation_id="generation-a")
         self.assertEqual(result["reason"], "invalid_price_periods")
+
+    def test_verified_complete_load_enriches_price_blocks_deterministically(self):
+        now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+        plan = build_price_only_plan("site-a", periods([0.2, 0.2]), now, source_generation_id="generation-a")
+        enriched = enrich_plan_with_load(plan, [self._load_frame()])
+        self.assertEqual(enriched, enrich_plan_with_load(plan, [self._load_frame()]))
+        self.assertEqual(enriched["plan_blocks"][0]["load"]["energy_kwh"], 0.75)
+        self.assertEqual(enriched["plan_blocks"][0]["load"]["coverage"], "complete")
+        self.assertIn("load", enriched["plan_blocks"][0]["verified_inputs"]["capabilities"])
+
+    def test_missing_stale_or_partial_load_falls_back_without_fabrication(self):
+        now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+        plan = build_price_only_plan("site-a", periods([0.2, 0.2]), now, source_generation_id="generation-a")
+        partial = self._load_frame(points=[{"valid_at": "2026-09-20T00:00:00+00:00", "value": 1000, "unit": "W", "quality_status": "good"}])
+        for frames in ([], [self._load_frame(quality_status="stale")], [partial], [self._load_frame("site-b")]):
+            result = enrich_plan_with_load(plan, frames)
+            self.assertTrue(all("load" not in block for block in result["plan_blocks"]))
+
+    def test_load_enrichment_is_site_scoped(self):
+        now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+        plan_a = build_price_only_plan("site-a", periods([0.2, 0.8]), now, source_generation_id="generation-a")
+        plan_b = build_price_only_plan("site-b", periods([0.2, 0.8]), now, source_generation_id="generation-a")
+        self.assertTrue(any("load" in block for block in enrich_plan_with_load(plan_a, [self._load_frame()])["plan_blocks"]))
+        self.assertTrue(all("load" not in block for block in enrich_plan_with_load(plan_b, [self._load_frame()])["plan_blocks"]))
 
     def test_websocket_price_plan_does_not_require_legacy_ella_binding(self):
         class Identity:

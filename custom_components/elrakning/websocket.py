@@ -33,7 +33,7 @@ from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
 from .invoice import build_today_variable_cost
 from .power import PowerManager
-from .price_only_planner import build_price_only_plan
+from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
 from .site_identity import SiteIdentityManager
@@ -1295,6 +1295,9 @@ async def websocket_ella_plan(hass, connection, msg):
         dt_util.now(),
         source_generation_id=stored_fingerprint,
     )
+    if result.get("available"):
+        load_state = await _async_load_forecast_state(hass)
+        result = enrich_plan_with_load(result, load_state.get("frames", []))
     connection.send_result(msg["id"], result)
 
 

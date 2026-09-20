@@ -2627,7 +2627,6 @@ class ElrakningPanel {
           <div class="price-chart-frame">
             <div class="price-chart" aria-live="polite"></div>
           </div>
-          <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle${this._spotBarsVisible ? " active" : ""}" data-chart-layer="spot" aria-pressed="${this._spotBarsVisible}">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris<span class="chart-legend-solo-badge">SOLO</span>
@@ -2671,6 +2670,8 @@ class ElrakningPanel {
             <dialog class="period-picker-dialog" data-period-picker-dialog aria-label="Välj period"></dialog>
           </div>
         </section>
+
+        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
 
         <div class="daily-energy-row">
           <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
@@ -6693,6 +6694,7 @@ class ElrakningPanel {
         this._renderSiteSettings();
         await this._refreshBackendState(true);
         if (result) result.textContent = "Installationen är aktiv.";
+        window.location.reload();
       } catch (error) {
         if (result) result.textContent = `Byte kunde inte genomföras: ${error.message}`;
         await this._loadSiteIdentity();
@@ -8172,6 +8174,13 @@ class ElrakningPanel {
         value.className = "price-plan-value";
         value.textContent = `Snitt ${this._formatNumber(average)} kr/kWh`;
         button.append(value);
+      }
+      const expectedLoad = Number(block?.load?.energy_kwh);
+      if (Number.isFinite(expectedLoad) && block?.load?.coverage === "complete") {
+        const load = document.createElement("span");
+        load.className = "price-plan-load";
+        load.textContent = `Förväntad förbrukning ${this._formatNumber(expectedLoad)} kWh`;
+        button.append(load);
       }
       const status = document.createElement("span");
       status.className = "price-plan-status";

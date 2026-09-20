@@ -1,8 +1,8 @@
-"""Deterministic price-only ELLA planning from verified price periods."""
+"""Deterministic ELLA planning from verified price periods and optional load."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import math
@@ -12,6 +12,8 @@ from typing import Any, Iterable
 DATASET = "ella.price_only_plan.v1"
 CAPABILITY = "price"
 PLAN_VERSION = "price-only-v1"
+LOAD_PAYLOAD_SCHEMA = "load_forecast.v1"
+LOAD_SLOT_SECONDS = 900
 
 
 def _canonical(value: Any) -> str:
@@ -141,3 +143,97 @@ def build_price_only_plan(
         "capability": capability,
         "plan_blocks": blocks,
     }
+
+
+def _load_points_for_block(block: dict[str, Any], frames: Iterable[dict[str, Any]], site_id: str, decision_at: datetime) -> list[dict[str, Any]] | None:
+    """Return complete, site-scoped forecast coverage for one price block."""
+    try:
+        start = datetime.fromisoformat(block["start"])
+        end = datetime.fromisoformat(block["end"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        return None
+    expected = int((end - start).total_seconds() / LOAD_SLOT_SECONDS)
+    if expected <= 0:
+        return None
+    candidates: list[dict[str, Any]] = []
+    for frame in frames or []:
+        if not isinstance(frame, dict) or frame.get("site_id") != site_id:
+            continue
+        if frame.get("payload_schema") != LOAD_PAYLOAD_SCHEMA:
+            continue
+        if frame.get("quality_status") not in {"good", "low_confidence"}:
+            continue
+        try:
+            frame_known_at = datetime.fromisoformat(frame["known_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if frame_known_at.tzinfo is None or frame_known_at > decision_at:
+            continue
+        for point in frame.get("points") or []:
+            if not isinstance(point, dict) or point.get("unit") != "W":
+                continue
+            try:
+                valid_at = datetime.fromisoformat(point["valid_at"])
+                value = float(point["value"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if valid_at.tzinfo is None or not math.isfinite(value) or value < 0:
+                continue
+            if start <= valid_at < end and point.get("quality_status") == "good":
+                candidates.append({"valid_at": valid_at, "value": value, "frame_id": frame.get("frame_id"),
+                                   "quality": frame.get("quality") or {},
+                                   "source_generation_id": frame.get("source_generation_id")})
+    by_time = {point["valid_at"]: point for point in candidates}
+    expected_times = [start + timedelta(seconds=LOAD_SLOT_SECONDS * index) for index in range(expected)]
+    selected = [by_time.get(value) for value in expected_times]
+    return [point for point in selected if point is not None] if all(selected) and len(by_time) == expected else None
+
+
+def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
+    """Add only fully covered, verified load forecast values to price blocks."""
+    if not isinstance(plan, dict) or plan.get("available") is not True or not frames:
+        return plan
+    site_id = plan.get("site_id")
+    if not isinstance(site_id, str) or not site_id:
+        return plan
+    try:
+        decision_at = datetime.fromisoformat(plan["capability"]["known_at"])
+    except (KeyError, TypeError, ValueError):
+        return plan
+    if decision_at.tzinfo is None:
+        return plan
+    enriched = {**plan, "plan_blocks": []}
+    for block in plan.get("plan_blocks") or []:
+        updated = dict(block)
+        points = _load_points_for_block(block, frames, site_id, decision_at)
+        if points:
+            watts = [point["value"] for point in points]
+            duration_hours = LOAD_SLOT_SECONDS / 3600
+            frame_ids = sorted({point["frame_id"] for point in points if point.get("frame_id")})
+            source_generations = sorted({point["source_generation_id"] for point in points if point.get("source_generation_id")})
+            updated["load"] = {
+                "energy_kwh": sum(watts) * duration_hours / 1000,
+                "average_power_kw": sum(watts) / len(watts) / 1000,
+                "peak_power_kw": max(watts) / 1000,
+                "coverage": "complete",
+                "dataset": LOAD_PAYLOAD_SCHEMA,
+                "frame_ids": frame_ids,
+                "source_generation_ids": source_generations,
+                "quality": "low_confidence" if any(point["quality"].get("status") == "low_confidence" for point in points) else "good",
+            }
+            updated["verified_inputs"] = {
+                **block.get("verified_inputs", {}),
+                "capabilities": ["price", "load"],
+                "load_frames": frame_ids,
+                "load_source_generations": source_generations,
+            }
+            if block.get("category") == "expensive_period":
+                updated["reason"] = f"Dyr prisperiod med förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+            elif block.get("category") == "cheap_period":
+                updated["reason"] = f"Billig prisperiod; förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+            else:
+                updated["reason"] = f"Prisförändring med förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+        enriched["plan_blocks"].append(updated)
+    return enriched
