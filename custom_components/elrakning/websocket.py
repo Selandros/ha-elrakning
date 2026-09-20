@@ -1338,8 +1338,6 @@ async def websocket_ella_capabilities(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": error or "load_registry_unavailable"})
         return
     forecast = await _async_load_forecast_state(hass, site_id)
-    learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
-    forecast_evaluation = learning_store.public_state(site_id) if learning_store else None
     try:
         inventory = build_capability_inventory(
             _ella_site_manager(hass), registry, site_id,
@@ -1391,6 +1389,8 @@ async def websocket_ella_site_state(hass, connection, msg):
         return
     from .ella_capabilities import build_capability_inventory
     forecast = await _async_load_forecast_state(hass, site_id)
+    learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
+    forecast_evaluation = learning_store.public_state(site_id) if learning_store else None
     try:
         inventory = build_capability_inventory(
             identity, registry, site_id, load_forecast=forecast,
