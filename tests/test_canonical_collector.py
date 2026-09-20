@@ -737,6 +737,17 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coverage, 355 / 900)
         self.assertTrue(metadata["boundary_carry_used"])
 
+    def test_time_weighted_coverage_is_clamped_to_storage_contract(self):
+        start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        _value, coverage, _observed_at, _metadata = CanonicalCollector._aggregate(
+            "time_weighted_mean",
+            [(start, 100.0), (start + timedelta(seconds=300), 100.0), (start + timedelta(seconds=600), 100.0)],
+            start,
+            360,
+        )
+        self.assertGreaterEqual(coverage, 0.0)
+        self.assertLessEqual(coverage, 1.0)
+
     async def test_source_replacement_mid_quarter_keeps_both_generations(self):
         with tempfile.TemporaryDirectory() as directory:
             old = _target("site-a", "solar.production", "sensor.solar_old", "gen-old")

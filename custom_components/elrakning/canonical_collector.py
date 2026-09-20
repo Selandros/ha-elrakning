@@ -835,7 +835,8 @@ class CanonicalCollector:
             observed_at = samples[-1][0] if samples else predecessor[0]
             return None, 0.0, observed_at, {"boundary_carry_used": predecessor_used}
         observed_at = samples[-1][0] if samples else predecessor[0]
-        return total / covered, covered / 900, observed_at, {
+        coverage = min(1.0, max(0.0, covered / 900))
+        return total / covered, coverage, observed_at, {
             "boundary_carry_used": predecessor_used,
             "hold_seconds": hold_seconds,
             "invalid_boundary_count": len(invalid_boundaries),
