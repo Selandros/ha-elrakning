@@ -3515,12 +3515,13 @@ class ElrakningPanel {
         .daily-energy-row {
           align-items: stretch;
           display: grid;
+          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         .dashboard-card-stack {
           display: grid;
-          column-gap: 0;
+          gap: var(--dashboard-card-gap);
         }
 
         .dashboard-card-stack > * {
@@ -3690,6 +3691,7 @@ class ElrakningPanel {
         .price-plan-rail {
           border-top: 0;
           display: grid;
+          gap: var(--dashboard-card-gap);
           overflow-x: auto;
           scrollbar-width: thin;
         }
@@ -4665,6 +4667,7 @@ class ElrakningPanel {
         .live-power-row {
           align-items: stretch;
           display: grid;
+          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(5, minmax(0, 1fr));
         }
 
@@ -4868,6 +4871,7 @@ class ElrakningPanel {
         .grid {
           align-items: stretch;
           display: grid;
+          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         }
 
