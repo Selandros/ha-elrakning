@@ -75,6 +75,9 @@ The following is historical context, not the new target architecture:
 | 0.0.668–0.0.669 | Accepted actual/forecast/historical-model load enrichment and provenance-safe block totals. | Per-slot precedence and no zero-fill. |
 | 0.0.670 onward | Accepted price-card DOM/spacing and later narrow dashboard spacing fixes. | The current dashboard visual baseline, not a planner eligibility rule. |
 | 0.0.692 | Latest runtime baseline for this reset: dashboard spacing patch deployed and runtime healthy. | All accepted capture, planner, load, provenance and site-isolation behavior above. |
+| 0.0.694 | First Stage 1 capability/load foundation deployment; not accepted because runtime exposed legacy ELLA-binding eligibility and incomplete capability semantics. | The versioned inventory/load-registry direction and no-write boundary were retained. |
+| 0.0.695 | Corrective Stage 1 deployment; not accepted as a further startup forecast-capture legacy-binding gate was found after deployment. | Fingerprinted bindings, multi-resource inventory and configured-versus-available entity semantics were retained. |
+| 0.0.696 | Stage 1 capability registry and individual-load foundation accepted after authenticated two-site runtime verification. | Site-scoped capability inventory, explicit binding verification, no-write invariants and deterministic resource preservation. |
 
 The historical “price-only first, solar next, ESS later” roadmap is superseded
 as a product ordering. Solar and ESS remain capabilities in the same planner,
@@ -338,7 +341,10 @@ No actuator writes.
 Exit: each load is site-scoped and independently verifiable; observe,
 recommend and controllable modes are distinct; Fiskvik can model its own
 loads without Vikarbodarna data; absent control yields recommendation or no
-execution expectation.
+execution expectation. Runtime acceptance for 0.0.696 additionally confirmed
+that legacy ELLA binding is transition history only, price-only planning does
+not require it, explicit bindings require valid fingerprints, multi-resource
+roles are preserved, and configured-but-missing entities remain unavailable.
 
 Tests: enable/disable/invalid capability, stale/wrong-site load, missing
 measurement, absent actuator, recommend-only, constraint validation,
@@ -455,17 +461,19 @@ or cards render.
 
 ## 17. Current implementation boundary
 
-At runtime baseline 0.0.692, the accepted implementation is still, in
-substance, capability-driven price-block planning with load enrichment and
-the established dashboard/card interaction and site safety. It is not yet the
-vNext action planner, individual-load controller, learning loop or physical
-control architecture described above.
+At accepted runtime baseline 0.0.696, the implementation includes the Stage 1
+site-scoped capability inventory and persistent individual-load foundation on
+top of the existing capability-driven price-block planner, canonical load
+enrichment and dashboard/card interaction. It is not yet the vNext action
+planner, unified site-state model, individual-load controller, learning loop
+or physical control architecture described above.
 
 The current seven-card result is explained by the current third-based price
 classification and contiguous grouping. It is not itself a defect. Future
 card count must emerge from material action changes and constraints.
 
-The next implementation scope after this documentation reset is **Stage 0 —
-Architecture reset and contracts**, followed by Stage 1 individual-load and
-capability foundation. Solar-first and ESS-first implementation must not be
-started before those contracts are accepted.
+Stage 0 architecture/contracts and Stage 1 capability/load foundation are
+implemented and accepted. The next active implementation scope is **Stage 2 —
+Unified 15-minute site state and forecasts**. Solar-first and ESS-first
+implementation remain superseded as ordering decisions; they are optional
+capabilities within the staged architecture and must not bypass Stage 2.

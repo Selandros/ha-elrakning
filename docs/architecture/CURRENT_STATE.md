@@ -1370,8 +1370,48 @@ INFERRED (roadmap): Long-term data foundation:
   implement individual-load planning, action-based segmentation, decision-time
   debug snapshots, the learning/evaluation loop, solar/ESS action enrichment
   or physical actuation.
-- CURRENT ROADMAP RESET: The authoritative next scope is now the ELLA
-  masterplan's Stage 0 architecture/contracts reset, then Stage 1 capability
-  registry and individual-load foundation. The former solar-first/ESS-later
-  ordering is superseded. This is a target-plan change only; no implementation
-  is claimed here.
+- HISTORICAL ROADMAP RESET: At the 0.0.692 documentation boundary, the
+  authoritative next scope became the ELLA masterplan's Stage 0
+  architecture/contracts reset, followed by Stage 1 capability registry and
+  individual-load foundation. The former solar-first/ESS-later ordering was
+  superseded. Stage 0 and Stage 1 are now closed by the later acceptance below.
+
+## 0.0.694–0.0.696 Stage 1 capability registry and individual-load foundation
+
+- `0.0.694` was the first Stage 1 deployment. It was not accepted because
+  legacy ELLA binding still incorrectly gated Fiskvik planner/load eligibility,
+  solar forecast capability was conflated with current-plan usage, and one
+  logical role could collapse multiple active resources.
+- `0.0.695` corrected those inventory semantics, but was not accepted because
+  startup forecast capture retained a separate legacy ELLA-binding gate.
+- `0.0.696`, commit `2f541cf0623c9c709e7b47db23583525d162a14d`, is the accepted
+  Stage 1 runtime baseline. It removes the remaining legacy binding gate from
+  forecast capture while preserving legacy ELLA binding data as transition
+  state only. No planner price classification/action algorithm was changed.
+- Stage 1 provides `ella_capability_inventory.v1` and the persistent,
+  site-scoped `ella_load_registry.v1`, with read-only capability inventory and
+  explicit site-scoped load list/state/upsert/remove websocket contracts.
+  Inventory is derived from existing verified site data; it does not duplicate
+  raw source datasets and introduces no dashboard card.
+- Authenticated runtime acceptance confirmed for Vikarbodarna
+  (`76f92eea-5720-4c19-9b43-17028d19a0a4`): price, retail/grid, house actual
+  and forecast, grid power/import/export, solar actual and forecast, and
+  battery power/SOC/capacity were available as reported capabilities; both
+  active solar resources were preserved. Solar and battery capabilities were
+  explicitly marked unused by the current planner, and execution plus actuator
+  writes remained false.
+- Authenticated runtime acceptance confirmed for Fiskvik
+  (`66edee1e-ee32-4511-8e9d-4fc96947c861`) after a real site activation:
+  price-only planning remained eligible without legacy ELLA binding;
+  `ella_plan` returned the correct site-scoped seven-block plan; load forecast
+  failed closed as `no_supported_history` rather than `ella_unbound`; solar,
+  forecast and battery layers were unavailable without verified site sources.
+  No fabricated values or cross-site data were observed, and Vikarbodarna was
+  restored as the active site after the audit.
+- Stage 1 runtime invariants are accepted: explicit binding plus valid
+  fingerprint is authoritative, address/name heuristics are not used; legacy
+  ELLA binding is historical transition state only; configured and runtime-
+  available entities are distinct; all actuator execution remains disabled.
+- The next active implementation scope is **Stage 2 — Unified 15-minute site
+  state and forecasts**. Stage 2 must preserve the accepted site isolation,
+  provenance, fail-closed and no-write boundaries.
