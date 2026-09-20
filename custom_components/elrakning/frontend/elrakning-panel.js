@@ -4699,9 +4699,8 @@ class ElrakningPanel {
           box-sizing: border-box;
           container-type: inline-size;
           display: grid;
-          align-content: start;
           grid-template-rows: auto auto auto 5px auto minmax(0, auto);
-          row-gap: 4px;
+          row-gap: 1px;
           min-width: 0;
           padding: 12px 14px;
           position: relative;
