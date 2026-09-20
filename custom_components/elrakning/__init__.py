@@ -3,7 +3,7 @@
 import asyncio
 import json
 from functools import partial
-from datetime import timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 
 from homeassistant.components import frontend
@@ -32,6 +32,7 @@ from .load_forecast import build_site_load_forecast
 from .ella_load_registry import EllaLoadRegistry
 from .ella_debug_snapshot import EllaDebugSnapshotStore
 from .ella_learning import EllaLearningStore
+from .ella_stage6 import EllaStage6CalibrationStore
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
@@ -90,6 +91,20 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
             )
             if learning_store is not None:
                 await learning_store.async_record(site_id, result.get("evaluation") or {}, result.get("calibration") or {})
+            if stage6_store is not None:
+                from .ella_stage6 import build_solar_calibration
+                stage6_rows = await hass.async_add_executor_job(
+                    canonical_collector.storage.read_site_energy_history,
+                    site_id, now - timedelta(days=60), now,
+                )
+                stage6_frames = await hass.async_add_executor_job(
+                    canonical_collector.storage.read_external_input_frames,
+                    now, source_scope="site", site_id=site_id,
+                )
+                solar_frames = [frame for frame in stage6_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
+                prior = stage6_store.public_state(site_id)
+                calibration = build_solar_calibration(site_id, stage6_rows, solar_frames, now, prior)
+                await stage6_store.async_record(site_id, calibration)
             if result.get("written"):
                 hass.bus.async_fire("elrakning_load_forecast_update", {
                     "site_id": site_id, "frame_id": result.get("frame_id"),
@@ -198,6 +213,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ella_learning_store = EllaLearningStore(hass)
     await ella_learning_store.async_load()
     hass.data.setdefault(DOMAIN, {})["ella_learning_store"] = ella_learning_store
+    ella_stage6_store = EllaStage6CalibrationStore(hass)
+    await ella_stage6_store.async_load()
+    hass.data.setdefault(DOMAIN, {})["ella_stage6_store"] = ella_stage6_store
     cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
     await cadence_audit_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager

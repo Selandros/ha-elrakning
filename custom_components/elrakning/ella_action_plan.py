@@ -167,6 +167,20 @@ def _slot_provenance(slot: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ess_eligibility(state: dict[str, Any]) -> dict[str, Any]:
+    stage6 = state.get("stage6") if isinstance(state.get("stage6"), dict) else {}
+    action_eligibility = (stage6.get("ess") or {}).get("action_eligibility") if isinstance(stage6, dict) else None
+    if isinstance(action_eligibility, dict):
+        missing = sorted({field for item in action_eligibility.values() if isinstance(item, dict) for field in item.get("missing_fields") or []})
+        return {
+            "eligible": any(
+                item.get("eligible") is True
+                for action, item in action_eligibility.items()
+                if action != "hold_ess" and isinstance(item, dict)
+            ),
+            "missing_fields": missing,
+            "reason": None if not missing else "missing_verified_ess_policy_constraints",
+            "actions": action_eligibility,
+        }
     required = ["soc", "usable_capacity", "min_soc", "max_soc", "reserve_soc", "max_charge_power", "max_discharge_power", "grid_charge_permission", "efficiency"]
     policy = state.get("ess_policy")
     missing = [field for field in required if not isinstance(policy, dict) or policy.get(field) is None]

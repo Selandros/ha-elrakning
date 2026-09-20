@@ -39,6 +39,7 @@ from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
 from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
+from .ella_stage6 import build_stage6_state
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -1391,6 +1392,7 @@ async def websocket_ella_site_state(hass, connection, msg):
     forecast = await _async_load_forecast_state(hass, site_id)
     learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
     forecast_evaluation = learning_store.public_state(site_id) if learning_store else None
+    stage6_store = hass.data.get(DOMAIN, {}).get("ella_stage6_store")
     try:
         inventory = build_capability_inventory(
             identity, registry, site_id, load_forecast=forecast,
@@ -1408,6 +1410,8 @@ async def websocket_ella_site_state(hass, connection, msg):
         )
         solar_frames = [frame for frame in all_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
         economic_frames = [frame for frame in all_frames if frame.get("payload_schema") == "eon.grid_economic_active_snapshot.v1"]
+        prior_stage6 = stage6_store.public_state(site_id) if stage6_store else None
+        stage6 = build_stage6_state(site_id, actual_rows, solar_frames, decision_at, prior_stage6)
         configured_loads = registry.list_for_site(site_id)
         availability_by_id = {
             item.get("load_id"): item
@@ -1430,6 +1434,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             solar_forecast_frames=solar_frames,
             economic_frames=economic_frames,
             forecast_evaluation=forecast_evaluation,
+            stage6=stage6,
             timezone_source=timezone_source,
         )
     except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as err:

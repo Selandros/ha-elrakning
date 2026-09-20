@@ -179,6 +179,7 @@ def build_site_state(
     solar_forecast_frames: Iterable[dict[str, Any]] = (),
     economic_frames: Iterable[dict[str, Any]] = (),
     forecast_evaluation: dict[str, Any] | None = None,
+    stage6: dict[str, Any] | None = None,
     timezone_source: str = "site_location",
 ) -> dict[str, Any]:
     """Build a read-only state snapshot from already verified facts."""
@@ -284,6 +285,12 @@ def build_site_state(
         "capabilities": capability_snapshot or {},
         "forecast_evaluation": forecast_evaluation or {
             "available": False, "reason": "no_evaluation_history", "records": [],
+        },
+        "stage6": stage6 or {
+            "schema": "ella_stage6_state.v1", "site_id": site_id,
+            "solar": {"calibration": {"available": False, "reason": "stage6_not_loaded"}},
+            "ess": {"action_eligibility": {}},
+            "execution_eligible": False, "actuator_writes_enabled": False,
         },
         "source_facts": sorted(source_facts, key=lambda item: (item.get("logical_role") or "", item.get("frame_id") or "")),
         "economic_facts": sorted(economic_facts, key=lambda item: (item.get("logical_role") or "", item.get("frame_id") or "")),

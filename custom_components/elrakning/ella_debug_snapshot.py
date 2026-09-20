@@ -71,6 +71,7 @@ def build_snapshot(state: dict[str, Any], plan: dict[str, Any], block: dict[str,
         "forecast_evaluation": state.get("forecast_evaluation") or {
             "available": False, "reason": "no_evaluation_history", "records": [],
         },
+        "stage6": state.get("stage6") or {},
         "execution_mode": plan.get("execution_mode"),
         "execution_status": block.get("execution_status"),
         "execution_eligible": False,
