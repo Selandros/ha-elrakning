@@ -9,6 +9,7 @@ install_elrakning_package_stub()
 install_optional_dependency_stubs()
 
 from custom_components.elrakning.price_only_planner import build_price_only_plan
+from custom_components.elrakning.site_identity import SiteIdentityManager
 from custom_components.elrakning.websocket import websocket_ella_plan
 
 
@@ -65,9 +66,12 @@ class PriceOnlyPlannerTests(unittest.TestCase):
         class Identity:
             state = {"active_site_id": "fiskvik"}
 
-        class Coordinator:
-            binding = {"config_entry_id": "price-generation-fiskvik"}
+            def global_binding(self, service):
+                binding = {"config_entry_id": "price-entry", "area": "SE2", "currency": "SEK"}
+                binding["binding_fingerprint"] = SiteIdentityManager.binding_fingerprint(binding)
+                return binding
 
+        class Coordinator:
             async def async_get_price_data(self, target):
                 return SimpleNamespace(
                     periods=periods([0.2, 0.8], start=datetime.now(UTC) + timedelta(hours=1)),
@@ -94,6 +98,43 @@ class PriceOnlyPlannerTests(unittest.TestCase):
         asyncio.run(websocket_ella_plan(Hass(), connection, {"id": 1, "type": "elrakning/ella_plan"}))
         self.assertTrue(connection.result["available"])
         self.assertEqual(connection.result["site_id"], "fiskvik")
+
+    def test_websocket_price_plan_rejects_tampered_global_price_provenance(self):
+        class Identity:
+            state = {"active_site_id": "fiskvik"}
+
+            def global_binding(self, service):
+                return {
+                    "config_entry_id": "price-entry",
+                    "area": "SE2",
+                    "currency": "SEK",
+                    "binding_fingerprint": "0" * 64,
+                }
+
+        class Coordinator:
+            async def async_get_price_data(self, target):
+                return SimpleNamespace(periods=periods([0.2, 0.8], start=datetime.now(UTC) + timedelta(hours=1)), error=None)
+
+        class Entries:
+            def async_entries(self, domain):
+                return [SimpleNamespace(runtime_data=Coordinator())]
+
+        class Hass:
+            config_entries = Entries()
+            data = {"elrakning": {"site_identity_manager": Identity()}}
+
+        class Connection:
+            def __init__(self):
+                self.result = None
+
+            def send_result(self, message_id, result):
+                self.result = result
+
+        connection = Connection()
+        import asyncio
+        asyncio.run(websocket_ella_plan(Hass(), connection, {"id": 1, "type": "elrakning/ella_plan"}))
+        self.assertFalse(connection.result["available"])
+        self.assertEqual(connection.result["reason"], "price_provenance_invalid")
 
 
 if __name__ == "__main__":

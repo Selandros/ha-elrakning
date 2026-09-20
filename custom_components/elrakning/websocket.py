@@ -36,6 +36,7 @@ from .power import PowerManager
 from .price_only_planner import build_price_only_plan
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
+from .site_identity import SiteIdentityManager
 
 COMMAND = f"{DOMAIN}/price_data"
 GREENELY_TEST_COMMAND = f"{DOMAIN}/greenely_test"
@@ -1281,12 +1282,18 @@ async def websocket_ella_plan(hass, connection, msg):
             connection.send_result(msg["id"], {"available": False, "reason": "invalid_date", "plan_blocks": []})
             return
     data = await coordinator.async_get_price_data(target)
-    binding = getattr(coordinator, "binding", None) or {}
+    binding_getter = getattr(identity, "global_binding", None)
+    binding = binding_getter("nord_pool") if callable(binding_getter) else None
+    stored_fingerprint = binding.get("binding_fingerprint") if isinstance(binding, dict) else None
+    computed_fingerprint = SiteIdentityManager.binding_fingerprint(binding)
+    if not stored_fingerprint or stored_fingerprint != computed_fingerprint:
+        connection.send_result(msg["id"], {"available": False, "reason": "price_provenance_invalid", "plan_blocks": []})
+        return
     result = build_price_only_plan(
         site_id,
         data.periods if data and not data.error else (),
         dt_util.now(),
-        source_generation_id=str(binding.get("binding_fingerprint") or binding.get("config_entry_id") or ""),
+        source_generation_id=stored_fingerprint,
     )
     connection.send_result(msg["id"], result)
 
