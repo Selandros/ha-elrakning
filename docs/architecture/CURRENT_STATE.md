@@ -1184,3 +1184,43 @@ INFERRED (roadmap): Long-term data foundation:
   correction/reissue identity semantics remain open. They do not invalidate
   the verified installation proof or the two current Vikarbodarna economics
   frames.
+
+## 0.0.657 ELLA site-gating release — superseded
+
+- NOT ACCEPTED / SUPERSEDED: The 0.0.657 release (`efbf725`, hardened by
+  `5c376bf` and `5ec5340`) introduced the explicit, versioned, fingerprinted
+  planner-only ELLA capability and backend production gate, but runtime UI
+  observation found stale ELLA rendering after a bound-to-unbound SPA site
+  switch. Fiskvik could retain the prior ELLA presentation. No closure was
+  recorded for this release.
+
+## 0.0.658 ELLA site-switch state isolation
+
+- ROOT CAUSE VERIFIED: Site activation updated the frontend site identity but
+  did not immediately reconcile ELLA-specific state. The unbound render path
+  returned without clearing the ELLA rail, readiness/selection state or stale
+  load-forecast response context.
+- IMPLEMENTED: Site changes now advance a frontend site-context generation,
+  clear ELLA state on context changes, discard late power-history responses
+  from the previous site, and render visibility directly from the current
+  site's verified binding. No site name or provider is hardcoded. Backend
+  planner-only binding and load-forecast production gates are unchanged.
+- VERIFIED: Release commit `1bce7e236622be01f1d80f1c198a0fcc270d86ea`
+  passed `655 passed, 46 subtests, 0 failed`, all MJS tests, compileall,
+  JSON/YAML validation and diff-check. The exact 60-file AppleDouble-free
+  payload matched before one normal Core restart; rollback for 0.0.657 is
+  preserved outside the discovery path.
+- VERIFIED (runtime, 0.0.658): Core and HTTP remained healthy, manifest is
+  `0.0.658`, and no new Elräkning traceback or thread-safety warning appeared
+  in the relevant post-restart log scan.
+- VERIFIED (runtime binding): Vikarbodarna has one explicit verified ELLA
+  planner binding whose canonical fingerprint matches and whose
+  `actuator_write_enabled` is false. Fiskvik has no ELLA binding.
+- VERIFIED (same authenticated Safari session): Vikarbodarna showed ELLA
+  with two cards; after switching to Fiskvik, the ELLA section was hidden and
+  its card rail contained zero cards; switching back to Vikarbodarna restored
+  the ELLA section and its two cards. No service call, battery write or
+  automatic binding was used.
+- DESIGN LIMITATION: This release does not add a real day planner, ESS digital
+  twin or actuator. ELLA remains planner-capability gated and actuator-write
+  disabled.
