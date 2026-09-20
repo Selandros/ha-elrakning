@@ -3515,12 +3515,20 @@ class ElrakningPanel {
         .daily-energy-row {
           align-items: stretch;
           display: grid;
-          gap: var(--dashboard-card-gap);
+          gap: 0;
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .daily-energy-row:has(> :not([hidden]) ~ :not([hidden])) {
+          gap: var(--dashboard-card-gap);
         }
 
         .dashboard-card-stack {
           display: grid;
+          gap: 0;
+        }
+
+        .dashboard-card-stack:has(> :not([hidden]) ~ :not([hidden])) {
           gap: var(--dashboard-card-gap);
         }
 
@@ -3691,9 +3699,13 @@ class ElrakningPanel {
         .price-plan-rail {
           border-top: 0;
           display: grid;
-          gap: var(--dashboard-card-gap);
+          gap: 0;
           overflow-x: auto;
           scrollbar-width: thin;
+        }
+
+        .price-plan-rail:has(> :not([hidden]) ~ :not([hidden])) {
+          gap: var(--dashboard-card-gap);
         }
 
         .price-plan-rail:not([hidden]) {
@@ -4667,8 +4679,12 @@ class ElrakningPanel {
         .live-power-row {
           align-items: stretch;
           display: grid;
-          gap: var(--dashboard-card-gap);
+          gap: 0;
           grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+
+        .live-power-row:has(> :not([hidden]) ~ :not([hidden])) {
+          gap: var(--dashboard-card-gap);
         }
 
         .live-power-tile {
@@ -4871,8 +4887,12 @@ class ElrakningPanel {
         .grid {
           align-items: stretch;
           display: grid;
-          gap: var(--dashboard-card-gap);
+          gap: 0;
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+
+        .grid:has(> :not([hidden]) ~ :not([hidden])) {
+          gap: var(--dashboard-card-gap);
         }
 
         .price-section {
