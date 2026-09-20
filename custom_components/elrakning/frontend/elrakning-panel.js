@@ -2624,7 +2624,9 @@ class ElrakningPanel {
               </div>
             </div>
           </div>
-          <div class="price-chart" aria-live="polite"></div>
+          <div class="price-chart-frame">
+            <div class="price-chart" aria-live="polite"></div>
+          </div>
           <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle${this._spotBarsVisible ? " active" : ""}" data-chart-layer="spot" aria-pressed="${this._spotBarsVisible}">
@@ -3640,10 +3642,13 @@ class ElrakningPanel {
         }
 
         .price-plan-rail {
+          border-bottom: 1px solid var(--divider-color);
+          border-top: 1px solid var(--divider-color);
           display: grid;
           gap: 8px;
           overflow-x: auto;
-          padding: 1px 1px 5px;
+          margin-top: 10px;
+          padding: 8px 1px 6px;
           scrollbar-width: thin;
         }
 
@@ -5871,6 +5876,7 @@ class ElrakningPanel {
     this._bindMainInvoiceParser();
     this._bindCostCard();
     this._bindPeriodPicker();
+    this._bindPricePlanSelectionEvents();
     this._bindChartLegend();
     this._setupPriceHeaderLayoutObserver();
     this._setupPriceChartResizeObserver();
@@ -6107,6 +6113,7 @@ class ElrakningPanel {
     const applySelectedHourDate = async (date) => {
       const next = new Date(date);
       if (!Number.isFinite(next.getTime())) return;
+      this._clearPricePlanSelection();
       const previous = this._periodPickerState.confirmed;
       const changed = !previous || previous.getTime() !== next.getTime();
       this._periodPickerState.confirmed = next;
@@ -6125,6 +6132,7 @@ class ElrakningPanel {
       this._renderPeriodPicker();
     };
     root.querySelectorAll("[data-period-picker-mode]").forEach((button) => button.addEventListener("click", () => {
+      this._clearPricePlanSelection();
       this._periodPickerState.mode = button.dataset.periodPickerMode;
       if (this._soloChartLayer === "average" && this._periodPickerState.mode !== "hour") {
         this._clearSoloChartLayer({ render: false });
@@ -6134,6 +6142,7 @@ class ElrakningPanel {
       this.renderPriceChart();
     }));
     root.querySelectorAll("[data-period-picker-nav]").forEach((button) => button.addEventListener("click", async () => {
+      this._clearPricePlanSelection();
       if (this._periodPickerState.mode === "year") return;
       const date = new Date(this._periodPickerState.confirmed);
       const direction = button.dataset.periodPickerNav === "next" ? 1 : -1;
@@ -8106,6 +8115,29 @@ class ElrakningPanel {
     return right > left ? `<rect class="ella-selection-band" x="${left}" y="${plot.top}" width="${right - left}" height="${plot.height || 340 - plot.top - plot.bottom}" />` : "";
   }
 
+  _clearPricePlanSelection() {
+    if (!this._ellaSelection) return;
+    this._ellaSelection = null;
+    this._renderPricePlanCards();
+    this.renderPriceChart();
+    this._renderSocChart();
+  }
+
+  _bindPricePlanSelectionEvents() {
+    const clearUnlessCard = (event) => {
+      if (event.type === "pointerdown" && event.target.closest?.(".price-plan-card")) return;
+      this._clearPricePlanSelection();
+    };
+    this.host.addEventListener("pointerdown", clearUnlessCard);
+    this.host.addEventListener("click", (event) => {
+      if (event.target.closest?.(".price-plan-card")) return;
+      this._clearPricePlanSelection();
+    });
+    this.host.addEventListener("wheel", clearUnlessCard, { passive: true });
+    this.host.addEventListener("touchmove", clearUnlessCard, { passive: true });
+    this.host.addEventListener("scroll", clearUnlessCard, true);
+  }
+
   _renderPricePlanCards() {
     const rail = this.host.querySelector("[data-price-plan-rail]");
     if (!rail) return;
@@ -8145,8 +8177,8 @@ class ElrakningPanel {
       status.className = "price-plan-status";
       status.textContent = "Ej verkställd";
       button.append(status);
+      button.addEventListener("pointerdown", (event) => event.stopPropagation());
       button.addEventListener("click", () => {
-        const id = button.dataset.planBlockId;
         this._ellaSelection = togglePricePlanSelection(this._ellaSelection, block, plan.plan_version || null);
         this._renderPricePlanCards();
         this.renderPriceChart();

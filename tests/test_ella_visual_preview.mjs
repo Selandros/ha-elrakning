@@ -7,12 +7,19 @@ const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), pan
 
 assert.match(panel, /type: "elrakning\/ella_plan"/);
 assert.match(panel, /data-price-plan-rail/);
+assert.match(panel, /price-chart-frame[\s\S]*price-plan-rail/);
 assert.match(panel, /price-plan-card/);
 assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);
 assert.match(panel, /togglePricePlanSelection\(this\._ellaSelection, block/);
 assert.match(panel, /_pricePlanRequestToken/);
 assert.match(panel, /siteContextGeneration !== this\._siteContextGeneration/);
+assert.match(panel, /_clearPricePlanSelection\(\)/);
+assert.match(panel, /addEventListener\("pointerdown", clearUnlessCard\)/);
+assert.match(panel, /addEventListener\("wheel", clearUnlessCard, \{ passive: true \}\)/);
+assert.match(panel, /addEventListener\("touchmove", clearUnlessCard, \{ passive: true \}\)/);
+assert.match(panel, /addEventListener\("scroll", clearUnlessCard, true\)/);
+assert.match(panel, /button\.addEventListener\("pointerdown", \(event\) => event\.stopPropagation\(\)\)/);
 assert.doesNotMatch(panel, /ELLA · Energiplan/);
 assert.doesNotMatch(panel, /Lärläge · Shadow · styrning avstängd/);
 assert.doesNotMatch(panel, /data-ella-expand/);
