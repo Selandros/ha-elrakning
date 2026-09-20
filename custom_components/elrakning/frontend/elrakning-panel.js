@@ -5907,7 +5907,6 @@ class ElrakningPanel {
           color: var(--text-primary-color);
           cursor: default;
           font: inherit;
-          margin-top: 20px;
           padding: 10px 16px;
         }
 
