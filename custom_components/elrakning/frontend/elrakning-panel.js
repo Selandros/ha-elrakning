@@ -3514,7 +3514,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-row {
-          align-items: start;
+          align-items: stretch;
           display: grid;
           gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3522,12 +3522,17 @@ class ElrakningPanel {
 
         .dashboard-card-stack {
           display: grid;
-          gap: var(--dashboard-card-gap);
+          column-gap: 0;
+          row-gap: var(--dashboard-card-gap);
+        }
+
+        .dashboard-card-stack > * {
+          margin-block: 0;
         }
 
         @container (max-width: 760px) {
-          .daily-energy-row {
-            align-items: start;
+        .daily-energy-row {
+          align-items: start;
             grid-template-columns: 1fr;
           }
         }
@@ -4868,7 +4873,7 @@ class ElrakningPanel {
         }
 
         .grid {
-          align-items: start;
+          align-items: stretch;
           display: grid;
           gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
