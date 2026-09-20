@@ -80,6 +80,7 @@ The following is historical context, not the new target architecture:
 | 0.0.696 | Stage 1 capability registry and individual-load foundation accepted after authenticated two-site runtime verification. | Site-scoped capability inventory, explicit binding verification, no-write invariants and deterministic resource preservation. |
 | 0.0.697 | Stage 2 first deployment; not accepted because Fiskvik had no resolved timezone, `net_load` was hardcoded unavailable, and `source_facts` was not horizon-bounded. | Unified state contract, canonical precedence, DST slot construction and no-write boundary were retained. |
 | 0.0.698 | Stage 2 unified 15-minute site state and forecasts accepted after authenticated two-site Safari/WS verification. | Site timezone fallback provenance, complete multi-resource solar/net-load semantics, bounded source facts, truthful optional-layer absence and deterministic site isolation. |
+| 0.0.702 | Stage 3 action planner accepted after authenticated two-site Safari/WS and UI verification. | Immutable `ella_action_plan.v1`, shadow/recommend-only semantics, clean action-card contract, action-boundary graph selection and fail-closed resource qualification. |
 
 The historical “price-only first, solar next, ESS later” roadmap is superseded
 as a product ordering. Solar and ESS remain capabilities in the same planner,
@@ -372,7 +373,7 @@ Tests: full/partial/stale forecasts, actual gaps, wrong-site data, DST,
 published versus unpublished tomorrow price, no observation/no learning,
 site isolation and deterministic replan triggers.
 
-### Stage 3 — Action planner in shadow/recommend-only mode
+### Stage 3 — Action planner in shadow/recommend-only mode (accepted 0.0.702)
 
 Entry: Stage 2 has a qualifying site state.
 
@@ -383,18 +384,46 @@ Clean cards expose primary action and short reason.
 
 Exit: plans are immutable, site-scoped, reproducible and constraint checked;
 absent actuators yield recommend-only/`NOT_APPLICABLE`; no write service
-exists; Fiskvik remains useful without solar/ESS.
+exists; Fiskvik remains useful without solar/ESS. Authenticated runtime
+acceptance for `0.0.702` confirmed eight blocks on both sites, shadow mode,
+`execution_eligible=false` and `actuator_writes_enabled=false`. Elapsed blocks
+remain truthful `normal_operation`/`NOT_APPLICABLE`, and the final
+Vikarbodarna future block was `18:30–00:00` local with no qualified flexible
+resource requiring action.
+
+The live registries for both sites are currently empty. This means the live
+acceptance proves fail-closed `normal_operation` without fabricated load
+actions; it does not prove a positive live flexible-load recommendation. The
+positive `run_flexible_loads`, `defer_flexible_loads` and preserved
+`source_control_mode` paths are covered by accepted Stage 3 fixtures and await
+a real configured load for live evidence. That is a current site-configuration
+limitation, not a planner defect.
+
+ESS remains explicitly ineligible and no battery action is fabricated. The
+accepted runtime reports missing `soc`, `usable_capacity`, `min_soc`,
+`max_soc`, `reserve_soc`, `max_charge_power`, `max_discharge_power`,
+`grid_charge_permission` and `efficiency` policy fields. No-write semantics
+remain invariant.
+
+The clean card contract is accepted: time/price context, primary action and
+short reason only. Runtime card intervals matched action blocks and exact
+graph selection, including the `18:30–00:00` block. Final-card centering may
+be edge-clamped at maximum scroll; that is expected geometry, not a planner
+failure.
 
 Tests: missing capability, stale/partial data, absent actuator,
 recommend-only, wrong-site data, deterministic replan, action-boundary
 segmentation, no fabricated values and exact card/graph interval selection.
 
-### Stage 4 — Debug snapshot and explainability
+### Stage 4 — Debug snapshot and explainability (next active scope)
 
 Entry: Stage 3 plan blocks and stable revisions.
 
-Deliver: Debug `Visa data` and `Kopiera data` for a plan block using a stored
-decision-time snapshot.
+Deliver: using existing Debug mode only, clicking an ELLA card exposes `Visa
+data` and `Kopiera data` for a plan block using a stored decision-time
+snapshot. The payload must contain the exact site, block and revision,
+provenance, actions, constraints, capability availability and
+missing/ineligible reasons, and must be suitable for copying into ChatGPT.
 
 Exit: copied payload reproduces decision inputs and provenance; opening the
 dialog does not substitute current sensor state; secrets and unnecessary PII
@@ -478,9 +507,10 @@ The current seven-card result is explained by the current third-based price
 classification and contiguous grouping. It is not itself a defect. Future
 card count must emerge from material action changes and constraints.
 
-Stage 0 architecture/contracts, Stage 1 capability/load foundation and Stage 2
-unified site state are implemented and accepted. The next active implementation
-scope is **Stage 3 — Action planner in shadow/recommend-only mode**. Solar-first
-and ESS-first implementation remain superseded as ordering decisions; they are
-optional capabilities within the staged architecture and must not bypass the
-accepted state foundation.
+Stage 0 architecture/contracts, Stage 1 capability/load foundation, Stage 2
+unified site state and Stage 3 shadow/recommend-only action planning are
+implemented and accepted. The next active implementation scope is **Stage 4 —
+Debug snapshot and explainability**. Solar-first and ESS-first implementation
+remain superseded as ordering decisions; they are optional capabilities within
+the staged architecture and must not bypass the accepted state and action
+foundations. Stage 5 learning/evaluation remains target architecture only.

@@ -1452,5 +1452,51 @@ INFERRED (roadmap): Long-term data foundation:
   verified requested date), truthful unresolved economic-frame handling and
   no actuator/device writes.
 - Stage 2 is closed and accepted. The next active implementation scope is
-  **Stage 3 — Action planner in shadow/recommend-only mode**. Stage 3+ remain
-  target architecture only until separately implemented and runtime accepted.
+  **Stage 3 — Action planner in shadow/recommend-only mode**. Stage 3 is now
+  closed and accepted below.
+
+## 0.0.702 Stage 3 action planner in shadow/recommend-only mode
+
+- `0.0.702`, implementation commit
+  `3e9afae9a49f376b6ebb635cf48c53f4a95655fa`, is the accepted Stage 3
+  runtime baseline after authenticated Safari/WS verification on Vikarbodarna
+  and Fiskvik. The action contract is `ella_action_plan.v1`, version
+  `action-shadow-v1`, and remains immutable, deterministic and site-scoped.
+- Both sites returned `available=true`, shadow execution semantics,
+  `execution_eligible=false` and `actuator_writes_enabled=false`. No actuator
+  or device writes are part of this stage.
+- Runtime returned eight action blocks on each site. Elapsed blocks are
+  `normal_operation` with `NOT_APPLICABLE` and the reason
+  `Observerat tidsfönster; ingen retroaktiv rekommendation.`. Vikarbodarna's
+  final future block was `18:30–00:00` local, `Dyr prisperiod`,
+  `normal_operation`, with no qualified flexible resource requiring action
+  and `NOT_APPLICABLE` execution status.
+- The current site configuration has an empty `ella_load_registry.v1` on both
+  Vikarbodarna and Fiskvik. Consequently, live runtime evidence correctly
+  demonstrates fail-closed `normal_operation`; it does not demonstrate a
+  positive live `run_flexible_loads` or `defer_flexible_loads` recommendation.
+  Positive run/defer and `source_control_mode` behavior is covered by the
+  accepted Stage 3 test fixtures and awaits a real configured load for live
+  site evidence. This is a site-configuration limitation, not a Stage 3
+  planner defect.
+- ESS actions remain absent by design. The runtime reports
+  `missing_verified_ess_policy_constraints` with missing
+  `soc`, `usable_capacity`, `min_soc`, `max_soc`, `reserve_soc`,
+  `max_charge_power`, `max_discharge_power`, `grid_charge_permission` and
+  `efficiency`. No battery action is fabricated.
+- Normal ELLA cards use the accepted three-level front contract: time and
+  price context, primary action and short reason. Technical provenance,
+  load values and execution/debug status remain off the card front. Runtime
+  card intervals matched the action blocks, including the `18:30–00:00`
+  split, and clicking it selected the exact UTC interval
+  `2026-09-20T16:30:00+00:00` to `2026-09-20T22:00:00+00:00` in the price and
+  SOC charts. Current-card centering remains edge-clamped at maximum scroll;
+  that is the expected geometry limitation for the final card, not a failure.
+- Stage 3 is closed and accepted. The next active implementation scope is
+  **Stage 4 — Debug snapshot and explainability**. Stage 4 must use existing
+  Debug mode only: clicking an ELLA card exposes `Visa data` and
+  `Kopiera data` backed by a stored decision-time snapshot, not mutable
+  current sensor state. The payload must include the exact site, block,
+  revision, provenance, actions, constraints, capability availability and
+  missing/ineligible reasons, and be suitable for copying into ChatGPT.
+  Stage 5 learning/evaluation is not part of that scope.
