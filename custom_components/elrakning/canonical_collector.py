@@ -74,7 +74,7 @@ class CanonicalCollector:
         self._reported_unsub = None
         self._quarter_unsub = None
         self._buffers: dict[tuple[str, str, str, datetime], dict[str, Any]] = defaultdict(
-            lambda: {"samples": [], "invalid": False}
+            lambda: {"samples": [], "invalid": False, "invalid_boundaries": []}
         )
         self._carry_samples: dict[tuple[str, str, str], tuple[datetime, float]] = {}
         self._recent_reported: dict[str, tuple[tuple[str, str, str], datetime]] = {}
@@ -602,8 +602,12 @@ class CanonicalCollector:
             buffer.setdefault("target", target)
             if value is None:
                 buffer["invalid"] = True
+                buffer.setdefault("invalid_boundaries", []).append(observed_at)
                 self._carry_samples.pop(carry_key, None)
                 continue
+            if "predecessor" not in buffer:
+                previous = self._carry_samples.get(carry_key)
+                buffer["predecessor"] = previous if previous and previous[0] < interval else None
             buffer["samples"].append((observed_at, value))
             for cached_key in tuple(self._carry_samples):
                 if cached_key[:2] == carry_key[:2] and cached_key[2] != carry_key[2]:
@@ -736,10 +740,16 @@ class CanonicalCollector:
                     self._buffers.pop(key, None)
                     continue
                 semantics = target["canonicalization"]
-                predecessor = self._carry_samples.get((site_id, role, generation_id))
+                if "predecessor" in buffer:
+                    predecessor = buffer.get("predecessor")
+                else:
+                    # A materialized silent buffer may use the last valid sample,
+                    # but an active buffer must use its frozen predecessor.
+                    predecessor = self._carry_samples.get((site_id, role, generation_id))
                 value, coverage, observed_at, aggregation_metadata = self._aggregate(
                     semantics["aggregation"], samples, interval,
                     self._effective_max_hold_seconds(semantics), predecessor,
+                    buffer.get("invalid_boundaries", []),
                 )
                 if value is None:
                     quality_status = "invalid" if buffer["invalid"] else "unknown"
@@ -788,8 +798,9 @@ class CanonicalCollector:
         interval: datetime,
         max_hold_seconds: float | None = None,
         predecessor: tuple[datetime, float] | None = None,
+        invalid_boundaries: list[datetime] | None = None,
     ):
-        if not samples:
+        if not samples and (aggregation != "time_weighted_mean" or predecessor is None):
             return None, 0.0, None, {}
         if aggregation == "last_valid":
             observed_at, value = samples[-1]
@@ -806,10 +817,17 @@ class CanonicalCollector:
             predecessor_used = True
         total = 0.0
         covered = 0.0
+        invalid_boundaries = sorted(invalid_boundaries or [])
         for index, (left_time, left_value) in enumerate(effective_samples):
             right_time = effective_samples[index + 1][0] if index + 1 < len(effective_samples) else end
             segment_start = max(left_time, start)
             segment_end = min(right_time, end, left_time + timedelta(seconds=hold_seconds))
+            invalid_boundary = next(
+                (boundary for boundary in invalid_boundaries if boundary > segment_start),
+                None,
+            )
+            if invalid_boundary is not None:
+                segment_end = min(segment_end, invalid_boundary)
             if segment_end > segment_start:
                 total += left_value * (segment_end - segment_start).total_seconds()
                 covered += (segment_end - segment_start).total_seconds()
@@ -820,6 +838,7 @@ class CanonicalCollector:
         return total / covered, covered / 900, observed_at, {
             "boundary_carry_used": predecessor_used,
             "hold_seconds": hold_seconds,
+            "invalid_boundary_count": len(invalid_boundaries),
         }
 
     def _build_observation(self, target, interval, value, coverage, observed_at, captured_at, quality_status, gap_status, aggregation_metadata=None):

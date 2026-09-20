@@ -658,6 +658,85 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coverage, 1.0)
         self.assertTrue(metadata["boundary_carry_used"])
 
+    async def test_predecessor_is_frozen_before_later_current_events_advance_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            collector = CanonicalCollector(_Hass(), _Identity([target]), Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 21, 30, tzinfo=UTC)
+            for when in (
+                start - timedelta(seconds=2),
+                start + timedelta(seconds=299),
+                start + timedelta(seconds=599),
+                start + timedelta(seconds=899),
+            ):
+                await collector._async_state_changed(types.SimpleNamespace(
+                    data={"entity_id": "sensor.load", "new_state": _State("100", "W", when)},
+                    time_fired=when,
+                ))
+            buffer = collector._buffers[("site-a", "house.consumption", "gen-a", start)]
+            self.assertEqual(buffer["predecessor"][0], start - timedelta(seconds=2))
+            await collector.async_flush(start, start + timedelta(seconds=905))
+            row = collector.storage._connection().execute(
+                "SELECT coverage_ratio, quality_status FROM energy_observations WHERE interval_start_us = ?",
+                (int(start.timestamp() * 1_000_000),),
+            ).fetchone()
+            self.assertEqual(row, (1.0, "good"))
+            collector.storage.close()
+
+    async def test_next_quarter_event_before_previous_flush_cannot_contaminate_previous_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            collector = CanonicalCollector(_Hass(), _Identity([target]), Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 21, 30, tzinfo=UTC)
+            for when in (
+                start - timedelta(seconds=2),
+                start + timedelta(seconds=299),
+                start + timedelta(seconds=599),
+                start + timedelta(seconds=899),
+                start + timedelta(seconds=902),
+            ):
+                await collector._async_state_changed(types.SimpleNamespace(
+                    data={"entity_id": "sensor.load", "new_state": _State("100", "W", when)},
+                    time_fired=when,
+                ))
+            await collector.async_flush(start, start + timedelta(seconds=905))
+            row = collector.storage._connection().execute(
+                "SELECT value, coverage_ratio, quality_status FROM energy_observations WHERE interval_start_us = ?",
+                (int(start.timestamp() * 1_000_000),),
+            ).fetchone()
+            self.assertEqual(row, (100.0, 1.0, "good"))
+            collector.storage.close()
+
+    def test_hold_boundary_and_invalid_boundary_do_not_create_coverage(self):
+        start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        value, coverage, _observed_at, _metadata = CanonicalCollector._aggregate(
+            "time_weighted_mean", [(start + timedelta(seconds=300), 100.0)], start, 360,
+            (start - timedelta(seconds=360), 100.0),
+        )
+        self.assertEqual(value, 100.0)
+        self.assertEqual(coverage, 360 / 900)
+        _value, invalid_coverage, _observed_at, metadata = CanonicalCollector._aggregate(
+            "time_weighted_mean",
+            [(start + timedelta(seconds=100), 100.0), (start + timedelta(seconds=800), 200.0)],
+            start, 360, (start - timedelta(seconds=5), 100.0),
+            [start + timedelta(seconds=500)],
+        )
+        self.assertEqual(invalid_coverage, 560 / 900)
+        self.assertEqual(metadata["invalid_boundary_count"], 1)
+
+    def test_silent_slot_uses_bounded_carry_only(self):
+        start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        value, coverage, _observed_at, metadata = CanonicalCollector._aggregate(
+            "time_weighted_mean", [], start, 360, (start - timedelta(seconds=5), 100.0)
+        )
+        self.assertEqual(value, 100.0)
+        self.assertEqual(coverage, 355 / 900)
+        self.assertTrue(metadata["boundary_carry_used"])
+
     async def test_source_replacement_mid_quarter_keeps_both_generations(self):
         with tempfile.TemporaryDirectory() as directory:
             old = _target("site-a", "solar.production", "sensor.solar_old", "gen-old")
