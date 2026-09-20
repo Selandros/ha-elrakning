@@ -21,7 +21,8 @@ assert.match(panel, /\.dashboard-card-stack\s*\{[\s\S]*?display: grid;[\s\S]*?co
 assert.match(panel, /\.dashboard-card-stack\s*> \*\s*\{[\s\S]*?margin-block: 0;/);
 const priceSectionRule = panel.match(/\.price-section\s*\{([^}]*)\}/)?.[1] || "";
 const pricePlanRailRule = panel.match(/\.price-plan-rail\s*\{([^}]*)\}/)?.[1] || "";
-assert.match(pricePlanRailRule, /padding: 0 1px 6px;/);
+assert.doesNotMatch(pricePlanRailRule, /gap:/);
+assert.doesNotMatch(pricePlanRailRule, /padding:/);
 assert.doesNotMatch(priceSectionRule, /margin-bottom:/);
 assert.doesNotMatch(pricePlanRailRule, /margin(?:-top|-right|-bottom|-left)?:/);
 assert.doesNotMatch(panel, /\.price-plan-rail\s*\{[\s\S]*?border-bottom:/);

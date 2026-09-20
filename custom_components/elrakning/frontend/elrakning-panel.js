@@ -3694,9 +3694,7 @@ class ElrakningPanel {
         .price-plan-rail {
           border-top: 0;
           display: grid;
-          gap: 8px;
           overflow-x: auto;
-          padding: 0 1px 6px;
           scrollbar-width: thin;
         }
 
