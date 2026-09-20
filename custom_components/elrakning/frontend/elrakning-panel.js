@@ -3689,7 +3689,7 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           overflow-x: auto;
-          margin: 20px 0 0;
+          margin: 0;
           padding: 0 1px 6px;
           scrollbar-width: thin;
         }

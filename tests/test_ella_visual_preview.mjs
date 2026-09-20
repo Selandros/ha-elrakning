@@ -16,7 +16,7 @@ assert.match(priceSectionMarkup, /price-chart-frame[\s\S]*price-controls/);
 assert.match(panel, /<\/section>\s*\n\s*<div class="price-plan-rail" data-price-plan-rail/);
 assert.doesNotMatch(panel.slice(pricePlanRail), /<div class="price-controls">/);
 assert.match(panel, /\.price-section\s*\{[\s\S]*?margin-bottom: 0;/);
-assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 20px 0 0;[\s\S]*?padding: 0 1px 6px;/);
+assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 0;[\s\S]*?padding: 0 1px 6px;/);
 assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
 assert.match(panel, /price-plan-load-missing/);
 assert.match(panel, /Faktisk förbrukning/);
