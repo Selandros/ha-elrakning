@@ -93,6 +93,7 @@ def build_historical_model_points(
             points.append({
                 "valid_at": cursor,
                 "value": sum(values) / len(values),
+                "unit": "W",
                 "frame_id": None,
                 "quality": {"status": "model", "sample_support": len(values), "support_method": support},
                 "source_generation_id": source_generations[0] if len(source_generations) == 1 else None,

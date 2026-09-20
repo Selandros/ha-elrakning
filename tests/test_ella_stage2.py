@@ -86,6 +86,36 @@ def test_state_load_precedence_and_no_zero_fill():
     assert state["actuator_writes_enabled"] is False
 
 
+def test_model_load_is_watts_and_net_load_uses_model_provenance():
+    site = "site-a"
+    decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    slots = local_day_slots(date(2026, 9, 20), "Europe/Stockholm")
+    first = slots[0][0]
+    model = [{"valid_at": first, "value": 522.017702530291, "source": "model", "quality": {"status": "model"}}]
+    solar = [_row(site, "solar.production", first, 354.71, "solar-1")]
+    state = build_site_state(site, "Europe/Stockholm", date(2026, 9, 20), decision, model_points=model, actual_rows=solar)
+    load = state["slots"][0]["load"]
+    net = state["slots"][0]["net_load"]
+    assert load["unit"] == "W"
+    assert net["availability"] == "available"
+    assert net["value_w"] == 522.017702530291 - 354.71
+    assert net["load_source"] == "model"
+
+
+def test_model_load_can_produce_negative_surplus_net_load():
+    site = "site-a"
+    decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    slots = local_day_slots(date(2026, 9, 20), "Europe/Stockholm")
+    first = slots[0][0]
+    model = [{"valid_at": first, "value": 399.4647795151824, "source": "model", "quality": {"status": "model"}}]
+    solar = [_row(site, "solar.production", first, 2180.16, "solar-1")]
+    state = build_site_state(site, "Europe/Stockholm", date(2026, 9, 20), decision, model_points=model, actual_rows=solar)
+    net = state["slots"][0]["net_load"]
+    assert net["availability"] == "available"
+    assert net["value_w"] == 399.4647795151824 - 2180.16
+    assert net["sign_convention"] == "positive_import_need_negative_surplus"
+
+
 def test_future_forecast_known_after_decision_is_rejected_and_wrong_site_isolated():
     site = "site-a"
     decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)

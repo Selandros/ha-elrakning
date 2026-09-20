@@ -63,7 +63,9 @@ def build_snapshot(state: dict[str, Any], plan: dict[str, Any], block: dict[str,
             "capability_references": plan.get("capability_references") or {},
             "ess_eligibility": (plan.get("eligibility") or {}).get("ess", {}),
         },
-        "capability_snapshot": state.get("capability_snapshot") or {},
+        # ``capabilities`` is the canonical Stage 2 state field.  Keep the
+        # public Stage 4 name while freezing that decision-time object.
+        "capability_snapshot": state.get("capabilities") or state.get("capability_snapshot") or {},
         "source_facts": state.get("source_facts") or [],
         "economic_facts": state.get("economic_facts") or [],
         "execution_mode": plan.get("execution_mode"),

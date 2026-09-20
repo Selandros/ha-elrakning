@@ -25,7 +25,7 @@ def _state(site_id="site-a"):
         "known_at": "2026-09-20T00:00:00+00:00",
         "timezone": "Europe/Stockholm",
         "horizon": {"date": "2026-09-20"},
-        "capability_snapshot": {"site_id": site_id, "solar": {"availability": "unavailable", "reason": "canonical_role_missing"}},
+        "capabilities": {"site_id": site_id, "solar": {"availability": "unavailable", "reason": "canonical_role_missing"}},
         "slots": [{
             "start": "2026-09-20T01:00:00+00:00",
             "end": "2026-09-20T01:15:00+00:00",
@@ -53,6 +53,20 @@ async def test_snapshot_is_decision_time_immutable_and_idempotent():
     second = store.get("site-a", plan["plan_id"], plan["revision"], block["plan_block_id"])
     assert second == first
     assert second["slots"][0]["load"]["availability"] == "unavailable"
+
+
+@run_async
+async def test_capability_inventory_is_frozen_in_public_snapshot_field():
+    state = _state()
+    state["capabilities"] = {"site_id": "site-a", "price": {"availability": "available"}}
+    plan = build_action_plan(state)
+    store = EllaDebugSnapshotStore(object())
+    await store.async_put_plan(state, plan)
+    block = plan["plan_blocks"][0]
+    snapshot = store.get("site-a", plan["plan_id"], plan["revision"], block["plan_block_id"])
+    assert snapshot["capability_snapshot"] == state["capabilities"]
+    state["capabilities"]["price"]["availability"] = "unavailable"
+    assert snapshot["capability_snapshot"]["price"]["availability"] == "available"
 
 
 @run_async
@@ -88,7 +102,7 @@ async def test_snapshot_retention_is_bounded_and_deterministic():
 
 def test_snapshot_redacts_sensitive_keys_and_preserves_absence():
     state = _state()
-    state["capability_snapshot"]["api_token"] = "secret-value"
+    state["capabilities"]["api_token"] = "secret-value"
     plan = build_action_plan(state)
     snapshot = build_snapshot(state, plan, plan["plan_blocks"][0])
     encoded = str(snapshot)

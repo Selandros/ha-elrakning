@@ -193,7 +193,9 @@ def build_site_state(
         if load is None:
             load = {"availability": "unavailable", "reason": "no_verified_actual_forecast_or_model"}
         elif load.get("source") == "model":
-            load = {**load, "availability": "available"}
+            # Historical profile values are watts by contract; normalize the
+            # unit here as the state boundary before net-load arithmetic.
+            load = {**load, "availability": "available", "unit": load.get("unit") or "W"}
         else:
             load = {**load, "availability": "available"}
         solar_resources = _canonical_resources(rows, "solar.production", site_id, start, end)
