@@ -2415,7 +2415,20 @@ export function reconcileEllaSiteState(previousState, nextState, currentState = 
     changed: true,
     bound,
     loadForecast: { available: false, reason: bound ? "site_changed" : "ella_unbound", frames: [] },
+    pricePlan: { available: false, reason: "site_changed", plan_blocks: [] },
     ellaSelection: null,
+  };
+}
+
+export function togglePricePlanSelection(currentSelection, block, revision = null) {
+  const id = block?.plan_block_id;
+  if (!id) return null;
+  if (currentSelection?.id === id) return null;
+  return {
+    id,
+    start: typeof block.start === "string" ? block.start : null,
+    end: typeof block.end === "string" ? block.end : null,
+    revision,
   };
 }
 
@@ -2462,8 +2475,10 @@ class ElrakningPanel {
     this._powerStateLifecycleGeneration = 0;
     this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
+    this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._ellaSelection = null;
     this._powerHistoryRequestToken = 0;
+    this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._solarEvidenceEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
@@ -2610,6 +2625,7 @@ class ElrakningPanel {
             </div>
           </div>
           <div class="price-chart" aria-live="polite"></div>
+          <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle${this._spotBarsVisible ? " active" : ""}" data-chart-layer="spot" aria-pressed="${this._spotBarsVisible}">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris<span class="chart-legend-solo-badge">SOLO</span>
@@ -2636,7 +2652,6 @@ class ElrakningPanel {
               <span class="chart-legend-swatch" aria-hidden="true"></span>Urladdning<span class="chart-legend-solo-badge">SOLO</span>
             </button>
           </div>
-          <p class="price-analysis" data-price-analysis aria-live="polite">Dagens prisanalys laddas …</p>
           <button type="button" class="card-source-action price-source-action" data-card-source="price" hidden>Visa data</button>
           <div class="period-picker" data-period-picker>
             <div class="period-picker-control">
@@ -2653,16 +2668,6 @@ class ElrakningPanel {
             <div class="period-picker-popover" data-period-picker-popover hidden></div>
             <dialog class="period-picker-dialog" data-period-picker-dialog aria-label="Välj period"></dialog>
           </div>
-        </section>
-
-        <section class="ella-preview-section" data-ella-preview hidden aria-labelledby="ella-preview-title">
-          <div class="section-heading ella-preview-heading">
-            <div><h2 id="ella-preview-title">ELLA · Energiplan</h2><p class="status">Lärläge · Shadow · styrning avstängd</p></div>
-            <button type="button" class="card-source-action" data-ella-expand>Visa plan</button>
-          </div>
-          <div class="ella-readiness" data-ella-readiness></div>
-          <div class="ella-card-rail" data-ella-card-rail role="list" aria-label="ELLA-prognos och beredskap"></div>
-          <p class="ella-unavailable" data-ella-unavailable hidden></p>
         </section>
 
         <div class="daily-energy-row">
@@ -2810,7 +2815,6 @@ class ElrakningPanel {
           <button type="button" data-site-activate disabled>Gör till aktiv installation</button>
           <p class="site-settings-result" data-site-settings-result aria-live="polite"></p>
           <label class="site-settings-config-toggle"><input type="checkbox" data-site-config-cards-toggle> Visa konfigurationskort på tavlan</label>
-          <label class="site-settings-config-toggle"><input type="checkbox" data-site-ella-planner-toggle> Tillåt ELLA-planering för denna installation (ingen batteristyrning)</label>
           <button type="button" data-site-settings-close>Stäng</button>
         </div>
       </div>
@@ -3635,49 +3639,19 @@ class ElrakningPanel {
           min-width: 0;
         }
 
-        .ella-preview-section {
+        .price-plan-rail {
           display: grid;
-          gap: 10px;
-          margin-block: 10px;
-        }
-
-        .ella-preview-heading {
-          align-items: center;
-          display: flex;
-          justify-content: space-between;
-        }
-
-        .ella-preview-heading h2 {
-          margin: 0;
-        }
-
-        .ella-preview-heading .status,
-        .ella-unavailable,
-        .ella-readiness {
-          color: var(--secondary-text-color);
-          font-size: var(--price-card-text-size);
-          margin: 2px 0 0;
-        }
-
-        .ella-readiness {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px 12px;
-        }
-
-        .ella-readiness span {
-          white-space: nowrap;
-        }
-
-        .ella-card-rail {
-          display: flex;
           gap: 8px;
           overflow-x: auto;
           padding: 1px 1px 5px;
           scrollbar-width: thin;
         }
 
-        .ella-preview-card {
+        .price-plan-rail:not([hidden]) {
+          display: flex;
+        }
+
+        .price-plan-card {
           background: var(--ha-card-background, var(--card-background-color));
           border: 1px solid var(--divider-color);
           border-radius: var(--ha-card-border-radius, 12px);
@@ -3686,22 +3660,33 @@ class ElrakningPanel {
           text-align: left;
         }
 
-        .ella-preview-card.selected {
+        .price-plan-card.selected {
           border-color: var(--primary-color);
           box-shadow: 0 0 0 1px var(--primary-color);
         }
 
-        .ella-preview-card strong,
-        .ella-preview-card small {
+        .price-plan-card strong,
+        .price-plan-card small {
           display: block;
         }
 
-        .ella-preview-card small {
+        .price-plan-card small {
           color: var(--secondary-text-color);
           margin-top: 4px;
         }
 
-        .ella-card-status {
+        .price-plan-card .price-plan-value {
+          color: var(--secondary-text-color);
+          font-size: .85em;
+          margin-top: 8px;
+        }
+
+        .price-plan-card:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+
+        .price-plan-card .price-plan-status {
           color: var(--secondary-text-color);
           font-size: .85em;
           margin-top: 8px;
@@ -6586,17 +6571,20 @@ class ElrakningPanel {
   _applySiteIdentityState(state) {
     const reconciled = reconcileEllaSiteState(this._siteState, state, {
       loadForecast: this._loadForecast,
+      pricePlan: this._pricePlan,
       ellaSelection: this._ellaSelection,
     });
     if (reconciled.changed) {
       this._siteContextGeneration += 1;
       this._powerHistoryRequestToken += 1;
+      this._pricePlanRequestToken += 1;
       this._loadForecast = reconciled.loadForecast;
+      this._pricePlan = reconciled.pricePlan;
       this._ellaSelection = reconciled.ellaSelection;
     }
     this._siteState = state;
     this._renderSiteSettings();
-    this._renderEllaPreview();
+    this._renderPricePlanCards();
   }
 
   _renderSiteSettings() {
@@ -6609,12 +6597,10 @@ class ElrakningPanel {
     const select = this.host.querySelector("[data-site-select]");
     const activate = this.host.querySelector("[data-site-activate]");
     const configToggle = this.host.querySelector("[data-site-config-cards-toggle]");
-    const ellaToggle = this.host.querySelector("[data-site-ella-planner-toggle]");
     if (name) name.textContent = current.name || "Namnlös installation";
     if (id) id.textContent = currentId || "–";
     if (created) created.textContent = current.created_at ? `Skapad ${current.created_at}` : "";
     if (configToggle) configToggle.checked = this._configurationCardsVisible;
-    if (ellaToggle) ellaToggle.checked = state.ella_binding_verified === true;
     if (!select) return;
     const sites = Array.isArray(state.available_sites) ? state.available_sites : [];
     select.replaceChildren(...sites.map((site) => {
@@ -6628,7 +6614,7 @@ class ElrakningPanel {
   }
 
   _setSiteSettingsBusy(busy) {
-    for (const control of this.host.querySelectorAll("[data-site-activate], [data-site-rename], [data-site-create], [data-site-select], [data-site-ella-planner-toggle]")) control.disabled = busy;
+    for (const control of this.host.querySelectorAll("[data-site-activate], [data-site-rename], [data-site-create], [data-site-select]")) control.disabled = busy;
   }
 
   async _openSiteSettings() {
@@ -6646,8 +6632,7 @@ class ElrakningPanel {
     const rename = this.host.querySelector("[data-site-rename]");
     const create = this.host.querySelector("[data-site-create]");
     const configToggle = this.host.querySelector("[data-site-config-cards-toggle]");
-    const ellaToggle = this.host.querySelector("[data-site-ella-planner-toggle]");
-    if (!dialog || !close || !select || !activate || !rename || !create || !configToggle || !ellaToggle) return;
+    if (!dialog || !close || !select || !activate || !rename || !create || !configToggle) return;
     const result = this.host.querySelector("[data-site-settings-result]");
     const currentId = () => this._siteState?.current_site?.site_id || this._siteState?.site_id || null;
     close.addEventListener("click", () => { dialog.hidden = true; });
@@ -6656,21 +6641,6 @@ class ElrakningPanel {
     configToggle.addEventListener("change", () => {
       this._applyConfigurationCardsVisibility(configToggle.checked);
       this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
-    });
-    ellaToggle.addEventListener("change", async () => {
-      const id = currentId();
-      if (!id) return;
-      this._setSiteSettingsBusy(true);
-      try {
-        const response = await this.hass.callWS({ type: "elrakning/ella_binding_set", site_id: id, enabled: ellaToggle.checked });
-        if (!response?.success) throw new Error(response?.error || "ella_binding_failed");
-        this._applySiteIdentityState(response);
-        this._renderSiteSettings();
-        if (result) result.textContent = ellaToggle.checked ? "ELLA-planering aktiverad. Ingen batteristyrning." : "ELLA-planering avaktiverad.";
-      } catch (error) {
-        ellaToggle.checked = !ellaToggle.checked;
-        if (result) result.textContent = `ELLA-planering kunde inte ändras: ${error.message}`;
-      } finally { this._setSiteSettingsBusy(false); }
     });
     rename.addEventListener("click", async () => {
       const id = currentId();
@@ -8117,7 +8087,7 @@ class ElrakningPanel {
       this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
       this._renderSolarEvidence();
-      this._renderEllaPreview();
+      this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
@@ -8136,51 +8106,53 @@ class ElrakningPanel {
     return right > left ? `<rect class="ella-selection-band" x="${left}" y="${plot.top}" width="${right - left}" height="${plot.height || 340 - plot.top - plot.bottom}" />` : "";
   }
 
-  _renderEllaPreview() {
-    const section = this.host.querySelector("[data-ella-preview]");
-    const rail = this.host.querySelector("[data-ella-card-rail]");
-    const readiness = this.host.querySelector("[data-ella-readiness]");
-    const unavailable = this.host.querySelector("[data-ella-unavailable]");
-    if (!section || !rail || !readiness || !unavailable) return;
-    const ellaBound = this._siteState?.ella_binding_verified === true;
-    section.hidden = !ellaBound;
-    if (!ellaBound) {
-      this._ellaSelection = null;
+  _renderPricePlanCards() {
+    const rail = this.host.querySelector("[data-price-plan-rail]");
+    if (!rail) return;
+    const plan = this._pricePlan || {};
+    const blocks = plan.available === true && Array.isArray(plan.plan_blocks) ? plan.plan_blocks : [];
+    if (!blocks.length) {
+      if (this._ellaSelection) this._ellaSelection = null;
+      rail.hidden = true;
       rail.replaceChildren();
-      readiness.replaceChildren();
-      unavailable.hidden = true;
       return;
     }
-    const forecastFrame = this._loadForecast?.frames?.[0];
-    const points = Array.isArray(forecastFrame?.points) ? forecastFrame.points : [];
-    const solarAvailable = this._powerHistory?.solar_forecast?.available === true;
-    readiness.innerHTML = `<span>Lastprognos: ${points.length ? "klar" : "saknar historiskt stöd"}</span><span>Solprognos: ${solarAvailable ? "tillgänglig" : "ej tillgänglig"}</span><span>ESS-modell: saknas</span><span>Styrning: avstängd (lärläge)</span>`;
-    const cards = [];
-    if (points.length) {
-      const first = new Date(points[0].valid_at);
-      const last = new Date(points[Math.min(points.length, 16) - 1].valid_at);
-      last.setMinutes(last.getMinutes() + 15);
-      const average = points.slice(0, 16).reduce((sum, point) => sum + Number(point.value || 0), 0) / Math.min(points.length, 16) / 1000;
-      cards.push({
-        id: `load-${forecastFrame.frame_id}`,
-        start: first.toISOString(), end: last.toISOString(),
-        title: `${this._formatTime(first)}–${this._formatTime(last)} · Lastprognos`,
-        reason: `Förväntad last cirka ${this._formatNumber(average)} kW · ${forecastFrame.quality_status === "good" ? "god" : "låg"} säkerhet`,
-        status: "Lärläge",
+    rail.hidden = false;
+    rail.replaceChildren(...blocks.map((block) => {
+      const start = typeof block?.start === "string" ? block.start : "";
+      const end = typeof block?.end === "string" ? block.end : "";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `price-plan-card${this._ellaSelection?.id === block.plan_block_id ? " selected" : ""}`;
+      button.dataset.planBlockId = block.plan_block_id || "";
+      button.dataset.planStart = start;
+      button.dataset.planEnd = end;
+      button.setAttribute("role", "listitem");
+      button.setAttribute("aria-pressed", String(this._ellaSelection?.id === block.plan_block_id));
+      const title = document.createElement("strong");
+      title.textContent = `${this._formatTime(new Date(start))}–${this._formatTime(new Date(end))} · ${block.title || "Prisperiod"}`;
+      const reason = document.createElement("small");
+      reason.textContent = block.reason || "Verifierad prisperiod.";
+      button.append(title, reason);
+      const average = Number(block?.price?.average_sek_per_kwh);
+      if (Number.isFinite(average)) {
+        const value = document.createElement("span");
+        value.className = "price-plan-value";
+        value.textContent = `Snitt ${this._formatNumber(average)} kr/kWh`;
+        button.append(value);
+      }
+      const status = document.createElement("span");
+      status.className = "price-plan-status";
+      status.textContent = "Ej verkställd";
+      button.append(status);
+      button.addEventListener("click", () => {
+        const id = button.dataset.planBlockId;
+        this._ellaSelection = togglePricePlanSelection(this._ellaSelection, block, plan.plan_version || null);
+        this._renderPricePlanCards();
+        this.renderPriceChart();
+        this._renderSocChart();
       });
-    }
-    cards.push({ id: "ess-readiness", title: "Batteriplan väntar på ESS-modell", reason: "Ingen planerad laddning/urladdning visas utan verifierade begränsningar.", status: "Lärläge" });
-    cards.push({ id: "pv-readiness", title: solarAvailable ? "Solprognos tillgänglig" : "Solprognos ej tillgänglig", reason: solarAvailable ? "Providerprognos visas endast som prognosdata." : "Ingen verifierad framtida PV-serie att rita.", status: "Lärläge" });
-    rail.innerHTML = cards.map((card) => `<button type="button" class="ella-preview-card${this._ellaSelection?.id === card.id ? " selected" : ""}" data-ella-card="${card.id}" data-ella-start="${card.start || ""}" data-ella-end="${card.end || ""}" role="listitem"><strong>${card.title}</strong><small>${card.reason}</small><span class="ella-card-status">${card.status}</span></button>`).join("");
-    unavailable.hidden = true;
-    rail.querySelectorAll("[data-ella-card]").forEach((card) => card.addEventListener("click", () => {
-      const id = card.dataset.ellaCard;
-      if (this._ellaSelection?.id === id) this._ellaSelection = null;
-      else if (card.dataset.ellaStart && card.dataset.ellaEnd) this._ellaSelection = { id, start: card.dataset.ellaStart, end: card.dataset.ellaEnd, revision: forecastFrame?.revision || null };
-      else this._ellaSelection = { id, start: null, end: null, revision: null };
-      this._renderEllaPreview();
-      this.renderPriceChart();
-      this._renderSocChart();
+      return button;
     }));
   }
 
@@ -9665,6 +9637,7 @@ class ElrakningPanel {
     if (this._backendHydrationPromise) return this._backendHydrationPromise;
     this._backendHydrationPromise = Promise.all([
       this.loadPriceData(),
+      this.loadPricePlan(),
       this.loadProviderState(),
       this.loadEonGridState(),
       this.loadGridProviders(),
@@ -9707,6 +9680,27 @@ class ElrakningPanel {
     this.updatePriceSummary();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     this._renderInvoiceEstimateCard();
+  }
+
+  async loadPricePlan() {
+    if (!this.hass?.callWS) return;
+    const requestToken = ++this._pricePlanRequestToken;
+    const siteContextGeneration = this._siteContextGeneration;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/ella_plan" });
+      if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
+      const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
+      if (activeSiteId && response?.site_id && response.site_id !== activeSiteId) return;
+      this._pricePlan = response && typeof response === "object"
+        ? response
+        : { available: false, reason: "invalid_plan_response", plan_blocks: [] };
+      this._renderPricePlanCards();
+      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    } catch {
+      if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
+      this._pricePlan = { available: false, reason: "plan_unavailable", plan_blocks: [] };
+      this._renderPricePlanCards();
+    }
   }
 
   _bindPhaseHistoryCard() {

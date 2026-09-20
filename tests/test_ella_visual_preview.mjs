@@ -1,35 +1,54 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { reconcileEllaSiteState } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { reconcileEllaSiteState, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), panel.indexOf('<div class="daily-energy-row">'));
 
-assert.match(panel, /ELLA · Energiplan/);
-assert.match(panel, /ella_binding_verified/);
-assert.match(panel, /const ellaBound = this\._siteState\?\.ella_binding_verified === true/);
-assert.match(panel, /Lärläge · Shadow · styrning avstängd/);
-assert.match(panel, /load_forecast/);
-assert.match(panel, /chart-power-forecast-load/);
-assert.match(panel, /stroke-dasharray: 8 5/);
-assert.match(panel, /Batteriplan väntar på ESS-modell/);
-assert.match(panel, /data-ella-card/);
-assert.match(panel, /ella-selection-band/);
+assert.match(panel, /type: "elrakning\/ella_plan"/);
+assert.match(panel, /data-price-plan-rail/);
+assert.match(panel, /price-plan-card/);
+assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);
+assert.match(panel, /togglePricePlanSelection\(this\._ellaSelection, block/);
+assert.match(panel, /_pricePlanRequestToken/);
+assert.match(panel, /siteContextGeneration !== this\._siteContextGeneration/);
+assert.doesNotMatch(panel, /ELLA · Energiplan/);
+assert.doesNotMatch(panel, /Lärläge · Shadow · styrning avstängd/);
+assert.doesNotMatch(panel, /data-ella-expand/);
+assert.doesNotMatch(panel, /data-site-ella-planner-toggle/);
+assert.doesNotMatch(panel, /Batteriplan väntar på ESS-modell/);
+assert.doesNotMatch(panel, /Solprognos tillgänglig/);
+assert.doesNotMatch(priceTemplate, /price-analysis|Dagens prisanalys laddas|Normalt pris nu|Nästa 2 h|Från /);
 assert.doesNotMatch(panel, /if\s*\(.*(?:growatt|huawei|solis)/i);
 
 const bound = { site_id: "site-a", ella_binding_verified: true };
 const unbound = { site_id: "site-b", ella_binding_verified: false };
-const initial = { loadForecast: { available: true, frames: [{ frame_id: "a" }] }, ellaSelection: { id: "a" } };
+const initial = {
+  loadForecast: { available: true, frames: [{ frame_id: "a" }] },
+  pricePlan: { available: true, site_id: "site-a", plan_blocks: [{ plan_block_id: "a" }] },
+  ellaSelection: { id: "a" },
+};
 const switchedAway = reconcileEllaSiteState(bound, unbound, initial);
 assert.equal(switchedAway.changed, true);
 assert.equal(switchedAway.bound, false);
 assert.deepEqual(switchedAway.loadForecast, { available: false, reason: "ella_unbound", frames: [] });
+assert.deepEqual(switchedAway.pricePlan, { available: false, reason: "site_changed", plan_blocks: [] });
 assert.equal(switchedAway.ellaSelection, null);
 
 const switchedBack = reconcileEllaSiteState(unbound, bound, switchedAway);
 assert.equal(switchedBack.changed, true);
 assert.equal(switchedBack.bound, true);
-assert.deepEqual(switchedBack.loadForecast, { available: false, reason: "site_changed", frames: [] });
+assert.deepEqual(switchedBack.pricePlan, { available: false, reason: "site_changed", plan_blocks: [] });
 assert.equal(switchedBack.ellaSelection, null);
 
-console.log("ELLA visual preview static checks: PASS");
+const blockA = { plan_block_id: "a", start: "2026-09-20T13:00:00Z", end: "2026-09-20T17:00:00Z" };
+const blockB = { plan_block_id: "b", start: "2026-09-20T17:00:00Z", end: "2026-09-20T20:00:00Z" };
+const selectedA = togglePricePlanSelection(null, blockA, "price-only-v1");
+assert.deepEqual(selectedA, { id: "a", start: blockA.start, end: blockA.end, revision: "price-only-v1" });
+assert.deepEqual(togglePricePlanSelection(selectedA, blockB, "price-only-v1"), {
+  id: "b", start: blockB.start, end: blockB.end, revision: "price-only-v1",
+});
+assert.equal(togglePricePlanSelection(selectedA, blockA, "price-only-v1"), null);
+
+console.log("ELLA price-plan shell static/site-switch checks: PASS");
