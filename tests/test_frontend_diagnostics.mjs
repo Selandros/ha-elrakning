@@ -1731,7 +1731,7 @@ assert.match(panelSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/
 assert.match(panelSource, /\.daily-energy-grid \{\n\s+align-items: start;/);
 assert.match(panelSource, /data-soc-card/);
 assert.match(panelSource, /Batteri SOC/);
-assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: stretch;\n\s+display: grid;\n\s+gap: var\(--dashboard-card-gap\);\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: stretch;\n\s+display: grid;\n\s+grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
 assert.match(panelSource, /@container \(max-width: 760px\) \{[\s\S]*\.daily-energy-row \{\n\s+align-items: start;/);
 assert.match(panelSource, /daily-energy-row[\s\S]*data-daily-energy[\s\S]*data-soc-card/);
 assert.doesNotMatch(panelSource, /_syncSocCardHeight|_setupSocCardHeightObserver/);

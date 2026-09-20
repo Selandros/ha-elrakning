@@ -2994,7 +2994,6 @@ class ElrakningPanel {
           max-width: 960px;
           min-height: 100%;
           margin: 0 auto;
-          padding: 28px 20px 40px;
           position: relative;
           z-index: 1;
         }
@@ -3516,7 +3515,6 @@ class ElrakningPanel {
         .daily-energy-row {
           align-items: stretch;
           display: grid;
-          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
@@ -3562,7 +3560,6 @@ class ElrakningPanel {
           align-items: baseline;
           display: grid;
           grid-template-columns: minmax(0, 1fr) auto;
-          gap: 12px;
         }
 
         .daily-energy-part-heading > *,
