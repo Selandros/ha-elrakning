@@ -2665,9 +2665,6 @@ class ElrakningPanel {
           <div class="price-chart-frame">
             <div class="price-chart" aria-live="polite"></div>
           </div>
-        </section>
-
-        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
 
         <div class="price-controls">
           <div class="price-chart-legend" data-meter-legend hidden>
@@ -2713,6 +2710,9 @@ class ElrakningPanel {
             <dialog class="period-picker-dialog" data-period-picker-dialog aria-label="Välj period"></dialog>
           </div>
         </div>
+        </section>
+
+        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
 
         <div class="daily-energy-row">
           <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">

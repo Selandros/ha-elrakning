@@ -7,9 +7,14 @@ const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), pan
 
 assert.match(panel, /type: "elrakning\/ella_plan"/);
 assert.match(panel, /data-price-plan-rail/);
-assert.match(panel, /price-chart-frame[\s\S]*price-plan-rail/);
-assert.match(panel, /<\/section>\s*<div class="price-plan-rail" data-price-plan-rail/);
-assert.match(panel, /price-plan-rail[\s\S]*<div class="price-controls">/);
+const priceSectionStart = panel.indexOf('<section class="price-section"');
+const priceSectionEnd = panel.indexOf('</section>', priceSectionStart);
+const pricePlanRail = panel.indexOf('<div class="price-plan-rail" data-price-plan-rail');
+assert.ok(priceSectionStart >= 0 && priceSectionEnd > priceSectionStart && pricePlanRail > priceSectionEnd);
+const priceSectionMarkup = panel.slice(priceSectionStart, priceSectionEnd);
+assert.match(priceSectionMarkup, /price-chart-frame[\s\S]*price-controls/);
+assert.match(panel, /<\/section>\s*\n\s*<div class="price-plan-rail" data-price-plan-rail/);
+assert.doesNotMatch(panel.slice(pricePlanRail), /<div class="price-controls">/);
 assert.match(panel, /\.price-section\s*\{[\s\S]*?margin-bottom: 0;/);
 assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 20px 0 0;[\s\S]*?padding: 0 1px 6px;/);
 assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
