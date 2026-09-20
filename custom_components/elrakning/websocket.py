@@ -84,6 +84,7 @@ POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
 LOAD_FORECAST_COMMAND = f"{DOMAIN}/load_forecast"
+FORECAST_EVALUATION_COMMAND = f"{DOMAIN}/ella_forecast_evaluation"
 SITE_IDENTITY_COMMAND = f"{DOMAIN}/site_identity"
 SITE_RENAME_COMMAND = f"{DOMAIN}/site_rename"
 SITE_CREATE_COMMAND = f"{DOMAIN}/site_create"
@@ -149,6 +150,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
     websocket_api.async_register_command(hass, websocket_load_forecast)
+    websocket_api.async_register_command(hass, websocket_ella_forecast_evaluation)
     websocket_api.async_register_command(hass, websocket_site_identity)
     websocket_api.async_register_command(hass, websocket_site_rename)
     websocket_api.async_register_command(hass, websocket_site_create)
@@ -1295,6 +1297,17 @@ async def websocket_load_forecast(hass, connection, msg):
     connection.send_result(msg["id"], await _async_load_forecast_state(hass))
 
 
+@websocket_api.websocket_command({vol.Required("type"): FORECAST_EVALUATION_COMMAND, vol.Optional("site_id"): str})
+@websocket_api.async_response
+async def websocket_ella_forecast_evaluation(hass, connection, msg):
+    site_id, error = _ella_requested_site(hass, msg)
+    learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
+    if error or learning_store is None:
+        connection.send_result(msg["id"], {"success": False, "available": False, "error": error or "learning_store_unavailable"})
+        return
+    connection.send_result(msg["id"], {"success": True, **learning_store.public_state(site_id, include_records=True)})
+
+
 def _ella_site_manager(hass):
     return hass.data.get(DOMAIN, {}).get("site_identity_manager")
 
@@ -1325,6 +1338,8 @@ async def websocket_ella_capabilities(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": error or "load_registry_unavailable"})
         return
     forecast = await _async_load_forecast_state(hass, site_id)
+    learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
+    forecast_evaluation = learning_store.public_state(site_id) if learning_store else None
     try:
         inventory = build_capability_inventory(
             _ella_site_manager(hass), registry, site_id,
@@ -1414,6 +1429,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             individual_loads=state_loads,
             solar_forecast_frames=solar_frames,
             economic_frames=economic_frames,
+            forecast_evaluation=forecast_evaluation,
             timezone_source=timezone_source,
         )
     except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as err:

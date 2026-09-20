@@ -7,6 +7,7 @@ import json
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -16,7 +17,7 @@ from .canonical_storage import CanonicalStorage
 DATASET = "load_forecast.v1"
 PAYLOAD_SCHEMA = "load_forecast.v1"
 LOGICAL_ROLE = "load.forecast"
-MODEL_VERSION = "load-profile-v1"
+MODEL_VERSION = "load-profile-v2"
 MIN_DISTINCT_DAYS = 7
 SLOT_SECONDS = 900
 
@@ -26,9 +27,9 @@ def _quarter_start(value: datetime) -> datetime:
     return value - timedelta(minutes=value.minute % 15)
 
 
-def _generation_id(site_id: str, source_generations: set[str]) -> str:
+def _generation_id(site_id: str, source_generations: set[str], calibration: dict[str, Any] | None = None) -> str:
     identity = {"dataset": DATASET, "model_version": MODEL_VERSION, "site_id": site_id,
-                "source_generations": sorted(source_generations)}
+                "source_generations": sorted(source_generations), "calibration": calibration or {}}
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
     return f"load-{digest}"
 
@@ -64,6 +65,167 @@ def _profile_buckets(history: list[dict[str, Any]], timezone_name: str):
         by_weekday_slot[(local.weekday(), slot)].append((value, row))
         by_slot[slot].append((value, row))
     return zone, by_weekday_slot, by_slot
+
+
+def _baseline_point(profile, local_time: datetime) -> tuple[float | None, str, int]:
+    """Return the deterministic historical baseline for one local slot."""
+    _zone, by_weekday_slot, by_slot = profile
+    slot = local_time.hour * 4 + local_time.minute // 15
+    candidates = by_weekday_slot.get((local_time.weekday(), slot), [])
+    support = "weekday_slot"
+    if not candidates:
+        candidates = by_slot.get(slot, [])
+        support = "all_weekdays_slot"
+    if not candidates:
+        return None, support, 0
+    return sum(value for value, _row in candidates) / len(candidates), support, len(candidates)
+
+
+def _qualified_actual(row: dict[str, Any], decision_at: datetime) -> bool:
+    """Accept only completed, well-covered canonical observations for learning."""
+    coverage = row.get("coverage_ratio")
+    return (
+        row.get("logical_role") == "house.consumption"
+        and row.get("unit") == "W"
+        and row.get("quality_status") == "good"
+        and isinstance(row.get("interval_start"), datetime)
+        and isinstance(row.get("interval_end"), datetime)
+        and row["interval_end"] <= decision_at
+        and isinstance(coverage, (int, float))
+        and math.isfinite(float(coverage))
+        and float(coverage) >= 0.9
+        and isinstance(row.get("value"), (int, float))
+        and math.isfinite(float(row["value"]))
+        and float(row["value"]) >= 0
+    )
+
+
+def _intraday_calibration(history: list[dict[str, Any]], timezone_name: str, known_at: datetime) -> dict[str, Any]:
+    """Estimate a bounded same-day correction from completed qualified slots."""
+    try:
+        zone = ZoneInfo(timezone_name)
+    except Exception:
+        return {"factor": 1.0, "evidence_count": 0, "confidence": "low_confidence", "reason": "timezone_unavailable", "evidence": []}
+    today = known_at.astimezone(zone).date()
+    baseline_history = [
+        row for row in history
+        if isinstance(row.get("interval_start"), datetime)
+        and row["interval_start"].astimezone(zone).date() != today
+    ]
+    profile = _profile_buckets(baseline_history, timezone_name)
+    evidence = []
+    if profile is not None:
+        for row in history:
+            start = row.get("interval_start")
+            if not _qualified_actual(row, known_at) or start.astimezone(zone).date() != today:
+                continue
+            baseline, support_method, support = _baseline_point(profile, start.astimezone(zone))
+            actual = float(row["value"])
+            if baseline is None or baseline <= 1:
+                continue
+            evidence.append({
+                "valid_at": start.astimezone(timezone.utc).isoformat(),
+                "actual_w": actual,
+                "baseline_w": baseline,
+                "ratio": actual / baseline,
+                "support_method": support_method,
+                "sample_support": support,
+                "coverage_ratio": float(row["coverage_ratio"]),
+                "source_generation_id": row.get("source_generation_id"),
+            })
+    evidence = sorted(evidence, key=lambda item: item["valid_at"])[-8:]
+    ratios = [item["ratio"] for item in evidence]
+    if len(ratios) < 3:
+        return {"factor": 1.0, "evidence_count": len(ratios), "confidence": "low_confidence", "reason": "insufficient_support", "evidence": evidence}
+    robust_ratio = median(ratios)
+    shrink = min(0.75, (len(ratios) - 2) / 6)
+    factor = min(1.45, max(0.55, 1.0 + (robust_ratio - 1.0) * shrink))
+    classification = "within_expected_error"
+    if robust_ratio < 0.85:
+        classification = "systematic_overprediction"
+    elif robust_ratio > 1.15:
+        classification = "systematic_underprediction"
+    return {
+        "factor": factor,
+        "raw_ratio_median": robust_ratio,
+        "evidence_count": len(ratios),
+        "confidence": "good" if len(ratios) >= 6 else "medium_confidence",
+        "reason": classification,
+        "evidence": evidence,
+    }
+
+
+def build_forecast_evaluation(
+    frames: list[dict[str, Any]], actual_rows: list[dict[str, Any]], decision_at: datetime, site_id: str,
+) -> dict[str, Any]:
+    """Score frozen forecast revisions only against later qualified actuals."""
+    scoped_actuals = {
+        row["interval_start"]: row for row in actual_rows
+        if row.get("site_id") in {None, site_id} and isinstance(row.get("interval_start"), datetime)
+    }
+    actual_by_start = {key: row for key, row in scoped_actuals.items() if _qualified_actual(row, decision_at)}
+    records = []
+    matured_count = 0
+    no_observation_count = 0
+    ineligible_actual_count = 0
+    for frame in frames:
+        if frame.get("site_id") != site_id or frame.get("payload_schema") != PAYLOAD_SCHEMA:
+            continue
+        for point in frame.get("points") or []:
+            valid_at = point.get("valid_at")
+            if not isinstance(valid_at, datetime) or valid_at >= decision_at:
+                continue
+            matured_count += 1
+            actual = actual_by_start.get(valid_at)
+            if actual is None:
+                if valid_at not in scoped_actuals:
+                    no_observation_count += 1
+                else:
+                    ineligible_actual_count += 1
+                continue
+            detail = point.get("point") or {}
+            predicted = float(detail.get("corrected_forecast_w", point.get("value")))
+            actual_value = float(actual["value"])
+            signed_error = actual_value - predicted
+            relative = abs(signed_error) / actual_value if actual_value > 1 else None
+            if relative is None:
+                classification = "within_expected_error" if abs(signed_error) <= 100 else "isolated_spike_or_event"
+            elif relative <= 0.15:
+                classification = "within_expected_error"
+            elif signed_error < 0:
+                classification = "systematic_overprediction"
+            else:
+                classification = "systematic_underprediction"
+            records.append({
+                "site_id": site_id, "frame_id": frame.get("frame_id"), "revision": frame.get("revision"),
+                "forecast_known_at": frame.get("known_at").isoformat() if isinstance(frame.get("known_at"), datetime) else frame.get("known_at"),
+                "valid_at": valid_at.isoformat(), "model_version": detail.get("model_version") or frame.get("quality", {}).get("model_version"),
+                "baseline_w": detail.get("baseline_w"), "corrected_forecast_w": predicted,
+                "actual_w": actual_value, "signed_error_w": signed_error,
+                "absolute_error_w": abs(signed_error), "relative_error": relative,
+                "actual_quality": {"quality_status": actual.get("quality_status"), "coverage_ratio": actual.get("coverage_ratio")},
+                "learning_eligible": True, "learning_reason": "qualified_actual_observed", "error_classification": classification,
+            })
+    records = sorted(records, key=lambda item: (item["valid_at"], item["frame_id"] or "", item["revision"] or 0))[-256:]
+    errors = [item["signed_error_w"] for item in records]
+    actual_total = sum(item["actual_w"] for item in records)
+    return {
+        "schema": "ella_forecast_evaluation.v1", "site_id": site_id,
+        "model_version": MODEL_VERSION, "known_at": decision_at.isoformat(),
+        "summary": {
+            "count": len(records), "matured_count": matured_count,
+            "learning_eligible_count": len(records), "ineligible_actual_count": ineligible_actual_count,
+            "mean_signed_bias_w": sum(errors) / len(errors) if errors else None,
+            "median_signed_bias_w": median(errors) if errors else None,
+            "mae_w": sum(abs(error) for error in errors) / len(errors) if errors else None,
+            "wape": sum(abs(error) for error in errors) / actual_total if actual_total > 1 else None,
+            "no_observation_count": no_observation_count,
+        },
+        "records": records,
+        "learning_eligibility": {"forecast": bool(records), "reason": "qualified_actual_observed" if records else ("no_observation" if no_observation_count else "insufficient_actual_quality")},
+        "planner_quality": {"status": "not_evaluable", "reason": "no_stage5_counterfactual_or_execution_evidence"},
+        "execution_quality": {"status": "NOT_APPLICABLE", "reason": "no_actuator_execution_in_stage_5"},
+    }
 
 
 def build_historical_model_points(
@@ -132,12 +294,19 @@ def build_load_forecast_frame(
     source_generations = {str(row["source_generation_id"]) for row in rows if row.get("source_generation_id")}
     if not source_generations:
         return None, []
-    profile = _profile_buckets(rows, timezone_name)
+    local_today = known_at.astimezone(zone).date()
+    baseline_rows = [
+        row for row in rows
+        if isinstance(row.get("interval_start"), datetime)
+        and row["interval_start"].astimezone(zone).date() != local_today
+    ]
+    profile = _profile_buckets(baseline_rows, timezone_name)
     if profile is None:
         return None, []
     _zone, by_weekday_slot, by_slot = profile
     target_start = _quarter_start(known_at.astimezone(zone) + timedelta(minutes=15)).astimezone(timezone.utc)
     target_end = target_start + timedelta(hours=horizon_hours)
+    calibration = _intraday_calibration(history, timezone_name, known_at)
     points: list[dict[str, Any]] = []
     cursor = target_start
     while cursor < target_end:
@@ -149,17 +318,26 @@ def build_load_forecast_frame(
             candidates = by_slot.get(slot, [])
             support = "all_weekdays_slot"
         if candidates:
-            value = sum(item[0] for item in candidates) / len(candidates)
+            baseline = sum(item[0] for item in candidates) / len(candidates)
+            value = baseline * calibration["factor"]
             points.append({
                 "point_id": "", "point_key": cursor.isoformat(), "valid_at": cursor,
                 "value": value, "unit": "W", "quality_status": "good",
-                "point": {"forecast_w": value, "sample_support": len(candidates),
-                          "support_method": support, "model_version": MODEL_VERSION},
+                "point": {"forecast_w": value, "baseline_w": baseline,
+                          "corrected_forecast_w": value, "intraday_factor": calibration["factor"],
+                          "correction_evidence_count": calibration["evidence_count"],
+                          "confidence_status": calibration["confidence"],
+                          "sample_support": len(candidates), "support_method": support,
+                          "model_version": MODEL_VERSION, "calibration_reason": calibration["reason"]},
             })
         cursor += timedelta(seconds=SLOT_SECONDS)
     if not points:
         return None, []
-    generation_id = _generation_id(site_id, source_generations)
+    calibration_identity = {
+        "factor": calibration["factor"], "evidence_count": calibration["evidence_count"],
+        "evidence": [item["valid_at"] for item in calibration.get("evidence", [])],
+    }
+    generation_id = _generation_id(site_id, source_generations, calibration_identity)
     semantic_key = f"{DATASET}|site:{site_id}|generation:{generation_id}|target:{target_start.date().isoformat()}"
     # Canonical quality_status is schema-bound; retain confidence detail in
     # the quality object instead of introducing a non-canonical status value.
@@ -170,6 +348,8 @@ def build_load_forecast_frame(
         "sample_support_min": min(point["point"]["sample_support"] for point in points),
         "sample_support_max": max(point["point"]["sample_support"] for point in points),
         "observed_days": len(observed_days), "source_generations": sorted(source_generations),
+        "intraday_factor": calibration["factor"], "intraday_evidence_count": calibration["evidence_count"],
+        "intraday_confidence": calibration["confidence"], "intraday_reason": calibration["reason"],
     }
     content = json.dumps([{key: value for key, value in point.items() if key != "point_id"}
                           for point in points], sort_keys=True, default=str, separators=(",", ":"))
@@ -186,6 +366,7 @@ def build_load_forecast_frame(
         "valid_to": target_end, "quality_status": quality_status, "quality": quality,
         "provenance": {"origin_type": "canonical_energy_observations", "site_id": site_id,
                         "model_version": MODEL_VERSION, "source_generations": sorted(source_generations),
+                        "intraday_calibration": calibration,
                         "capture_contract": PAYLOAD_SCHEMA}, "payload_schema": PAYLOAD_SCHEMA,
     }
     return frame, points
@@ -226,13 +407,18 @@ def persist_load_forecast(storage: CanonicalStorage, frame: dict[str, Any], poin
 def build_site_load_forecast(storage: CanonicalStorage, site_id: str, timezone_name: str, now: datetime) -> dict[str, Any]:
     """Build and persist one site's forecast without active-site dependence."""
     history = storage.read_site_energy_history(site_id, now - timedelta(days=60), now)
+    previous_frames = storage.read_external_input_frames(
+        now, source_scope="site", site_id=site_id, logical_role=LOGICAL_ROLE,
+    )
+    evaluation = build_forecast_evaluation(previous_frames, history, now, site_id)
     frame, points = build_load_forecast_frame(site_id, timezone_name, history, now)
     if frame is None:
-        return {"site_id": site_id, "available": False, "reason": "insufficient_historical_support", "point_count": 0}
+        return {"site_id": site_id, "available": False, "reason": "insufficient_historical_support", "point_count": 0, "evaluation": evaluation}
     written = persist_load_forecast(storage, frame, points, now)
     return {
         "site_id": site_id, "available": True, "frame_id": frame["frame_id"],
         "semantic_key": frame["semantic_key"], "revision": frame["revision"],
         "point_count": len(points), "quality_status": frame["quality_status"],
         "known_at": frame["known_at"].isoformat(), "written": bool(written),
+        "model_version": MODEL_VERSION, "evaluation": evaluation, "calibration": frame["quality"],
     }

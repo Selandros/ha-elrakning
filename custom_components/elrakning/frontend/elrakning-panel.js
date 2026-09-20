@@ -2535,6 +2535,7 @@ class ElrakningPanel {
     this._powerHistoryRequestToken = 0;
     this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
+    this._loadForecastEventUnsubscribePromise = null;
     this._solarEvidenceEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
     this._backendHydrationPromise = null;
@@ -9691,6 +9692,13 @@ class ElrakningPanel {
         () => this.loadSolarForecast(),
         "elrakning_solar_forecast_update",
       );
+      this._loadForecastEventUnsubscribePromise = hass.connection.subscribeEvents(
+        (event) => {
+          const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
+          if (!event?.data?.site_id || !activeSiteId || event.data.site_id === activeSiteId) this.loadPowerHistory();
+        },
+        "elrakning_load_forecast_update",
+      );
       this._solarWeatherEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this.loadPowerHistory(),
         "elrakning_solar_weather_update",
@@ -9750,8 +9758,18 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
-    if (this._solarForecastEventUnsubscribePromise) {
-      Promise.resolve(this._solarForecastEventUnsubscribePromise)
+      if (this._solarForecastEventUnsubscribePromise) {
+        Promise.resolve(this._solarForecastEventUnsubscribePromise)
+          .then((unsubscribe) => unsubscribe?.())
+          .catch(() => {});
+      }
+      if (this._loadForecastEventUnsubscribePromise) {
+        Promise.resolve(this._loadForecastEventUnsubscribePromise)
+          .then((unsubscribe) => unsubscribe?.())
+          .catch(() => {});
+      }
+    if (this._loadForecastEventUnsubscribePromise) {
+      Promise.resolve(this._loadForecastEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
@@ -9785,6 +9803,7 @@ class ElrakningPanel {
     this._meterPowerEventUnsubscribePromise = null;
     this._powerEventUnsubscribePromise = null;
     this._solarForecastEventUnsubscribePromise = null;
+    this._loadForecastEventUnsubscribePromise = null;
     this._solarWeatherEventUnsubscribePromise = null;
     this._solarEvidenceEventUnsubscribePromise = null;
     this._diagnosticsEventUnsubscribePromise = null;

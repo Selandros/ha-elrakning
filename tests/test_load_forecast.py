@@ -9,7 +9,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage
-from custom_components.elrakning.load_forecast import build_historical_model_points, build_load_forecast_frame, persist_load_forecast
+from custom_components.elrakning.load_forecast import build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, persist_load_forecast
 
 
 UTC = timezone.utc
@@ -43,7 +43,71 @@ class LoadForecastTests(unittest.TestCase):
         self.assertTrue(points)
         self.assertTrue(all(point["value"] == 750 for point in points))
         self.assertTrue(all(point["value"] != 0 for point in points))
-        self.assertEqual(points[0]["point"]["model_version"], "load-profile-v1")
+        self.assertEqual(points[0]["point"]["model_version"], "load-profile-v2")
+
+    def _adaptive_history(self, now, current_values=(), current_coverage=1.0):
+        history = []
+        for day in range(7):
+            for offset in (15, -60, -45, -30):
+                history.append({
+                    "logical_role": "house.consumption", "interval_start": now - timedelta(days=day + 1) + timedelta(minutes=offset),
+                    "interval_end": now - timedelta(days=day + 1) + timedelta(minutes=offset + 15),
+                    "source_generation_id": "source-a", "value": 1000, "unit": "W", "quality_status": "good",
+                    "coverage_ratio": 1.0,
+                })
+        for index, value in enumerate(current_values):
+            start = now - timedelta(minutes=60 - index * 15)
+            history.append({
+                "logical_role": "house.consumption", "interval_start": start,
+                "interval_end": start + timedelta(minutes=15), "source_generation_id": "source-a",
+                "value": value, "unit": "W", "quality_status": "good", "coverage_ratio": current_coverage,
+            })
+        return history
+
+    def test_intraday_correction_moves_future_forecast_down_with_qualified_evidence(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        frame, points = build_load_forecast_frame("site-a", "Europe/Stockholm", self._adaptive_history(now, [600, 600, 600]), now, horizon_hours=12)
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame["quality"]["model_version"], "load-profile-v2")
+        self.assertEqual(frame["quality"]["intraday_evidence_count"], 3)
+        self.assertLess(frame["quality"]["intraday_factor"], 1.0)
+        self.assertLess(points[0]["point"]["corrected_forecast_w"], points[0]["point"]["baseline_w"])
+
+    def test_isolated_spike_does_not_drive_median_correction(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        frame, _points = build_load_forecast_frame("site-a", "Europe/Stockholm", self._adaptive_history(now, [600, 600, 2500, 600, 600]), now, horizon_hours=12)
+        self.assertIsNotNone(frame)
+        self.assertLess(frame["quality"]["intraday_factor"], 1.0)
+
+    def test_low_coverage_and_open_slot_do_not_enter_correction(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        history = self._adaptive_history(now, [600, 600], current_coverage=0.001)
+        history.append({
+            "logical_role": "house.consumption", "interval_start": now - timedelta(minutes=5),
+            "interval_end": now + timedelta(minutes=10), "source_generation_id": "source-a",
+            "value": 100, "unit": "W", "quality_status": "good", "coverage_ratio": 1.0,
+        })
+        frame, _points = build_load_forecast_frame("site-a", "Europe/Stockholm", history, now, horizon_hours=12)
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame["quality"]["intraday_evidence_count"], 0)
+        self.assertEqual(frame["quality"]["intraday_factor"], 1.0)
+
+    def test_correction_returns_toward_neutral_after_recent_alignment(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        frame, _points = build_load_forecast_frame("site-a", "Europe/Stockholm", self._adaptive_history(now, [1000] * 8), now, horizon_hours=12)
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame["quality"]["intraday_factor"], 1.0)
+
+    def test_correction_is_site_and_local_day_scoped_and_replay_deterministic(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        history = self._adaptive_history(now, [600, 600, 600])
+        first, _ = build_load_forecast_frame("site-a", "Europe/Stockholm", history, now, horizon_hours=1)
+        replay, _ = build_load_forecast_frame("site-a", "Europe/Stockholm", history, now, horizon_hours=1)
+        other, _ = build_load_forecast_frame("site-b", "Europe/Stockholm", history, now, horizon_hours=1)
+        next_day, _ = build_load_forecast_frame("site-a", "Europe/Stockholm", history, now + timedelta(days=1), horizon_hours=1)
+        self.assertEqual(first["frame_id"], replay["frame_id"])
+        self.assertNotEqual(first["source_generation_id"], other["source_generation_id"])
+        self.assertEqual(next_day["quality"]["intraday_factor"], 1.0)
 
     def test_unknown_slot_is_omitted_instead_of_zero(self):
         now = datetime(2026, 9, 19, 12, tzinfo=UTC)
@@ -110,6 +174,35 @@ class LoadForecastTests(unittest.TestCase):
         self.assertEqual(points[0]["source"], "model")
         self.assertEqual(points[0]["quality"]["support_method"], "weekday_slot")
         self.assertGreater(points[0]["value"], 0)
+
+    def test_forecast_evaluation_requires_matured_qualified_actual(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        valid_at = now - timedelta(minutes=30)
+        frame = {
+            "site_id": "site-a", "frame_id": "frame-a", "revision": 1,
+            "payload_schema": "load_forecast.v1", "known_at": now - timedelta(hours=1),
+            "points": [{"valid_at": valid_at, "value": 1000, "point": {"baseline_w": 1000, "corrected_forecast_w": 1000, "model_version": "load-profile-v2"}}],
+        }
+        actual = [{"site_id": "site-a", "logical_role": "house.consumption", "interval_start": valid_at,
+                   "interval_end": valid_at + timedelta(minutes=15), "unit": "W", "value": 600,
+                   "quality_status": "good", "coverage_ratio": 1.0}]
+        result = build_forecast_evaluation([frame], actual, now, "site-a")
+        self.assertEqual(result["summary"]["count"], 1)
+        self.assertEqual(result["records"][0]["actual_w"], 600)
+        self.assertTrue(result["records"][0]["learning_eligible"])
+        self.assertEqual(build_forecast_evaluation([frame], [], now, "site-a")["summary"]["count"], 0)
+
+    def test_forecast_evaluation_marks_poor_actual_as_ineligible(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        valid_at = now - timedelta(minutes=30)
+        frame = {"site_id": "site-a", "frame_id": "frame-a", "revision": 1, "payload_schema": "load_forecast.v1",
+                 "known_at": now - timedelta(hours=1), "points": [{"valid_at": valid_at, "value": 1000, "point": {}}]}
+        actual = [{"site_id": "site-a", "logical_role": "house.consumption", "interval_start": valid_at,
+                   "interval_end": valid_at + timedelta(minutes=15), "unit": "W", "value": 600,
+                   "quality_status": "partial", "coverage_ratio": 0.001}]
+        result = build_forecast_evaluation([frame], actual, now, "site-a")
+        assert result["summary"]["ineligible_actual_count"] == 1
+        assert result["learning_eligibility"]["forecast"] is False
 
 
 if __name__ == "__main__":

@@ -148,7 +148,9 @@ def _forecast_load(frames: Iterable[dict[str, Any]], start: datetime, end: datet
                 valid_at = datetime.fromisoformat(valid_at)
             value = _number(point.get("value"))
             if valid_at == start and value is not None and point.get("unit") == "W" and point.get("quality_status") == "good":
-                return {"source": "forecast", "value": value, "unit": "W", "valid_at": start, "frame_id": frame.get("frame_id"), "source_generation_id": frame.get("source_generation_id"), "quality": frame.get("quality") or {}}
+                return {"source": "forecast", "value": value, "unit": "W", "valid_at": start,
+                        "frame_id": frame.get("frame_id"), "source_generation_id": frame.get("source_generation_id"),
+                        "quality": frame.get("quality") or {}, "forecast": point.get("point") or {}}
     return None
 
 
@@ -176,6 +178,7 @@ def build_site_state(
     individual_loads: Iterable[dict[str, Any]] = (),
     solar_forecast_frames: Iterable[dict[str, Any]] = (),
     economic_frames: Iterable[dict[str, Any]] = (),
+    forecast_evaluation: dict[str, Any] | None = None,
     timezone_source: str = "site_location",
 ) -> dict[str, Any]:
     """Build a read-only state snapshot from already verified facts."""
@@ -279,6 +282,9 @@ def build_site_state(
         "known_at": _iso(decision_at), "interval_seconds": INTERVAL_SECONDS,
         "horizon": {"start": slots[0]["start"] if slots else None, "end": slots[-1]["end"] if slots else None, "date": target_date.isoformat()},
         "capabilities": capability_snapshot or {},
+        "forecast_evaluation": forecast_evaluation or {
+            "available": False, "reason": "no_evaluation_history", "records": [],
+        },
         "source_facts": sorted(source_facts, key=lambda item: (item.get("logical_role") or "", item.get("frame_id") or "")),
         "economic_facts": sorted(economic_facts, key=lambda item: (item.get("logical_role") or "", item.get("frame_id") or "")),
         "slots": slots,
