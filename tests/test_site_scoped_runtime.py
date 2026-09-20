@@ -1,15 +1,19 @@
 import types
+import asyncio
 import unittest
 from pathlib import Path
 from datetime import date
 
 from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
+from tests._elrakning_test_bootstrap import install_optional_dependency_stubs
 
 
 install_homeassistant_stubs()
 install_elrakning_package_stub()
+install_optional_dependency_stubs()
 from custom_components.elrakning.coordinator import ElrakningCoordinator  # noqa: E402
 from custom_components.elrakning.site_identity import SiteIdentityManager  # noqa: E402
+from custom_components.elrakning.websocket import websocket_ella_binding_set  # noqa: E402
 
 
 class _Entry:
@@ -185,7 +189,7 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         }
         binding["binding_fingerprint"] = SiteIdentityManager.binding_fingerprint(binding)
         self.assertTrue(SiteIdentityManager.is_valid_ella_planner_binding(binding, require_enabled=True))
-        binding["capability"] = "other_capability"
+        binding["binding_fingerprint"] = "0" * 64
         self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding(binding, require_enabled=True))
 
     def test_ella_mutation_websocket_requires_admin_and_accepts_intent_only(self):
@@ -197,6 +201,34 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('msg["enabled"]', body)
         for forbidden in ("verification_state", "binding_fingerprint", "binding_version", "actuator_write_enabled"):
             self.assertNotIn(f'msg["{forbidden}"]', body)
+
+    def test_ella_mutation_websocket_enforces_admin_and_delegates_only_intent(self):
+        class Connection:
+            def __init__(self, is_admin):
+                self.user = types.SimpleNamespace(is_admin=is_admin)
+                self.results = []
+            def send_result(self, msg_id, result):
+                self.results.append((msg_id, result))
+
+        class Manager:
+            def __init__(self):
+                self.calls = []
+            async def async_set_ella_planner_binding(self, site_id, enabled):
+                self.calls.append((site_id, enabled))
+                return {"ella_binding_verified": enabled}
+
+        manager = Manager()
+        hass = types.SimpleNamespace(data={"elrakning": {"site_identity_manager": manager}})
+        message = {"id": 1, "site_id": "site-a", "enabled": True}
+        non_admin = Connection(False)
+        asyncio.run(websocket_ella_binding_set(hass, non_admin, message))
+        self.assertEqual(non_admin.results[-1], (1, {"success": False, "error": "admin_required"}))
+        self.assertEqual(manager.calls, [])
+
+        admin = Connection(True)
+        asyncio.run(websocket_ella_binding_set(hass, admin, message))
+        self.assertEqual(manager.calls, [("site-a", True)])
+        self.assertEqual(admin.results[-1], (1, {"success": True, "ella_binding_verified": True}))
         self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding({
             "binding_version": 1, "capability": "ella_planner", "enabled": True,
             "verification_state": "verified", "actuator_write_enabled": True,
