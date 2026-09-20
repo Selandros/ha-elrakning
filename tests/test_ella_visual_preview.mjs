@@ -9,6 +9,8 @@ assert.match(panel, /type: "elrakning\/ella_plan"/);
 assert.match(panel, /data-price-plan-rail/);
 assert.match(panel, /price-chart-frame[\s\S]*price-plan-rail/);
 assert.match(panel, /<\/section>\s*<div class="price-plan-rail" data-price-plan-rail/);
+assert.match(panel, /\.price-section\s*\{[\s\S]*?margin-bottom: 0;/);
+assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 0;[\s\S]*?padding: 6px 1px;/);
 assert.match(panel, /price-plan-card/);
 assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);

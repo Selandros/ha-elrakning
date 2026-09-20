@@ -3648,8 +3648,8 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           overflow-x: auto;
-          margin-top: 10px;
-          padding: 8px 1px 6px;
+          margin: 0;
+          padding: 6px 1px;
           scrollbar-width: thin;
         }
 
@@ -4842,7 +4842,7 @@ class ElrakningPanel {
           box-shadow: var(--ha-card-glass-inset-shadow, var(--ha-card-box-shadow, none));
           box-sizing: border-box;
           isolation: isolate;
-          margin-bottom: 16px;
+          margin-bottom: 0;
           overflow: visible;
           padding: 20px 20px 12px;
           position: relative;
