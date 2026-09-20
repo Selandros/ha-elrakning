@@ -193,7 +193,8 @@ def _load_points_for_block(block: dict[str, Any], frames: Iterable[dict[str, Any
 
 def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
     """Add only fully covered, verified load forecast values to price blocks."""
-    if not isinstance(plan, dict) or plan.get("available") is not True or not frames:
+    frame_list = list(frames or [])
+    if not isinstance(plan, dict) or plan.get("available") is not True or not frame_list:
         return plan
     site_id = plan.get("site_id")
     if not isinstance(site_id, str) or not site_id:
@@ -204,10 +205,22 @@ def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]]
         return plan
     if decision_at.tzinfo is None:
         return plan
+    usable_frames = []
+    for frame in frame_list:
+        if not isinstance(frame, dict) or frame.get("site_id") != site_id:
+            continue
+        if frame.get("payload_schema") != LOAD_PAYLOAD_SCHEMA or frame.get("quality_status") not in {"good", "partial"}:
+            continue
+        try:
+            frame_known_at = datetime.fromisoformat(frame["known_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if frame_known_at.tzinfo is not None and frame_known_at <= decision_at:
+            usable_frames.append(frame)
     enriched = {**plan, "plan_blocks": []}
     for block in plan.get("plan_blocks") or []:
         updated = dict(block)
-        points = _load_points_for_block(block, frames, site_id, decision_at)
+        points = _load_points_for_block(block, frame_list, site_id, decision_at)
         if points:
             watts = [point["value"] for point in points]
             duration_hours = LOAD_SLOT_SECONDS / 3600
@@ -235,5 +248,9 @@ def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]]
                 updated["reason"] = f"Billig prisperiod; förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
             else:
                 updated["reason"] = f"Prisförändring med förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+        elif usable_frames:
+            # Preserve fail-closed semantics explicitly for blocks without
+            # complete forecast coverage; never fill a missing interval with 0.
+            updated["load"] = {"coverage": "unavailable", "reason": "incomplete_forecast_coverage"}
         enriched["plan_blocks"].append(updated)
     return enriched

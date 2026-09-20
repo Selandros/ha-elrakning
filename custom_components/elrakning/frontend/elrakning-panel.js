@@ -2432,6 +2432,28 @@ export function togglePricePlanSelection(currentSelection, block, revision = nul
   };
 }
 
+export function currentPricePlanBlock(blocks, nowMs = Date.now()) {
+  if (!Array.isArray(blocks) || !Number.isFinite(nowMs)) return null;
+  return blocks.find((block) => {
+    const start = new Date(block?.start).getTime();
+    const end = new Date(block?.end).getTime();
+    return Number.isFinite(start) && Number.isFinite(end) && start <= nowMs && nowMs < end;
+  }) || null;
+}
+
+export function centerCurrentPricePlanCard(rail, blocks, nowMs = Date.now()) {
+  if (!rail || !Array.isArray(blocks)) return false;
+  const activeBlock = currentPricePlanBlock(blocks, nowMs);
+  if (!activeBlock?.plan_block_id) return false;
+  const card = [...(rail.querySelectorAll?.(".price-plan-card") || [])]
+    .find((item) => item.dataset?.planBlockId === activeBlock.plan_block_id);
+  if (!card || !Number.isFinite(rail.clientWidth)) return false;
+  const maxScroll = Math.max(0, rail.scrollWidth - rail.clientWidth);
+  const target = card.offsetLeft - (rail.clientWidth - card.offsetWidth) / 2;
+  rail.scrollLeft = Math.max(0, Math.min(maxScroll, target));
+  return true;
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -3644,12 +3666,12 @@ class ElrakningPanel {
 
         .price-plan-rail {
           border-bottom: 1px solid var(--divider-color);
-          border-top: 1px solid var(--divider-color);
+          border-top: 0;
           display: grid;
           gap: 8px;
           overflow-x: auto;
           margin: 0;
-          padding: 6px 1px;
+          padding: 0 1px 6px;
           scrollbar-width: thin;
         }
 
@@ -3685,6 +3707,13 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: .85em;
           margin-top: 8px;
+        }
+
+        .price-plan-card .price-plan-load-missing {
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: .82em;
+          margin-top: 4px;
         }
 
         .price-plan-card:focus-visible {
@@ -8147,10 +8176,19 @@ class ElrakningPanel {
     const blocks = plan.available === true && Array.isArray(plan.plan_blocks) ? plan.plan_blocks : [];
     if (!blocks.length) {
       if (this._ellaSelection) this._ellaSelection = null;
+      this._pricePlanRailCenteredKey = null;
       rail.hidden = true;
       rail.replaceChildren();
       return;
     }
+    const planKey = JSON.stringify({
+      site_id: plan.site_id || null,
+      plan_version: plan.plan_version || null,
+      source_generation_id: plan.capability?.source_generation_id || null,
+      block_ids: blocks.map((block) => block?.plan_block_id || null),
+    });
+    const shouldCenterCurrentCard = this._pricePlanRailCenteredKey !== planKey;
+    this._pricePlanRailCenteredKey = planKey;
     rail.hidden = false;
     rail.replaceChildren(...blocks.map((block) => {
       const start = typeof block?.start === "string" ? block.start : "";
@@ -8181,6 +8219,11 @@ class ElrakningPanel {
         load.className = "price-plan-load";
         load.textContent = `Förväntad förbrukning ${this._formatNumber(expectedLoad)} kWh`;
         button.append(load);
+      } else if (block?.load?.coverage === "unavailable") {
+        const load = document.createElement("span");
+        load.className = "price-plan-load-missing";
+        load.textContent = "Förbrukning saknas för hela perioden";
+        button.append(load);
       }
       const status = document.createElement("span");
       status.className = "price-plan-status";
@@ -8195,6 +8238,11 @@ class ElrakningPanel {
       });
       return button;
     }));
+    if (shouldCenterCurrentCard) {
+      const center = () => centerCurrentPricePlanCard(rail, blocks);
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(center);
+      else setTimeout(center, 0);
+    }
   }
 
   _formatTime(value) {

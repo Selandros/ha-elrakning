@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { reconcileEllaSiteState, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { centerCurrentPricePlanCard, currentPricePlanBlock, reconcileEllaSiteState, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), panel.indexOf('<div class="daily-energy-row">'));
@@ -10,7 +10,9 @@ assert.match(panel, /data-price-plan-rail/);
 assert.match(panel, /price-chart-frame[\s\S]*price-plan-rail/);
 assert.match(panel, /<\/section>\s*<div class="price-plan-rail" data-price-plan-rail/);
 assert.match(panel, /\.price-section\s*\{[\s\S]*?margin-bottom: 0;/);
-assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 0;[\s\S]*?padding: 6px 1px;/);
+assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 0;[\s\S]*?padding: 0 1px 6px;/);
+assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
+assert.match(panel, /price-plan-load-missing/);
 assert.match(panel, /price-plan-card/);
 assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);
@@ -60,5 +62,17 @@ assert.deepEqual(togglePricePlanSelection(selectedA, blockB, "price-only-v1"), {
   id: "b", start: blockB.start, end: blockB.end, revision: "price-only-v1",
 });
 assert.equal(togglePricePlanSelection(selectedA, blockA, "price-only-v1"), null);
+
+const blockNow = { plan_block_id: "now", start: "2026-09-20T11:30:00Z", end: "2026-09-20T13:45:00Z" };
+const blockLater = { plan_block_id: "later", start: "2026-09-20T13:45:00Z", end: "2026-09-20T15:00:00Z" };
+assert.equal(currentPricePlanBlock([blockNow, blockLater], Date.parse("2026-09-20T12:00:00Z")), blockNow);
+const rail = {
+  clientWidth: 300,
+  scrollWidth: 900,
+  scrollLeft: 0,
+  querySelectorAll: () => [{ dataset: { planBlockId: "now" }, offsetLeft: 350, offsetWidth: 220 }],
+};
+assert.equal(centerCurrentPricePlanCard(rail, [blockNow], Date.parse("2026-09-20T12:00:00Z")), true);
+assert.equal(rail.scrollLeft, 310);
 
 console.log("ELLA price-plan shell static/site-switch checks: PASS");

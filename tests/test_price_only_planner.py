@@ -80,13 +80,27 @@ class PriceOnlyPlannerTests(unittest.TestCase):
         self.assertEqual(enriched["plan_blocks"][0]["load"]["coverage"], "complete")
         self.assertIn("load", enriched["plan_blocks"][0]["verified_inputs"]["capabilities"])
 
+    def test_all_fully_covered_price_blocks_are_load_enriched(self):
+        now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+        plan = build_price_only_plan("site-a", periods([0.2, 0.8, 0.2]), now, source_generation_id="generation-a")
+        points = [
+            {"valid_at": f"2026-09-20T00:{minutes:02d}:00+00:00", "value": 1000 + minutes, "unit": "W", "quality_status": "good"}
+            for minutes in (0, 15, 30)
+        ]
+        enriched = enrich_plan_with_load(plan, [self._load_frame(points=points)])
+        self.assertEqual(len(enriched["plan_blocks"]), 3)
+        self.assertTrue(all(block.get("load", {}).get("coverage") == "complete" for block in enriched["plan_blocks"]))
+
     def test_missing_stale_or_partial_load_falls_back_without_fabrication(self):
         now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
         plan = build_price_only_plan("site-a", periods([0.2, 0.2]), now, source_generation_id="generation-a")
         partial = self._load_frame(points=[{"valid_at": "2026-09-20T00:00:00+00:00", "value": 1000, "unit": "W", "quality_status": "good"}])
-        for frames in ([], [self._load_frame(quality_status="stale")], [partial], [self._load_frame("site-b")]):
+        for frames in ([], [self._load_frame(quality_status="stale")], [self._load_frame("site-b")]):
             result = enrich_plan_with_load(plan, frames)
             self.assertTrue(all("load" not in block for block in result["plan_blocks"]))
+        incomplete = enrich_plan_with_load(plan, [partial])
+        self.assertTrue(all(block["load"] == {"coverage": "unavailable", "reason": "incomplete_forecast_coverage"}
+                           for block in incomplete["plan_blocks"]))
 
     def test_load_enrichment_is_site_scoped(self):
         now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
