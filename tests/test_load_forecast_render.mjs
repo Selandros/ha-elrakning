@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { selectLoadForecastPoints } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+
+const panel = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+assert.doesNotMatch(panel, /actualBeforeForecast|loadForecastPoints\.unshift/);
 
 const siteId = "site-a";
 const oldV1 = {
@@ -34,6 +38,12 @@ const at2045 = selectLoadForecastPoints([oldV1, currentV2], {
   siteId, selectedDate, now: new Date("2026-09-20T20:45:00+02:00"),
 });
 assert.equal(at2045[0].timestamp, new Date("2026-09-20T21:00:00+02:00").getTime());
+
+const at2054 = selectLoadForecastPoints([oldV1, currentV2], {
+  siteId, selectedDate, now: new Date("2026-09-20T20:54:00+02:00"),
+});
+assert.equal(at2054[0].timestamp, new Date("2026-09-20T21:00:00+02:00").getTime());
+assert.ok(at2054.every((point) => point.timestamp >= new Date("2026-09-20T21:00:00+02:00").getTime()));
 
 assert.deepEqual(selectLoadForecastPoints([oldV1, currentV2], {
   siteId, selectedDate: new Date("2026-09-19T12:00:00+02:00"), now: new Date("2026-09-20T20:41:00+02:00"),

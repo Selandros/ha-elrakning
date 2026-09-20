@@ -11354,12 +11354,6 @@ class ElrakningPanel {
       selectedDate: dayStart,
       now,
     });
-    if (loadForecastPoints.length) {
-      const actualBeforeForecast = (powerDisplayPoints.consumption || [])
-        .filter((point) => new Date(point.timestamp).getTime() < loadForecastPoints[0].timestamp)
-        .at(-1);
-      if (actualBeforeForecast) loadForecastPoints.unshift({ ...actualBeforeForecast, value_kw: Number(actualBeforeForecast.value_kw) });
-    }
     this._powerCanonicalPointMaps = Object.fromEntries(
       Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
         points.filter((point) => point.raw_timestamp !== null).map((point) => [point.timestamp, point]),
