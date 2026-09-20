@@ -5155,7 +5155,7 @@ class ElrakningPanel {
           flex-wrap: nowrap;
           gap: clamp(3px, 1cqw, 8px);
           justify-content: flex-end;
-          margin-top: 6px;
+          margin-bottom: 6px;
           max-width: 100%;
           min-width: 0;
           position: static;

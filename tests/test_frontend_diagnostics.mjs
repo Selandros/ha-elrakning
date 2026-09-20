@@ -1088,7 +1088,9 @@ assert.doesNotMatch(eonPanelSource, /<svg class="chart-svg"[\s\S]*\$\{hourLabels
 assert.match(eonPanelSource, /\.price-analysis \{[\s\S]*margin: 0;[\s\S]*min-height: 0;/);
 assert.match(eonPanelSource, /plotBottom: plot\.bottom/);
 assert.match(eonPanelSource, /\.price-chart-legend \{[\s\S]*min-height: 14px;[\s\S]*margin-top: 0;/);
-assert.match(eonPanelSource, /\.period-picker \{[\s\S]*margin-top: 6px;/);
+const periodPickerRule = eonPanelSource.match(/\.period-picker \{([^}]*)\}/)?.[1] || "";
+assert.doesNotMatch(periodPickerRule, /margin-top:/);
+assert.match(periodPickerRule, /margin-bottom: 6px;/);
 const phaseRawSamples = (offset = 0) => Array.from({ length: 720 }, (_, index) => ({
   timestamp: new Date(Date.parse("2026-08-30T00:00:00Z") + (index * 5 + offset) * 1000).toISOString(),
   value: index === 361 ? 99 : index / 100,
