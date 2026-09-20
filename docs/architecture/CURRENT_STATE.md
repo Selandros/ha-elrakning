@@ -1289,3 +1289,37 @@ INFERRED (roadmap): Long-term data foundation:
 - This closure verifies only the price-only UI shell and graph-selection
   interaction. Load-aware, solar-aware, ESS/battery, actuator and dispatch
   stages remain unimplemented and are not implied by this status.
+
+## 0.0.668–0.0.669 Load-aware plan cards and spacing closure
+
+- ACCEPTED RUNTIME BASELINE: `0.0.669`, release commit `8d01c4c`.
+  The release gate passed with Python `671 passed`, `46 subtests`, `0
+  failed`, MJS `29/29`, compileall, JSON/YAML validation and diff-check.
+  The clean payload matched SHA256 `61/61`; HA Core check passed, exactly
+  one normal Core restart was performed, HTTP returned `200`, and no new
+  Elräkning traceback or thread-safety warning was observed.
+- IMPLEMENTED IN `0.0.668`: plan-block load totals use the established
+  canonical load model with deterministic per-slot precedence
+  `actual > forward forecast > historical model`. Mixed totals are allowed
+  and carry explicit provenance; missing slots are never zero-filled. The
+  historical model fallback is the existing site-scoped load-profile model,
+  not a separate Recorder/UI shortcut.
+- SUPERSEDED FOR LAYOUT ONLY: `0.0.668` established the historical-model
+  fallback and runtime load/provenance behavior, but its effective vertical
+  rail spacing remained too large. `0.0.669` changes only the
+  price-section/rail DOM layout and spacing; planner, load, provenance,
+  selection and site-isolation semantics are unchanged.
+- VERIFIED (authenticated Safari runtime, Vikarbodarna): all `7/7`
+  price-only plan blocks had numeric load totals. The observed provenance
+  sequence was `actual, mixed, model, model, mixed, forecast, forecast`.
+  The current `11:30–13:45` block remained centered with rail center
+  `622.5`, card center `602.5`, delta `-20 px` and `scrollLeft=763`.
+- VERIFIED (authenticated Safari runtime): chart-frame-to-rail spacing was
+  approximately `20.5 px` and price-section-to-rail spacing `20.0 px`; the
+  rail remained structurally outside the price section. Site-scoped,
+  provenance-aware and fail-closed semantics remain in force: no zero-fill,
+  no cross-site load leakage, and no solar/ESS/actuator behavior was added.
+- CURRENT ROADMAP STATE: A1 price-only planning, the price-card UI shell,
+  and stage B load-aware enrichment are accepted runtime behavior. Solar/
+  net-load enrichment, ESS planning and physical actuator/dispatch remain
+  future stages and are not implemented by this state.

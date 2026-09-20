@@ -1399,3 +1399,40 @@ enrichment remains the next staged scope (B), followed by solar/net-load
 enrichment (C), ESS planning (D), and separate vendor-neutral actuator/
 dispatch (E). No load, solar, ESS, actuator or dispatch behavior is implied
 by the accepted `0.0.662` UI shell.
+
+### 19.9 Current accepted state after 0.0.669
+
+This section supersedes the earlier roadmap wording that described stage B
+as the next unimplemented scope. It records only behavior that has passed
+the 0.0.669 runtime gate; stages C–E remain future work.
+
+- ELLA is a planner concept, not an on/off product toggle. The transitional
+  site binding and the 0.0.658 stale/cross-site protections remain historical
+  safety mechanisms; price-only eligibility is based on verified, site-scoped
+  price capability.
+- The accepted UI presents plan cards directly below the price graph. There
+  is no separate ELLA product section, shadow/lärläge presentation or
+  planner toggle in the accepted product shell. Price-only cards work when
+  verified Nord Pool data exists; load enrichment is added only when the
+  current site's canonical load evidence qualifies.
+- Stage B load-aware enrichment is accepted through `0.0.669`. Per-slot
+  load estimates use the single established source with precedence
+  `actual > forecast > historical model`; a block may carry a mixed total
+  when its interval is covered by more than one of those sources. Every
+  numeric result is provenance-labelled, and a slot with no verified support
+  remains unavailable rather than becoming zero. No source is inferred from
+  site name, vendor name or another site's data.
+- Plan cards containing the current time are auto-centred once after a new
+  plan/date/site render. Card selection marks the corresponding price-graph
+  interval; selecting another card moves the band, selecting it again or
+  interacting outside the cards/scrolling clears it. Site changes invalidate
+  the old cards and selection before applying the new site.
+- The 0.0.669 layout keeps the card rail outside the price-section/chart
+  frame, with approximately equal runtime spacing above and below the rail.
+  The runtime measurement was approximately `20.5 px` from chart frame to
+  rail and `20.0 px` from price section to rail.
+
+The next staged scope is C, solar and net-load enrichment. It must add only
+verified raw/corrected PV inputs and preserve the same site-scoped,
+provenance-aware and fail-closed rules. ESS planning, physical actuation and
+dispatch remain unimplemented; no current UI or plan may imply them.
