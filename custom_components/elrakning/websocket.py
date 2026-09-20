@@ -34,6 +34,7 @@ from .meter import MeterManager
 from .invoice import build_today_variable_cost
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
+from .ella_capabilities import build_capability_inventory
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -87,6 +88,11 @@ ELLA_BINDING_SET_COMMAND = f"{DOMAIN}/ella_binding_set"
 SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
 SOLAR_EVIDENCE_STATE_COMMAND = f"{DOMAIN}/solar_evidence_state"
 ELLA_PLAN_COMMAND = f"{DOMAIN}/ella_plan"
+ELLA_CAPABILITIES_COMMAND = f"{DOMAIN}/ella_capabilities"
+ELLA_LOADS_LIST_COMMAND = f"{DOMAIN}/ella_loads/list"
+ELLA_LOADS_STATE_COMMAND = f"{DOMAIN}/ella_loads/state"
+ELLA_LOADS_UPSERT_COMMAND = f"{DOMAIN}/ella_loads/upsert"
+ELLA_LOADS_REMOVE_COMMAND = f"{DOMAIN}/ella_loads/remove"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -142,6 +148,11 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_site_activate)
     websocket_api.async_register_command(hass, websocket_ella_binding_set)
     websocket_api.async_register_command(hass, websocket_ella_plan)
+    websocket_api.async_register_command(hass, websocket_ella_capabilities)
+    websocket_api.async_register_command(hass, websocket_ella_loads_list)
+    websocket_api.async_register_command(hass, websocket_ella_loads_state)
+    websocket_api.async_register_command(hass, websocket_ella_loads_upsert)
+    websocket_api.async_register_command(hass, websocket_ella_loads_remove)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -827,12 +838,29 @@ async def websocket_electricity_provider_source_data(hass, connection, msg):
 async def websocket_diagnostics_state(hass, connection, msg):
     manager = _elhandel_manager(hass)
     site_identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    inventory = None
+    if site_identity is not None and _ella_load_registry(hass) is not None:
+        site_id = getattr(site_identity, "state", {}).get("active_site_id")
+        if isinstance(site_id, str):
+            inventory = build_capability_inventory(
+                site_identity,
+                _ella_load_registry(hass),
+                site_id,
+                load_forecast=await _async_load_forecast_state(hass, site_id),
+            )
     connection.send_result(msg["id"], {
         "logs": manager.diagnostics if manager else [],
         "site_identity": site_identity.public_state() if site_identity else {
             "site_id": None,
             "logical_roles": [],
             "source_ledger": [],
+        },
+        "ella_capability_inventory": inventory,
+        "ella_loads": {
+            "schema": "ella_load_registry.v1",
+            "site_id": inventory.get("site_id") if inventory else None,
+            "count": inventory.get("individual_loads", {}).get("count", 0) if inventory else 0,
+            "execution_eligible": False,
         },
     })
 
@@ -1204,14 +1232,15 @@ async def websocket_power_history(hass, connection, msg):
     connection.send_result(msg["id"], result)
 
 
-async def _async_load_forecast_state(hass) -> dict:
+async def _async_load_forecast_state(hass, requested_site_id: str | None = None) -> dict:
     """Serialize the active site's immutable load forecast, if available."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
-    ella_binding_getter = getattr(identity, "active_ella_binding", None) if identity else None
-    if not callable(ella_binding_getter) or ella_binding_getter() is None:
+    site_id = requested_site_id or (getattr(identity, "state", {}).get("active_site_id") if identity else None)
+    binding_getter = getattr(identity, "ella_binding_for_site", None) if identity else None
+    binding = binding_getter(site_id) if callable(binding_getter) else None
+    if binding is None:
         return {"available": False, "reason": "ella_unbound", "frames": []}
-    site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
     if not site_id or collector is None:
         return {"available": False, "reason": "site_unconfigured", "frames": []}
     now = dt_util.now().astimezone()
@@ -1248,6 +1277,100 @@ async def _async_load_forecast_state(hass) -> dict:
 @websocket_api.async_response
 async def websocket_load_forecast(hass, connection, msg):
     connection.send_result(msg["id"], await _async_load_forecast_state(hass))
+
+
+def _ella_site_manager(hass):
+    return hass.data.get(DOMAIN, {}).get("site_identity_manager")
+
+
+def _ella_load_registry(hass):
+    return hass.data.get(DOMAIN, {}).get("ella_load_registry")
+
+
+def _ella_requested_site(hass, msg, *, required: bool = False):
+    identity = _ella_site_manager(hass)
+    if identity is None:
+        return None, "site_manager_unavailable"
+    site_id = msg.get("site_id") or getattr(identity, "state", {}).get("active_site_id")
+    if required and not isinstance(msg.get("site_id"), str):
+        return None, "site_id_required"
+    sites = getattr(identity, "state", {}).get("sites", [])
+    if not isinstance(site_id, str) or not any(item.get("site_id") == site_id for item in sites if isinstance(item, dict)):
+        return None, "site_not_found"
+    return site_id, None
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_CAPABILITIES_COMMAND, vol.Optional("site_id"): str})
+@websocket_api.async_response
+async def websocket_ella_capabilities(hass, connection, msg):
+    site_id, error = _ella_requested_site(hass, msg)
+    registry = _ella_load_registry(hass)
+    if error or registry is None:
+        connection.send_result(msg["id"], {"success": False, "error": error or "load_registry_unavailable"})
+        return
+    forecast = await _async_load_forecast_state(hass, site_id)
+    try:
+        inventory = build_capability_inventory(_ella_site_manager(hass), registry, site_id, load_forecast=forecast)
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, **inventory})
+
+
+async def _ella_loads_response(hass, msg):
+    site_id, error = _ella_requested_site(hass, msg)
+    registry = _ella_load_registry(hass)
+    if error or registry is None:
+        return {"success": False, "error": error or "load_registry_unavailable"}
+    return {"success": True, "schema": "ella_load_registry.v1", "site_id": site_id, "loads": registry.list_for_site(site_id)}
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_LOADS_LIST_COMMAND, vol.Optional("site_id"): str})
+@websocket_api.async_response
+async def websocket_ella_loads_list(hass, connection, msg):
+    connection.send_result(msg["id"], await _ella_loads_response(hass, msg))
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_LOADS_STATE_COMMAND, vol.Optional("site_id"): str})
+@websocket_api.async_response
+async def websocket_ella_loads_state(hass, connection, msg):
+    connection.send_result(msg["id"], await _ella_loads_response(hass, msg))
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_LOADS_UPSERT_COMMAND, vol.Required("site_id"): str, vol.Required("load"): dict})
+@websocket_api.async_response
+async def websocket_ella_loads_upsert(hass, connection, msg):
+    user = getattr(connection, "user", None)
+    if user is None or getattr(user, "is_admin", False) is not True:
+        connection.send_result(msg["id"], {"success": False, "error": "admin_required"})
+        return
+    site_id, error = _ella_requested_site(hass, msg, required=True)
+    registry = _ella_load_registry(hass)
+    if error or registry is None:
+        connection.send_result(msg["id"], {"success": False, "error": error or "load_registry_unavailable"})
+        return
+    try:
+        load = await registry.async_upsert(site_id, msg["load"])
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, "schema": "ella_load_registry.v1", "site_id": site_id, "load": load, "execution_eligible": False})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_LOADS_REMOVE_COMMAND, vol.Required("site_id"): str, vol.Required("load_id"): str})
+@websocket_api.async_response
+async def websocket_ella_loads_remove(hass, connection, msg):
+    user = getattr(connection, "user", None)
+    if user is None or getattr(user, "is_admin", False) is not True:
+        connection.send_result(msg["id"], {"success": False, "error": "admin_required"})
+        return
+    site_id, error = _ella_requested_site(hass, msg, required=True)
+    registry = _ella_load_registry(hass)
+    if error or registry is None:
+        connection.send_result(msg["id"], {"success": False, "error": error or "load_registry_unavailable"})
+        return
+    removed = await registry.async_remove(site_id, msg["load_id"])
+    connection.send_result(msg["id"], {"success": True, "site_id": site_id, "load_id": msg["load_id"], "removed": removed})
 
 
 @websocket_api.websocket_command({vol.Required("type"): SOLAR_FORECAST_STATE_COMMAND})
