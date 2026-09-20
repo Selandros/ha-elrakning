@@ -25,7 +25,7 @@ const pricePlanRailRule = panel.match(/\.price-plan-rail\s*\{([^}]*)\}/)?.[1] ||
 const genericButtonRule = panel.match(/\n\s*button\s*\{([^}]*)\}/)?.[1] || "";
 assert.match(pricePlanRailRule, /gap: 0;/);
 assert.match(panel, /\.price-plan-rail:has\(> :not\(\[hidden\]\) ~ :not\(\[hidden\]\)\)\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
-assert.doesNotMatch(pricePlanRailRule, /padding:/);
+assert.match(pricePlanRailRule, /padding: 3px;/);
 assert.doesNotMatch(priceSectionRule, /margin-bottom:/);
 assert.doesNotMatch(pricePlanRailRule, /margin(?:-top|-right|-bottom|-left)?:/);
 assert.doesNotMatch(genericButtonRule, /margin-top:/);

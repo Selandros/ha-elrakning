@@ -1095,7 +1095,7 @@ const livePowerTileRule = eonPanelSource.match(/\.live-power-tile \{([^}]*)\}/)?
 assert.doesNotMatch(livePowerTileRule, /align-content:\s*start/);
 assert.match(livePowerTileRule, /row-gap:\s*1px/);
 const pricePlanRailRule = eonPanelSource.match(/\.price-plan-rail \{([^}]*)\}/)?.[1] || "";
-assert.match(pricePlanRailRule, /padding-block:\s*1px/);
+assert.match(pricePlanRailRule, /padding:\s*3px/);
 assert.match(pricePlanRailRule, /scrollbar-width:\s*none/);
 const phaseRawSamples = (offset = 0) => Array.from({ length: 720 }, (_, index) => ({
   timestamp: new Date(Date.parse("2026-08-30T00:00:00Z") + (index * 5 + offset) * 1000).toISOString(),

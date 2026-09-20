@@ -3705,7 +3705,7 @@ class ElrakningPanel {
           display: grid;
           gap: 0;
           overflow-x: auto;
-          padding-block: 1px;
+          padding: 3px;
           scrollbar-width: none;
         }
 
