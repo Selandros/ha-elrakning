@@ -99,6 +99,7 @@ ELLA_LOADS_UPSERT_COMMAND = f"{DOMAIN}/ella_loads/upsert"
 ELLA_LOADS_REMOVE_COMMAND = f"{DOMAIN}/ella_loads/remove"
 ELLA_SITE_STATE_COMMAND = f"{DOMAIN}/ella_site_state"
 ELLA_ACTION_PLAN_COMMAND = f"{DOMAIN}/ella_action_plan"
+ELLA_DEBUG_SNAPSHOT_COMMAND = f"{DOMAIN}/ella_action_plan/debug"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ella_loads_remove)
     websocket_api.async_register_command(hass, websocket_ella_site_state)
     websocket_api.async_register_command(hass, websocket_ella_action_plan)
+    websocket_api.async_register_command(hass, websocket_ella_debug_snapshot)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -1441,7 +1443,35 @@ async def websocket_ella_action_plan(hass, connection, msg):
         connection.send_result(msg["id"], state or {"success": False, "error": "site_state_unavailable"})
         return
     result = build_action_plan({key: value for key, value in state.items() if key != "success"})
+    snapshot_store = hass.data.get(DOMAIN, {}).get("ella_debug_snapshot_store")
+    if result.get("available") is True and snapshot_store is not None:
+        await snapshot_store.async_put_plan({key: value for key, value in state.items() if key != "success"}, result)
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): ELLA_DEBUG_SNAPSHOT_COMMAND,
+    vol.Required("site_id"): str,
+    vol.Required("plan_id"): str,
+    vol.Required("revision"): int,
+    vol.Required("plan_block_id"): str,
+})
+@websocket_api.async_response
+async def websocket_ella_debug_snapshot(hass, connection, msg):
+    """Return only the immutable persisted decision-time snapshot for one block."""
+    site_id, error = _ella_requested_site(hass, msg, required=True)
+    if error:
+        connection.send_result(msg["id"], {"success": False, "available": False, "error": error})
+        return
+    snapshot_store = hass.data.get(DOMAIN, {}).get("ella_debug_snapshot_store")
+    if snapshot_store is None:
+        connection.send_result(msg["id"], {"success": False, "available": False, "error": "snapshot_store_unavailable"})
+        return
+    snapshot = snapshot_store.get(site_id, msg["plan_id"], msg["revision"], msg["plan_block_id"])
+    if snapshot is None:
+        connection.send_result(msg["id"], {"success": False, "available": False, "error": "snapshot_not_found_or_revision_mismatch", "site_id": site_id})
+        return
+    connection.send_result(msg["id"], {"success": True, "available": True, "snapshot": snapshot})
 
 
 async def _ella_loads_response(hass, msg):

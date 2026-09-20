@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const source = fs.readFileSync("custom_components/elrakning/frontend/elrakning-panel.js", "utf8");
+assert.match(source, /_loadEllaDebugSnapshot\(plan, block\)/);
+assert.match(source, /type: "elrakning\/ella_action_plan\/debug"/);
+assert.match(source, /plan_id: plan\?\.plan_id/);
+assert.match(source, /revision: plan\?\.revision/);
+assert.match(source, /plan_block_id: block\?\.plan_block_id/);
+assert.match(source, /if \(this\._debugEnabled\) this\._loadEllaDebugSnapshot/);
+assert.match(source, /ELLA · Visa data/);
+assert.match(source, /Kopiera data/);
+assert.match(source, /snapshot_unavailable/);
+assert.match(source, /_siteContextGeneration/);
+assert.match(source, /price-plan-action/);
+assert.doesNotMatch(source, /price-plan-card[\s\S]{0,1200}Snitt/);
+console.log("ELLA Stage 4 debug snapshot/static interaction checks: PASS");

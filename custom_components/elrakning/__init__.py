@@ -30,6 +30,7 @@ from .solar_evidence import SolarEvidenceManager
 from .solar_weather import SolarWeatherManager
 from .load_forecast import build_site_load_forecast
 from .ella_load_registry import EllaLoadRegistry
+from .ella_debug_snapshot import EllaDebugSnapshotStore
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
@@ -176,6 +177,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ella_load_registry = EllaLoadRegistry(hass, lambda: dt_util.now().isoformat())
     await ella_load_registry.async_load()
     hass.data.setdefault(DOMAIN, {})["ella_load_registry"] = ella_load_registry
+    ella_debug_snapshot_store = EllaDebugSnapshotStore(hass)
+    await ella_debug_snapshot_store.async_load()
+    hass.data.setdefault(DOMAIN, {})["ella_debug_snapshot_store"] = ella_debug_snapshot_store
     cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
     await cadence_audit_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager

@@ -2515,6 +2515,7 @@ class ElrakningPanel {
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._ellaSelection = null;
+    this._ellaDebugRequestToken = 0;
     this._powerHistoryRequestToken = 0;
     this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
@@ -8258,6 +8259,7 @@ class ElrakningPanel {
         this._renderPricePlanCards();
         this.renderPriceChart();
         this._renderSocChart();
+        if (this._debugEnabled) this._loadEllaDebugSnapshot(plan, block);
       });
       return button;
     }));
@@ -8387,7 +8389,7 @@ class ElrakningPanel {
     };
   }
 
-  _showSourceDataDialog(title, sourceLabel, data) {
+  _showSourceDataDialog(title, sourceLabel, data, copyLabel = "Kopiera") {
     const dialog = this.host.querySelector("[data-provider-source-dialog]");
     const heading = dialog?.querySelector("h2");
     const provider = this.host.querySelector("[data-provider-source-provider]");
@@ -8399,8 +8401,54 @@ class ElrakningPanel {
     provider.hidden = !sourceLabel;
     text.textContent = JSON.stringify(sanitizeDebugData(data), null, 2);
     copy.disabled = false;
-    copy.textContent = "Kopiera";
+    copy.dataset.defaultLabel = copyLabel;
+    copy.textContent = copyLabel;
     dialog.hidden = false;
+  }
+
+  async _loadEllaDebugSnapshot(plan, block) {
+    const requestToken = ++this._ellaDebugRequestToken;
+    const siteGeneration = this._siteContextGeneration;
+    const siteId = plan?.site_id || this._siteState?.site_id;
+    const request = {
+      type: "elrakning/ella_action_plan/debug",
+      site_id: siteId,
+      plan_id: plan?.plan_id,
+      revision: plan?.revision,
+      plan_block_id: block?.plan_block_id,
+    };
+    try {
+      const response = await this.hass.callWS(request);
+      if (requestToken !== this._ellaDebugRequestToken
+        || siteGeneration !== this._siteContextGeneration
+        || this._pricePlan?.plan_id !== plan?.plan_id
+        || this._pricePlan?.revision !== plan?.revision
+        || this._siteState?.site_id && this._siteState.site_id !== siteId) return;
+      if (response?.success === true && response?.available === true && response.snapshot) {
+        this._showSourceDataDialog("ELLA · Visa data", `Planblock ${block.plan_block_id}`, response.snapshot, "Kopiera data");
+        return;
+      }
+      this._showSourceDataDialog("ELLA · Visa data", `Planblock ${block.plan_block_id}`, {
+        available: false,
+        error: response?.error || "snapshot_unavailable",
+        site_id: siteId,
+        plan_id: plan?.plan_id,
+        revision: plan?.revision,
+        plan_block_id: block?.plan_block_id,
+      }, "Kopiera data");
+    } catch (error) {
+      if (requestToken !== this._ellaDebugRequestToken || siteGeneration !== this._siteContextGeneration) return;
+      const details = this._websocketErrorDetails(error);
+      this._showSourceDataDialog("ELLA · Visa data", `Planblock ${block.plan_block_id}`, {
+        available: false,
+        error: details.code,
+        message: details.message,
+        site_id: siteId,
+        plan_id: plan?.plan_id,
+        revision: plan?.revision,
+        plan_block_id: block?.plan_block_id,
+      }, "Kopiera data");
+    }
   }
 
   _buildPriceSourceData() {
@@ -8929,6 +8977,8 @@ class ElrakningPanel {
       provider.hidden = true;
       provider.textContent = "";
       copy.disabled = true;
+      copy.dataset.defaultLabel = "Kopiera";
+      copy.textContent = "Kopiera";
       try {
         let source = liveSource
           ? liveSource._livePowerRaw || {}
@@ -8979,10 +9029,10 @@ class ElrakningPanel {
       try {
         await this._copyText(text.textContent);
         copy.textContent = "Kopierat";
-        window.setTimeout(() => { copy.textContent = "Kopiera"; }, 1500);
+        window.setTimeout(() => { copy.textContent = copy.dataset.defaultLabel || "Kopiera"; }, 1500);
       } catch {
         copy.textContent = "Kunde inte kopiera";
-        window.setTimeout(() => { copy.textContent = "Kopiera"; }, 1500);
+        window.setTimeout(() => { copy.textContent = copy.dataset.defaultLabel || "Kopiera"; }, 1500);
       }
     });
     close.addEventListener("click", dismiss);
