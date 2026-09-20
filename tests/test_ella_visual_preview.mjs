@@ -17,11 +17,15 @@ assert.match(panel, /<\/section>\s*\n\s*<div class="price-plan-rail" data-price-
 assert.doesNotMatch(panel.slice(pricePlanRail), /<div class="price-controls">/);
 assert.match(panel, /\.price-section\s*\{[\s\S]*?margin-bottom: 0;/);
 assert.match(panel, /--dashboard-card-gap: 16px;/);
-assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: var\(--dashboard-card-gap\) 0;[\s\S]*?padding: 0 1px 6px;/);
+assert.match(panel, /dashboard-card-stack/);
+assert.match(panel, /\.dashboard-card-stack\s*\{[\s\S]*?display: grid;[\s\S]*?gap: var\(--dashboard-card-gap\);/);
+assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: 0;[\s\S]*?padding: 0 1px 6px;/);
 assert.doesNotMatch(panel, /\.price-plan-rail\s*\{[\s\S]*?border-bottom:/);
 assert.match(panel, /\.daily-energy-row\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
-assert.match(panel, /\.battery-history-row\s*\{[\s\S]*?margin-top: var\(--dashboard-card-gap\);/);
-assert.match(panel, /\.phase-history-row\s*\{[\s\S]*?margin-top: var\(--dashboard-card-gap\);/);
+const batteryHistoryRule = panel.match(/\.battery-history-row\s*\{([^}]*)\}/)?.[1] || "";
+const phaseHistoryRule = panel.match(/\.phase-history-row\s*\{([^}]*)\}/)?.[1] || "";
+assert.doesNotMatch(batteryHistoryRule, /margin-top:/);
+assert.doesNotMatch(phaseHistoryRule, /margin-top:/);
 assert.match(panel, /\.grid\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
 assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
 assert.match(panel, /price-plan-load-missing/);

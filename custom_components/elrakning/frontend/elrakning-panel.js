@@ -2577,6 +2577,7 @@ class ElrakningPanel {
           </div>
         </header>
 
+        <div class="dashboard-card-stack">
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
             <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
@@ -2823,6 +2824,7 @@ class ElrakningPanel {
           <span class="diagnostics-copy-status" data-diagnostics-copy-status aria-live="polite"></span>
           <div class="diagnostics-list" data-diagnostics-list></div>
         </section>
+        </div>
       </main>
       <div class="provider-source-dialog" data-provider-source-dialog hidden role="dialog" aria-modal="true" aria-labelledby="provider-source-dialog-title">
         <div class="provider-dialog-card">
@@ -3486,7 +3488,6 @@ class ElrakningPanel {
           background: var(--ha-card-background, var(--card-background-color));
           box-shadow: none;
           backdrop-filter: none;
-          margin-top: 16px;
           -webkit-backdrop-filter: none;
         }
         .solar-evidence-summary, .solar-evidence-status { line-height: 1.45; }
@@ -3519,8 +3520,9 @@ class ElrakningPanel {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .battery-history-row {
-          margin-top: var(--dashboard-card-gap);
+        .dashboard-card-stack {
+          display: grid;
+          gap: var(--dashboard-card-gap);
         }
 
         @container (max-width: 760px) {
@@ -3689,7 +3691,7 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           overflow-x: auto;
-          margin: var(--dashboard-card-gap) 0;
+          margin: 0;
           padding: 0 1px 6px;
           scrollbar-width: thin;
         }
@@ -4076,7 +4078,6 @@ class ElrakningPanel {
 
         .phase-history-row {
           grid-template-columns: 1fr;
-          margin-top: var(--dashboard-card-gap);
         }
 
         .cost-card {
@@ -4601,7 +4602,7 @@ class ElrakningPanel {
         }
 
         .invoice-diagnostics {
-          margin-top: 16px;
+          margin: 0;
         }
 
         .invoice-diagnostic-grid {
@@ -4644,7 +4645,7 @@ class ElrakningPanel {
         }
 
         .diagnostics-card {
-          margin-top: 16px;
+          margin: 0;
         }
 
         .diagnostic-entry {
@@ -4668,7 +4669,6 @@ class ElrakningPanel {
           display: grid;
           gap: 12px;
           grid-template-columns: repeat(5, minmax(0, 1fr));
-          margin-bottom: 16px;
         }
 
         .live-power-tile {
