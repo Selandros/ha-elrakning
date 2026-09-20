@@ -4868,7 +4868,6 @@ class ElrakningPanel {
         .grid {
           align-items: stretch;
           display: grid;
-          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         }
 

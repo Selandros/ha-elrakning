@@ -38,8 +38,9 @@ const batteryHistoryRule = panel.match(/\.battery-history-row\s*\{([^}]*)\}/)?.[
 const phaseHistoryRule = panel.match(/\.phase-history-row\s*\{([^}]*)\}/)?.[1] || "";
 assert.doesNotMatch(batteryHistoryRule, /margin-top:/);
 assert.doesNotMatch(phaseHistoryRule, /margin-top:/);
-assert.match(panel, /\.grid\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
 assert.match(panel, /\.grid\s*\{[\s\S]*?align-items: stretch;/);
+const dashboardGridRule = panel.match(/\.grid\s*\{([^}]*)\}/)?.[1] || "";
+assert.doesNotMatch(dashboardGridRule, /gap:/);
 assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
 assert.match(panel, /price-plan-load-missing/);
 assert.match(panel, /Faktisk förbrukning/);
