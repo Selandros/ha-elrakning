@@ -33,6 +33,7 @@ from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
 from .invoice import build_today_variable_cost
 from .power import PowerManager
+from .price_only_planner import build_price_only_plan
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
 
@@ -83,6 +84,7 @@ SITE_ACTIVATE_COMMAND = f"{DOMAIN}/site_activate"
 ELLA_BINDING_SET_COMMAND = f"{DOMAIN}/ella_binding_set"
 SOLAR_FORECAST_STATE_COMMAND = f"{DOMAIN}/solar_forecast_state"
 SOLAR_EVIDENCE_STATE_COMMAND = f"{DOMAIN}/solar_evidence_state"
+ELLA_PLAN_COMMAND = f"{DOMAIN}/ella_plan"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,6 +139,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_site_create)
     websocket_api.async_register_command(hass, websocket_site_activate)
     websocket_api.async_register_command(hass, websocket_ella_binding_set)
+    websocket_api.async_register_command(hass, websocket_ella_plan)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -1251,6 +1254,41 @@ async def websocket_solar_forecast_state(hass, connection, msg):
     """Return current Forecast.Solar facts and stored daily baselines."""
     manager = _solar_forecast_manager(hass) if _site_is_configured(hass) else None
     connection.send_result(msg["id"], manager.public_state() if manager else SolarForecastManager._unavailable_facts())
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_PLAN_COMMAND, vol.Optional("date"): str})
+@websocket_api.async_response
+async def websocket_ella_plan(hass, connection, msg):
+    """Return the active site's truthful price-only plan."""
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if identity is None:
+        connection.send_result(msg["id"], {"available": False, "reason": "site_identity_unavailable", "plan_blocks": []})
+        return
+    site_id = identity.state.get("active_site_id")
+    if not isinstance(site_id, str) or not site_id:
+        connection.send_result(msg["id"], {"available": False, "reason": "site_unconfigured", "plan_blocks": []})
+        return
+    entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+    coordinator = entry.runtime_data if entry else None
+    if coordinator is None:
+        connection.send_result(msg["id"], {"available": False, "reason": "price_unavailable", "plan_blocks": []})
+        return
+    target = dt_util.now().date()
+    if msg.get("date"):
+        try:
+            target = date.fromisoformat(msg["date"])
+        except ValueError:
+            connection.send_result(msg["id"], {"available": False, "reason": "invalid_date", "plan_blocks": []})
+            return
+    data = await coordinator.async_get_price_data(target)
+    binding = getattr(coordinator, "binding", None) or {}
+    result = build_price_only_plan(
+        site_id,
+        data.periods if data and not data.error else (),
+        dt_util.now(),
+        source_generation_id=str(binding.get("binding_fingerprint") or binding.get("config_entry_id") or ""),
+    )
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command({vol.Required("type"): SOLAR_EVIDENCE_STATE_COMMAND})
