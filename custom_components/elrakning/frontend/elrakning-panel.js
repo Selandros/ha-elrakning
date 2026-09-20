@@ -3009,6 +3009,7 @@ class ElrakningPanel {
           display: flex;
           justify-content: space-between;
           gap: 16px;
+          margin-top: 16px;
         }
 
         .header-icon-controls {
@@ -3530,6 +3531,7 @@ class ElrakningPanel {
         .dashboard-card-stack {
           display: grid;
           gap: 0;
+          margin-bottom: 16px;
         }
 
         .dashboard-card-stack:has(> :not([hidden]) ~ :not([hidden])) {
