@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfoNotFoundError
@@ -1431,7 +1432,10 @@ async def websocket_ella_action_plan(hass, connection, msg):
             self.payload = payload
 
     capture = _Capture()
-    await websocket_ella_site_state(hass, capture, msg)
+    state_handler = getattr(websocket_ella_site_state, "__wrapped__", websocket_ella_site_state)
+    state_result = state_handler(hass, capture, msg)
+    if inspect.isawaitable(state_result):
+        await state_result
     state = capture.payload
     if not isinstance(state, dict) or state.get("success") is not True:
         connection.send_result(msg["id"], state or {"success": False, "error": "site_state_unavailable"})
