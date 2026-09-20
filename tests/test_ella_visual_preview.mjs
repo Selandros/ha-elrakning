@@ -5,7 +5,7 @@ import { centerCurrentPricePlanCard, currentPricePlanBlock, reconcileEllaSiteSta
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), panel.indexOf('<div class="daily-energy-row">'));
 
-assert.match(panel, /type: "elrakning\/ella_plan"/);
+assert.match(panel, /type: "elrakning\/ella_action_plan"/);
 assert.match(panel, /data-price-plan-rail/);
 const priceSectionStart = panel.indexOf('<section class="price-section"');
 const priceSectionEnd = panel.indexOf('</section>', priceSectionStart);
@@ -48,10 +48,13 @@ const dashboardGridRule = panel.match(/\.grid\s*\{([^}]*)\}/)?.[1] || "";
 assert.match(dashboardGridRule, /gap: 0;/);
 assert.match(panel, /\.grid:has\(> :not\(\[hidden\]\) ~ :not\(\[hidden\]\)\)\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
 assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
-assert.match(panel, /price-plan-load-missing/);
-assert.match(panel, /Faktisk förbrukning/);
-assert.match(panel, /Beräknad total/);
-assert.match(panel, /Estimerad förbrukning/);
+const cardRender = panel.slice(panel.indexOf("_renderPricePlanCards()"), panel.indexOf("_formatTime(value)", panel.indexOf("_renderPricePlanCards()")));
+assert.match(cardRender, /price_context\?\.title/);
+assert.match(cardRender, /primary_action\?\.label/);
+assert.match(cardRender, /short_reason/);
+for (const legacyLabel of ["Snitt", "Ej verkställd", "Faktisk förbrukning", "Beräknad total", "Estimerad förbrukning", "Förväntad förbrukning"]) {
+  assert.doesNotMatch(cardRender, new RegExp(legacyLabel));
+}
 assert.match(panel, /price-plan-card/);
 const pricePlanCardRule = panel.match(/\.price-plan-card\s*\{([^}]*)\}/)?.[1] || "";
 assert.match(pricePlanCardRule, /background: var\(--ha-card-glass-tint, var\(--ha-card-background, var\(--card-background-color\)\)\);/);

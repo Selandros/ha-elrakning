@@ -37,6 +37,7 @@ from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
 from .ella_site_state import build_site_state, resolve_timezone
+from .ella_action_plan import build_action_plan
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -96,6 +97,7 @@ ELLA_LOADS_STATE_COMMAND = f"{DOMAIN}/ella_loads/state"
 ELLA_LOADS_UPSERT_COMMAND = f"{DOMAIN}/ella_loads/upsert"
 ELLA_LOADS_REMOVE_COMMAND = f"{DOMAIN}/ella_loads/remove"
 ELLA_SITE_STATE_COMMAND = f"{DOMAIN}/ella_site_state"
+ELLA_ACTION_PLAN_COMMAND = f"{DOMAIN}/ella_action_plan"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -157,6 +159,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ella_loads_upsert)
     websocket_api.async_register_command(hass, websocket_ella_loads_remove)
     websocket_api.async_register_command(hass, websocket_ella_site_state)
+    websocket_api.async_register_command(hass, websocket_ella_action_plan)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -1414,6 +1417,27 @@ async def websocket_ella_site_state(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": str(err), "site_id": site_id})
         return
     connection.send_result(msg["id"], {"success": True, **state})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_ACTION_PLAN_COMMAND, vol.Optional("site_id"): str, vol.Optional("date"): str})
+@websocket_api.async_response
+async def websocket_ella_action_plan(hass, connection, msg):
+    """Return the Stage 3 shadow/recommend-only plan without device writes."""
+    class _Capture:
+        def __init__(self):
+            self.payload = None
+
+        def send_result(self, _message_id, payload):
+            self.payload = payload
+
+    capture = _Capture()
+    await websocket_ella_site_state(hass, capture, msg)
+    state = capture.payload
+    if not isinstance(state, dict) or state.get("success") is not True:
+        connection.send_result(msg["id"], state or {"success": False, "error": "site_state_unavailable"})
+        return
+    result = build_action_plan({key: value for key, value in state.items() if key != "success"})
+    connection.send_result(msg["id"], result)
 
 
 async def _ella_loads_response(hass, msg):

@@ -3735,37 +3735,24 @@ class ElrakningPanel {
         }
 
         .price-plan-card strong,
+        .price-plan-card b,
         .price-plan-card small {
           display: block;
         }
 
-        .price-plan-card small {
-          color: var(--secondary-text-color);
-          margin-top: 4px;
-        }
-
-        .price-plan-card .price-plan-value {
-          color: var(--secondary-text-color);
-          font-size: .85em;
+        .price-plan-card b {
+          font-size: 1.05em;
           margin-top: 8px;
         }
 
-        .price-plan-card .price-plan-load-missing {
+        .price-plan-card small {
           color: var(--secondary-text-color);
-          display: block;
-          font-size: .82em;
           margin-top: 4px;
         }
 
         .price-plan-card:focus-visible {
           outline: 2px solid var(--primary-color);
           outline-offset: 2px;
-        }
-
-        .price-plan-card .price-plan-status {
-          color: var(--secondary-text-color);
-          font-size: .85em;
-          margin-top: 8px;
         }
 
         .chart-power-forecast-load {
@@ -6203,7 +6190,9 @@ class ElrakningPanel {
       this._periodPickerState.draft = new Date(next);
       this._periodPickerState.open = false;
       this._renderPeriodPicker();
-      if (changed) await this.loadPriceData(next);
+      if (changed) {
+        await Promise.all([this.loadPriceData(next), this.loadPricePlan(next)]);
+      }
       else {
         this.updatePriceSummary();
         this.renderPriceChart();
@@ -8237,7 +8226,8 @@ class ElrakningPanel {
     const planKey = JSON.stringify({
       site_id: plan.site_id || null,
       plan_version: plan.plan_version || null,
-      source_generation_id: plan.capability?.source_generation_id || null,
+      input_state_id: plan.input_state_id || null,
+      plan_id: plan.plan_id || null,
       block_ids: blocks.map((block) => block?.plan_block_id || null),
     });
     const shouldCenterCurrentCard = this._pricePlanRailCenteredKey !== planKey;
@@ -8255,37 +8245,13 @@ class ElrakningPanel {
       button.setAttribute("role", "listitem");
       button.setAttribute("aria-pressed", String(this._ellaSelection?.id === block.plan_block_id));
       const title = document.createElement("strong");
-      title.textContent = `${this._formatTime(new Date(start))}–${this._formatTime(new Date(end))} · ${block.title || "Prisperiod"}`;
+      title.textContent = `${this._formatTime(new Date(start))}–${this._formatTime(new Date(end))} · ${block.price_context?.title || block.title || "Okänd kostnadsperiod"}`;
+      const action = document.createElement("b");
+      action.className = "price-plan-action";
+      action.textContent = block.primary_action?.label || "Normal drift";
       const reason = document.createElement("small");
-      reason.textContent = block.reason || "Verifierad prisperiod.";
-      button.append(title, reason);
-      const average = Number(block?.price?.average_sek_per_kwh);
-      if (Number.isFinite(average)) {
-        const value = document.createElement("span");
-        value.className = "price-plan-value";
-        value.textContent = `Snitt ${this._formatNumber(average)} kr/kWh`;
-        button.append(value);
-      }
-      const expectedLoad = Number(block?.load?.energy_kwh);
-      if (Number.isFinite(expectedLoad) && block?.load?.coverage === "complete") {
-        const load = document.createElement("span");
-        load.className = "price-plan-load";
-        const label = block.load.estimate_kind === "actual"
-          ? "Faktisk förbrukning"
-          : block.load.estimate_kind === "mixed" ? "Beräknad total"
-            : block.load.estimate_kind === "model" ? "Estimerad förbrukning" : "Förväntad förbrukning";
-        load.textContent = `${label} ${this._formatNumber(expectedLoad)} kWh`;
-        button.append(load);
-      } else if (block?.load?.coverage === "unavailable") {
-        const load = document.createElement("span");
-        load.className = "price-plan-load-missing";
-        load.textContent = "Förbrukning saknas för hela perioden";
-        button.append(load);
-      }
-      const status = document.createElement("span");
-      status.className = "price-plan-status";
-      status.textContent = "Ej verkställd";
-      button.append(status);
+      reason.textContent = block.short_reason || "Ingen verifierad rekommendation.";
+      button.append(title, action, reason);
       button.addEventListener("pointerdown", (event) => event.stopPropagation());
       button.addEventListener("click", () => {
         this._ellaSelection = togglePricePlanSelection(this._ellaSelection, block, plan.plan_version || null);
@@ -9826,12 +9792,17 @@ class ElrakningPanel {
     this._renderInvoiceEstimateCard();
   }
 
-  async loadPricePlan() {
+  async loadPricePlan(selectedDate = null) {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._pricePlanRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
     try {
-      const response = await this.hass.callWS({ type: "elrakning/ella_plan" });
+      const request = { type: "elrakning/ella_action_plan" };
+      const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed;
+      if (requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())) {
+        request.date = `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`;
+      }
+      const response = await this.hass.callWS(request);
       if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
       if (activeSiteId && response?.site_id && response.site_id !== activeSiteId) return;
