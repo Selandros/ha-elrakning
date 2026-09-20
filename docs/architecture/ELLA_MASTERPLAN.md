@@ -1355,3 +1355,21 @@ no-actuator/no-acknowledgement states cannot be reported as executed.
 
 No megarelease is allowed. Each stage has its own focused/full test gate,
 release, deployment and runtime verification when it changes production.
+
+### 19.7 A1 completion record: capability-driven price-only foundation
+
+Roadmap stage A1 is accepted in release `0.0.660`. The backend now exposes a
+deterministic `ella.price_only_plan.v1` from verified Nord Pool periods using
+the site identity/global price-binding contract and its canonical fingerprint.
+Missing or mismatched price provenance fails closed. A site does not need the
+transitional manual ELLA binding to receive a price-only plan; this was
+runtime-verified for Fiskvik as well as Vikarbodarna, including the
+Vikarbodarna -> Fiskvik -> Vikarbodarna switch sequence.
+
+A1 produces only price-derived blocks. It does not claim load, solar, battery,
+SOC, ESS constraints, actuator execution or dispatch. The next staged scope is
+the UI/product shell and price-only card presentation described in stage A;
+load-aware enrichment remains stage B, followed by solar/net-load stage C,
+ESS planning stage D and separate actuator/dispatch stage E. These later
+stages remain unimplemented and must not be represented as current runtime
+capabilities.

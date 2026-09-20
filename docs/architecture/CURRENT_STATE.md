@@ -1,6 +1,6 @@
 # Elräkning – Current State
 
-Updated: 2026-09-13
+Updated: 2026-09-20
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
@@ -1224,3 +1224,42 @@ INFERRED (roadmap): Long-term data foundation:
 - DESIGN LIMITATION: This release does not add a real day planner, ESS digital
   twin or actuator. ELLA remains planner-capability gated and actuator-write
   disabled.
+
+## 0.0.660 ELLA A1 capability-driven price-only planner
+
+- NOT ACCEPTED / SUPERSEDED: `0.0.659` failed runtime acceptance because the
+  price-only planner read provenance from a coordinator attribute that is not
+  present in the real runtime. The resulting `missing_price_provenance` state
+  prevented valid plans.
+- IMPLEMENTED AND VERIFIED: `0.0.660` reads the verified Nord Pool binding
+  from the public `SiteIdentityManager.global_binding("nord_pool")` contract,
+  recomputes and compares its canonical binding fingerprint, and fails closed
+  when provenance is missing or mismatched. Legacy ELLA binding remains only as
+  transition/history state and is not required for price-only eligibility.
+- VERIFIED (release): Commit
+  `d6697f36907cf5ac8f5122e1cd9f51ecc1c8b6f4`; Python `661 passed`, `46
+  subtests`, `0 failed`; focused planner/provenance tests `21 passed`; MJS,
+  compileall, JSON/YAML validation and diff-check pass. The exact 61-file
+  payload matched SHA256 `61/61`; HA Core check passed; exactly one normal Core
+  restart was performed; HTTP returned `200` and no new Elräkning traceback or
+  thread-safety warning was observed.
+- VERIFIED (authenticated runtime): Fiskvik, with
+  `ella_binding_verified=false`, returned an available
+  `ella.price_only_plan.v1` with `plan_version=price-only-v1`, verified price
+  capability from `nord_pool.price_periods.v1`, 96 periods and 7 deterministic
+  price-only blocks. The blocks contained no load, solar, battery or SOC
+  fields.
+- VERIFIED (authenticated runtime): Vikarbodarna, with its existing verified
+  ELLA transition binding, returned the same available A1 dataset and 7
+  price-only blocks from its own site-scoped planner response. The shared SE2
+  Nord Pool source was represented by the verified source generation, while
+  stable plan-block identities remained site-scoped and differed between the
+  two sites.
+- VERIFIED (authenticated runtime): The transition Vikarbodarna -> Fiskvik
+  -> Vikarbodarna returned a planner result whose site matched the active site
+  after each activation. No stale or cross-site planner result was observed.
+- SCOPE CLOSED: A1 is limited to capability-driven price-only planning. It
+  does not implement the future UI shell, load-aware or solar-aware
+  enrichment, ESS planning, digital twin, actuator or dispatch. The accepted
+  `0.0.658` stale-response/site-isolation protections remain the safety
+  foundation.
