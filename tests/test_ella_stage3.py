@@ -45,6 +45,20 @@ def test_plan_is_deterministic_and_elapsed_slots_do_not_claim_recommendation():
     assert first["plan_blocks"][0]["execution_status"] == "NOT_APPLICABLE"
 
 
+def test_observe_only_shiftable_load_is_never_recommended():
+    load = {"load_id": "sensor_only", "enabled": True, "flexibility": "shiftable", "control_mode": "observe_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T03:00:00+00:00"}
+    plan = build_action_plan(_state([load]))
+    assert all(not block["actions"] for block in plan["plan_blocks"])
+    assert plan["load_eligibility"]["sensor_only"]["reason"] == "observe_only_no_recommendation"
+
+
+def test_elapsed_cheapest_slot_is_excluded_before_scheduling():
+    load = {"load_id": "washer", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T03:00:00+00:00"}
+    plan = build_action_plan(_state([load], known_at="2026-09-20T01:30:00+00:00"))
+    scheduled = [block["start"] for block in plan["plan_blocks"] if block["actions"]]
+    assert scheduled == ["2026-09-20T02:00:00+00:00"]
+
+
 def test_qualifying_shiftable_load_uses_cheapest_feasible_slots_and_priority_tiebreak():
     load = {"load_id": "washer", "enabled": True, "flexibility": "shiftable", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T02:00:00+00:00", "priority": 1, "control_mode": "controllable"}
     plan = build_action_plan(_state([load]))
@@ -53,12 +67,14 @@ def test_qualifying_shiftable_load_uses_cheapest_feasible_slots_and_priority_tie
     assert all(block["execution_eligible"] is False for block in plan["plan_blocks"])
     assert any(action["code"] == "schedule" for block in plan["plan_blocks"] for action in block["actions"])
     assert all(block["control_semantics"]["mode"] == "shadow" for block in plan["plan_blocks"])
+    assert all(action["source_control_mode"] == "controllable" for block in plan["plan_blocks"] for action in block["actions"])
 
 
 def test_incomplete_load_underlay_never_creates_fake_schedule():
-    load = {"load_id": "dryer", "enabled": True, "flexibility": "shiftable", "nominal_power_w": 1000, "energy_need_kwh": 5, "deadline": "2026-09-20T01:00:00+00:00", "priority": 1}
+    load = {"load_id": "dryer", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 5, "deadline": "2026-09-20T01:00:00+00:00", "priority": 1}
     plan = build_action_plan(_state([load]))
     assert all(not block["sub_actions"] for block in plan["plan_blocks"])
+    assert plan["load_eligibility"]["dryer"]["reason"] == "no_future_contiguous_feasible_window"
 
 
 def test_observe_only_and_critical_fixed_loads_do_not_create_recommendations():
@@ -71,7 +87,7 @@ def test_observe_only_and_critical_fixed_loads_do_not_create_recommendations():
 
 
 def test_min_runtime_and_allowed_window_are_fail_closed_and_contiguous():
-    load = {"load_id": "heater", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.5, "deadline": "2026-09-20T04:00:00+00:00", "min_runtime_minutes": 30, "allowed_windows": [{"start": "01:00", "end": "04:00"}]}
+    load = {"load_id": "heater", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.5, "deadline": "2026-09-20T04:00:00+00:00", "min_runtime_minutes": 30, "allowed_windows": [{"start": "2026-09-20T01:00:00+00:00", "end": "2026-09-20T04:00:00+00:00"}]}
     state = _state([load])
     for index, slot in enumerate(state["slots"]):
         hour, minute = 1, index * 15
@@ -84,3 +100,50 @@ def test_min_runtime_and_allowed_window_are_fail_closed_and_contiguous():
         ("2026-09-20T01:00:00+00:00", "2026-09-20T01:15:00+00:00"),
         ("2026-09-20T01:15:00+00:00", "2026-09-20T01:30:00+00:00"),
     ]
+
+
+def test_allowed_window_excludes_cheapest_slot_and_unknown_constraints_fail_closed():
+    allowed = {"load_id": "allowed", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T04:00:00+00:00", "allowed_windows": [{"start": "2026-09-20T02:00:00+00:00", "end": "2026-09-20T04:00:00+00:00"}]}
+    unknown = {"load_id": "unknown", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T04:00:00+00:00", "allowed_windows": [{"start": "02:00", "end": "04:00"}], "constraints": {"comfort": {"max_temperature": 21}}}
+    plan = build_action_plan(_state([allowed, unknown]))
+    assert plan["load_eligibility"]["unknown"]["reason"] == "unsupported_allowed_windows_form"
+    assert all(action.get("load_id") != "unknown" for block in plan["plan_blocks"] for action in block["actions"])
+    assert any(action.get("load_id") == "allowed" for block in plan["plan_blocks"] for action in block["actions"])
+
+
+def test_recommendation_has_defer_then_run_and_noop_is_not_pending_execution():
+    load = {"load_id": "washer", "name": "VVB", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T04:00:00+00:00"}
+    state = _state([load], known_at="2026-09-20T00:00:00+00:00")
+    state["slots"][1]["cost_stack"]["components"][0]["value"] = 3.0
+    state["slots"][2]["cost_stack"]["components"][0]["value"] = 1.0
+    plan = build_action_plan(state)
+    codes = [(block["primary_action"]["code"], block["execution_status"]) for block in plan["plan_blocks"]]
+    assert any(code == "defer_flexible_loads" for code, _ in codes)
+    assert any(code == "run_flexible_loads" for code, _ in codes)
+    assert all(status in {"recommend_only", "NOT_APPLICABLE"} for _, status in codes)
+
+
+def test_net_load_is_secondary_tiebreak_and_missing_net_load_is_not_solar_claim():
+    load = {"load_id": "washer", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T04:00:00+00:00"}
+    state = _state([load])
+    state["slots"][1]["cost_stack"]["components"][0]["value"] = 1.0
+    state["slots"][2]["cost_stack"]["components"][0]["value"] = 1.0
+    state["slots"][2]["net_load"] = {"availability": "available", "value_w": -100}
+    plan = build_action_plan(state)
+    assert any(action.get("load_id") == "washer" for block in plan["plan_blocks"] for action in block["actions"])
+    assert all("solar" not in block["short_reason"].lower() for block in plan["plan_blocks"])
+
+
+def test_ess_qualification_reports_missing_policy_without_battery_action():
+    plan = build_action_plan(_state())
+    ess = plan["eligibility"]["ess"]
+    assert ess["eligible"] is False
+    assert "min_soc" in ess["missing_fields"]
+    assert all(block["primary_action"]["code"] not in {"charge_ess", "hold_ess", "discharge_ess"} for block in plan["plan_blocks"])
+
+
+def test_wrong_site_load_is_ignored_and_future_noop_is_not_pending_execution():
+    load = {"load_id": "other_site_load", "site_id": "site-b", "enabled": True, "flexibility": "shiftable", "control_mode": "recommend_only", "nominal_power_w": 1000, "energy_need_kwh": 0.25, "deadline": "2026-09-20T04:00:00+00:00"}
+    plan = build_action_plan(_state([load]))
+    assert all(not block["actions"] for block in plan["plan_blocks"])
+    assert all(block["execution_status"] == "NOT_APPLICABLE" for block in plan["plan_blocks"])
