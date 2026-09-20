@@ -3514,7 +3514,7 @@ class ElrakningPanel {
         }
 
         .daily-energy-row {
-          align-items: stretch;
+          align-items: start;
           display: grid;
           gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4868,7 +4868,7 @@ class ElrakningPanel {
         }
 
         .grid {
-          align-items: stretch;
+          align-items: start;
           display: grid;
           gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
