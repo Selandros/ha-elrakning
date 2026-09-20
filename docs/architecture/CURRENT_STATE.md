@@ -1548,7 +1548,52 @@ INFERRED (roadmap): Long-term data foundation:
   without an actuator, and `execution_eligible=false` plus
   `actuator_writes_enabled=false` remain invariants. No actuator or device
   writes occurred.
-- Stage 5 is closed and accepted. The next active implementation scope is
-  **Stage 6 — Solar/ESS enrichment and physical calibration**. Solar-first and
-  ESS-first remain capability-scoped and must not bypass the accepted
-  site-state, action and learning foundations.
+- Stage 5 is closed and accepted. At that earlier closure boundary, the next
+  scope was **Stage 6 — Solar/ESS enrichment and physical calibration**.
+  Solar-first and ESS-first remain capability-scoped and must not bypass the
+  accepted site-state, action and learning foundations.
+
+## 0.0.715 Stage 6 runtime acceptance and closure
+
+- Stage 6 is runtime accepted on `0.0.715`, implementation commit
+  `9c5f7a3e8fa92cf2a67064f7dd881ccce6179b7a`. Deployment evidence was
+  independently verified: 68/68 payload hashes matched, `ha core check`
+  passed, exactly one normal Core restart completed, the runtime manifest
+  returned HTTP 200, and no new Elräkning-specific log errors were observed.
+- Authenticated Vikarbodarna runtime returned `ella_stage6_state.v1`. Solar
+  calibration was correctly fail-closed: `available=false`, neutral factor
+  `1`, support `0`, uncertainty `unknown`, reason
+  `no_slot_resolved_forecast_overlap`, and no resource calibration entries.
+  This is not a live learned solar factor; eligible overlap and promotion
+  paths remain test-only evidence.
+- Vikarbodarna exposed verified ESS physical facts through
+  `ella_ess_physical_state.v1`: battery power `-687 W`, SOC `49 %`, and
+  capacity `25 kWh`, all observed at `2026-09-20T21:00:00+00:00` with their
+  respective source generations. Persisted canonical rows had
+  `resource_id=null`; the runtime therefore preserved role/source facts but
+  did not infer a per-ESS pairing or aggregate mapping.
+- ESS policy remained explicitly separate and unavailable. Missing fields
+  were `min_soc`, `max_soc`, `reserve_soc`, `max_charge_power`,
+  `max_discharge_power`, `grid_charge_permission` and `efficiency`.
+  Charge, grid-charge and discharge were ineligible; hold was a meaningful
+  physical-state semantic but not executable. Planned SOC trajectory was
+  unavailable with explicit missing physical/policy inputs; no future SOC was
+  fabricated.
+- The immutable Stage 4 debug snapshot contained the decision-time Stage 6
+  solar calibration, ESS facts, policy gaps, action-specific eligibility and
+  unavailable trajectory. It was not reconstructed from live values at click
+  time. Global invariants remained `execution_eligible=false` and
+  `actuator_writes_enabled=false`.
+- Authenticated Fiskvik runtime remained available for site state and planner
+  behavior while reporting solar calibration unavailable with
+  `solar_forecast_unavailable`, no ESS physical resources/facts, no
+  trajectory, and no fabricated values. Payload isolation checks found no
+  Vikarbodarna site, battery-generation or solar-generation identifiers.
+- Multi-ESS identity/aggregation, solar calibration promotion and uncertainty,
+  valid planned SOC energy balance, efficiency/loss calibration, stale SOC,
+  reserve/limit violations, temperature/derating and counterfactual replay
+  were not live-exercisable. They remain test-only evidence and are not
+  represented as live runtime acceptance.
+- Stage 6 is closed and accepted. No manifest change, deploy or restart was
+  performed during this docs closure. The next active implementation scope is
+  **Stage 7 — Controlled execution**; Stage 7 implementation has not started.

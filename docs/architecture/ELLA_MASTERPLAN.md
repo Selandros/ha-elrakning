@@ -81,6 +81,7 @@ The following is historical context, not the new target architecture:
 | 0.0.697 | Stage 2 first deployment; not accepted because Fiskvik had no resolved timezone, `net_load` was hardcoded unavailable, and `source_facts` was not horizon-bounded. | Unified state contract, canonical precedence, DST slot construction and no-write boundary were retained. |
 | 0.0.698 | Stage 2 unified 15-minute site state and forecasts accepted after authenticated two-site Safari/WS verification. | Site timezone fallback provenance, complete multi-resource solar/net-load semantics, bounded source facts, truthful optional-layer absence and deterministic site isolation. |
 | 0.0.702 | Stage 3 action planner accepted after authenticated two-site Safari/WS and UI verification. | Immutable `ella_action_plan.v1`, shadow/recommend-only semantics, clean action-card contract, action-boundary graph selection and fail-closed resource qualification. |
+| 0.0.715 | Stage 6 solar/ESS enrichment and physical calibration accepted after authenticated two-site runtime verification. | Site-scoped solar calibration and ESS physical/policy separation, action-specific fail-closed eligibility, immutable Stage 6 debug evidence and no-write execution boundary. |
 
 The historical “price-only first, solar next, ESS later” roadmap is superseded
 as a product ordering. Solar and ESS remain capabilities in the same planner,
@@ -477,21 +478,47 @@ actuator, with `execution_eligible=false` and
 Stage 5 is closed and accepted. The next active implementation scope is
 **Stage 6 — Solar/ESS enrichment and physical calibration**.
 
-### Stage 6 — Solar/ESS enrichment and physical calibration
+### Stage 6 — Solar/ESS enrichment and physical calibration (accepted 0.0.715)
 
 Entry: Stage 5 quality evidence and verified site-specific capabilities.
 
-Deliver: solar bias/uncertainty and per-ESS physical calibration, including
-SOC, usable capacity, limits, efficiency, reserve and planned trajectory.
-Only capable sites receive these actions; Fiskvik remains fully functional
-without them.
+Deliver: site-scoped solar calibration/uncertainty, ESS physical facts,
+separate verified policy constraints, action-specific eligibility and planned
+SOC trajectory only when the required inputs are complete. Only capable sites
+receive these enrichments; Fiskvik remains fully functional without solar or
+ESS.
 
-Exit: no cross-site parameter transfer, bounded energy balance, unknown
-capacity/limits fail closed, and planned SOC comes from the planner's model.
+Runtime closure: implementation commit
+`9c5f7a3e8fa92cf2a67064f7dd881ccce6179b7a`, runtime baseline `0.0.715`, was
+deployed with 68/68 payload hashes matching, `ha core check` passing, one
+normal restart, HTTP manifest 200 and no new Elräkning-specific log errors.
+Authenticated runtime verification accepted the stage on both sites. On
+Vikarbodarna, solar calibration correctly remained unavailable with neutral
+factor and zero support because no slot-resolved forecast overlap existed.
+ESS physical facts were available as role/source-generation observations, but
+persisted rows had `resource_id=null`; no per-ESS pairing or aggregate mapping
+was inferred. ESS policy remained separate and unavailable with explicit
+missing constraints, so charge, grid-charge and discharge were ineligible;
+hold was meaningful as a physical-state semantic but remained non-executable.
+No planned SOC trajectory was emitted because its physical and policy inputs
+were incomplete. The immutable Stage 4 debug snapshot contained the same
+decision-time Stage 6 evidence. On Fiskvik, solar calibration, ESS facts and
+trajectory were explicitly unavailable without fabricated values or foreign
+site IDs. Both sites retained `execution_eligible=false` and
+`actuator_writes_enabled=false`.
 
-Tests: actual/forecast overlap, solar uncertainty, ESS efficiency/loss,
-multiple ESS, stale SOC, reserve/limit violation, temperature/derating and
-counterfactual replay.
+The following remain test-only evidence in this release and are not claimed
+as live runtime behavior: solar overlap promotion/min-support/bounded factor
+and uncertainty, valid planned SOC energy balance, efficiency/loss
+calibration, verified multi-ESS identity and capacity-weighted aggregation,
+stale SOC, reserve/limit violations, temperature/derating and counterfactual
+replay. They are covered by the accepted Stage 6 automated tests where
+applicable. No device writes occurred.
+
+Exit: no cross-site parameter transfer, physical facts remain separate from
+policy, unknown capacity/limits fail closed, and planned SOC is modelled only
+from verified inputs. Stage 6 is closed and accepted. The next active
+implementation scope is **Stage 7 — Controlled execution**.
 
 ### Stage 7 — Controlled execution
 
@@ -538,8 +565,8 @@ card count must emerge from material action changes and constraints.
 
 Stage 0 architecture/contracts, Stage 1 capability/load foundation, Stage 2
 unified site state, Stage 3 shadow/recommend-only action planning, Stage 4
-decision-time debug snapshots and Stage 5 site-scoped evaluation/learning are
-implemented and accepted. The next active implementation scope is **Stage 6 —
-Solar/ESS enrichment and physical calibration**. Solar-first and ESS-first
-implementation remain capability-scoped and must not bypass the accepted
+decision-time debug snapshots, Stage 5 site-scoped evaluation/learning and
+Stage 6 solar/ESS enrichment are implemented and accepted. The next active
+implementation scope is **Stage 7 — Controlled execution**. Solar-first and
+ESS-first behavior remains capability-scoped and must not bypass the accepted
 state, action, debug and learning foundations.
