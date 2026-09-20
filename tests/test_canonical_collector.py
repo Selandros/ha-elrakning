@@ -487,18 +487,22 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
             collector._buffers[("site-a", "house.consumption", "gen-a", start)]["target"] = target_a
             collector._buffers[("site-a", "house.consumption", "gen-a", start)]["samples"] = [
                 (start, 100.0),
-                (start + timedelta(seconds=900), 100.0),
+                (start + timedelta(seconds=300), 100.0),
+                (start + timedelta(seconds=600), 100.0),
             ]
             collector._buffers[("site-b", "house.consumption", "gen-b", start)]["target"] = target_b
             collector._buffers[("site-b", "house.consumption", "gen-b", start)]["samples"] = [
                 (start, 200.0),
-                (start + timedelta(seconds=900), 200.0),
+                (start + timedelta(seconds=300), 200.0),
+                (start + timedelta(seconds=600), 200.0),
             ]
             self.assertEqual(await collector.async_flush(start, start + timedelta(seconds=900)), 2)
             self.assertEqual(collector.storage.count_observations(), 2)
             collector._buffers[("site-a", "house.consumption", "gen-a", start)]["target"] = target_a
             collector._buffers[("site-a", "house.consumption", "gen-a", start)]["samples"] = [
-                (start, 100.0), (start + timedelta(seconds=900), 100.0)
+                (start, 100.0),
+                (start + timedelta(seconds=300), 100.0),
+                (start + timedelta(seconds=600), 100.0),
             ]
             self.assertEqual(await collector.async_flush(start, start + timedelta(seconds=901)), 0)
             self.assertEqual(collector.storage.integrity_check(), "ok")
@@ -525,8 +529,134 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT value, quality_status, gap_status, coverage_ratio FROM energy_observations"
             ).fetchone()
             self.assertEqual(row[0], 100.0)
-            self.assertEqual(row[1:], ("partial", "gap", 300 / 900))
+            self.assertEqual(row[1:], ("partial", "gap", 600 / 900))
             collector.storage.close()
+
+    async def test_time_weighted_mean_uses_fresh_predecessor_and_bounded_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            collector = CanonicalCollector(_Hass(), _Identity([target]), Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            key = ("site-a", "house.consumption", "gen-a")
+            collector._carry_samples[key] = (start - timedelta(seconds=5), 100.0)
+            collector._buffers[(*key, start)]["target"] = target
+            collector._buffers[(*key, start)]["samples"] = [
+                (start + timedelta(seconds=300), 100.0),
+                (start + timedelta(seconds=600), 100.0),
+                (start + timedelta(seconds=895), 100.0),
+            ]
+            await collector.async_flush(start, start + timedelta(seconds=900))
+            row = collector.storage._connection().execute(
+                "SELECT value, coverage_ratio, quality_status, quality_json FROM energy_observations"
+            ).fetchone()
+            self.assertEqual(row[0:3], (100.0, 1.0, "good"))
+            self.assertIn('"boundary_carry_used": true', row[3])
+            collector.storage.close()
+
+    async def test_time_weighted_mean_does_not_hold_stale_predecessor_or_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            collector = CanonicalCollector(_Hass(), _Identity([target]), Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            key = ("site-a", "house.consumption", "gen-a")
+            collector._carry_samples[key] = (start - timedelta(seconds=361), 100.0)
+            collector._buffers[(*key, start)]["target"] = target
+            collector._buffers[(*key, start)]["samples"] = [(start + timedelta(seconds=300), 100.0)]
+            await collector.async_flush(start, start + timedelta(seconds=900))
+            row = collector.storage._connection().execute(
+                "SELECT coverage_ratio, quality_status FROM energy_observations"
+            ).fetchone()
+            self.assertEqual(row, (360 / 900, "partial"))
+            collector.storage.close()
+
+    async def test_single_stale_sample_never_creates_full_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            collector = CanonicalCollector(_Hass(), _Identity([target]), Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            key = ("site-a", "house.consumption", "gen-a", start)
+            collector._buffers[key]["target"] = target
+            collector._buffers[key]["samples"] = [(start, 100.0)]
+            await collector.async_flush(start, start + timedelta(seconds=900))
+            row = collector.storage._connection().execute(
+                "SELECT coverage_ratio, quality_status, gap_status FROM energy_observations"
+            ).fetchone()
+            self.assertEqual(row, (360 / 900, "partial", "gap"))
+            collector.storage.close()
+
+    async def test_generation_switch_never_carries_old_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old = _target("site-a", "house.consumption", "sensor.old", "gen-old")
+            new = _target("site-a", "house.consumption", "sensor.new", "gen-new")
+            identity = _Identity([new])
+            collector = CanonicalCollector(_Hass(), identity, Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            collector._carry_samples[("site-a", "house.consumption", "gen-old")] = (
+                start - timedelta(seconds=5), 100.0
+            )
+            key = ("site-a", "house.consumption", "gen-new", start)
+            collector._buffers[key]["target"] = new
+            collector._buffers[key]["samples"] = [(start + timedelta(seconds=300), 200.0)]
+            await collector.async_flush(start, start + timedelta(seconds=900))
+            row = collector.storage._connection().execute(
+                "SELECT value, coverage_ratio FROM energy_observations"
+            ).fetchone()
+            self.assertEqual(row, (200.0, 360 / 900))
+            collector.storage.close()
+
+    async def test_restart_without_cache_does_not_invent_predecessor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+            collector = CanonicalCollector(_Hass(), _Identity([target]), Path(directory) / "canonical.sqlite")
+            collector.storage.open()
+            collector._started = True
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            key = ("site-a", "house.consumption", "gen-a", start)
+            collector._buffers[key]["target"] = target
+            collector._buffers[key]["samples"] = [(start + timedelta(seconds=300), 100.0)]
+            await collector.async_flush(start, start + timedelta(seconds=900))
+            row = collector.storage._connection().execute(
+                "SELECT coverage_ratio FROM energy_observations"
+            ).fetchone()
+            self.assertEqual(row[0], 360 / 900)
+            collector.storage.close()
+
+    async def test_invalid_event_breaks_boundary_carry(self):
+        target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        collector._started = True
+        start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        key = ("site-a", "house.consumption", "gen-a")
+        collector._carry_samples[key] = (start - timedelta(seconds=5), 100.0)
+        await collector._async_state_changed(types.SimpleNamespace(
+            data={"entity_id": "sensor.load", "new_state": _State("unavailable", "W", start + timedelta(seconds=10))},
+            time_fired=start + timedelta(seconds=10),
+        ))
+        self.assertNotIn(key, collector._carry_samples)
+
+    async def test_exact_boundary_sample_belongs_to_new_interval_without_double_count(self):
+        target = _target("site-a", "house.consumption", "sensor.load", "gen-a")
+        collector = CanonicalCollector(_Hass(), _Identity([target]), ":memory:")
+        start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        predecessor = (start - timedelta(seconds=5), 100.0)
+        value, coverage, _observed_at, metadata = collector._aggregate(
+            "time_weighted_mean",
+            [(start, 200.0), (start + timedelta(seconds=300), 200.0), (start + timedelta(seconds=600), 200.0)],
+            start,
+            360,
+            predecessor,
+        )
+        self.assertEqual(value, 200.0)
+        self.assertEqual(coverage, 1.0)
+        self.assertTrue(metadata["boundary_carry_used"])
 
     async def test_source_replacement_mid_quarter_keeps_both_generations(self):
         with tempfile.TemporaryDirectory() as directory:

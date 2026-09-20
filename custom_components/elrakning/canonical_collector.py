@@ -56,6 +56,9 @@ POWER_ROLES = {
     "battery.discharge": ("W", "positive_discharge"),
 }
 ENERGY_ROLES = {"grid.energy_import", "grid.energy_export", "battery.capacity"}
+# A bounded hold covers the observed five-minute reporting cadence without
+# allowing a silent source to appear healthy indefinitely.
+DEFAULT_TIME_WEIGHTED_HOLD_SECONDS = 360.0
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -73,6 +76,7 @@ class CanonicalCollector:
         self._buffers: dict[tuple[str, str, str, datetime], dict[str, Any]] = defaultdict(
             lambda: {"samples": [], "invalid": False}
         )
+        self._carry_samples: dict[tuple[str, str, str], tuple[datetime, float]] = {}
         self._recent_reported: dict[str, tuple[tuple[str, str, str], datetime]] = {}
         self._finalized_intervals: set[datetime] = set()
         self._flush_lock = asyncio.Lock()
@@ -537,6 +541,7 @@ class CanonicalCollector:
             self._weather_unsub()
             self._weather_unsub = None
         self._buffers.clear()
+        self._carry_samples.clear()
         self._recent_reported.clear()
         self._finalized_intervals.clear()
         if self._started:
@@ -592,12 +597,18 @@ class CanonicalCollector:
             if interval in self._finalized_intervals:
                 continue
             value = self._value_for_target(target, new_state)
+            carry_key = (target["site_id"], role, target["generation_id"])
             buffer = self._buffers[(target["site_id"], role, target["generation_id"], interval)]
             buffer.setdefault("target", target)
             if value is None:
                 buffer["invalid"] = True
+                self._carry_samples.pop(carry_key, None)
                 continue
             buffer["samples"].append((observed_at, value))
+            for cached_key in tuple(self._carry_samples):
+                if cached_key[:2] == carry_key[:2] and cached_key[2] != carry_key[2]:
+                    self._carry_samples.pop(cached_key, None)
+            self._carry_samples[carry_key] = (observed_at, value)
 
     @staticmethod
     def _state_signature(state: Any) -> tuple[str, str, str]:
@@ -725,9 +736,10 @@ class CanonicalCollector:
                     self._buffers.pop(key, None)
                     continue
                 semantics = target["canonicalization"]
-                value, coverage, observed_at = self._aggregate(
+                predecessor = self._carry_samples.get((site_id, role, generation_id))
+                value, coverage, observed_at, aggregation_metadata = self._aggregate(
                     semantics["aggregation"], samples, interval,
-                    semantics.get("max_hold_seconds"),
+                    self._effective_max_hold_seconds(semantics), predecessor,
                 )
                 if value is None:
                     quality_status = "invalid" if buffer["invalid"] else "unknown"
@@ -748,6 +760,7 @@ class CanonicalCollector:
                     captured_at,
                     quality_status,
                     gap_status,
+                    aggregation_metadata,
                 ))
             written = await self.hass.async_add_executor_job(
                 self._write_batch,
@@ -760,34 +773,56 @@ class CanonicalCollector:
             return written
 
     @staticmethod
+    def _effective_max_hold_seconds(semantics: dict[str, Any]) -> float | None:
+        if semantics.get("aggregation") != "time_weighted_mean":
+            return semantics.get("max_hold_seconds")
+        configured = semantics.get("max_hold_seconds")
+        if isinstance(configured, (int, float)) and configured > 0:
+            return float(configured)
+        return DEFAULT_TIME_WEIGHTED_HOLD_SECONDS
+
+    @staticmethod
     def _aggregate(
         aggregation: str,
         samples: list[tuple[datetime, float]],
         interval: datetime,
         max_hold_seconds: float | None = None,
+        predecessor: tuple[datetime, float] | None = None,
     ):
         if not samples:
-            return None, 0.0, None
+            return None, 0.0, None, {}
         if aggregation == "last_valid":
             observed_at, value = samples[-1]
             interval_end = interval + timedelta(seconds=900)
             age = (interval_end - observed_at).total_seconds()
-            return value, 1.0 if max_hold_seconds is not None and age <= max_hold_seconds else 0.0, observed_at
+            return value, 1.0 if max_hold_seconds is not None and age <= max_hold_seconds else 0.0, observed_at, {}
         start = interval
         end = interval + timedelta(seconds=900)
+        hold_seconds = max_hold_seconds or DEFAULT_TIME_WEIGHTED_HOLD_SECONDS
+        effective_samples = list(samples)
+        predecessor_used = False
+        if predecessor is not None and predecessor[0] < start:
+            effective_samples.insert(0, predecessor)
+            predecessor_used = True
         total = 0.0
         covered = 0.0
-        for (left_time, left_value), (right_time, _right_value) in zip(samples, samples[1:]):
+        for index, (left_time, left_value) in enumerate(effective_samples):
+            right_time = effective_samples[index + 1][0] if index + 1 < len(effective_samples) else end
             segment_start = max(left_time, start)
-            segment_end = min(right_time, end)
+            segment_end = min(right_time, end, left_time + timedelta(seconds=hold_seconds))
             if segment_end > segment_start:
                 total += left_value * (segment_end - segment_start).total_seconds()
                 covered += (segment_end - segment_start).total_seconds()
         if covered <= 0:
-            return None, 0.0, samples[-1][0]
-        return total / covered, covered / 900, samples[-1][0]
+            observed_at = samples[-1][0] if samples else predecessor[0]
+            return None, 0.0, observed_at, {"boundary_carry_used": predecessor_used}
+        observed_at = samples[-1][0] if samples else predecessor[0]
+        return total / covered, covered / 900, observed_at, {
+            "boundary_carry_used": predecessor_used,
+            "hold_seconds": hold_seconds,
+        }
 
-    def _build_observation(self, target, interval, value, coverage, observed_at, captured_at, quality_status, gap_status):
+    def _build_observation(self, target, interval, value, coverage, observed_at, captured_at, quality_status, gap_status, aggregation_metadata=None):
         role = target["logical_role"]
         canonicalization = target.get("canonicalization") or {}
         unit = canonicalization["unit"]
@@ -809,7 +844,11 @@ class CanonicalCollector:
             "quality_status": quality_status,
             "coverage_ratio": coverage,
             "gap_status": gap_status,
-            "quality": {"coverage_ratio": coverage, "invalid_event": quality_status == "invalid"},
+            "quality": {
+                "coverage_ratio": coverage,
+                "invalid_event": quality_status == "invalid",
+                **(aggregation_metadata or {}),
+            },
             "provenance": {
                 "origin_type": "ha_state_event",
                 "entity_id": target["entity_id"],

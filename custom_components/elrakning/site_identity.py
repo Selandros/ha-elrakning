@@ -130,7 +130,7 @@ ROLE_CANONICALIZATION = {
         "sign_convention": "positive_consumption",
         "aggregation": "time_weighted_mean",
         "classification": "measured",
-        "max_hold_seconds": None,
+        "max_hold_seconds": 360,
         "absolute_value": True,
     },
     "solar.production": {
@@ -138,7 +138,7 @@ ROLE_CANONICALIZATION = {
         "sign_convention": "positive_production",
         "aggregation": "time_weighted_mean",
         "classification": "measured",
-        "max_hold_seconds": None,
+        "max_hold_seconds": 360,
         "absolute_value": True,
     },
     "grid.power/import": {
@@ -146,7 +146,7 @@ ROLE_CANONICALIZATION = {
         "sign_convention": "positive_import_negative_export",
         "aggregation": "time_weighted_mean",
         "classification": "measured",
-        "max_hold_seconds": None,
+        "max_hold_seconds": 360,
         "absolute_value": False,
     },
     "battery.power": {
@@ -154,7 +154,7 @@ ROLE_CANONICALIZATION = {
         "sign_convention": "positive_discharge_negative_charge",
         "aggregation": "time_weighted_mean",
         "classification": "measured",
-        "max_hold_seconds": None,
+        "max_hold_seconds": 360,
         "absolute_value": False,
     },
     "battery.soc": {
@@ -186,7 +186,7 @@ ROLE_CANONICALIZATION = {
         "sign_convention": "positive_charge",
         "aggregation": "time_weighted_mean",
         "classification": "measured",
-        "max_hold_seconds": None,
+        "max_hold_seconds": 360,
         "absolute_value": True,
     },
     "battery.discharge": {
@@ -194,7 +194,7 @@ ROLE_CANONICALIZATION = {
         "sign_convention": "positive_discharge",
         "aggregation": "time_weighted_mean",
         "classification": "measured",
-        "max_hold_seconds": None,
+        "max_hold_seconds": 360,
         "absolute_value": True,
     },
     "battery.capacity": {
