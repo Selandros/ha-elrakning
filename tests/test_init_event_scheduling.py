@@ -55,6 +55,41 @@ def test_price_update_is_scheduled_once_on_home_assistant_loop():
     assert hass.bus.events == ["elrakning_price_update"]
 
 
+def test_load_forecast_cadence_uses_thread_safe_create_task_from_worker_thread():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index("def _schedule_load_forecast_capture(")
+    end = source.index("\n\nasync def _async_register_frontend", start)
+    namespace = {}
+    exec(compile(source[start:end], str(source_path), "exec"), namespace)
+
+    async def capture(*_args):
+        return None
+
+    class ThreadSafeHass:
+        def __init__(self):
+            self.loop = asyncio.get_running_loop()
+            self.async_create_task_called = False
+
+        def async_create_task(self, _coroutine):
+            self.async_create_task_called = True
+            raise AssertionError("worker callback used async_create_task")
+
+        def create_task(self, coroutine):
+            return asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+
+    async def exercise():
+        hass = ThreadSafeHass()
+        namespace["_async_capture_load_forecasts"] = capture
+        task = await asyncio.to_thread(
+            namespace["_schedule_load_forecast_capture"], hass, object(), object()
+        )
+        await asyncio.wrap_future(task)
+        assert hass.async_create_task_called is False
+
+    asyncio.run(exercise())
+
+
 def _load_midnight_refresh():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))

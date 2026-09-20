@@ -83,6 +83,13 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
             continue
 
 
+def _schedule_load_forecast_capture(hass, site_identity_manager, canonical_collector):
+    """Schedule the cadence capture through Home Assistant's thread-safe API."""
+    return hass.create_task(
+        _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
+    )
+
+
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Register the panel before optional runtime initialization can fail."""
     integration_dir = Path(__file__).parent
@@ -231,8 +238,8 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unsubscribe := frontend_data.pop("load_forecast_cadence_unsub", None):
         unsubscribe()
     frontend_data["load_forecast_cadence_unsub"] = async_track_time_change(
-        hass, lambda _now: hass.async_create_task(
-            _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
+        hass, lambda _now: _schedule_load_forecast_capture(
+            hass, site_identity_manager, canonical_collector
         ), hour=None, minute=0, second=30
     )
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
