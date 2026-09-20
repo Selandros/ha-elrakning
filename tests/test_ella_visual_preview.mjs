@@ -18,6 +18,7 @@ assert.doesNotMatch(panel.slice(pricePlanRail), /<div class="price-controls">/);
 assert.match(panel, /\.price-section\s*\{[\s\S]*?margin-bottom: 0;/);
 assert.match(panel, /--dashboard-card-gap: 16px;/);
 assert.match(panel, /\.price-plan-rail\s*\{[\s\S]*?margin: var\(--dashboard-card-gap\) 0;[\s\S]*?padding: 0 1px 6px;/);
+assert.doesNotMatch(panel, /\.price-plan-rail\s*\{[\s\S]*?border-bottom:/);
 assert.match(panel, /\.daily-energy-row\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
 assert.match(panel, /\.battery-history-row\s*\{[\s\S]*?margin-top: var\(--dashboard-card-gap\);/);
 assert.match(panel, /\.phase-history-row\s*\{[\s\S]*?margin-top: var\(--dashboard-card-gap\);/);

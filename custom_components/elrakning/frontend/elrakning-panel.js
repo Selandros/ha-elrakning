@@ -3685,7 +3685,6 @@ class ElrakningPanel {
         }
 
         .price-plan-rail {
-          border-bottom: 1px solid var(--divider-color);
           border-top: 0;
           display: grid;
           gap: 8px;
