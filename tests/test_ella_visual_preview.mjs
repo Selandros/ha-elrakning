@@ -17,7 +17,8 @@ assert.match(panel, /<\/section>\s*\n\s*<div class="price-plan-rail" data-price-
 assert.doesNotMatch(panel.slice(pricePlanRail), /<div class="price-controls">/);
 assert.match(panel, /--dashboard-card-gap: 16px;/);
 assert.match(panel, /dashboard-card-stack/);
-assert.match(panel, /\.dashboard-card-stack\s*\{[\s\S]*?display: grid;[\s\S]*?column-gap: 0;[\s\S]*?row-gap: var\(--dashboard-card-gap\);/);
+assert.match(panel, /\.dashboard-card-stack\s*\{[\s\S]*?display: grid;[\s\S]*?column-gap: 0;/);
+assert.doesNotMatch(panel, /\.dashboard-card-stack\s*\{[^}]*row-gap:/);
 assert.match(panel, /\.dashboard-card-stack\s*> \*\s*\{[\s\S]*?margin-block: 0;/);
 const priceSectionRule = panel.match(/\.price-section\s*\{([^}]*)\}/)?.[1] || "";
 const pricePlanRailRule = panel.match(/\.price-plan-rail\s*\{([^}]*)\}/)?.[1] || "";

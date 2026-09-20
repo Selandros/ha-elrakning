@@ -3523,7 +3523,6 @@ class ElrakningPanel {
         .dashboard-card-stack {
           display: grid;
           column-gap: 0;
-          row-gap: var(--dashboard-card-gap);
         }
 
         .dashboard-card-stack > * {
