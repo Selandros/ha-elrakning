@@ -1,12 +1,15 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import tempfile
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
 
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 
-from custom_components.elrakning.load_forecast import build_load_forecast_frame
+from custom_components.elrakning.canonical_storage import CanonicalStorage
+from custom_components.elrakning.load_forecast import build_load_forecast_frame, persist_load_forecast
 
 
 UTC = timezone.utc
@@ -54,6 +57,39 @@ class LoadForecastTests(unittest.TestCase):
         self.assertIsNotNone(frame)
         self.assertTrue(points)
         self.assertLess(len(points), 36 * 4)
+
+    def test_partial_canonical_15_minute_history_persists_forecast_generation(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        history = []
+        for day in range(7):
+            history.append({
+                "logical_role": "house.consumption",
+                "interval_start": now - timedelta(days=day + 1) + timedelta(minutes=15),
+                "source_generation_id": "canonical-house-generation",
+                "value": 750,
+                "quality_status": "partial",
+            })
+
+        frame, points = build_load_forecast_frame("site-a", "Europe/Stockholm", history, now, horizon_hours=1)
+        self.assertIsNotNone(frame)
+        self.assertTrue(points)
+
+        with tempfile.TemporaryDirectory() as directory:
+            storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
+            storage.open()
+            try:
+                self.assertEqual(frame["quality_status"], "partial")
+                self.assertEqual(frame["quality"]["status"], "low_confidence")
+                self.assertTrue(persist_load_forecast(storage, frame, points, now))
+                generation = storage.connection.execute(
+                    "SELECT source_resolution_kind, source_resolution_seconds "
+                    "FROM source_generations WHERE source_generation_id = ?",
+                    (frame["source_generation_id"],),
+                ).fetchone()
+                self.assertEqual(generation, ("native_bucket", 900))
+                self.assertIsNotNone(storage.latest_external_frame(frame["semantic_key"]))
+            finally:
+                storage.close()
 
 
 if __name__ == "__main__":

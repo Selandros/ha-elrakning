@@ -93,9 +93,12 @@ def build_load_forecast_frame(
         return None, []
     generation_id = _generation_id(site_id, source_generations)
     semantic_key = f"{DATASET}|site:{site_id}|generation:{generation_id}|target:{target_start.date().isoformat()}"
-    quality_status = "good" if all(point["point"]["sample_support"] >= 2 for point in points) else "low_confidence"
+    # Canonical quality_status is schema-bound; retain confidence detail in
+    # the quality object instead of introducing a non-canonical status value.
+    quality_status = "good" if all(point["point"]["sample_support"] >= 2 for point in points) else "partial"
+    confidence_status = "good" if quality_status == "good" else "low_confidence"
     quality = {
-        "status": quality_status, "model_version": MODEL_VERSION,
+        "status": confidence_status, "model_version": MODEL_VERSION,
         "sample_support_min": min(point["point"]["sample_support"] for point in points),
         "sample_support_max": max(point["point"]["sample_support"] for point in points),
         "observed_days": len(observed_days), "source_generations": sorted(source_generations),
@@ -127,7 +130,9 @@ def persist_load_forecast(storage: CanonicalStorage, frame: dict[str, Any], poin
         "generation_id": frame["source_generation_id"],
         "source_identity": {"identity_key": frame["source_generation_id"], "identity_strength": "strong",
                              "identity_provenance": "canonical_load_observation_profile"},
-        "source_resolution_kind": "derived_profile", "source_resolution_seconds": SLOT_SECONDS,
+        # The storage contract describes the 15-minute source buckets used by
+        # this profile; derived provenance is carried separately below.
+        "source_resolution_kind": "native_bucket", "source_resolution_seconds": SLOT_SECONDS,
         "timezone_state": "verified",
     }, captured_at)
     latest = storage.latest_external_frame(frame["semantic_key"])

@@ -163,7 +163,7 @@ def _load_points_for_block(block: dict[str, Any], frames: Iterable[dict[str, Any
             continue
         if frame.get("payload_schema") != LOAD_PAYLOAD_SCHEMA:
             continue
-        if frame.get("quality_status") not in {"good", "low_confidence"}:
+        if frame.get("quality_status") not in {"good", "partial"}:
             continue
         try:
             frame_known_at = datetime.fromisoformat(frame["known_at"])
