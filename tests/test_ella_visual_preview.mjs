@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { centerCurrentPricePlanCard, currentPricePlanBlock, reconcileEllaSiteState, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { centerCurrentPricePlanCard, currentPricePlanBlock, ellaPlanContextKey, reconcileEllaSiteState, shouldPreserveEllaPlanOnTransportError, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), panel.indexOf('<div class="daily-energy-row">'));
@@ -63,6 +63,9 @@ assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);
 assert.match(panel, /togglePricePlanSelection\(this\._ellaSelection, block/);
 assert.match(panel, /_pricePlanRequestToken/);
+assert.match(panel, /previousPlanContextKey/);
+assert.match(panel, /shouldPreserveEllaPlanOnTransportError/);
+assert.match(panel, /this\._pricePlanContextKey/);
 assert.match(panel, /siteContextGeneration !== this\._siteContextGeneration/);
 assert.match(panel, /_clearPricePlanSelection\(\)/);
 assert.match(panel, /addEventListener\("pointerdown", clearUnlessCard\)/);
@@ -98,6 +101,28 @@ assert.equal(switchedBack.changed, true);
 assert.equal(switchedBack.bound, true);
 assert.deepEqual(switchedBack.pricePlan, { available: false, reason: "site_changed", plan_blocks: [] });
 assert.equal(switchedBack.ellaSelection, null);
+
+const hydratedPlan = { available: true, site_id: "site-a", date: "2026-09-20", plan_blocks: [{ plan_block_id: "a" }] };
+const hydrated = reconcileEllaSiteState(null, { site_id: "site-a", ella_binding_verified: true }, {
+  loadForecast: { available: true }, pricePlan: hydratedPlan, ellaSelection: { id: "a" },
+});
+assert.equal(hydrated.changed, false);
+assert.equal(hydrated.pricePlan, hydratedPlan);
+
+const hydratedWrongSite = reconcileEllaSiteState(null, { site_id: "site-b", ella_binding_verified: true }, {
+  loadForecast: { available: true }, pricePlan: hydratedPlan, ellaSelection: { id: "a" },
+});
+assert.equal(hydratedWrongSite.changed, true);
+assert.deepEqual(hydratedWrongSite.pricePlan, { available: false, reason: "site_changed", plan_blocks: [] });
+
+assert.equal(reconcileEllaSiteState({ site_id: "site-a" }, { site_id: "site-a" }, { pricePlan: hydrated }).changed, false);
+assert.equal(reconcileEllaSiteState({ site_id: "site-a" }, { site_id: "site-b" }, { pricePlan: hydrated }).changed, true);
+assert.equal(reconcileEllaSiteState(null, { site_id: "site-a" }, { pricePlan: { available: true, plan_blocks: [] } }).changed, true);
+
+const sameContext = ellaPlanContextKey("site-a", "2026-09-20");
+assert.equal(shouldPreserveEllaPlanOnTransportError(hydrated.pricePlan, sameContext, sameContext), true);
+assert.equal(shouldPreserveEllaPlanOnTransportError(hydrated.pricePlan, sameContext, ellaPlanContextKey("site-a", "2026-09-21")), false);
+assert.equal(shouldPreserveEllaPlanOnTransportError({ available: false, plan_blocks: [] }, sameContext, sameContext), false);
 
 const blockA = { plan_block_id: "a", start: "2026-09-20T13:00:00Z", end: "2026-09-20T17:00:00Z" };
 const blockB = { plan_block_id: "b", start: "2026-09-20T17:00:00Z", end: "2026-09-20T20:00:00Z" };

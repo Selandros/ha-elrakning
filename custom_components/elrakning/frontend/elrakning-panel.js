@@ -2408,7 +2408,11 @@ export function createPerformanceSessionId(randomValue = null) {
 
 export function reconcileEllaSiteState(previousState, nextState, currentState = {}) {
   const siteId = (state) => state?.current_site?.site_id || state?.site_id || null;
-  const changed = siteId(previousState) !== siteId(nextState);
+  const previousSiteId = siteId(previousState);
+  const nextSiteId = siteId(nextState);
+  const trustedPlanSiteId = currentState?.pricePlan?.site_id || null;
+  const effectivePreviousSiteId = previousSiteId || trustedPlanSiteId;
+  const changed = effectivePreviousSiteId !== nextSiteId;
   const bound = nextState?.ella_binding_verified === true;
   if (!changed) return { changed: false, bound, ...currentState };
   return {
@@ -2418,6 +2422,17 @@ export function reconcileEllaSiteState(previousState, nextState, currentState = 
     pricePlan: { available: false, reason: "site_changed", plan_blocks: [] },
     ellaSelection: null,
   };
+}
+
+export function ellaPlanContextKey(siteId, date) {
+  return `${siteId || ""}|${date || ""}`;
+}
+
+export function shouldPreserveEllaPlanOnTransportError(plan, previousContextKey, requestContextKey) {
+  return plan?.available === true
+    && Array.isArray(plan.plan_blocks)
+    && plan.plan_blocks.length > 0
+    && previousContextKey === requestContextKey;
 }
 
 export function togglePricePlanSelection(currentSelection, block, revision = null) {
@@ -2514,6 +2529,7 @@ class ElrakningPanel {
     this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
+    this._pricePlanContextKey = null;
     this._ellaSelection = null;
     this._ellaDebugRequestToken = 0;
     this._powerHistoryRequestToken = 0;
@@ -6662,6 +6678,7 @@ class ElrakningPanel {
       this._pricePlanRequestToken += 1;
       this._loadForecast = reconciled.loadForecast;
       this._pricePlan = reconciled.pricePlan;
+      this._pricePlanContextKey = reconciled.changed ? null : this._pricePlanContextKey;
       this._ellaSelection = reconciled.ellaSelection;
     }
     this._siteState = state;
@@ -9846,11 +9863,22 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._pricePlanRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
+    const previousPlan = this._pricePlan;
+    const previousPlanContextKey = this._pricePlanContextKey
+      || ellaPlanContextKey(previousPlan?.site_id, previousPlan?.date);
     try {
       const request = { type: "elrakning/ella_action_plan" };
       const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed;
+      const requestedDateKey = requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())
+        ? `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`
+        : previousPlan?.date || "";
+      const requestedSiteId = this._siteState?.site_id
+        || this._siteState?.current_site?.site_id
+        || previousPlan?.site_id
+        || null;
+      const requestContextKey = ellaPlanContextKey(requestedSiteId, requestedDateKey);
       if (requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())) {
-        request.date = `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`;
+        request.date = requestedDateKey;
       }
       const response = await this.hass.callWS(request);
       if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
@@ -9859,11 +9887,26 @@ class ElrakningPanel {
       this._pricePlan = response && typeof response === "object"
         ? response
         : { available: false, reason: "invalid_plan_response", plan_blocks: [] };
+      this._pricePlanContextKey = ellaPlanContextKey(
+        this._pricePlan.site_id || requestedSiteId,
+        this._pricePlan.date || requestedDateKey,
+      );
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
       if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
+      const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed;
+      const requestedDateKey = requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())
+        ? `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`
+        : previousPlan?.date || "";
+      const requestedSiteId = this._siteState?.site_id
+        || this._siteState?.current_site?.site_id
+        || previousPlan?.site_id
+        || null;
+      const requestContextKey = ellaPlanContextKey(requestedSiteId, requestedDateKey);
+      if (shouldPreserveEllaPlanOnTransportError(previousPlan, previousPlanContextKey, requestContextKey)) return;
       this._pricePlan = { available: false, reason: "plan_unavailable", plan_blocks: [] };
+      this._pricePlanContextKey = requestContextKey;
       this._renderPricePlanCards();
     }
   }
