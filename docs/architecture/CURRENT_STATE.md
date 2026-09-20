@@ -1323,3 +1323,30 @@ INFERRED (roadmap): Long-term data foundation:
   and stage B load-aware enrichment are accepted runtime behavior. Solar/
   net-load enrichment, ESS planning and physical actuator/dispatch remain
   future stages and are not implemented by this state.
+
+## 0.0.670 Price-card DOM order and spacing closure
+
+- NOT FINAL / SUPERSEDED FOR VISUAL LAYOUT: `0.0.669` reduced the gap but
+  placed the graph controls after the ELLA rail. That made the rail appear
+  visually inside the price graph even though the planner and load behavior
+  were correct.
+- ACCEPTED RUNTIME SPACING BASELINE: `0.0.670`, release commit
+  `5f47486026754cb5b818060825dea1451627adde`, manifest/runtime `0.0.670`.
+  Python `671 passed`, `46 subtests`, `0 failed`; MJS `29/29`; compileall,
+  JSON/YAML validation and diff-check passed. The clean payload matched
+  SHA256 `61/61`; HA Core check passed; exactly one normal Core restart was
+  performed; HTTP returned `200`; and no new Elräkning traceback or
+  thread-safety warning was observed.
+- VERIFIED (authenticated Safari runtime): `.price-section` was
+  `top=203.69, bottom=630.75`; `.price-chart-frame` ended at `565.77`;
+  `.price-controls` was inside `.price-section` from `top=565.77` to
+  `bottom=630.25`; and the legend and period picker were inside
+  `.price-controls`. The price-plan rail began at `650.75` as a sibling
+  after the closed price section, giving exactly `20 px` spacing.
+- DOM acceptance: complete price card (heading/statistics, chart, legend and
+  period controls) -> `20 px` gap -> ELLA plan rail -> normal dashboard
+  spacing. `railInsidePrice=false`; no graph control occurs after the rail.
+- Scope: this release changed only frontend DOM/CSS ordering and its
+  regression test. Planner, load, provenance, centering, selection,
+  site-isolation and backend behavior were unchanged. No solar, ESS or
+  actuator behavior is implied.

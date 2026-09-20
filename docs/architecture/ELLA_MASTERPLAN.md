@@ -1427,12 +1427,29 @@ the 0.0.669 runtime gate; stages C–E remain future work.
   interval; selecting another card moves the band, selecting it again or
   interacting outside the cards/scrolling clears it. Site changes invalidate
   the old cards and selection before applying the new site.
-- The 0.0.669 layout keeps the card rail outside the price-section/chart
-  frame, with approximately equal runtime spacing above and below the rail.
-  The runtime measurement was approximately `20.5 px` from chart frame to
-  rail and `20.0 px` from price section to rail.
+- The 0.0.670 layout is the accepted DOM baseline: `.price-section` contains
+  the complete price card, including chart, legend and period controls, and
+  the plan rail is its sibling after the closed section. Authenticated Safari
+  measured exactly `20 px` from the price-section bottom to the rail
+  (`.price-section bottom=630.75`, rail top `650.75`); the rail is not inside
+  the price graph. The earlier 0.0.669 arrangement, with graph controls after
+  the rail, is historical and not the final visual baseline.
 
 The next staged scope is C, solar and net-load enrichment. It must add only
 verified raw/corrected PV inputs and preserve the same site-scoped,
 provenance-aware and fail-closed rules. ESS planning, physical actuation and
 dispatch remain unimplemented; no current UI or plan may imply them.
+
+### 19.10 Price-card structure acceptance record: 0.0.670
+
+Release `0.0.670` closes the remaining price-card structure issue without
+changing planner or load semantics. The required hierarchy is:
+
+`price-section (heading/statistics -> chart-frame -> legend/period controls)`
+` -> spacing -> price-plan-rail -> following dashboard cards`.
+
+The rail remains directly associated with the price section but is never
+inserted between the plot and the price section's own controls. This is a
+layout-only acceptance record; solar/net-load enrichment remains stage C,
+ESS planning remains stage D, and vendor-neutral actuation/dispatch remains
+stage E.
