@@ -1500,3 +1500,55 @@ INFERRED (roadmap): Long-term data foundation:
   revision, provenance, actions, constraints, capability availability and
   missing/ineligible reasons, and be suitable for copying into ChatGPT.
   Stage 5 learning/evaluation is not part of that scope.
+
+## 0.0.703–0.0.714 Stage 4 and Stage 5 acceptance closure
+
+- Stage 4 debug snapshots and explainability were implemented and runtime-
+  verified through the 0.0.703–0.0.705 correction series. Existing Debug mode
+  uses immutable decision-time snapshots and remains separate from the normal
+  clean card front.
+- Stage 5 is runtime accepted on `0.0.714`, commit
+  `8a9fab7a6941d25200f2d9f9277442719399f754`. Forecast/model quality,
+  planner/decision quality and execution quality remain separate, with
+  site-scoped bounded learning and no actuator writes.
+- The 0.0.713 post-restart slot `2026-09-20 21:30–21:45 CEST` produced a
+  Vikarbodarna `house.consumption` observation with value
+  `760.0104206977779 W`, coverage approximately `1.0`, and
+  `learning_eligible=true`. Its evidence was classified
+  `partial_high_coverage`; the intraday factor correctly remained `1.0` with
+  `insufficient_support` after one eligible evidence point.
+- 0.0.713 then exposed a storage-boundary defect on the following
+  `21:45–22:00 CEST` flush: floating-point coverage marginally above `1.0`
+  violated the SQLite contract and rolled back that flush. No learning
+  evidence was fabricated from the failed interval.
+- 0.0.714 clamps computed coverage deterministically to `[0, 1]`. Its full
+  post-restart interval `2026-09-20 22:15–22:30 CEST` produced exactly one
+  revision for the same site/role/generation, value `698.4902961477778 W`,
+  unit `W`, `coverage_ratio=1.0`, `quality_status=good`,
+  `boundary_carry_used=true`, `hold_seconds=360`, and
+  `invalid_boundary_count=0`. The row was known at
+  `2026-09-20T20:30:05.172953Z`; its last exposed event timestamp was
+  `2026-09-20T20:25:19.562921Z`, before the interval end.
+- Learning state increased deterministically from one to two eligible
+  intraday evidence points without duplicates. The new point had baseline
+  `1230.5523266980267 W`, actual `698.4902961477778 W`, ratio
+  `0.5676234004790801`, coverage `1.0`, and qualification
+  `good_high_coverage`. `intraday_factor` remained `1.0` with
+  `insufficient_support`; support was not sufficient to promote a correction.
+  No observation still produces no learning update.
+- Exact predecessor age and first-event timestamp are not persisted in the
+  canonical row. They are therefore not claimed as runtime facts. Frozen
+  predecessor selection, next-quarter race isolation, bounded 360-second
+  hold, invalid-boundary handling, generation isolation, restart-empty-cache,
+  idempotence and coverage-clamp semantics are covered by automated tests.
+  No older canonical rows or Stage 4 snapshots were rewritten.
+- Runtime remains fail-closed for planner/execution quality:
+  counterfactual evaluation is unavailable when individual loads are absent
+  or ESS policy constraints are incomplete, execution is `NOT_APPLICABLE`
+  without an actuator, and `execution_eligible=false` plus
+  `actuator_writes_enabled=false` remain invariants. No actuator or device
+  writes occurred.
+- Stage 5 is closed and accepted. The next active implementation scope is
+  **Stage 6 — Solar/ESS enrichment and physical calibration**. Solar-first and
+  ESS-first remain capability-scoped and must not bypass the accepted
+  site-state, action and learning foundations.

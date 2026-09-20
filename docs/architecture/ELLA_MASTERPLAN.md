@@ -432,7 +432,7 @@ are excluded.
 Tests: snapshot reproducibility after state changes/restart, missing optional
 capability, wrong-site rejection, redaction, stable JSON and copy output.
 
-### Stage 5 — Evaluation and site-scoped learning loop
+### Stage 5 — Evaluation and site-scoped learning loop (accepted 0.0.714)
 
 Entry: qualifying plans, observations and decision snapshots exist.
 
@@ -447,6 +447,35 @@ model promotion cannot widen safety constraints.
 Tests: forecast error, planner regret, actuator-failure separation, missing
 observation, counterfactual insufficiency, site leakage, replay determinism,
 rollback and seasonal/site holdout evaluation.
+
+Runtime closure: `0.0.714`, commit
+`8a9fab7a6941d25200f2d9f9277442719399f754`, is accepted after two
+site-scoped Vikarbodarna post-restart observations. The 0.0.713 interval
+`21:30–21:45 CEST` produced `760.0104206977779 W`, coverage approximately
+`1.0` and `learning_eligible=true`. The following 0.0.713 flush exposed a
+floating-point coverage overflow at `21:45–22:00 CEST`; no learning evidence
+was fabricated from that failed interval. The 0.0.714 clamp correction then
+produced exactly one `22:15–22:30 CEST` row for the same site, role and
+generation: `698.4902961477778 W`, `coverage_ratio=1.0`,
+`quality_status=good`, boundary carry enabled, 360-second hold policy and
+zero invalid boundaries. Its evidence was added once with baseline
+`1230.5523266980267 W`, actual `698.4902961477778 W`, ratio
+`0.5676234004790801` and `good_high_coverage`; the intraday factor correctly
+remained `1.0` with `insufficient_support`.
+
+Exact predecessor age and first-event timestamp are not persisted in the
+canonical row and are not treated as runtime facts. Frozen predecessor
+selection, next-quarter race isolation, bounded carry, invalid-boundary and
+generation handling, restart-empty-cache, idempotence and coverage-clamp
+behavior are covered by the accepted automated tests. Existing canonical rows
+and Stage 4 snapshots remain immutable. Counterfactual evaluation is
+`counterfactual_unavailable` while individual loads and complete ESS policy
+constraints are absent; execution remains `NOT_APPLICABLE` without an
+actuator, with `execution_eligible=false` and
+`actuator_writes_enabled=false`. No device writes occurred.
+
+Stage 5 is closed and accepted. The next active implementation scope is
+**Stage 6 — Solar/ESS enrichment and physical calibration**.
 
 ### Stage 6 — Solar/ESS enrichment and physical calibration
 
@@ -508,9 +537,9 @@ classification and contiguous grouping. It is not itself a defect. Future
 card count must emerge from material action changes and constraints.
 
 Stage 0 architecture/contracts, Stage 1 capability/load foundation, Stage 2
-unified site state and Stage 3 shadow/recommend-only action planning are
-implemented and accepted. The next active implementation scope is **Stage 4 —
-Debug snapshot and explainability**. Solar-first and ESS-first implementation
-remain superseded as ordering decisions; they are optional capabilities within
-the staged architecture and must not bypass the accepted state and action
-foundations. Stage 5 learning/evaluation remains target architecture only.
+unified site state, Stage 3 shadow/recommend-only action planning, Stage 4
+decision-time debug snapshots and Stage 5 site-scoped evaluation/learning are
+implemented and accepted. The next active implementation scope is **Stage 6 —
+Solar/ESS enrichment and physical calibration**. Solar-first and ESS-first
+implementation remain capability-scoped and must not bypass the accepted
+state, action, debug and learning foundations.
