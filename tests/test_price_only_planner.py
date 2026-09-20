@@ -125,6 +125,39 @@ class PriceOnlyPlannerTests(unittest.TestCase):
         self.assertEqual(enriched["plan_blocks"][2]["load"]["actual_slots"], 1)
         self.assertEqual(enriched["plan_blocks"][2]["load"]["forecast_slots"], 1)
 
+    def test_model_fills_missing_slot_without_zero_fill_or_double_counting(self):
+        decision_at = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
+        plan = {
+            "available": True, "site_id": "site-a", "capability": {"known_at": decision_at.isoformat()},
+            "plan_blocks": [{"plan_block_id": "mixed", "start": "2026-09-20T10:00:00+00:00", "end": "2026-09-20T10:30:00+00:00"}],
+        }
+        model = [{
+            "valid_at": datetime(2026, 9, 20, 10, 15, tzinfo=UTC), "value": 3000,
+            "source": "model", "source_generation_id": "canonical-a", "source_generation_ids": ["canonical-a"],
+            "frame_id": None, "quality": {"status": "model"},
+        }]
+        actual = [{
+            "logical_role": "house.consumption", "interval_start": datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+            "interval_end": datetime(2026, 9, 20, 10, 15, tzinfo=UTC), "resolution_seconds": 900,
+            "source_generation_id": "canonical-a", "unit": "W", "value": 1000, "quality_status": "good",
+        }]
+        result = enrich_plan_with_load(plan, [], actual_rows=actual, decision_at=decision_at, model_points=model)
+        load = result["plan_blocks"][0]["load"]
+        self.assertEqual(load["estimate_kind"], "mixed")
+        self.assertEqual(load["actual_slots"], 1)
+        self.assertEqual(load["model_slots"], 1)
+        self.assertEqual(load["energy_kwh"], 1.0)
+        self.assertEqual(load["model_support"]["model_version"], "load-profile-v1")
+
+    def test_missing_model_support_stays_fail_closed(self):
+        decision_at = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
+        plan = {
+            "available": True, "site_id": "site-a", "capability": {"known_at": decision_at.isoformat()},
+            "plan_blocks": [{"plan_block_id": "gap", "start": "2026-09-20T10:00:00+00:00", "end": "2026-09-20T10:15:00+00:00"}],
+        }
+        result = enrich_plan_with_load(plan, [], actual_rows=[], decision_at=decision_at, model_points=[])
+        self.assertNotIn("load", result["plan_blocks"][0])
+
     def test_actual_load_is_site_scoped_and_gaps_fail_closed(self):
         decision_at = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
         plan = {

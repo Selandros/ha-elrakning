@@ -15,6 +15,7 @@ assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
 assert.match(panel, /price-plan-load-missing/);
 assert.match(panel, /Faktisk förbrukning/);
 assert.match(panel, /Beräknad total/);
+assert.match(panel, /Estimerad förbrukning/);
 assert.match(panel, /price-plan-card/);
 assert.match(panel, /this\.renderPriceChart\(\)/);
 assert.match(panel, /this\._renderSocChart\(\)/);

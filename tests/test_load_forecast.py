@@ -9,7 +9,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage
-from custom_components.elrakning.load_forecast import build_load_forecast_frame, persist_load_forecast
+from custom_components.elrakning.load_forecast import build_historical_model_points, build_load_forecast_frame, persist_load_forecast
 
 
 UTC = timezone.utc
@@ -90,6 +90,26 @@ class LoadForecastTests(unittest.TestCase):
                 self.assertIsNotNone(storage.latest_external_frame(frame["semantic_key"]))
             finally:
                 storage.close()
+
+    def test_historical_model_points_reuse_weekday_slot_profile(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        history = []
+        for day in range(7):
+            history.append({
+                "logical_role": "house.consumption",
+                "interval_start": datetime(2026, 9, 14 + day, 10, 0, tzinfo=UTC),
+                "source_generation_id": "canonical-house-generation",
+                "value": 900 + day,
+                "quality_status": "partial",
+            })
+        points = build_historical_model_points(
+            history, "Europe/Stockholm", datetime(2026, 9, 21, 10, 0, tzinfo=UTC),
+            datetime(2026, 9, 21, 10, 15, tzinfo=UTC),
+        )
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0]["source"], "model")
+        self.assertEqual(points[0]["quality"]["support_method"], "weekday_slot")
+        self.assertGreater(points[0]["value"], 0)
 
 
 if __name__ == "__main__":

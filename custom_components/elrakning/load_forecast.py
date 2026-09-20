@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -30,6 +31,76 @@ def _generation_id(site_id: str, source_generations: set[str]) -> str:
                 "source_generations": sorted(source_generations)}
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
     return f"load-{digest}"
+
+
+def _profile_buckets(history: list[dict[str, Any]], timezone_name: str):
+    """Build the shared weekday/time-of-day profile used by load forecasts."""
+    try:
+        zone = ZoneInfo(timezone_name)
+    except Exception:
+        return None
+    rows = []
+    for row in history:
+        if row.get("logical_role") != "house.consumption" or row.get("value") is None:
+            continue
+        if row.get("quality_status") not in {"good", "partial"}:
+            continue
+        interval_start = row.get("interval_start")
+        if not isinstance(interval_start, datetime) or interval_start.tzinfo is None:
+            continue
+        try:
+            value = float(row["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if value < 0 or not math.isfinite(value):
+            continue
+        rows.append((row, interval_start.astimezone(zone), value))
+    if not rows:
+        return None
+    by_weekday_slot: dict[tuple[int, int], list[tuple[float, dict[str, Any]]]] = defaultdict(list)
+    by_slot: dict[int, list[tuple[float, dict[str, Any]]]] = defaultdict(list)
+    for row, local, value in rows:
+        slot = local.hour * 4 + local.minute // 15
+        by_weekday_slot[(local.weekday(), slot)].append((value, row))
+        by_slot[slot].append((value, row))
+    return zone, by_weekday_slot, by_slot
+
+
+def build_historical_model_points(
+    history: list[dict[str, Any]],
+    timezone_name: str,
+    target_start: datetime,
+    target_end: datetime,
+) -> list[dict[str, Any]]:
+    """Return supported model estimates using the canonical forecast profile."""
+    profile = _profile_buckets(history, timezone_name)
+    if profile is None or target_start.tzinfo is None or target_end.tzinfo is None:
+        return []
+    zone, by_weekday_slot, by_slot = profile
+    points = []
+    cursor = _quarter_start(target_start)
+    while cursor < target_end:
+        local = cursor.astimezone(zone)
+        slot = local.hour * 4 + local.minute // 15
+        candidates = by_weekday_slot.get((local.weekday(), slot), [])
+        support = "weekday_slot"
+        if not candidates:
+            candidates = by_slot.get(slot, [])
+            support = "all_weekdays_slot"
+        if candidates:
+            values = [value for value, _row in candidates]
+            source_generations = sorted({str(row.get("source_generation_id")) for _value, row in candidates if row.get("source_generation_id")})
+            points.append({
+                "valid_at": cursor,
+                "value": sum(values) / len(values),
+                "frame_id": None,
+                "quality": {"status": "model", "sample_support": len(values), "support_method": support},
+                "source_generation_id": source_generations[0] if len(source_generations) == 1 else None,
+                "source_generation_ids": source_generations,
+                "source": "model",
+            })
+        cursor += timedelta(seconds=SLOT_SECONDS)
+    return points
 
 
 def build_load_forecast_frame(
@@ -60,14 +131,10 @@ def build_load_forecast_frame(
     source_generations = {str(row["source_generation_id"]) for row in rows if row.get("source_generation_id")}
     if not source_generations:
         return None, []
-    by_weekday_slot: dict[tuple[int, int], list[float]] = defaultdict(list)
-    by_slot: dict[int, list[float]] = defaultdict(list)
-    for row in rows:
-        local = row["interval_start"].astimezone(zone)
-        slot = local.hour * 4 + local.minute // 15
-        value = float(row["value"])
-        by_weekday_slot[(local.weekday(), slot)].append(value)
-        by_slot[slot].append(value)
+    profile = _profile_buckets(rows, timezone_name)
+    if profile is None:
+        return None, []
+    _zone, by_weekday_slot, by_slot = profile
     target_start = _quarter_start(known_at.astimezone(zone) + timedelta(minutes=15)).astimezone(timezone.utc)
     target_end = target_start + timedelta(hours=horizon_hours)
     points: list[dict[str, Any]] = []
@@ -81,7 +148,7 @@ def build_load_forecast_frame(
             candidates = by_slot.get(slot, [])
             support = "all_weekdays_slot"
         if candidates:
-            value = sum(candidates) / len(candidates)
+            value = sum(item[0] for item in candidates) / len(candidates)
             points.append({
                 "point_id": "", "point_key": cursor.isoformat(), "valid_at": cursor,
                 "value": value, "unit": "W", "quality_status": "good",

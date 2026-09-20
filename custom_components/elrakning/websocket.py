@@ -33,6 +33,7 @@ from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
 from .invoice import build_today_variable_cost
 from .power import PowerManager
+from .load_forecast import build_historical_model_points
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -1299,19 +1300,27 @@ async def websocket_ella_plan(hass, connection, msg):
     if result.get("available"):
         load_state = await _async_load_forecast_state(hass)
         actual_rows = []
+        model_points = []
         collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
         if collector is not None and result.get("plan_blocks"):
             try:
                 starts = [datetime.fromisoformat(block["start"]) for block in result["plan_blocks"]]
                 ends = [datetime.fromisoformat(block["end"]) for block in result["plan_blocks"]]
+                location = identity.state.get("site_configs", {}).get(site_id, {}).get("location", {})
+                timezone_name = location.get("timezone")
                 actual_rows = await hass.async_add_executor_job(
                     collector.storage.read_site_energy_history,
-                    site_id, min(starts), max(ends),
+                    site_id, decision_at - timedelta(days=60), max(ends),
                 )
+                if isinstance(timezone_name, str) and timezone_name:
+                    model_points = build_historical_model_points(
+                        actual_rows, timezone_name, min(starts), max(ends)
+                    )
             except (KeyError, TypeError, ValueError):
                 actual_rows = []
         result = enrich_plan_with_load(
-            result, load_state.get("frames", []), actual_rows=actual_rows, decision_at=decision_at
+            result, load_state.get("frames", []), actual_rows=actual_rows,
+            decision_at=decision_at, model_points=model_points,
         )
     connection.send_result(msg["id"], result)
 

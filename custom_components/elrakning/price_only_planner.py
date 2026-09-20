@@ -151,6 +151,7 @@ def _load_points_for_block(
     site_id: str,
     decision_at: datetime,
     actual_rows: Iterable[dict[str, Any]] | None = None,
+    model_points: Iterable[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Return complete site-scoped actual/forecast coverage for one block."""
     try:
@@ -193,6 +194,10 @@ def _load_points_for_block(
                                    "source_generation_id": frame.get("source_generation_id"),
                                    "source": "forecast"})
     by_time = {point["valid_at"]: point for point in candidates}
+    for point in model_points or []:
+        valid_at = point.get("valid_at") if isinstance(point, dict) else None
+        if isinstance(valid_at, datetime) and start <= valid_at < end:
+            by_time.setdefault(valid_at, point)
     actual_by_time: dict[datetime, dict[str, Any]] = {}
     for row in actual_rows or []:
         if row.get("site_id") not in {None, site_id}:
@@ -229,10 +234,12 @@ def enrich_plan_with_load(
     *,
     actual_rows: Iterable[dict[str, Any]] | None = None,
     decision_at: datetime | None = None,
+    model_points: Iterable[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Add complete canonical actual/forecast load values to price blocks."""
     frame_list = list(frames or [])
-    if not isinstance(plan, dict) or plan.get("available") is not True or (not frame_list and not actual_rows):
+    model_point_list = list(model_points or [])
+    if not isinstance(plan, dict) or plan.get("available") is not True or (not frame_list and not actual_rows and not model_point_list):
         return plan
     site_id = plan.get("site_id")
     if not isinstance(site_id, str) or not site_id:
@@ -258,12 +265,14 @@ def enrich_plan_with_load(
     enriched = {**plan, "plan_blocks": []}
     for block in plan.get("plan_blocks") or []:
         updated = dict(block)
-        points = _load_points_for_block(block, frame_list, site_id, decision_at, actual_rows)
+        points = _load_points_for_block(block, frame_list, site_id, decision_at, actual_rows, model_point_list)
         if points:
             watts = [point["value"] for point in points]
             duration_hours = LOAD_SLOT_SECONDS / 3600
             frame_ids = sorted({point["frame_id"] for point in points if point.get("frame_id")})
-            source_generations = sorted({point["source_generation_id"] for point in points if point.get("source_generation_id")})
+            source_generations = sorted({generation for point in points for generation in (
+                point.get("source_generation_ids") or [point.get("source_generation_id")]
+            ) if generation})
             sources = sorted({point["source"] for point in points})
             updated["load"] = {
                 "energy_kwh": sum(watts) * duration_hours / 1000,
@@ -277,20 +286,30 @@ def enrich_plan_with_load(
                 "estimate_kind": "mixed" if len(sources) > 1 else sources[0],
                 "actual_slots": sum(point["source"] == "actual" for point in points),
                 "forecast_slots": sum(point["source"] == "forecast" for point in points),
+                "model_slots": sum(point["source"] == "model" for point in points),
             }
+            model_support = [point.get("quality", {}) for point in points if point["source"] == "model"]
+            if model_support:
+                updated["load"]["model_support"] = {
+                    "model_version": "load-profile-v1",
+                    "sample_support_min": min(item.get("sample_support", 0) for item in model_support),
+                    "sample_support_max": max(item.get("sample_support", 0) for item in model_support),
+                    "support_methods": sorted({item.get("support_method") for item in model_support if item.get("support_method")}),
+                }
             updated["verified_inputs"] = {
                 **block.get("verified_inputs", {}),
                 "capabilities": ["price", "load"],
                 "load_frames": frame_ids,
                 "load_source_generations": source_generations,
             }
+            label = "estimerad" if sources == ["model"] else "förväntad"
             if block.get("category") == "expensive_period":
-                updated["reason"] = f"Dyr prisperiod med förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+                updated["reason"] = f"Dyr prisperiod med {label} förbrukning {updated['load']['energy_kwh']:.1f} kWh."
             elif block.get("category") == "cheap_period":
-                updated["reason"] = f"Billig prisperiod; förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+                updated["reason"] = f"Billig prisperiod; {label} förbrukning {updated['load']['energy_kwh']:.1f} kWh."
             else:
-                updated["reason"] = f"Prisförändring med förväntad förbrukning {updated['load']['energy_kwh']:.1f} kWh."
-        elif usable_frames:
+                updated["reason"] = f"Prisförändring med {label} förbrukning {updated['load']['energy_kwh']:.1f} kWh."
+        elif usable_frames or model_point_list:
             # Preserve fail-closed semantics explicitly for blocks without
             # complete forecast coverage; never fill a missing interval with 0.
             updated["load"] = {"coverage": "unavailable", "reason": "incomplete_forecast_coverage"}

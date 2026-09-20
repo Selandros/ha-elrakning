@@ -2454,6 +2454,22 @@ export function centerCurrentPricePlanCard(rail, blocks, nowMs = Date.now()) {
   return true;
 }
 
+function scheduleCurrentPricePlanCenter(rail, blocks) {
+  let attempts = 0;
+  const center = () => {
+    attempts += 1;
+    if (centerCurrentPricePlanCard(rail, blocks)) return;
+    if (attempts >= 4) return;
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(center);
+    else setTimeout(center, 0);
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => requestAnimationFrame(center));
+  } else {
+    setTimeout(center, 0);
+  }
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -4873,7 +4889,7 @@ class ElrakningPanel {
           isolation: isolate;
           margin-bottom: 0;
           overflow: visible;
-          padding: 20px 20px 12px;
+          padding: 20px 20px 0;
           position: relative;
           backdrop-filter: var(--ha-card-backdrop-filter, none);
           -webkit-backdrop-filter: var(--ha-card-backdrop-filter, none);
@@ -5021,7 +5037,7 @@ class ElrakningPanel {
 
         @media (max-width: 600px) {
           .price-section {
-          padding: 16px 12px 10px;
+          padding: 16px 12px 0;
           }
         }
 
@@ -8219,7 +8235,8 @@ class ElrakningPanel {
         load.className = "price-plan-load";
         const label = block.load.estimate_kind === "actual"
           ? "Faktisk förbrukning"
-          : block.load.estimate_kind === "mixed" ? "Beräknad total" : "Förväntad förbrukning";
+          : block.load.estimate_kind === "mixed" ? "Beräknad total"
+            : block.load.estimate_kind === "model" ? "Estimerad förbrukning" : "Förväntad förbrukning";
         load.textContent = `${label} ${this._formatNumber(expectedLoad)} kWh`;
         button.append(load);
       } else if (block?.load?.coverage === "unavailable") {
@@ -8242,9 +8259,7 @@ class ElrakningPanel {
       return button;
     }));
     if (shouldCenterCurrentCard) {
-      const center = () => centerCurrentPricePlanCard(rail, blocks);
-      if (typeof requestAnimationFrame === "function") requestAnimationFrame(center);
-      else setTimeout(center, 0);
+      scheduleCurrentPricePlanCenter(rail, blocks);
     }
   }
 
