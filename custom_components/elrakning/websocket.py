@@ -847,6 +847,7 @@ async def websocket_diagnostics_state(hass, connection, msg):
                 _ella_load_registry(hass),
                 site_id,
                 load_forecast=await _async_load_forecast_state(hass, site_id),
+                entity_available=lambda entity_id: _ella_entity_available(hass, entity_id),
             )
     connection.send_result(msg["id"], {
         "logs": manager.diagnostics if manager else [],
@@ -1237,10 +1238,6 @@ async def _async_load_forecast_state(hass, requested_site_id: str | None = None)
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
     site_id = requested_site_id or (getattr(identity, "state", {}).get("active_site_id") if identity else None)
-    binding_getter = getattr(identity, "ella_binding_for_site", None) if identity else None
-    binding = binding_getter(site_id) if callable(binding_getter) else None
-    if binding is None:
-        return {"available": False, "reason": "ella_unbound", "frames": []}
     if not site_id or collector is None:
         return {"available": False, "reason": "site_unconfigured", "frames": []}
     now = dt_util.now().astimezone()
@@ -1271,6 +1268,15 @@ async def _async_load_forecast_state(hass, requested_site_id: str | None = None)
                         "point": point["point"]} for point in frame["points"]],
         })
     return {"available": bool(serialized), "reason": None if serialized else "no_supported_history", "frames": serialized}
+
+
+def _ella_entity_available(hass, entity_id: str) -> bool:
+    """Check only explicit registry/state presence; never infer an entity by name."""
+    registry = er.async_get(hass)
+    registry_entry = registry.async_get(entity_id) if registry is not None and hasattr(registry, "async_get") else None
+    states = getattr(hass, "states", None)
+    state = states.get(entity_id) if states is not None and hasattr(states, "get") else None
+    return registry_entry is not None or state is not None
 
 
 @websocket_api.websocket_command({vol.Required("type"): LOAD_FORECAST_COMMAND})
@@ -1310,7 +1316,11 @@ async def websocket_ella_capabilities(hass, connection, msg):
         return
     forecast = await _async_load_forecast_state(hass, site_id)
     try:
-        inventory = build_capability_inventory(_ella_site_manager(hass), registry, site_id, load_forecast=forecast)
+        inventory = build_capability_inventory(
+            _ella_site_manager(hass), registry, site_id,
+            load_forecast=forecast,
+            entity_available=lambda entity_id: _ella_entity_available(hass, entity_id),
+        )
     except ValueError as err:
         connection.send_result(msg["id"], {"success": False, "error": str(err)})
         return

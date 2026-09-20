@@ -34,6 +34,7 @@ def _capability(
     actuator_available: bool = False,
     control_mode: str = "observe_only",
     execution_eligible: bool = False,
+    used_by_current_plan: bool = False,
     quality: Any = None,
 ) -> dict[str, Any]:
     source = source or {}
@@ -51,6 +52,9 @@ def _capability(
             "generation_id": source.get("generation_id"),
             "resource_id": source.get("resource_id"),
             "frame_ids": sorted(source.get("frame_ids", [])),
+            "resources": deepcopy(source.get("resources", [])),
+            "binding_fingerprint": source.get("binding_fingerprint"),
+            "entities": deepcopy(source.get("entities", {})),
         },
         "known_at": source.get("known_at"),
         "captured_at": source.get("captured_at"),
@@ -61,6 +65,7 @@ def _capability(
         "actuator_available": actuator_available,
         "control_mode": control_mode,
         "execution_eligible": execution_eligible,
+        "used_by_current_plan": used_by_current_plan,
     }
 
 
@@ -73,8 +78,8 @@ def _site_rows(site_manager: Any, site_id: str) -> tuple[dict[str, Any], list[di
     return site or {}, rows
 
 
-def _role(rows: list[dict[str, Any]], role: str) -> dict[str, Any] | None:
-    return next((row for row in rows if row.get("logical_role") == role), None)
+def _roles(rows: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+    return [row for row in rows if row.get("logical_role") == role]
 
 
 def _binding(site_manager: Any, site_id: str, service: str) -> dict[str, Any] | None:
@@ -98,6 +103,24 @@ def _source(row: dict[str, Any] | None, *, dataset: str | None = None) -> dict[s
     }
 
 
+def _sources(rows: list[dict[str, Any]], *, dataset: str | None = None) -> dict[str, Any]:
+    """Preserve every active resource while keeping the legacy first source shape."""
+    resources = [_source(row, dataset=dataset) for row in rows]
+    first = deepcopy(resources[0]) if resources else {"dataset": dataset}
+    first["resources"] = resources
+    return first
+
+
+def _valid_binding(site_manager: Any, binding: dict[str, Any] | None) -> bool:
+    if not isinstance(binding, dict):
+        return False
+    fingerprint = binding.get("binding_fingerprint")
+    checker = getattr(site_manager, "binding_fingerprint", None)
+    if not isinstance(fingerprint, str) or not callable(checker):
+        return False
+    return fingerprint == checker(binding)
+
+
 def build_capability_inventory(
     site_manager: Any,
     load_registry: EllaLoadRegistry,
@@ -105,6 +128,7 @@ def build_capability_inventory(
     *,
     load_forecast: dict[str, Any] | None = None,
     now: datetime | None = None,
+    entity_available: Any = None,
 ) -> dict[str, Any]:
     """Build a deterministic inventory from explicit bindings and canonical roles."""
     site, rows = _site_rows(site_manager, site_id)
@@ -112,17 +136,17 @@ def build_capability_inventory(
         raise ValueError("site_not_found")
     now_value = (now or datetime.now().astimezone()).isoformat()
     price_binding = getattr(site_manager, "global_binding", lambda _service: None)("nord_pool")
-    ella_binding = getattr(site_manager, "ella_binding_for_site", lambda _site: None)(site_id)
     retail_binding = _binding(site_manager, site_id, "elhandel")
     grid_binding = _binding(site_manager, site_id, "grid")
-    house = _role(rows, "house.consumption")
-    solar = _role(rows, "solar.production")
-    grid_power = _role(rows, "grid.power/import")
-    grid_import = _role(rows, "grid.energy_import")
-    grid_export = _role(rows, "grid.energy_export")
-    battery_power = _role(rows, "battery.power")
-    battery_soc = _role(rows, "battery.soc")
-    battery_capacity = _role(rows, "battery.capacity")
+    forecast_binding = _binding(site_manager, site_id, "forecast")
+    house = _roles(rows, "house.consumption")
+    solar = _roles(rows, "solar.production")
+    grid_power = _roles(rows, "grid.power/import")
+    grid_import = _roles(rows, "grid.energy_import")
+    grid_export = _roles(rows, "grid.energy_export")
+    battery_power = _roles(rows, "battery.power")
+    battery_soc = _roles(rows, "battery.soc")
+    battery_capacity = _roles(rows, "battery.capacity")
     forecast = load_forecast or {"available": False, "reason": "not_loaded", "frames": []}
     frames = forecast.get("frames", []) if isinstance(forecast, dict) else []
     load_available = bool(forecast.get("available")) and all(frame.get("site_id") == site_id for frame in frames if isinstance(frame, dict))
@@ -133,34 +157,39 @@ def build_capability_inventory(
         "known_at": max((frame.get("known_at") for frame in frames if isinstance(frame, dict) and frame.get("known_at")), default=None),
     }
     capabilities = [
-        _capability("price.spot", "price", site_id, available=bool(price_binding), reason=None if price_binding else "explicit_price_binding_missing", source={"dataset": "price_data.v1"}, forecast_available=bool(price_binding), quality="verified_binding" if price_binding else None),
-        _capability("cost.electricity_retail", "electricity_retail", site_id, available=bool(retail_binding), reason=None if retail_binding else "explicit_retail_binding_missing", source={"dataset": "electricity_provider_binding.v1"}),
-        _capability("cost.grid_tariff", "grid_tariff", site_id, available=bool(grid_binding), reason=None if grid_binding else "explicit_grid_binding_missing", source={"dataset": "grid_binding.v1"}),
-        _capability("load.house_total.actual", "house_total_consumption", site_id, available=bool(house), reason=None if house else "canonical_role_missing", source=_source(house, dataset="canonical.house.consumption"), observation_available=bool(house)),
+        _capability("price.spot", "price", site_id, available=_valid_binding(site_manager, price_binding), reason=None if _valid_binding(site_manager, price_binding) else "explicit_price_binding_invalid", source={"dataset": "price_data.v1", "binding_fingerprint": price_binding.get("binding_fingerprint") if isinstance(price_binding, dict) else None}, forecast_available=_valid_binding(site_manager, price_binding), used_by_current_plan=_valid_binding(site_manager, price_binding), quality="verified_binding" if _valid_binding(site_manager, price_binding) else None),
+        _capability("cost.electricity_retail", "electricity_retail", site_id, available=_valid_binding(site_manager, retail_binding), reason=None if _valid_binding(site_manager, retail_binding) else "explicit_retail_binding_invalid", source={"dataset": "electricity_provider_binding.v1", "binding_fingerprint": retail_binding.get("binding_fingerprint") if isinstance(retail_binding, dict) else None}),
+        _capability("cost.grid_tariff", "grid_tariff", site_id, available=_valid_binding(site_manager, grid_binding), reason=None if _valid_binding(site_manager, grid_binding) else "explicit_grid_binding_invalid", source={"dataset": "grid_binding.v1", "binding_fingerprint": grid_binding.get("binding_fingerprint") if isinstance(grid_binding, dict) else None}),
+        _capability("load.house_total.actual", "house_total_consumption", site_id, available=bool(house), reason=None if house else "canonical_role_missing", source=_sources(house, dataset="canonical.house.consumption"), observation_available=bool(house)),
         _capability("load.house_total.forecast", "load_forecast", site_id, available=load_available, reason=None if load_available else forecast.get("reason", "no_supported_history"), source=load_source, forecast_available=load_available, quality=[frame.get("quality") for frame in frames if isinstance(frame, dict)]),
-        _capability("grid.power", "grid_import_export_power", site_id, available=bool(grid_power), reason=None if grid_power else "canonical_role_missing", source=_source(grid_power, dataset="canonical.grid.power"), observation_available=bool(grid_power)),
-        _capability("grid.energy_import", "grid_import_energy", site_id, available=bool(grid_import), reason=None if grid_import else "canonical_role_missing", source=_source(grid_import, dataset="canonical.grid.energy_import"), observation_available=bool(grid_import)),
-        _capability("grid.energy_export", "grid_export_energy", site_id, available=bool(grid_export), reason=None if grid_export else "canonical_role_missing", source=_source(grid_export, dataset="canonical.grid.energy_export"), observation_available=bool(grid_export)),
-        _capability("solar.actual", "solar_actual", site_id, available=bool(solar), reason=None if solar else "canonical_role_missing", source=_source(solar, dataset="canonical.solar.production"), observation_available=bool(solar)),
-        _capability("solar.forecast", "solar_forecast", site_id, available=False, reason="not_integrated_in_stage_1", source={"dataset": "solar_forecast.v1"}, forecast_available=False),
-        _capability("battery.power", "battery_power", site_id, available=bool(battery_power), reason=None if battery_power else "canonical_role_missing", source=_source(battery_power, dataset="canonical.battery.power"), observation_available=bool(battery_power)),
-        _capability("battery.soc", "battery_soc", site_id, available=bool(battery_soc), reason=None if battery_soc else "canonical_role_missing", source=_source(battery_soc, dataset="canonical.battery.soc"), observation_available=bool(battery_soc)),
-        _capability("battery.capacity", "battery_capacity", site_id, available=bool(battery_capacity), reason=None if battery_capacity else "canonical_role_missing", source=_source(battery_capacity, dataset="canonical.battery.capacity"), observation_available=bool(battery_capacity)),
+        _capability("grid.power", "grid_import_export_power", site_id, available=bool(grid_power), reason=None if grid_power else "canonical_role_missing", source=_sources(grid_power, dataset="canonical.grid.power"), observation_available=bool(grid_power)),
+        _capability("grid.energy_import", "grid_import_energy", site_id, available=bool(grid_import), reason=None if grid_import else "canonical_role_missing", source=_sources(grid_import, dataset="canonical.grid.energy_import"), observation_available=bool(grid_import)),
+        _capability("grid.energy_export", "grid_export_energy", site_id, available=bool(grid_export), reason=None if grid_export else "canonical_role_missing", source=_sources(grid_export, dataset="canonical.grid.energy_export"), observation_available=bool(grid_export)),
+        _capability("solar.actual", "solar_actual", site_id, available=bool(solar), reason=None if solar else "canonical_role_missing", source=_sources(solar, dataset="canonical.solar.production"), observation_available=bool(solar), used_by_current_plan=False),
+        _capability("solar.forecast", "solar_forecast", site_id, available=_valid_binding(site_manager, forecast_binding), reason=None if _valid_binding(site_manager, forecast_binding) else "explicit_forecast_binding_invalid", source={"dataset": "solar_forecast.v1", "binding_fingerprint": forecast_binding.get("binding_fingerprint") if isinstance(forecast_binding, dict) else None, "entities": forecast_binding.get("entities", {}) if isinstance(forecast_binding, dict) else {}, "resources": [{"dataset": "solar_forecast.v1", "binding_fingerprint": forecast_binding.get("binding_fingerprint"), "entities": forecast_binding.get("entities", {})}] if isinstance(forecast_binding, dict) else []}, forecast_available=_valid_binding(site_manager, forecast_binding), used_by_current_plan=False),
+        _capability("battery.power", "battery_power", site_id, available=bool(battery_power), reason=None if battery_power else "canonical_role_missing", source=_sources(battery_power, dataset="canonical.battery.power"), observation_available=bool(battery_power), used_by_current_plan=False),
+        _capability("battery.soc", "battery_soc", site_id, available=bool(battery_soc), reason=None if battery_soc else "canonical_role_missing", source=_sources(battery_soc, dataset="canonical.battery.soc"), observation_available=bool(battery_soc), used_by_current_plan=False),
+        _capability("battery.capacity", "battery_capacity", site_id, available=bool(battery_capacity), reason=None if battery_capacity else "canonical_role_missing", source=_sources(battery_capacity, dataset="canonical.battery.capacity"), observation_available=bool(battery_capacity), used_by_current_plan=False),
     ]
     loads = load_registry.list_for_site(site_id)
     individual = []
     for load in loads:
         measurement = load.get("measurement")
         actuator = load.get("actuator")
+        measurement_present = bool(measurement and entity_available and entity_available(measurement))
+        actuator_present = bool(actuator and entity_available and entity_available(actuator))
         individual.append({
             "load_id": load["load_id"], "site_id": site_id, "enabled": load["enabled"],
-            "measurement_available": bool(measurement), "actuator_available": bool(actuator),
+            "measurement_configured": bool(measurement), "measurement_available": measurement_present,
+            "actuator_configured": bool(actuator), "actuator_available": actuator_present,
+            "reason": "entity_missing" if (measurement and not measurement_present) or (actuator and not actuator_present) else None,
             "control_mode": load["control_mode"], "criticality": load["criticality"],
             "flexibility": load["flexibility"], "execution_eligible": False,
         })
     capabilities.append(_capability("loads.individual", "individual_loads", site_id, available=bool(individual), partial=any(not row["measurement_available"] for row in individual), reason=None if individual else "registry_empty", source={"dataset": "ella_load_registry.v1"}, observation_available=any(row["measurement_available"] for row in individual), actuator_available=any(row["actuator_available"] for row in individual), execution_eligible=False))
     capabilities.append(_capability("actuators.loads", "load_actuators", site_id, available=False, partial=any(row["actuator_available"] for row in individual), reason="execution_disabled_stage_1", source={"dataset": "ella_load_registry.v1"}, actuator_available=any(row["actuator_available"] for row in individual), execution_eligible=False))
-    planner_eligible = bool(ella_binding and price_binding and house)
+    price_valid = _valid_binding(site_manager, price_binding)
+    planner_eligible = price_valid
     return {
         "schema": SCHEMA,
         "site_id": site_id,
@@ -169,8 +198,8 @@ def build_capability_inventory(
         "captured_at": now_value,
         "planner": {
             "current_plan": "price_load_v1",
-            "price_eligible": bool(ella_binding and price_binding),
-            "load_eligible": bool(ella_binding and house),
+            "price_eligible": price_valid,
+            "load_eligible": bool(house),
             "planner_eligible": planner_eligible,
             "solar_ess_used_by_current_plan": False,
         },
