@@ -1263,3 +1263,29 @@ INFERRED (roadmap): Long-term data foundation:
   enrichment, ESS planning, digital twin, actuator or dispatch. The accepted
   `0.0.658` stale-response/site-isolation protections remain the safety
   foundation.
+
+## 0.0.662 ELLA price-only UI shell and selection closure
+
+- NOT ACCEPTED / SUPERSEDED: `0.0.661` is superseded by `0.0.662` for the
+  price-only card layout and selection UX. It is not the final accepted
+  runtime baseline for that scope.
+- ACCEPTED RUNTIME/UI BASELINE: `0.0.662`, release commit
+  `77e62cc085e471eefbd01f0ce204ac4adeb0b2d5`, manifest/runtime `0.0.662`.
+  Python `661 passed`, `46 subtests`, `0 failed`; MJS `29/29`; compileall,
+  JSON/YAML validation and diff-check passed. The clean pre-restart payload
+  matched SHA256 `61/61`; HA Core check passed; exactly one normal Core
+  restart was performed; HTTP returned `200`; no new Elräkning traceback or
+  thread-safety warning was observed.
+- VERIFIED (authenticated UI runtime): seven price-only plan cards rendered
+  in a dedicated rail below the price chart. The chart plot area was
+  `top=270.77, bottom=565.77`; the rail was `top=575.77, bottom=697.77`,
+  with `railBelowChart=true`.
+- VERIFIED (authenticated UI runtime): selecting a card created the exact
+  plan-block selection band; selecting the same card again cleared it;
+  pointer interaction outside the cards and wheel/scroll interaction cleared
+  it immediately. A real Vikarbodarna -> Fiskvik site switch cleared the
+  selected card and selection band before applying Fiskvik's seven cards;
+  no stale Vikarbodarna selection remained.
+- This closure verifies only the price-only UI shell and graph-selection
+  interaction. Load-aware, solar-aware, ESS/battery, actuator and dispatch
+  stages remain unimplemented and are not implied by this status.

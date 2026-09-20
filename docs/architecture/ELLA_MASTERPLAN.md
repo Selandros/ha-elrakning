@@ -1373,3 +1373,29 @@ load-aware enrichment remains stage B, followed by solar/net-load stage C,
 ESS planning stage D and separate actuator/dispatch stage E. These later
 stages remain unimplemented and must not be represented as current runtime
 capabilities.
+
+### 19.8 UI/product shell completion record: price-only cards
+
+The price-only UI/product-shell scope is accepted in runtime release
+`0.0.662`. It places the existing site-scoped price-only plan blocks in a
+dedicated card rail below the price chart, without introducing a separate
+ELLA section, shadow-mode product status or a second planner. The seven-card
+runtime result was visually verified with the rail outside the chart plot
+area.
+
+Card-to-graph selection is also runtime-verified: a selected card creates an
+exact interval selection band, selecting it again clears the band, and
+pointer interaction outside the cards or wheel/scroll interaction clears the
+selection without changing plan data. Site switching clears the old card and
+selection state before applying the new site's cards; no stale cross-site
+selection was observed. The accepted `0.0.658` generation/site-isolation
+protections remain in force.
+
+Release `0.0.661` is historical and superseded by `0.0.662` for this layout
+and selection scope; it is not the final accepted runtime baseline.
+
+This record does not mark any later roadmap stage complete. Load-aware
+enrichment remains the next staged scope (B), followed by solar/net-load
+enrichment (C), ESS planning (D), and separate vendor-neutral actuator/
+dispatch (E). No load, solar, ESS, actuator or dispatch behavior is implied
+by the accepted `0.0.662` UI shell.
