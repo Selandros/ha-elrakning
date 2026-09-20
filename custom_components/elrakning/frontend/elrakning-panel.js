@@ -8217,7 +8217,10 @@ class ElrakningPanel {
       if (Number.isFinite(expectedLoad) && block?.load?.coverage === "complete") {
         const load = document.createElement("span");
         load.className = "price-plan-load";
-        load.textContent = `Förväntad förbrukning ${this._formatNumber(expectedLoad)} kWh`;
+        const label = block.load.estimate_kind === "actual"
+          ? "Faktisk förbrukning"
+          : block.load.estimate_kind === "mixed" ? "Beräknad total" : "Förväntad förbrukning";
+        load.textContent = `${label} ${this._formatNumber(expectedLoad)} kWh`;
         button.append(load);
       } else if (block?.load?.coverage === "unavailable") {
         const load = document.createElement("span");

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from functools import partial
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
@@ -1289,15 +1289,30 @@ async def websocket_ella_plan(hass, connection, msg):
     if not stored_fingerprint or stored_fingerprint != computed_fingerprint:
         connection.send_result(msg["id"], {"available": False, "reason": "price_provenance_invalid", "plan_blocks": []})
         return
+    decision_at = dt_util.now()
     result = build_price_only_plan(
         site_id,
         data.periods if data and not data.error else (),
-        dt_util.now(),
+        decision_at,
         source_generation_id=stored_fingerprint,
     )
     if result.get("available"):
         load_state = await _async_load_forecast_state(hass)
-        result = enrich_plan_with_load(result, load_state.get("frames", []))
+        actual_rows = []
+        collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+        if collector is not None and result.get("plan_blocks"):
+            try:
+                starts = [datetime.fromisoformat(block["start"]) for block in result["plan_blocks"]]
+                ends = [datetime.fromisoformat(block["end"]) for block in result["plan_blocks"]]
+                actual_rows = await hass.async_add_executor_job(
+                    collector.storage.read_site_energy_history,
+                    site_id, min(starts), max(ends),
+                )
+            except (KeyError, TypeError, ValueError):
+                actual_rows = []
+        result = enrich_plan_with_load(
+            result, load_state.get("frames", []), actual_rows=actual_rows, decision_at=decision_at
+        )
     connection.send_result(msg["id"], result)
 
 

@@ -145,8 +145,14 @@ def build_price_only_plan(
     }
 
 
-def _load_points_for_block(block: dict[str, Any], frames: Iterable[dict[str, Any]], site_id: str, decision_at: datetime) -> list[dict[str, Any]] | None:
-    """Return complete, site-scoped forecast coverage for one price block."""
+def _load_points_for_block(
+    block: dict[str, Any],
+    frames: Iterable[dict[str, Any]],
+    site_id: str,
+    decision_at: datetime,
+    actual_rows: Iterable[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]] | None:
+    """Return complete site-scoped actual/forecast coverage for one block."""
     try:
         start = datetime.fromisoformat(block["start"])
         end = datetime.fromisoformat(block["end"])
@@ -184,23 +190,55 @@ def _load_points_for_block(block: dict[str, Any], frames: Iterable[dict[str, Any
             if start <= valid_at < end and point.get("quality_status") == "good":
                 candidates.append({"valid_at": valid_at, "value": value, "frame_id": frame.get("frame_id"),
                                    "quality": frame.get("quality") or {},
-                                   "source_generation_id": frame.get("source_generation_id")})
+                                   "source_generation_id": frame.get("source_generation_id"),
+                                   "source": "forecast"})
     by_time = {point["valid_at"]: point for point in candidates}
+    actual_by_time: dict[datetime, dict[str, Any]] = {}
+    for row in actual_rows or []:
+        if row.get("site_id") not in {None, site_id}:
+            continue
+        if row.get("logical_role") != "house.consumption" or row.get("unit") != "W":
+            continue
+        if row.get("quality_status") not in {"good", "partial"} or row.get("value") is None:
+            continue
+        interval_start = row.get("interval_start")
+        interval_end = row.get("interval_end")
+        if not isinstance(interval_start, datetime) or not isinstance(interval_end, datetime):
+            continue
+        if interval_start.tzinfo is None or interval_end.tzinfo is None or interval_end <= interval_start:
+            continue
+        if int(row.get("resolution_seconds") or 0) != LOAD_SLOT_SECONDS or interval_end > decision_at:
+            continue
+        value = float(row["value"])
+        if not math.isfinite(value) or value < 0 or not (start <= interval_start < end):
+            continue
+        actual_by_time[interval_start] = {
+            "valid_at": interval_start, "value": value, "frame_id": None,
+            "quality": {"status": row.get("quality_status"), "source": "canonical"},
+            "source_generation_id": row.get("source_generation_id"), "source": "actual",
+        }
+    by_time.update(actual_by_time)
     expected_times = [start + timedelta(seconds=LOAD_SLOT_SECONDS * index) for index in range(expected)]
     selected = [by_time.get(value) for value in expected_times]
     return [point for point in selected if point is not None] if all(selected) and len(by_time) == expected else None
 
 
-def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
-    """Add only fully covered, verified load forecast values to price blocks."""
+def enrich_plan_with_load(
+    plan: dict[str, Any],
+    frames: Iterable[dict[str, Any]] | None,
+    *,
+    actual_rows: Iterable[dict[str, Any]] | None = None,
+    decision_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Add complete canonical actual/forecast load values to price blocks."""
     frame_list = list(frames or [])
-    if not isinstance(plan, dict) or plan.get("available") is not True or not frame_list:
+    if not isinstance(plan, dict) or plan.get("available") is not True or (not frame_list and not actual_rows):
         return plan
     site_id = plan.get("site_id")
     if not isinstance(site_id, str) or not site_id:
         return plan
     try:
-        decision_at = datetime.fromisoformat(plan["capability"]["known_at"])
+        decision_at = decision_at or datetime.fromisoformat(plan["capability"]["known_at"])
     except (KeyError, TypeError, ValueError):
         return plan
     if decision_at.tzinfo is None:
@@ -220,12 +258,13 @@ def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]]
     enriched = {**plan, "plan_blocks": []}
     for block in plan.get("plan_blocks") or []:
         updated = dict(block)
-        points = _load_points_for_block(block, frame_list, site_id, decision_at)
+        points = _load_points_for_block(block, frame_list, site_id, decision_at, actual_rows)
         if points:
             watts = [point["value"] for point in points]
             duration_hours = LOAD_SLOT_SECONDS / 3600
             frame_ids = sorted({point["frame_id"] for point in points if point.get("frame_id")})
             source_generations = sorted({point["source_generation_id"] for point in points if point.get("source_generation_id")})
+            sources = sorted({point["source"] for point in points})
             updated["load"] = {
                 "energy_kwh": sum(watts) * duration_hours / 1000,
                 "average_power_kw": sum(watts) / len(watts) / 1000,
@@ -235,6 +274,9 @@ def enrich_plan_with_load(plan: dict[str, Any], frames: Iterable[dict[str, Any]]
                 "frame_ids": frame_ids,
                 "source_generation_ids": source_generations,
                 "quality": "low_confidence" if any(point["quality"].get("status") == "low_confidence" for point in points) else "good",
+                "estimate_kind": "mixed" if len(sources) > 1 else sources[0],
+                "actual_slots": sum(point["source"] == "actual" for point in points),
+                "forecast_slots": sum(point["source"] == "forecast" for point in points),
             }
             updated["verified_inputs"] = {
                 **block.get("verified_inputs", {}),

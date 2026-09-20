@@ -91,6 +91,53 @@ class PriceOnlyPlannerTests(unittest.TestCase):
         self.assertEqual(len(enriched["plan_blocks"]), 3)
         self.assertTrue(all(block.get("load", {}).get("coverage") == "complete" for block in enriched["plan_blocks"]))
 
+    def test_actual_and_forecast_slots_form_complete_nonduplicated_estimate(self):
+        decision_at = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
+        plan = {
+            "available": True,
+            "site_id": "site-a",
+            "capability": {"known_at": decision_at.isoformat()},
+            "plan_blocks": [
+                {"plan_block_id": "past", "start": "2026-09-20T10:00:00+00:00", "end": "2026-09-20T10:15:00+00:00"},
+                {"plan_block_id": "future", "start": "2026-09-20T10:30:00+00:00", "end": "2026-09-20T10:45:00+00:00"},
+                {"plan_block_id": "mixed", "start": "2026-09-20T10:15:00+00:00", "end": "2026-09-20T10:45:00+00:00"},
+            ],
+        }
+        frame = self._load_frame(points=[
+            {"valid_at": "2026-09-20T10:30:00+00:00", "value": 2000, "unit": "W", "quality_status": "good"},
+            {"valid_at": "2026-09-20T10:45:00+00:00", "value": 2000, "unit": "W", "quality_status": "good"},
+        ])
+        actual_rows = [
+            {"logical_role": "house.consumption", "interval_start": datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+             "interval_end": datetime(2026, 9, 20, 10, 15, tzinfo=UTC), "resolution_seconds": 900,
+             "source_generation_id": "canonical-a", "unit": "W", "value": 1000, "quality_status": "good"},
+            {"logical_role": "house.consumption", "interval_start": datetime(2026, 9, 20, 10, 15, tzinfo=UTC),
+             "interval_end": datetime(2026, 9, 20, 10, 30, tzinfo=UTC), "resolution_seconds": 900,
+             "source_generation_id": "canonical-a", "unit": "W", "value": 1000, "quality_status": "partial"},
+        ]
+        enriched = enrich_plan_with_load(plan, [frame], actual_rows=actual_rows, decision_at=decision_at)
+        self.assertEqual(enriched["plan_blocks"][0]["load"]["estimate_kind"], "actual")
+        self.assertEqual(enriched["plan_blocks"][0]["load"]["energy_kwh"], 0.25)
+        self.assertEqual(enriched["plan_blocks"][1]["load"]["estimate_kind"], "forecast")
+        self.assertEqual(enriched["plan_blocks"][1]["load"]["energy_kwh"], 0.5)
+        self.assertEqual(enriched["plan_blocks"][2]["load"]["estimate_kind"], "mixed")
+        self.assertEqual(enriched["plan_blocks"][2]["load"]["energy_kwh"], 0.75)
+        self.assertEqual(enriched["plan_blocks"][2]["load"]["actual_slots"], 1)
+        self.assertEqual(enriched["plan_blocks"][2]["load"]["forecast_slots"], 1)
+
+    def test_actual_load_is_site_scoped_and_gaps_fail_closed(self):
+        decision_at = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
+        plan = {
+            "available": True, "site_id": "site-a", "capability": {"known_at": decision_at.isoformat()},
+            "plan_blocks": [{"plan_block_id": "gap", "start": "2026-09-20T10:00:00+00:00", "end": "2026-09-20T10:30:00+00:00"}],
+        }
+        actual = [{"logical_role": "house.consumption", "interval_start": datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+                   "interval_end": datetime(2026, 9, 20, 10, 15, tzinfo=UTC), "resolution_seconds": 900,
+                   "source_generation_id": "canonical-a", "unit": "W", "value": 1000, "quality_status": "good",
+                   "site_id": "site-b"}]
+        result = enrich_plan_with_load(plan, [], actual_rows=actual, decision_at=decision_at)
+        self.assertNotIn("load", result["plan_blocks"][0])
+
     def test_missing_stale_or_partial_load_falls_back_without_fabrication(self):
         now = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
         plan = build_price_only_plan("site-a", periods([0.2, 0.2]), now, source_generation_id="generation-a")
