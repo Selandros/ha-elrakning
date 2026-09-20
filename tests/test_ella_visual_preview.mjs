@@ -32,6 +32,7 @@ assert.doesNotMatch(genericButtonRule, /margin-top:/);
 assert.doesNotMatch(panel, /\.price-plan-rail\s*\{[\s\S]*?border-bottom:/);
 assert.match(panel, /\.daily-energy-row\s*\{[\s\S]*?gap: 0;/);
 assert.match(panel, /\.daily-energy-row:has\(> :not\(\[hidden\]\) ~ :not\(\[hidden\]\)\)\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
+assert.match(panel, /\.daily-energy-row:not\(:has\(> :not\(\[hidden\]\)\)\)\s*\{[\s\S]*?display: none;/);
 assert.match(panel, /\.daily-energy-row\s*\{[\s\S]*?align-items: stretch;/);
 assert.match(panel, /\.page\s*\{[\s\S]*?max-width: 960px;[\s\S]*?margin: 0 auto;/);
 assert.doesNotMatch(panel, /\.page\s*\{[^}]*padding:/);

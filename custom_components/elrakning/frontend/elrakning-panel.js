@@ -3523,6 +3523,10 @@ class ElrakningPanel {
           gap: var(--dashboard-card-gap);
         }
 
+        .daily-energy-row:not(:has(> :not([hidden]))) {
+          display: none;
+        }
+
         .dashboard-card-stack {
           display: grid;
           gap: 0;
