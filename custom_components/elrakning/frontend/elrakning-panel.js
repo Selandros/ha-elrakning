@@ -361,6 +361,69 @@ function localDateKey(value) {
   return Number.isFinite(date.getTime()) ? date.toLocaleDateString("sv-SE") : null;
 }
 
+function localDayStart(value) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    : null;
+}
+
+function nextForecastBoundary(now) {
+  const boundary = new Date(now);
+  const minutes = boundary.getMinutes();
+  const remainder = minutes % 15;
+  boundary.setMinutes(minutes - remainder + 15, 0, 0);
+  return boundary;
+}
+
+function forecastModelRank(frame) {
+  const modelVersion = frame?.quality?.model_version
+    || frame?.provenance?.model_version
+    || frame?.points?.[0]?.point?.model_version
+    || "";
+  return modelVersion === "load-profile-v2" ? 2 : 1;
+}
+
+export function selectLoadForecastPoints(frames, { siteId = null, selectedDate = new Date(), now = new Date() } = {}) {
+  const dayStart = localDayStart(selectedDate);
+  if (!dayStart) return [];
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  const todayStart = localDayStart(now);
+  if (!todayStart) return [];
+  const dayKey = localDateKey(dayStart);
+  const todayKey = localDateKey(todayStart);
+  if (dayKey < todayKey) return [];
+  const firstVisible = dayKey === todayKey ? nextForecastBoundary(now) : dayStart;
+  const candidates = (Array.isArray(frames) ? frames : [])
+    .filter((frame) => frame?.logical_role === "load.forecast"
+      && (!siteId || frame.site_id === siteId)
+      && Array.isArray(frame.points)
+      && frame.points.some((point) => {
+        const timestamp = new Date(point?.valid_at).getTime();
+        return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+      }))
+    .sort((left, right) => {
+      const modelOrder = forecastModelRank(left) - forecastModelRank(right);
+      if (modelOrder) return modelOrder;
+      const knownOrder = new Date(left.known_at || 0).getTime() - new Date(right.known_at || 0).getTime();
+      if (knownOrder) return knownOrder;
+      const revisionOrder = Number(left.revision || 0) - Number(right.revision || 0);
+      return revisionOrder || String(left.frame_id || "").localeCompare(String(right.frame_id || ""));
+    });
+  const frame = candidates.at(-1);
+  if (!frame) return [];
+  const points = new Map();
+  for (const point of frame.points) {
+    const timestamp = new Date(point?.valid_at).getTime();
+    const value = Number(point?.value);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(value)
+      || timestamp < firstVisible.getTime() || timestamp >= dayEnd.getTime()) continue;
+    points.set(timestamp, { timestamp, value_kw: value / 1000 });
+  }
+  return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
+}
+
 export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
 
 export function isVisiblePowerValue(value) {
@@ -11285,12 +11348,12 @@ class ElrakningPanel {
         value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
       }));
     }
-    const loadForecastPoints = (this._loadForecast?.frames || [])
-      .flatMap((frame) => Array.isArray(frame.points) ? frame.points : [])
-      .map((point) => ({ timestamp: new Date(point.valid_at).getTime(), value_kw: Number(point.value) / 1000 }))
-      .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value_kw)
-        && point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime())
-      .sort((left, right) => left.timestamp - right.timestamp);
+    const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || this._pricePlan?.site_id || null;
+    const loadForecastPoints = selectLoadForecastPoints(this._loadForecast?.frames, {
+      siteId: activeSiteId,
+      selectedDate: dayStart,
+      now,
+    });
     if (loadForecastPoints.length) {
       const actualBeforeForecast = (powerDisplayPoints.consumption || [])
         .filter((point) => new Date(point.timestamp).getTime() < loadForecastPoints[0].timestamp)
