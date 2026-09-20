@@ -2665,6 +2665,11 @@ class ElrakningPanel {
           <div class="price-chart-frame">
             <div class="price-chart" aria-live="polite"></div>
           </div>
+        </section>
+
+        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
+
+        <div class="price-controls">
           <div class="price-chart-legend" data-meter-legend hidden>
             <button type="button" class="chart-legend-toggle${this._spotBarsVisible ? " active" : ""}" data-chart-layer="spot" aria-pressed="${this._spotBarsVisible}">
               <span class="chart-legend-swatch spot" aria-hidden="true"></span>Pris<span class="chart-legend-solo-badge">SOLO</span>
@@ -2707,9 +2712,7 @@ class ElrakningPanel {
             <div class="period-picker-popover" data-period-picker-popover hidden></div>
             <dialog class="period-picker-dialog" data-period-picker-dialog aria-label="Välj period"></dialog>
           </div>
-        </section>
-
-        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
+        </div>
 
         <div class="daily-energy-row">
           <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
@@ -3686,7 +3689,7 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           overflow-x: auto;
-          margin: 0;
+          margin: 20px 0 0;
           padding: 0 1px 6px;
           scrollbar-width: thin;
         }
@@ -4034,7 +4037,7 @@ class ElrakningPanel {
           display: flex;
           gap: 10px;
           justify-content: flex-end;
-          margin-top: 20px;
+          margin-top: 6px;
         }
 
         .provider-result {
@@ -4893,6 +4896,15 @@ class ElrakningPanel {
           position: relative;
           backdrop-filter: var(--ha-card-backdrop-filter, none);
           -webkit-backdrop-filter: var(--ha-card-backdrop-filter, none);
+        }
+
+        .price-controls {
+          display: flex;
+          flex-wrap: wrap;
+          font-size: var(--price-card-text-size);
+          line-height: 1.35;
+          row-gap: 0;
+          width: 100%;
         }
 
         .section-heading {
