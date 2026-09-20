@@ -40,6 +40,7 @@ from .ella_capabilities import build_capability_inventory
 from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
+from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
 from .solar_weather import build_sun_context
@@ -102,6 +103,10 @@ ELLA_LOADS_REMOVE_COMMAND = f"{DOMAIN}/ella_loads/remove"
 ELLA_SITE_STATE_COMMAND = f"{DOMAIN}/ella_site_state"
 ELLA_ACTION_PLAN_COMMAND = f"{DOMAIN}/ella_action_plan"
 ELLA_DEBUG_SNAPSHOT_COMMAND = f"{DOMAIN}/ella_action_plan/debug"
+ELLA_EXECUTION_STATE_COMMAND = f"{DOMAIN}/ella_execution/state"
+ELLA_EXECUTION_PERMISSION_SET_COMMAND = f"{DOMAIN}/ella_execution/permission_set"
+ELLA_EXECUTION_OVERRIDE_COMMAND = f"{DOMAIN}/ella_execution/manual_override"
+ELLA_EXECUTION_DISPATCH_COMMAND = f"{DOMAIN}/ella_execution/dispatch"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -166,6 +171,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ella_site_state)
     websocket_api.async_register_command(hass, websocket_ella_action_plan)
     websocket_api.async_register_command(hass, websocket_ella_debug_snapshot)
+    websocket_api.async_register_command(hass, websocket_ella_execution_state)
+    websocket_api.async_register_command(hass, websocket_ella_execution_permission_set)
+    websocket_api.async_register_command(hass, websocket_ella_execution_override)
+    websocket_api.async_register_command(hass, websocket_ella_execution_dispatch)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -1493,6 +1502,149 @@ async def websocket_ella_debug_snapshot(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "available": False, "error": "snapshot_not_found_or_revision_mismatch", "site_id": site_id})
         return
     connection.send_result(msg["id"], {"success": True, "available": True, "snapshot": snapshot})
+
+
+def _ella_execution_store(hass) -> EllaExecutionStore | None:
+    store = hass.data.get(DOMAIN, {}).get("ella_execution_store")
+    return store if isinstance(store, EllaExecutionStore) else None
+
+
+def _execution_admin(connection) -> bool:
+    user = getattr(connection, "user", None)
+    return user is not None and getattr(user, "is_admin", False) is True
+
+
+async def _verified_execution_resource(hass, site_id: str, resource_id: str, permission: dict) -> bool:
+    """Verify an actuator from the current site inventory; never trust client flags."""
+    identity = _ella_site_manager(hass)
+    registry = _ella_load_registry(hass)
+    if identity is None or registry is None:
+        return False
+    try:
+        inventory = build_capability_inventory(
+            identity,
+            registry,
+            site_id,
+            entity_available=lambda entity_id: _ella_entity_available(hass, entity_id),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    if permission.get("capability_type") == "load":
+        item = next((item for item in (inventory.get("individual_loads", {}).get("items") or []) if item.get("load_id") == resource_id), None)
+        return bool(
+            isinstance(item, dict)
+            and item.get("actuator_available") is True
+            and item.get("control_mode") == "controllable"
+            and permission.get("actuator_id")
+        )
+    for capability in inventory.get("capabilities") or []:
+        if not isinstance(capability, dict) or capability.get("actuator_available") is not True:
+            continue
+        source = capability.get("source") or {}
+        resources = source.get("resources") or []
+        if source.get("resource_id") == resource_id or any(isinstance(item, dict) and item.get("resource_id") == resource_id for item in resources):
+            return bool(permission.get("actuator_id"))
+    return False
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_EXECUTION_STATE_COMMAND, vol.Optional("site_id"): str})
+@websocket_api.async_response
+async def websocket_ella_execution_state(hass, connection, msg):
+    """Return permissions, ledger and breaker state; never performs a write."""
+    store = _ella_execution_store(hass)
+    site_id, error = _ella_requested_site(hass, msg)
+    if store is None or error:
+        connection.send_result(msg["id"], {"success": False, "error": error or "execution_store_unavailable"})
+        return
+    connection.send_result(msg["id"], {"success": True, **store.public_state(site_id)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_EXECUTION_PERMISSION_SET_COMMAND, vol.Required("permission"): dict})
+@websocket_api.async_response
+async def websocket_ella_execution_permission_set(hass, connection, msg):
+    """Persist an explicit permission; arming requires an admin confirmation."""
+    if not _execution_admin(connection):
+        connection.send_result(msg["id"], {"success": False, "error": "admin_required"})
+        return
+    store = _ella_execution_store(hass)
+    permission = msg["permission"]
+    site_id = permission.get("site_id") if isinstance(permission, dict) else None
+    site_id, error = _ella_requested_site(hass, {**msg, "site_id": site_id}, required=True)
+    if store is None or error:
+        connection.send_result(msg["id"], {"success": False, "error": error or "execution_store_unavailable"})
+        return
+    if permission.get("site_id") != site_id:
+        connection.send_result(msg["id"], {"success": False, "error": "wrong_site"})
+        return
+    if permission.get("armed") is True and not await _verified_execution_resource(hass, site_id, permission.get("resource_id"), permission):
+        connection.send_result(msg["id"], {"success": False, "error": "verified_controllable_actuator_required", "execution_eligible": False, "actuator_writes_enabled": False})
+        return
+    try:
+        result = await store.async_set_permission(permission)
+    except ValueError as err:
+        connection.send_result(msg["id"], {"success": False, "error": str(err)})
+        return
+    connection.send_result(msg["id"], {"success": True, "permission": result, "execution_eligible": result["execution_eligible"], "actuator_writes_enabled": False})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ELLA_EXECUTION_OVERRIDE_COMMAND, vol.Required("site_id"): str, vol.Required("active"): bool, vol.Optional("reason", default="manual_override"): str})
+@websocket_api.async_response
+async def websocket_ella_execution_override(hass, connection, msg):
+    """Set a persistent manual override that blocks automated dispatch."""
+    if not _execution_admin(connection):
+        connection.send_result(msg["id"], {"success": False, "error": "admin_required"})
+        return
+    store = _ella_execution_store(hass)
+    site_id, error = _ella_requested_site(hass, msg, required=True)
+    if store is None or error:
+        connection.send_result(msg["id"], {"success": False, "error": error or "execution_store_unavailable"})
+        return
+    override = await store.async_set_manual_override(site_id, msg["active"], msg.get("reason", "manual_override"))
+    connection.send_result(msg["id"], {"success": True, "site_id": site_id, "manual_override": override, "execution_eligible": False})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): ELLA_EXECUTION_DISPATCH_COMMAND,
+    vol.Required("site_id"): str,
+    vol.Required("plan_id"): str,
+    vol.Required("revision"): int,
+    vol.Required("plan_block_id"): str,
+    vol.Required("resource_id"): str,
+    vol.Required("idempotency_key"): str,
+    vol.Optional("date"): str,
+})
+@websocket_api.async_response
+async def websocket_ella_execution_dispatch(hass, connection, msg):
+    """Dispatch only through an explicitly registered vendor-neutral adapter."""
+    if not _execution_admin(connection):
+        connection.send_result(msg["id"], {"success": False, "status": "REJECTED", "failure_class": "admin_required", "execution_eligible": False, "actuator_writes_enabled": False})
+        return
+    store = _ella_execution_store(hass)
+    site_id, error = _ella_requested_site(hass, msg, required=True)
+    if store is None or error:
+        connection.send_result(msg["id"], {"success": False, "status": "REJECTED", "failure_class": error or "execution_store_unavailable", "execution_eligible": False, "actuator_writes_enabled": False})
+        return
+    class _Capture:
+        def __init__(self):
+            self.payload = None
+
+        def send_result(self, _message_id, payload):
+            self.payload = payload
+
+    capture = _Capture()
+    state_handler = getattr(websocket_ella_action_plan, "__wrapped__", websocket_ella_action_plan)
+    state_handler_msg = {"id": -msg["id"], "type": ELLA_ACTION_PLAN_COMMAND, "site_id": site_id}
+    if msg.get("date"):
+        state_handler_msg["date"] = msg["date"]
+    state_result = state_handler(hass, capture, state_handler_msg)
+    if inspect.isawaitable(state_result):
+        await state_result
+    plan = capture.payload
+    if not isinstance(plan, dict) or plan.get("available") is not True:
+        connection.send_result(msg["id"], {"success": False, "status": "REJECTED", "failure_class": "stale_plan", "execution_eligible": False, "actuator_writes_enabled": False})
+        return
+    result = await store.async_dispatch(msg, plan)
+    connection.send_result(msg["id"], result)
 
 
 async def _ella_loads_response(hass, msg):
