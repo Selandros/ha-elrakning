@@ -4665,7 +4665,6 @@ class ElrakningPanel {
         .live-power-row {
           align-items: stretch;
           display: grid;
-          gap: 12px;
           grid-template-columns: repeat(5, minmax(0, 1fr));
         }
 
