@@ -2406,6 +2406,19 @@ export function createPerformanceSessionId(randomValue = null) {
   return `perf-${String(value).replace(/[^a-z0-9]/gi, "").slice(0, 8)}`;
 }
 
+export function reconcileEllaSiteState(previousState, nextState, currentState = {}) {
+  const siteId = (state) => state?.current_site?.site_id || state?.site_id || null;
+  const changed = siteId(previousState) !== siteId(nextState);
+  const bound = nextState?.ella_binding_verified === true;
+  if (!changed) return { changed: false, bound, ...currentState };
+  return {
+    changed: true,
+    bound,
+    loadForecast: { available: false, reason: bound ? "site_changed" : "ella_unbound", frames: [] },
+    ellaSelection: null,
+  };
+}
+
 class ElrakningPanel {
   constructor(host, version) {
     this.host = host;
@@ -2414,6 +2427,7 @@ class ElrakningPanel {
     this._debugPreferenceChanged = false;
     this._configurationCardsVisible = true;
     this._siteState = null;
+    this._siteContextGeneration = 0;
     this._mainCards = {
       elhandel: false,
       elnet: false,
@@ -6560,15 +6574,29 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return null;
     try {
       const state = await this.hass.callWS({ type: "elrakning/site_identity" });
-      this._siteState = state;
-      this._renderSiteSettings();
-      this._renderEllaPreview();
+      this._applySiteIdentityState(state);
       return state;
     } catch (error) {
       const result = this.host.querySelector("[data-site-settings-result]");
       if (result) result.textContent = "Installationer kunde inte hämtas.";
       return null;
     }
+  }
+
+  _applySiteIdentityState(state) {
+    const reconciled = reconcileEllaSiteState(this._siteState, state, {
+      loadForecast: this._loadForecast,
+      ellaSelection: this._ellaSelection,
+    });
+    if (reconciled.changed) {
+      this._siteContextGeneration += 1;
+      this._powerHistoryRequestToken += 1;
+      this._loadForecast = reconciled.loadForecast;
+      this._ellaSelection = reconciled.ellaSelection;
+    }
+    this._siteState = state;
+    this._renderSiteSettings();
+    this._renderEllaPreview();
   }
 
   _renderSiteSettings() {
@@ -6636,7 +6664,7 @@ class ElrakningPanel {
       try {
         const response = await this.hass.callWS({ type: "elrakning/ella_binding_set", site_id: id, enabled: ellaToggle.checked });
         if (!response?.success) throw new Error(response?.error || "ella_binding_failed");
-        this._siteState = response;
+        this._applySiteIdentityState(response);
         this._renderSiteSettings();
         if (result) result.textContent = ellaToggle.checked ? "ELLA-planering aktiverad. Ingen batteristyrning." : "ELLA-planering avaktiverad.";
       } catch (error) {
@@ -6652,7 +6680,7 @@ class ElrakningPanel {
       try {
         const response = await this.hass.callWS({ type: "elrakning/site_rename", site_id: id, name: name.trim() });
         if (!response?.success) throw new Error(response?.error || "site_rename_failed");
-        this._siteState = response;
+        this._applySiteIdentityState(response);
         this._renderSiteSettings();
         if (result) result.textContent = "Namnet sparades.";
       } catch (error) {
@@ -6666,7 +6694,7 @@ class ElrakningPanel {
       try {
         const response = await this.hass.callWS({ type: "elrakning/site_create", name: name.trim() });
         if (!response?.success) throw new Error(response?.error || "site_create_failed");
-        this._siteState = response;
+        this._applySiteIdentityState(response);
         this._renderSiteSettings();
         if (result) result.textContent = "Installationen skapades. Välj den och bekräfta byte om den ska aktiveras.";
       } catch (error) {
@@ -6682,7 +6710,7 @@ class ElrakningPanel {
       try {
         const response = await this.hass.callWS({ type: "elrakning/site_activate", site_id: site.site_id, confirm: true });
         if (!response?.success) throw new Error(response?.error || "site_activate_failed");
-        this._siteState = response;
+        this._applySiteIdentityState(response);
         this._renderSiteSettings();
         await this._refreshBackendState(true);
         if (result) result.textContent = "Installationen är aktiv.";
@@ -8062,10 +8090,11 @@ class ElrakningPanel {
   async loadPowerHistory() {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._powerHistoryRequestToken;
+    const siteContextGeneration = this._siteContextGeneration;
     try {
       const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7 });
       if (response?.error === "power_unavailable") return;
-      if (requestToken !== this._powerHistoryRequestToken) return;
+      if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
       for (const [key, points] of Object.entries(this._powerLivePoints)) {
         if (!points.size) continue;
@@ -8115,7 +8144,13 @@ class ElrakningPanel {
     if (!section || !rail || !readiness || !unavailable) return;
     const ellaBound = this._siteState?.ella_binding_verified === true;
     section.hidden = !ellaBound;
-    if (!ellaBound) return;
+    if (!ellaBound) {
+      this._ellaSelection = null;
+      rail.replaceChildren();
+      readiness.replaceChildren();
+      unavailable.hidden = true;
+      return;
+    }
     const forecastFrame = this._loadForecast?.frames?.[0];
     const points = Array.isArray(forecastFrame?.points) ? forecastFrame.points : [];
     const solarAvailable = this._powerHistory?.solar_forecast?.available === true;
