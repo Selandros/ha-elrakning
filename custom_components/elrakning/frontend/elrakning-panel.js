@@ -2953,6 +2953,7 @@ class ElrakningPanel {
           --el-export-color: #72AAF6;
           --el-charging-color: #B76A8F;
           --el-discharging-color: #DF5C8A;
+          --dashboard-card-gap: 16px;
           --el-text-primary: var(--primary-text-color, #F1F1F5);
           --el-text-secondary: var(--secondary-text-color, #B7B8C0);
           --el-divider: var(--divider-color, rgba(255, 255, 255, .12));
@@ -3514,12 +3515,12 @@ class ElrakningPanel {
         .daily-energy-row {
           align-items: stretch;
           display: grid;
-          gap: 16px;
+          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         .battery-history-row {
-          margin-top: 16px;
+          margin-top: var(--dashboard-card-gap);
         }
 
         @container (max-width: 760px) {
@@ -3689,7 +3690,7 @@ class ElrakningPanel {
           display: grid;
           gap: 8px;
           overflow-x: auto;
-          margin: 0;
+          margin: var(--dashboard-card-gap) 0;
           padding: 0 1px 6px;
           scrollbar-width: thin;
         }
@@ -4076,7 +4077,7 @@ class ElrakningPanel {
 
         .phase-history-row {
           grid-template-columns: 1fr;
-          margin-top: 16px;
+          margin-top: var(--dashboard-card-gap);
         }
 
         .cost-card {
@@ -4871,7 +4872,7 @@ class ElrakningPanel {
         .grid {
           align-items: stretch;
           display: grid;
-          gap: 16px;
+          gap: var(--dashboard-card-gap);
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         }
 
