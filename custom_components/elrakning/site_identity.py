@@ -797,7 +797,14 @@ class SiteIdentityManager:
 
     def active_ella_binding(self) -> dict[str, Any] | None:
         """Return ELLA only for an explicitly verified versioned site binding."""
-        binding = self.active_binding("ella")
+        return self.ella_binding_for_site(self.state.get("active_site_id"))
+
+    def ella_binding_for_site(self, site_id: str | None) -> dict[str, Any] | None:
+        """Return a valid enabled planner binding for one site, never another site."""
+        configs = self.state.get("site_configs", {})
+        config = configs.get(site_id, {}) if isinstance(configs, dict) else {}
+        bindings = config.get("bindings", {}) if isinstance(config, dict) else {}
+        binding = bindings.get("ella") if isinstance(bindings, dict) else None
         return binding if self.is_valid_ella_planner_binding(binding, require_enabled=True) else None
 
     @staticmethod
@@ -818,8 +825,9 @@ class SiteIdentityManager:
         if require_enabled and (binding.get("enabled") is not True or binding.get("verification_state") != "verified"):
             return False
         fingerprint = binding.get("binding_fingerprint")
-        return isinstance(fingerprint, str) and len(fingerprint) == 64 and all(
-            char in "0123456789abcdef" for char in fingerprint
+        return (
+            isinstance(fingerprint, str)
+            and fingerprint == SiteIdentityManager.binding_fingerprint(binding)
         )
 
     async def async_set_ella_planner_binding(self, site_id: str, enabled: bool) -> dict[str, Any]:
@@ -845,18 +853,7 @@ class SiteIdentityManager:
                 raise ValueError("invalid_ella_binding")
             bindings["ella"] = binding
         else:
-            binding = dict(bindings.get("ella", {}))
-            binding.update({
-                "binding_version": 1,
-                "capability": "ella_planner",
-                "enabled": False,
-                "verification_state": "disabled",
-                "actuator_write_enabled": False,
-            })
-            binding["binding_fingerprint"] = self.binding_fingerprint(binding)
-            if not self.is_valid_ella_planner_binding(binding):
-                raise ValueError("invalid_ella_binding")
-            bindings["ella"] = binding
+            bindings.pop("ella", None)
         await self.store.async_save(self.state)
         if site_id == self.state.get("active_site_id"):
             return self.public_state()

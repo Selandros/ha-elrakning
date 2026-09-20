@@ -1,5 +1,6 @@
 import types
 import unittest
+from pathlib import Path
 from datetime import date
 
 from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
@@ -138,7 +139,13 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "enabled": True,
             "verification_state": "verified",
             "actuator_write_enabled": False,
-            "binding_fingerprint": "0" * 64,
+            "binding_fingerprint": SiteIdentityManager.binding_fingerprint({
+                "binding_version": 1,
+                "capability": "ella_planner",
+                "enabled": True,
+                "verification_state": "verified",
+                "actuator_write_enabled": False,
+            }),
         }
 
         self.assertEqual(manager.active_ella_binding()["binding_version"], 1)
@@ -167,6 +174,29 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "verification_state": "verified", "actuator_write_enabled": False,
             "binding_fingerprint": "foo",
         }))
+
+    def test_ella_binding_rejects_stale_or_tampered_fingerprint(self):
+        binding = {
+            "binding_version": 1,
+            "capability": "ella_planner",
+            "enabled": True,
+            "verification_state": "verified",
+            "actuator_write_enabled": False,
+        }
+        binding["binding_fingerprint"] = SiteIdentityManager.binding_fingerprint(binding)
+        self.assertTrue(SiteIdentityManager.is_valid_ella_planner_binding(binding, require_enabled=True))
+        binding["capability"] = "other_capability"
+        self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding(binding, require_enabled=True))
+
+    def test_ella_mutation_websocket_requires_admin_and_accepts_intent_only(self):
+        source = (Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py").read_text()
+        start = source.index("async def websocket_ella_binding_set")
+        body = source[start:source.index("\n\ndef _solar_forecast_manager", start)]
+        self.assertIn('"admin_required"', body)
+        self.assertIn('msg["site_id"]', body)
+        self.assertIn('msg["enabled"]', body)
+        for forbidden in ("verification_state", "binding_fingerprint", "binding_version", "actuator_write_enabled"):
+            self.assertNotIn(f'msg["{forbidden}"]', body)
         self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding({
             "binding_version": 1, "capability": "ella_planner", "enabled": True,
             "verification_state": "verified", "actuator_write_enabled": True,
@@ -190,9 +220,7 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(SiteIdentityManager.is_valid_ella_planner_binding(binding, require_enabled=True))
         disabled = await manager.async_set_ella_planner_binding("site-a", False)
         self.assertFalse(disabled["ella_binding_verified"])
-        self.assertFalse(SiteIdentityManager.is_valid_ella_planner_binding(
-            manager.state["site_configs"]["site-a"]["bindings"]["ella"], require_enabled=True
-        ))
+        self.assertNotIn("ella", manager.state["site_configs"]["site-a"]["bindings"])
 
     async def test_price_fetch_requires_explicit_site_binding(self):
         entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})

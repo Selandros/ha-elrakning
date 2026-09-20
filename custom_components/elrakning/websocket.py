@@ -1346,6 +1346,10 @@ async def websocket_site_activate(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_ella_binding_set(hass, connection, msg):
     """Explicitly grant/revoke planner-only ELLA capability for one site."""
+    user = getattr(connection, "user", None)
+    if user is None or getattr(user, "is_admin", False) is not True:
+        connection.send_result(msg["id"], {"success": False, "error": "admin_required"})
+        return
     manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     if manager is None:
         connection.send_result(msg["id"], {"success": False, "error": "site_manager_unavailable"})
