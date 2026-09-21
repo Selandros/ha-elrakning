@@ -40,6 +40,7 @@ from .ella_capabilities import build_capability_inventory
 from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
+from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
@@ -85,6 +86,7 @@ BILLING_HISTORY_COMMAND = f"{DOMAIN}/billing_history"
 POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
+POWER_FORECAST_COMMAND = f"{DOMAIN}/power_forecast"
 LOAD_FORECAST_COMMAND = f"{DOMAIN}/load_forecast"
 FORECAST_EVALUATION_COMMAND = f"{DOMAIN}/ella_forecast_evaluation"
 SITE_IDENTITY_COMMAND = f"{DOMAIN}/site_identity"
@@ -155,6 +157,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_save)
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
+    websocket_api.async_register_command(hass, websocket_power_forecast)
     websocket_api.async_register_command(hass, websocket_load_forecast)
     websocket_api.async_register_command(hass, websocket_ella_forecast_evaluation)
     websocket_api.async_register_command(hass, websocket_site_identity)
@@ -1252,7 +1255,53 @@ async def websocket_power_history(hass, connection, msg):
     result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
     result["solar_sun"] = build_sun_context(hass)
     result["load_forecast"] = await _async_load_forecast_state(hass)
+    result["power_forecast"] = await _async_power_forecast_state(hass)
     connection.send_result(msg["id"], result)
+
+
+async def _async_power_forecast_state(hass) -> dict:
+    """Return cached, read-only site power forecasts for the active chart day."""
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
+    if not site_id or collector is None:
+        return {"schema": "ella_power_forecast.v1", "available": False, "reason": "site_or_storage_unavailable", "series": {}}
+    now = dt_util.now()
+    bucket = int(now.timestamp()) // 900
+    load_forecast = await _async_load_forecast_state(hass, site_id)
+    load_frame_ids = tuple(sorted(str(frame.get("frame_id")) for frame in load_forecast.get("frames", []) if isinstance(frame, dict)))
+    forecast_manager = _solar_forecast_manager(hass)
+    solar_facts = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
+    binding = ((getattr(identity, "state", {}).get("site_configs", {}).get(site_id, {}) or {}).get("bindings", {}) or {}).get("forecast")
+    binding_fingerprint = binding.get("binding_fingerprint") if isinstance(binding, dict) else None
+    cache_key = (
+        str(site_id),
+        bucket,
+        load_frame_ids,
+        str(binding_fingerprint or ""),
+        tuple(sorted((key, str(value)) for key, value in solar_facts.items() if key != "baselines")),
+    )
+    cache = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_cache", {})
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    site = next((item for item in getattr(identity, "state", {}).get("sites", []) if isinstance(item, dict) and item.get("site_id") == site_id), {})
+    location = site.get("location") if isinstance(site, dict) else {}
+    timezone_name, _ = resolve_timezone((location or {}).get("timezone"), getattr(getattr(hass, "config", None), "time_zone", None))
+    rows = await hass.async_add_executor_job(
+        collector.storage.read_site_energy_history,
+        str(site_id), now - timedelta(days=30), now,
+    )
+    result = build_power_forecast(str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now)
+    cache.clear()
+    cache[cache_key] = result
+    return result
+
+
+@websocket_api.websocket_command({vol.Required("type"): POWER_FORECAST_COMMAND})
+@websocket_api.async_response
+async def websocket_power_forecast(hass, connection, msg):
+    connection.send_result(msg["id"], await _async_power_forecast_state(hass))
 
 
 async def _async_load_forecast_state(hass, requested_site_id: str | None = None) -> dict:

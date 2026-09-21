@@ -2672,7 +2672,7 @@ class ElrakningPanel {
     this._powerStateRequestGeneration = 0;
     this._powerStateMutationGeneration = 0;
     this._powerStateLifecycleGeneration = 0;
-    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+    this._powerHistory = { date: null, series: {}, power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} }, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._pricePlanContextKey = null;
@@ -8331,6 +8331,7 @@ class ElrakningPanel {
       this._powerHistory = {
         date: response?.date || null,
         series,
+        power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
         solar_analysis: response?.solar_analysis || { available: false, days: [] },
         solar_forecast: response?.solar_forecast || { available: false },
         solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
@@ -11452,13 +11453,15 @@ class ElrakningPanel {
       selectedDate: dayStart,
       now,
     });
+    const forecastSeries = this._powerHistory?.power_forecast?.series || {};
+    const forecastSource = (key, fallback) => forecastSeries[key]?.available === true ? forecastSeries[key] : fallback;
     const forecastSources = {
-      import: this._meterPowerHistory,
-      export: this._meterPowerHistory,
-      solar: this._powerHistory?.series?.solar,
-      consumption: this._powerHistory?.series?.consumption,
-      charging: this._powerHistory?.series?.charging,
-      discharging: this._powerHistory?.series?.discharging,
+      import: forecastSource("import", this._meterPowerHistory),
+      export: forecastSource("export", this._meterPowerHistory),
+      solar: forecastSource("solar", this._powerHistory?.series?.solar),
+      consumption: forecastSource("consumption", this._powerHistory?.series?.consumption),
+      charging: forecastSource("charging", this._powerHistory?.series?.charging),
+      discharging: forecastSource("discharging", this._powerHistory?.series?.discharging),
     };
     const powerForecastPoints = Object.fromEntries(
       Object.entries(forecastSources).map(([key, source]) => [key, selectPowerForecastPoints(source, {
