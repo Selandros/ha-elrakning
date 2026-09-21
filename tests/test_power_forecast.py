@@ -35,7 +35,7 @@ def _load_frame(points, known_at):
         "payload_schema": "load_forecast.v1",
         "known_at": known_at.isoformat(),
         "quality": {"model_version": "load-profile-v2"},
-        "points": [{"valid_at": start.isoformat(), "value": value} for start, value in points],
+        "points": [{"valid_at": start.isoformat(), "value": value, "unit": "W"} for start, value in points],
     }]}
 
 
@@ -68,6 +68,31 @@ def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
     )
 
 
+def test_battery_split_never_emits_negative_magnitudes():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    rows = []
+    for day in (7, 14, 20):
+        for minute, value in ((15, -400), (30, 250), (45, 0)):
+            rows.append(_row("battery.power", datetime(2026, 9, day, 18, minute, tzinfo=UTC), value))
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows,
+        _load_frame([], known_at), {}, None, known_at,
+    )
+    charging = {point["valid_at"]: point["value_w"] for point in result["series"]["charging"]["forecast_points"]}
+    discharging = {point["valid_at"]: point["value_w"] for point in result["series"]["discharging"]["forecast_points"]}
+    assert all(value >= 0 for value in charging.values())
+    assert all(value >= 0 for value in discharging.values())
+    assert charging["2026-09-21T18:15:00+00:00"] == 400
+    assert discharging["2026-09-21T18:15:00+00:00"] == 0
+    assert charging["2026-09-21T18:30:00+00:00"] == 0
+    assert discharging["2026-09-21T18:30:00+00:00"] == 250
+    assert charging["2026-09-21T18:45:00+00:00"] == 0
+    assert discharging["2026-09-21T18:45:00+00:00"] == 0
+    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 400
+    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 0
+    assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
+
+
 def test_insufficient_support_and_wrong_site_fail_closed():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     rows = [_row("battery.power", datetime(2026, 9, 20, 18, 0, tzinfo=UTC), 0), _row("battery.power", datetime(2026, 9, 14, 18, 0, tzinfo=UTC), 0, site="site-b")]
@@ -91,6 +116,15 @@ def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inpu
     assert result["series"]["import"]["forecast_points"][0]["value_w"] == 600
     assert result["series"]["export"]["forecast_points"][0]["value_w"] == 0
     assert result["series"]["import"]["forecast_points"][0]["provenance"]["method"] == "load_minus_solar_minus_signed_battery_power"
+
+
+def test_load_forecast_requires_canonical_w_unit():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    slot = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    frame = _load_frame([(slot, 1000)], known_at)
+    frame["frames"][0]["points"][0]["unit"] = "kW"
+    result = build_power_forecast(SITE, "Europe/Stockholm", [], frame, {}, None, known_at)
+    assert result["series"]["consumption"]["available"] is False
 
 
 def test_solar_hour_energy_is_split_only_into_four_aligned_slots():

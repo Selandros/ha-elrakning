@@ -56,7 +56,7 @@ def _local_slots(day: date, zone: ZoneInfo) -> list[tuple[datetime, datetime]]:
 
 
 def _usable_row(row: dict[str, Any], site_id: str, known_at: datetime) -> bool:
-    if row.get("site_id") not in (None, site_id):
+    if row.get("site_id") != site_id:
         return False
     start = _datetime(row.get("interval_start"))
     end = _datetime(row.get("interval_end"))
@@ -200,7 +200,7 @@ def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime
     for raw in frame.get("points", []):
         start = _datetime(raw.get("valid_at"))
         value = _finite(raw.get("value"))
-        if start and value is not None and start >= known_at:
+        if start and value is not None and raw.get("unit") == "W" and start >= known_at:
             result[start.isoformat()] = _point(value, start, start + timedelta(minutes=15), source="load_forecast.v1", provenance={"frame_id": frame.get("frame_id"), "revision": frame.get("revision"), "model_version": (frame.get("quality") or {}).get("model_version"), "known_at": frame.get("known_at"), "site_id": site_id})
     return result
 
