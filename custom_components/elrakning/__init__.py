@@ -230,6 +230,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     canonical_collector = CanonicalCollector(hass, site_identity_manager)
     await canonical_collector.async_start()
     hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
+    apply_migrations = getattr(site_identity_manager, "async_apply_canonical_source_migrations", None)
+    if apply_migrations is not None:
+        await apply_migrations(canonical_collector.storage)
     await async_register_proof_service(hass, site_identity_manager, entry)
     await coordinator.async_config_entry_first_refresh()
     if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):

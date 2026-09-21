@@ -190,6 +190,22 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ledger[0]["source_identity"]["identity_key"], resolve_source_identity(hass, "sensor.old_load")["identity_key"])
         self.assertEqual(len(ledger[0]["address_history"]), 1)
 
+    async def test_battery_mapping_sign_change_creates_new_generation(self):
+        entries = {"sensor.battery": _Entity("registry-battery", "battery")}
+        hass = _hass(entries)
+        power, meter = _managers({"battery_power_entity": "sensor.battery", "invert_battery_power": False})
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store()
+        await manager.async_load()
+        await manager.async_sync_from_current()
+        old_generation = manager.state["ledger"][0]["generation_id"]
+        power.mapping["invert_battery_power"] = True
+        await manager.async_sync_from_current()
+        active = [item for item in manager.state["ledger"] if item.get("effective_to") is None]
+        self.assertEqual(len(active), 1)
+        self.assertNotEqual(active[0]["generation_id"], old_generation)
+        self.assertTrue(active[0]["provenance"]["source_mapping_invert_battery_power"])
+
     async def test_replacement_closes_old_generation_and_starts_new_one(self):
         entries = {
             "sensor.old_load": _Entity("registry-old", "load-old"),

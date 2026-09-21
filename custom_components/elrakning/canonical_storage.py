@@ -201,6 +201,124 @@ class CanonicalStorage:
             ),
         )
 
+    def recanonicalize_source_generation(
+        self,
+        site_id: str,
+        logical_role: str,
+        old_generation_id: str,
+        new_generation_id: str,
+        migration_id: str,
+        now: datetime,
+        value_transform,
+    ) -> int:
+        """Append an auditable corrected generation without rewriting immutable rows."""
+        if logical_role != "battery.power":
+            raise ValueError("recanonicalization_role_not_supported")
+        connection = self._connection()
+        old_generation = connection.execute(
+            """SELECT source_scope, owner_site_id, logical_role,
+                      source_identity_fingerprint, source_identity_strength,
+                      source_identity_provenance, source_resolution_kind,
+                      source_resolution_seconds, timezone_state, valid_from_us
+                 FROM source_generations
+                WHERE source_generation_id = ?""",
+            (old_generation_id,),
+        ).fetchone()
+        if old_generation is None or old_generation[1] != site_id or old_generation[2] != logical_role:
+            raise ValueError("recanonicalization_source_generation_mismatch")
+        existing_new = connection.execute(
+            "SELECT COUNT(*) FROM energy_observations WHERE source_generation_id = ?",
+            (new_generation_id,),
+        ).fetchone()[0]
+        if existing_new:
+            return 0
+        connection.execute(
+            """INSERT OR IGNORE INTO source_generations(
+                source_generation_id, schema_version, source_scope, owner_site_id,
+                logical_role, source_identity_fingerprint, source_identity_strength,
+                source_identity_provenance, source_resolution_kind,
+                source_resolution_seconds, timezone_state, valid_from_us,
+                valid_to_us, created_at_us
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)""",
+            (
+                new_generation_id, SCHEMA_VERSION, old_generation[0], site_id,
+                logical_role, old_generation[3], old_generation[4],
+                old_generation[5], old_generation[6], old_generation[7],
+                old_generation[8], old_generation[9], timestamp_us(now),
+            ),
+        )
+        source_rows = []
+        for table in ("historical_energy_observations", "energy_observations"):
+            source_rows.extend(connection.execute(
+                f"""SELECT record_id, revision, interval_start_us, interval_end_us,
+                           resolution_seconds, observed_at_us, captured_at_us,
+                           known_at_us, classification, value, unit,
+                           quality_status, coverage_ratio, gap_status,
+                           quality_json, provenance_json
+                      FROM {table} AS current
+                     WHERE site_id = ? AND logical_role = ?
+                       AND source_generation_id = ?
+                       AND NOT EXISTS (
+                           SELECT 1 FROM {table} AS newer
+                            WHERE newer.semantic_key = current.semantic_key
+                              AND newer.revision > current.revision
+                       )""",
+                (site_id, logical_role, old_generation_id),
+            ).fetchall())
+        deduped = {}
+        for row in source_rows:
+            key = (int(row[2]), int(row[3]))
+            previous = deduped.get(key)
+            if previous is None or int(row[1]) > int(previous[1]):
+                deduped[key] = row
+        observations = []
+        for row in deduped.values():
+            provenance = json.loads(row[15]) if row[15] else {}
+            provenance.update({
+                "canonicalization_migration": migration_id,
+                "recanonicalized_from_generation_id": old_generation_id,
+                "recanonicalized_at": now.astimezone(timezone.utc).isoformat(),
+                "recanonicalization_transform": "negate_signed_battery_power",
+                "source_generation_id": new_generation_id,
+                "source_mapping_invert_battery_power": True,
+                "raw_sign_convention": "positive_charge_negative_discharge",
+                "canonical_sign_convention": "positive_discharge_negative_charge",
+            })
+            observations.append({
+                "semantic_key": f"{site_id}|{logical_role}|{new_generation_id}|{datetime.fromtimestamp(row[2] / 1_000_000, tz=timezone.utc).isoformat()}",
+                "revision": 1,
+                "site_id": site_id,
+                "logical_role": logical_role,
+                "source_generation_id": new_generation_id,
+                "interval_start": datetime.fromtimestamp(row[2] / 1_000_000, tz=timezone.utc),
+                "interval_end": datetime.fromtimestamp(row[3] / 1_000_000, tz=timezone.utc),
+                "resolution_seconds": int(row[4]),
+                "observed_at": datetime.fromtimestamp(row[5] / 1_000_000, tz=timezone.utc) if row[5] else None,
+                "captured_at": datetime.fromtimestamp(row[6] / 1_000_000, tz=timezone.utc) if row[6] else None,
+                "known_at": datetime.fromtimestamp(row[7] / 1_000_000, tz=timezone.utc) if row[7] else None,
+                "classification": row[8],
+                "value": value_transform(row[9]) if row[9] is not None else None,
+                "unit": row[10],
+                "sign_convention": "positive_discharge_negative_charge",
+                "quality_status": row[11],
+                "coverage_ratio": row[12],
+                "gap_status": row[13],
+                "quality": json.loads(row[14]) if row[14] else {},
+                "provenance": provenance,
+            })
+        try:
+            for observation in observations:
+                self._insert_observation(connection, observation)
+            connection.execute(
+                "UPDATE source_generations SET valid_to_us = ? WHERE source_generation_id = ? AND valid_to_us IS NULL",
+                (timestamp_us(now), old_generation_id),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        return len(observations)
+
     def ensure_global_source_generation(self, target: dict[str, Any], now: datetime) -> None:
         """Ensure one deterministic global external-source generation exists."""
         identity = target.get("source_identity") or {}
@@ -680,7 +798,7 @@ class CanonicalStorage:
                                resolution_seconds, value, unit, sign_convention, quality_status,
                                coverage_ratio, gap_status, semantic_key, revision,
                                CASE WHEN ? = 'energy_observations' THEN 1 ELSE 0 END AS live_priority,
-                               site_id
+                               site_id, provenance_json
                           FROM {table} AS current
                          WHERE site_id = ?
                            AND interval_start_us < ?
@@ -717,6 +835,7 @@ class CanonicalStorage:
                 "revision": int(row[12]),
                 "storage_class": "canonical" if int(row[13]) else "historical",
                 "site_id": row[14],
+                "provenance": json.loads(row[15]) if row[15] else {},
             }
             for row in sorted(latest.values(), key=lambda item: (item[2], item[0], item[1]))
         ]

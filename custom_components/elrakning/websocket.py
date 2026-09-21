@@ -1292,7 +1292,12 @@ async def _async_power_forecast_state(hass) -> dict:
         collector.storage.read_site_energy_history,
         str(site_id), now - timedelta(days=30), now,
     )
-    result = build_power_forecast(str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now)
+    active_battery_generation_ids = {
+        str(target.get("generation_id"))
+        for target in identity.collection_targets()
+        if target.get("site_id") == str(site_id) and target.get("logical_role") == "battery.power"
+    }
+    result = build_power_forecast(str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now, active_battery_generation_ids)
     cache.clear()
     cache[cache_key] = result
     return result

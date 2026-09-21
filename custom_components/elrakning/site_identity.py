@@ -42,6 +42,18 @@ GREENELY_EVIDENCE_FORBIDDEN_KEYS = frozenset({
     "signed_url",
 })
 
+# This is a one-time, source-identity-scoped correction for a verified legacy
+# mapping. It is intentionally outside forecast code and cannot affect other sites.
+CANONICAL_SOURCE_MIGRATIONS = (
+    {
+        "migration_id": "vikarbodarna-battery-sign-v1",
+        "site_id": "76f92eea-5720-4c19-9b43-17028d19a0a4",
+        "logical_role": "battery.power",
+        "entity_id": "sensor.fsp_ne_175846905_charge_discharge_power",
+        "source_identity_fingerprint": "66453674eb5a4233a80c15dcd794495f77e8f1cdd5d2960679a5bced53fe1633",
+    },
+)
+
 
 def normalize_greenely_facility_meter_identity(payload: dict[str, Any]) -> str | None:
     """Return one bounded facility-meter identity or an allowed absence state."""
@@ -1183,6 +1195,11 @@ class SiteIdentityManager:
                         item for index, item in enumerate(active)
                         if index not in matched
                         and item.get("source_identity", {}).get("identity_key") == identity.get("identity_key")
+                        and (
+                            role != "battery.power"
+                            or bool(item.get("provenance", {}).get("source_mapping_invert_battery_power", False))
+                            == bool(config.get("power", {}).get("invert_battery_power", False))
+                        )
                         and identity.get("identity_key")
                     ),
                     None,
@@ -1193,6 +1210,10 @@ class SiteIdentityManager:
                         match.setdefault("address_history", []).append({"entity_id": entity_id, "updated_at": _now()})
                         match["entity_id"] = entity_id
                     match["source_identity"] = identity
+                    if role == "battery.power":
+                        match.setdefault("provenance", {})["source_mapping_invert_battery_power"] = bool(
+                            config.get("power", {}).get("invert_battery_power", False)
+                        )
                     if match.get("canonicalization") is None:
                         semantics = ROLE_CANONICALIZATION.get(role)
                         if semantics:
@@ -1211,6 +1232,9 @@ class SiteIdentityManager:
                     "provenance": {
                         "migration_origin": "existing_configuration" if initial_migration else "mapping_change",
                         "effective_from_status": "unknown_unattributed" if initial_migration else "verified_mapping_change",
+                        "source_mapping_invert_battery_power": bool(
+                            config.get("power", {}).get("invert_battery_power", False)
+                        ) if role == "battery.power" else None,
                     },
                     "classification": ROLE_CANONICALIZATION.get(role, {}).get("classification"),
                     "canonicalization": deepcopy(ROLE_CANONICALIZATION.get(role)),
@@ -1229,6 +1253,83 @@ class SiteIdentityManager:
                 item.setdefault("provenance", {})["end_reason"] = "mapping_removed"
         self.state["migration_complete"] = True
         await self.store.async_save(self.state)
+
+    async def async_apply_canonical_source_migrations(self, storage) -> list[dict[str, Any]]:
+        """Apply verified source-semantic migrations without rewriting observations."""
+        results = []
+        now = _now()
+        configs = self.state.setdefault("site_configs", {})
+        ledger = self.state.setdefault("ledger", [])
+        for migration in CANONICAL_SOURCE_MIGRATIONS:
+            site_id = migration["site_id"]
+            config = configs.get(site_id)
+            if not isinstance(config, dict):
+                continue
+            power = config.setdefault("power", {})
+            if power.get("battery_power_entity") != migration["entity_id"]:
+                continue
+            active = [
+                item for item in ledger
+                if item.get("site_id") == site_id
+                and item.get("logical_role") == migration["logical_role"]
+                and item.get("effective_to") is None
+                and item.get("entity_id") == migration["entity_id"]
+            ]
+            old = next(
+                (
+                    item for item in active
+                    if hashlib.sha256(
+                        str((item.get("source_identity") or {}).get("identity_key", "")).encode()
+                    ).hexdigest() == migration["source_identity_fingerprint"]
+                    and item.get("provenance", {}).get("canonical_source_migration") != migration["migration_id"]
+                ),
+                None,
+            )
+            if old is None:
+                continue
+            old_generation_id = str(old["generation_id"])
+            new_generation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{migration['migration_id']}:{old_generation_id}"))
+            config_power = deepcopy(power)
+            config_power["invert_battery_power"] = True
+            config["power"] = config_power
+            old["effective_to"] = now
+            old.setdefault("provenance", {})["end_reason"] = "canonical_source_semantics_changed"
+            old["provenance"]["superseded_by_generation_id"] = new_generation_id
+            new_item = deepcopy(old)
+            new_item["generation_id"] = new_generation_id
+            new_item["resource_id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{migration['migration_id']}:{old.get('resource_id', old_generation_id)}"))
+            new_item["effective_from"] = now
+            new_item["effective_to"] = None
+            new_provenance = {
+                key: value for key, value in (old.get("provenance") or {}).items()
+                if key not in {"end_reason", "superseded_by_generation_id"}
+            }
+            new_item["provenance"] = {
+                **new_provenance,
+                "canonical_source_migration": migration["migration_id"],
+                "supersedes_generation_id": old_generation_id,
+                "source_mapping_invert_battery_power": True,
+                "raw_sign_convention": "positive_charge_negative_discharge",
+                "canonical_sign_convention": "positive_discharge_negative_charge",
+            }
+            ledger.append(new_item)
+            count = storage.recanonicalize_source_generation(
+                site_id, migration["logical_role"], old_generation_id,
+                new_generation_id, migration["migration_id"], now,
+                lambda value: -float(value),
+            )
+            if site_id == self.state.get("active_site_id") and self.power_manager:
+                await self.power_manager.async_restore_mapping(config_power)
+            results.append({
+                "migration_id": migration["migration_id"],
+                "site_id": site_id,
+                "old_generation_id": old_generation_id,
+                "new_generation_id": new_generation_id,
+                "rows_recanonicalized": count,
+            })
+        if results:
+            await self.store.async_save(self.state)
+        return results
 
     def public_state(self) -> dict[str, Any]:
         self._normalize_sites()

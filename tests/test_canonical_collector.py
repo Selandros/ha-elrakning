@@ -930,6 +930,49 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                 storage.insert_observation(changed)
             storage.close()
 
+    def test_recanonicalization_is_append_only_idempotent_and_site_scoped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
+            storage.open()
+            start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            for site, generation, value in (("site-a", "old-a", -500.0), ("site-b", "old-b", -700.0)):
+                target = _target(site, "battery.power", "sensor.battery", generation)
+                storage.ensure_source_generation(target, start)
+                storage.insert_observation({
+                    "semantic_key": f"{site}|battery.power|{generation}|{start.isoformat()}",
+                    "site_id": site, "logical_role": "battery.power", "source_generation_id": generation,
+                    "interval_start": start, "observed_at": start, "captured_at": start + timedelta(seconds=900),
+                    "known_at": start + timedelta(seconds=900), "value": value, "unit": "W",
+                    "sign_convention": "positive_discharge_negative_charge", "quality_status": "good",
+                    "coverage_ratio": 1.0, "gap_status": "none", "quality": {"coverage_ratio": 1.0},
+                    "provenance": {"entity_id": "sensor.battery"},
+                })
+            migrated = storage.recanonicalize_source_generation(
+                "site-a", "battery.power", "old-a", "new-a", "migration-a",
+                start + timedelta(days=1), lambda value: -float(value),
+            )
+            self.assertEqual(migrated, 1)
+            self.assertEqual(
+                storage.recanonicalize_source_generation(
+                    "site-a", "battery.power", "old-a", "new-a", "migration-a",
+                    start + timedelta(days=2), lambda value: -float(value),
+                ),
+                0,
+            )
+            rows_a = storage.read_site_energy_history("site-a", start, start + timedelta(hours=1))
+            rows_b = storage.read_site_energy_history("site-b", start, start + timedelta(hours=1))
+            corrected = next(row for row in rows_a if row["source_generation_id"] == "new-a")
+            original = next(row for row in rows_a if row["source_generation_id"] == "old-a")
+            self.assertEqual(corrected["value"], 500.0)
+            self.assertEqual(corrected["sign_convention"], "positive_discharge_negative_charge")
+            self.assertEqual(corrected["provenance"]["canonicalization_migration"], "migration-a")
+            self.assertEqual(corrected["provenance"]["source_generation_id"], "new-a")
+            self.assertTrue(corrected["provenance"]["source_mapping_invert_battery_power"])
+            self.assertEqual(original["value"], -500.0)
+            self.assertEqual(len(rows_b), 1)
+            self.assertEqual(rows_b[0]["value"], -700.0)
+            storage.close()
+
     def test_storage_reopen_verifies_schema_without_recreating_it(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "canonical.sqlite"

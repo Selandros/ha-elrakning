@@ -127,8 +127,12 @@ def _point(value_w: float, start: datetime, end: datetime, *, provenance: dict[s
     }
 
 
-def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime) -> dict[str, Any]:
-    battery_rows = [row for row in rows if row.get("logical_role") == "battery.power" and _usable_row(row, site_id, known_at)]
+def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None) -> dict[str, Any]:
+    candidate_battery_rows = [row for row in rows if row.get("logical_role") == "battery.power" and _usable_row(row, site_id, known_at)]
+    candidate_generations = {str(row.get("source_generation_id")) for row in candidate_battery_rows if row.get("source_generation_id")}
+    if active_generation_ids is None and len(candidate_generations) > 1:
+        return {"schema": BATTERY_SCHEMA, "site_id": site_id, "model_version": MODEL_VERSION, "model_kind": MODEL_KIND, "method": "robust_context_median", "known_at": known_at.isoformat(), "minimum_support": MIN_BATTERY_SUPPORT, "source_generation_ids": sorted(candidate_generations), "forecast_points": [], "available": False, "reason": "ambiguous_battery_source_generations", "execution_eligible": False, "actuator_writes_enabled": False}
+    battery_rows = [row for row in candidate_battery_rows if active_generation_ids is None or str(row.get("source_generation_id")) in active_generation_ids]
     soc_rows = {row["interval_start"]: row for row in rows if row.get("logical_role") == "battery.soc" and _usable_soc_row(row, site_id, known_at)}
     load_rows = {row["interval_start"]: row for row in rows if row.get("logical_role") == "house.consumption" and _usable_row(row, site_id, known_at)}
     solar_rows: dict[str, list[dict[str, Any]]] = {}
@@ -299,7 +303,7 @@ def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime
     return result
 
 
-def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime) -> dict[str, Any]:
+def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None) -> dict[str, Any]:
     """Build read-only forecast flows without changing execution or policy gates."""
     zone = ZoneInfo(timezone_name)
     local_day = known_at.astimezone(zone).date()
@@ -307,7 +311,7 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
     solar = _solar_forecast(site_id, zone, solar_facts, solar_binding, slots, known_at)
     load = _load_points(load_forecast, site_id, known_at)
     solar_by_slot = {point["valid_at"]: point for point in solar["forecast_points"]}
-    battery = _battery_forecast(rows, site_id, zone, slots, load, solar_by_slot, known_at)
+    battery = _battery_forecast(rows, site_id, zone, slots, load, solar_by_slot, known_at, active_battery_generation_ids)
     series = {
         "solar": solar,
         "consumption": {"schema": "load_forecast.v1", "site_id": site_id, "available": bool(load), "forecast_points": list(load.values()), "execution_eligible": False, "actuator_writes_enabled": False},

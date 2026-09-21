@@ -212,6 +212,24 @@ def test_canonical_battery_sign_contract_drives_split_and_grid_balance():
     assert result["battery"]["forecast_points"][0]["provenance"]["raw_behavior_sign_convention"] == "positive_discharge_negative_charge"
 
 
+def test_battery_forecast_uses_only_active_source_generation():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    starts = [datetime(2026, 9, day, 18, 15, tzinfo=UTC) for day in (7, 14, 20)]
+    old_rows = _context_rows(starts, [-500, -500, -500])
+    new_rows = _context_rows(starts, [500, 500, 500])
+    for row in new_rows:
+        if row["logical_role"] == "battery.power":
+            row["source_generation_id"] = "battery-new"
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", old_rows + new_rows,
+        _load_frame([(datetime(2026, 9, 21, 18, 15, tzinfo=UTC), 1000)], known_at),
+        {"this_hour_kwh": 0.3}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
+        {"battery-new"},
+    )
+    assert result["battery"]["source_generation_ids"] == ["battery-new"]
+    assert result["battery"]["forecast_points"][0]["value_w"] == 500
+
+
 def test_load_forecast_requires_canonical_w_unit():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     slot = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
