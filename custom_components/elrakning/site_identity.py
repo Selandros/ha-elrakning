@@ -7,7 +7,7 @@ import json
 import math
 import uuid
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -1315,7 +1315,8 @@ class SiteIdentityManager:
             ledger.append(new_item)
             count = storage.recanonicalize_source_generation(
                 site_id, migration["logical_role"], old_generation_id,
-                new_generation_id, migration["migration_id"], now,
+                new_generation_id, migration["migration_id"],
+                datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(timezone.utc),
                 lambda value: -float(value),
             )
             if site_id == self.state.get("active_site_id") and self.power_manager:
