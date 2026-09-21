@@ -2350,6 +2350,28 @@ export function buildContinuousGapPairs(points, key) {
   return gaps;
 }
 
+export function buildForecastSegments(points, key, resolutionMs = 15 * 60 * 1000) {
+  const segments = [];
+  let segment = [];
+  const appendSegment = () => {
+    if (segment.length >= 2) segments.push(segment);
+    segment = [];
+  };
+  const sorted = (Array.isArray(points) ? points : [])
+    .map((point) => ({ point, timestamp: new Date(point?.timestamp).getTime(), value: normalizeMeterValue(point?.[key]) }))
+    .filter((item) => Number.isFinite(item.timestamp) && Number.isFinite(item.value))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  sorted.forEach((item, index) => {
+    const previous = sorted[index - 1];
+    if (!previous || item.timestamp - previous.timestamp !== resolutionMs) {
+      appendSegment();
+    }
+    segment.push(item.point);
+  });
+  appendSegment();
+  return segments;
+}
+
 function monotoneEndpointTangent(point, nextPoint, followingPoint, slope, nextSlope) {
   const width = Math.abs(nextPoint.x - point.x);
   const nextWidth = Math.abs(followingPoint.x - nextPoint.x);
@@ -11159,6 +11181,13 @@ class ElrakningPanel {
     return `${segments}${interpolated}`;
   }
 
+  buildForecastDisplayMarkup(points, key, className, x, meterY) {
+    const color = chartSeriesColor(className);
+    return buildForecastSegments(points, key).map((segment) => (
+      `<path class="${className}" fill="none" stroke="${color}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`
+    )).join("");
+  }
+
   buildMeterDisplayAreaMarkup(points, key, className, x, meterY) {
     const color = chartSeriesColor(className);
     const segments = this.buildMeterDisplaySegments(points, key).map((segment) => {
@@ -11483,7 +11512,20 @@ class ElrakningPanel {
       ...Object.values(powerDisplayPoints).flatMap((points) => points.map((point) => Number(point.value_kw)))
         .filter(Number.isFinite),
     );
-    const meterBase = Math.max(10, meterMaximum);
+    const forecastMaximum = Math.max(
+      0,
+      ...Object.values(powerForecastPoints).flatMap((points) => points.map((point) => Math.abs(Number(point.value_kw))))
+        .filter(Number.isFinite),
+    );
+    const hasActualPowerData = meterDisplayPoints.some((point) => (
+      Number.isFinite(Number(point.import_kw)) || Number.isFinite(Number(point.export_kw))
+    )) || Object.values(powerDisplayPoints).some((points) => points.some((point) => Number.isFinite(Number(point.value_kw))));
+    const hasForecastPowerData = Object.values(powerForecastPoints).some((points) => points.length > 0);
+    const meterBase = hasActualPowerData
+      ? Math.max(10, meterMaximum)
+      : hasForecastPowerData
+        ? Math.max(1, forecastMaximum)
+        : 10;
     const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
     const meterNormalized = (meterBase / 4) / meterMagnitude;
     const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;
@@ -11499,7 +11541,7 @@ class ElrakningPanel {
         : "";
     };
     const powerForecastLinesFor = (key, className, visible) => visible && powerForecastPoints[key]?.length
-      ? this.buildMeterDisplayMarkup(powerForecastPoints[key], "value_kw", `${className} chart-power-forecast`, x, meterY)
+      ? this.buildForecastDisplayMarkup(powerForecastPoints[key], "value_kw", `${className} chart-power-forecast`, x, meterY)
       : "";
     const meterDisplayGeometry = {
       import_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "import_kw", x, meterY),
