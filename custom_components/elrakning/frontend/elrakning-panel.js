@@ -3810,6 +3810,10 @@ class ElrakningPanel {
           text-align: left;
         }
 
+        .price-plan-card.current {
+          border-color: color-mix(in srgb, var(--primary-color) 48%, var(--ha-card-border-color, var(--divider-color)));
+        }
+
         .price-plan-card.selected {
           border-color: var(--primary-color);
           box-shadow: 0 0 0 1px var(--primary-color);
@@ -8312,20 +8316,24 @@ class ElrakningPanel {
       plan_id: plan.plan_id || null,
       block_ids: blocks.map((block) => block?.plan_block_id || null),
     });
+    const currentBlockId = currentPricePlanBlock(blocks)?.plan_block_id || null;
     const shouldCenterCurrentCard = this._pricePlanRailCenteredKey !== planKey;
     this._pricePlanRailCenteredKey = planKey;
     rail.hidden = false;
     rail.replaceChildren(...blocks.map((block) => {
       const start = typeof block?.start === "string" ? block.start : "";
       const end = typeof block?.end === "string" ? block.end : "";
+      const isCurrent = block.plan_block_id === currentBlockId;
+      const isSelected = this._ellaSelection?.id === block.plan_block_id;
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `price-plan-card${this._ellaSelection?.id === block.plan_block_id ? " selected" : ""}`;
+      button.className = `price-plan-card${isCurrent ? " current" : ""}${isSelected ? " selected" : ""}`;
       button.dataset.planBlockId = block.plan_block_id || "";
       button.dataset.planStart = start;
       button.dataset.planEnd = end;
+      if (isCurrent) button.setAttribute("aria-current", "time");
       button.setAttribute("role", "listitem");
-      button.setAttribute("aria-pressed", String(this._ellaSelection?.id === block.plan_block_id));
+      button.setAttribute("aria-pressed", String(isSelected));
       const title = document.createElement("strong");
       title.textContent = `${this._formatTime(new Date(start))}–${this._formatTime(new Date(end))} · ${block.price_context?.title || block.title || "Okänd kostnadsperiod"}`;
       const action = document.createElement("b");
