@@ -6,7 +6,7 @@ import logging
 import inspect
 from functools import partial
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
@@ -44,6 +44,7 @@ from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
 from .solar_forecast import SolarForecastManager
+from .solar_single_run import build_single_run_targets
 from .solar_weather import build_sun_context
 from .site_identity import SiteIdentityManager
 
@@ -1233,6 +1234,7 @@ async def websocket_power_state(hass, connection, msg):
     {
         vol.Required("type"): POWER_HISTORY_COMMAND,
         vol.Optional("days", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=7)),
+        vol.Optional("date"): str,
     }
 )
 @websocket_api.async_response
@@ -1255,11 +1257,17 @@ async def websocket_power_history(hass, connection, msg):
     result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
     result["solar_sun"] = build_sun_context(hass)
     result["load_forecast"] = await _async_load_forecast_state(hass)
-    result["power_forecast"] = await _async_power_forecast_state(hass)
+    requested_date = None
+    if msg.get("date"):
+        try:
+            requested_date = date.fromisoformat(msg["date"])
+        except ValueError:
+            requested_date = None
+    result["power_forecast"] = await _async_power_forecast_state(hass, requested_date)
     connection.send_result(msg["id"], result)
 
 
-async def _async_power_forecast_state(hass) -> dict:
+async def _async_power_forecast_state(hass, requested_date: date | None = None) -> dict:
     """Return cached, read-only site power forecasts for the active chart day."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
@@ -1274,8 +1282,13 @@ async def _async_power_forecast_state(hass) -> dict:
     solar_facts = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
     binding = ((getattr(identity, "state", {}).get("site_configs", {}).get(site_id, {}) or {}).get("bindings", {}) or {}).get("forecast")
     binding_fingerprint = binding.get("binding_fingerprint") if isinstance(binding, dict) else None
+    site = next((item for item in getattr(identity, "state", {}).get("sites", []) if isinstance(item, dict) and item.get("site_id") == site_id), {})
+    location = site.get("location") if isinstance(site, dict) else {}
+    timezone_name, _ = resolve_timezone((location or {}).get("timezone"), getattr(getattr(hass, "config", None), "time_zone", None))
+    target_date = requested_date or now.astimezone(ZoneInfo(timezone_name)).date()
     cache_key = (
         str(site_id),
+        target_date.isoformat(),
         bucket,
         load_frame_ids,
         str(binding_fingerprint or ""),
@@ -1285,9 +1298,6 @@ async def _async_power_forecast_state(hass) -> dict:
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    site = next((item for item in getattr(identity, "state", {}).get("sites", []) if isinstance(item, dict) and item.get("site_id") == site_id), {})
-    location = site.get("location") if isinstance(site, dict) else {}
-    timezone_name, _ = resolve_timezone((location or {}).get("timezone"), getattr(getattr(hass, "config", None), "time_zone", None))
     rows = await hass.async_add_executor_job(
         collector.storage.read_site_energy_history,
         str(site_id), now - timedelta(days=30), now,
@@ -1297,7 +1307,37 @@ async def _async_power_forecast_state(hass) -> dict:
         for target in identity.collection_targets()
         if target.get("site_id") == str(site_id) and target.get("logical_role") == "battery.power"
     }
-    result = build_power_forecast(str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now, active_battery_generation_ids)
+    site_configs = getattr(identity, "collection_site_configs", lambda: {})()
+    open_meteo_targets = build_single_run_targets(site_configs)
+    open_meteo_frames = []
+    try:
+        raw_frames = await hass.async_add_executor_job(
+            partial(
+                collector.storage.read_external_input_frames,
+                now,
+                source_scope="site",
+                site_id=str(site_id),
+                logical_role="solar.irradiance.day_ahead_pv_forecast",
+            )
+        )
+        open_meteo_frames = [
+            {
+                **frame,
+                "known_at": frame.get("known_at"),
+                "valid_from": frame.get("valid_from"),
+                "valid_to": frame.get("valid_to"),
+            }
+            for frame in raw_frames
+        ]
+    except Exception:
+        open_meteo_frames = []
+    result = build_power_forecast(
+        str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now,
+        active_battery_generation_ids,
+        target_date=target_date,
+        open_meteo_frames=open_meteo_frames,
+        open_meteo_targets=open_meteo_targets,
+    )
     cache.clear()
     cache[cache_key] = result
     return result

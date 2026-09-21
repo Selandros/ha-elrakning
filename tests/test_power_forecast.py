@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -181,6 +181,69 @@ def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inpu
     assert result["series"]["import"]["forecast_points"][0]["value_w"] == 600
     assert result["series"]["export"]["forecast_points"][0]["value_w"] == 0
     assert result["series"]["import"]["forecast_points"][0]["provenance"]["method"] == "load_minus_solar_minus_signed_battery_behavior"
+
+
+def _single_run_frame(target_date=date(2026, 9, 22), values=None):
+    start = datetime(2026, 9, 21, 22, 0, tzinfo=UTC)
+    points = []
+    for index in range(24):
+        points.append({"valid_at": start + timedelta(hours=index), "value": (values or [100.0] * 24)[index], "unit": "W/m²", "quality_status": "good"})
+    end = start + timedelta(days=1)
+    return {
+        "frame_id": "open-meteo-frame",
+        "revision": 1,
+        "site_id": SITE,
+        "source_generation_id": "target-generation",
+        "logical_role": "solar.irradiance.day_ahead_pv_forecast",
+        "payload_schema": "open_meteo.single_run_day_ahead_pv.v1",
+        "known_at": datetime(2026, 9, 21, 20, 0, tzinfo=UTC),
+        "valid_from": start,
+        "valid_to": end,
+        "provenance": {
+            "target_date": target_date.isoformat(),
+            "run_initialization_at": "2026-09-21T12:00:00+00:00",
+            "provider_response_received_at": "2026-09-21T19:00:00+00:00",
+            "provider": "open-meteo",
+            "model": "metno_seamless",
+            "knowledge_fingerprint": "fingerprint",
+        },
+        "points": points,
+    }
+
+
+def test_open_meteo_day_ahead_builds_96_aligned_slots_with_section_provenance():
+    known_at = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
+    frame = _single_run_frame()
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", [],
+        {"frames": []}, {}, None, known_at,
+        target_date=date(2026, 9, 22),
+        open_meteo_frames=[frame],
+        open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
+    )
+    points = result["series"]["solar"]["forecast_points"]
+    assert len(points) == 96
+    assert points[0]["valid_at"] == "2026-09-21T22:00:00+00:00"
+    assert points[-1]["valid_at"] == "2026-09-22T21:45:00+00:00"
+    assert points[0]["value_w"] == 945.0
+    assert points[0]["provenance"]["source_generation_ids"] == ["target-generation"]
+    assert result["horizon"]["date"] == "2026-09-22"
+
+
+def test_open_meteo_missing_hour_fails_closed_for_only_that_hour():
+    known_at = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
+    frame = _single_run_frame()
+    frame["points"].pop(5)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", [], {"frames": []}, {}, None, known_at,
+        target_date=date(2026, 9, 22),
+        open_meteo_frames=[frame],
+        open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
+    )
+    points = result["series"]["solar"]["forecast_points"]
+    assert len(points) == 92
+    missing_hour = {point["valid_at"] for point in points if point["valid_at"].startswith("2026-09-22T03:")}
+    assert not missing_hour
 
 
 def test_canonical_battery_sign_contract_drives_split_and_grid_balance():

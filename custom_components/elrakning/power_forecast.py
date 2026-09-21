@@ -10,6 +10,8 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .solar_single_run import select_for_decision
+
 
 SCHEMA = "ella_power_forecast.v1"
 BATTERY_SCHEMA = "battery_power_forecast.v1"
@@ -127,7 +129,7 @@ def _point(value_w: float, start: datetime, end: datetime, *, provenance: dict[s
     }
 
 
-def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None) -> dict[str, Any]:
+def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, use_ratio_projection: bool = False) -> dict[str, Any]:
     candidate_battery_rows = [row for row in rows if row.get("logical_role") == "battery.power" and _usable_row(row, site_id, known_at)]
     candidate_generations = {str(row.get("source_generation_id")) for row in candidate_battery_rows if row.get("source_generation_id")}
     if active_generation_ids is None and len(candidate_generations) > 1:
@@ -148,6 +150,8 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
     by_soc_net: dict[tuple[str, str], list[float]] = {}
     by_quarter_soc_net: dict[tuple[int, str, str], list[float]] = {}
     by_solar_context: dict[str, list[float]] = {"solar_surplus": [], "no_solar_surplus": []}
+    by_discharge_ratio: dict[str, list[float]] = {}
+    by_charge_ratio: dict[str, list[float]] = {}
     global_values: list[float] = []
     for row in battery_rows:
         start_value = row.get("interval_start")
@@ -168,6 +172,12 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         solar_value = sum(float(item["value"]) for item in solar_at_slot)
         net_load = float(load_row["value"]) - solar_value
         by_solar_context["solar_surplus" if net_load < 0 else "no_solar_surplus"].append(value)
+        if use_ratio_projection and net_load > 100.0 and value >= 0:
+            ratio = min(2.0, max(0.0, value / net_load))
+            by_discharge_ratio.setdefault(_net_load_band(net_load), []).append(ratio)
+        elif use_ratio_projection and net_load < -100.0 and value <= 0:
+            ratio = min(2.0, max(0.0, (-value) / (-net_load)))
+            by_charge_ratio.setdefault(_net_load_band(net_load), []).append(ratio)
         if not soc:
             continue
         soc_key = _soc_band(float(soc["value"]))
@@ -181,7 +191,7 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
     points = []
     selected_support = []
 
-    def select_values(start: datetime, load_point: dict[str, Any], solar_point: dict[str, Any]) -> tuple[str, list[float], dict[str, Any]]:
+    def select_values(start: datetime, load_point: dict[str, Any], solar_point: dict[str, Any]) -> tuple[str, list[float], dict[str, Any], str | None, float]:
         local = start.astimezone(zone)
         quarter = local.hour * 4 + local.minute // 15
         load_value = float(load_point["value_w"])
@@ -189,17 +199,22 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         net_key = _net_load_band(load_value - solar_value)
         soc_key = _soc_band(current_soc_value) if current_soc_value is not None else None
         candidates = []
+        net_load = load_value - solar_value
+        if use_ratio_projection and net_load > 100.0:
+            candidates.append(("net_load_ratio", by_discharge_ratio.get(net_key, []), {"net_load_band": net_key, "projection": "discharge_coverage_ratio"}, "discharge_ratio", net_load))
+        elif use_ratio_projection and net_load < -100.0:
+            candidates.append(("net_load_ratio", by_charge_ratio.get(net_key, []), {"net_load_band": net_key, "projection": "charge_capture_ratio"}, "charge_ratio", net_load))
         if soc_key is not None:
-            candidates.append(("quarter_soc_net", by_quarter_soc_net.get((quarter, soc_key, net_key), []), {"quarter": quarter, "soc_band": soc_key, "net_load_band": net_key}))
-            candidates.append(("soc_net", by_soc_net.get((soc_key, net_key), []), {"soc_band": soc_key, "net_load_band": net_key}))
-        solar_context = "solar_surplus" if load_value - solar_value < 0 else "no_solar_surplus"
-        candidates.append(("solar_context", by_solar_context[solar_context], {"solar_context": solar_context, "net_load_band": net_key}))
-        candidates.append(("quarter", by_quarter.get(quarter, []), {"quarter": quarter}))
-        candidates.append(("global", global_values, {}))
-        for level, values, context in candidates:
+            candidates.append(("quarter_soc_net", by_quarter_soc_net.get((quarter, soc_key, net_key), []), {"quarter": quarter, "soc_band": soc_key, "net_load_band": net_key}, None, 0.0))
+            candidates.append(("soc_net", by_soc_net.get((soc_key, net_key), []), {"soc_band": soc_key, "net_load_band": net_key}, None, 0.0))
+        solar_context = "solar_surplus" if net_load < 0 else "no_solar_surplus"
+        candidates.append(("solar_context", by_solar_context[solar_context], {"solar_context": solar_context, "net_load_band": net_key}, None, 0.0))
+        candidates.append(("quarter", by_quarter.get(quarter, []), {"quarter": quarter}, None, 0.0))
+        candidates.append(("global", global_values, {}, None, 0.0))
+        for level, values, context, projection, projection_net_load in candidates:
             if len(values) >= MIN_BATTERY_SUPPORT:
-                return level, values, context
-        return "unavailable", [], {"net_load_band": net_key, "soc_band": soc_key}
+                return level, values, context, projection, projection_net_load
+        return "unavailable", [], {"net_load_band": net_key, "soc_band": soc_key}, None, 0.0
 
     for start, end in slots:
         if start < known_at:
@@ -209,16 +224,23 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         solar_point = solar.get(key)
         if not load_point or not solar_point:
             continue
-        level, values, context = select_values(start, load_point, solar_point)
+        level, values, context, projection, projection_net_load = select_values(start, load_point, solar_point)
         if not values:
             continue
-        value = float(median(values))
+        selected_median = float(median(values))
+        if projection == "discharge_ratio":
+            value = selected_median * projection_net_load
+        elif projection == "charge_ratio":
+            value = -selected_median * (-projection_net_load)
+        else:
+            value = selected_median
         selected_support.append(len(values))
         points.append(_point(value, start, end, source=BATTERY_SCHEMA, provenance={
             "schema": BATTERY_SCHEMA,
             "model_version": MODEL_VERSION,
             "model_kind": MODEL_KIND,
             "method": "robust_context_median",
+            "projection": projection,
             "context_level": level,
             "context": context,
             "site_id": site_id,
@@ -253,7 +275,55 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
     }
 
 
-def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime) -> dict[str, Any]:
+def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], known_at: datetime, target_date: date, frames: list[dict[str, Any]], targets: list[dict[str, Any]]) -> dict[str, Any]:
+    scoped_targets = [target for target in targets if target.get("site_id") == site_id]
+    selected: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for target in scoped_targets:
+        status, frame = select_for_decision(
+            frames,
+            site_id=site_id,
+            target_date=target_date,
+            timezone_name=target.get("timezone") or zone.key,
+            source_generation_id=str(target.get("generation_id") or ""),
+            decision_at=known_at,
+        )
+        if status != "VERIFIED_PRE_DECISION" or frame is None:
+            return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "available": False, "reason": "open_meteo_section_unavailable", "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False}
+        selected.append((target, frame))
+    if not selected:
+        return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "available": False, "reason": "open_meteo_targets_unavailable", "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False}
+    by_target_hour: list[dict[datetime, dict[str, Any]]] = []
+    for _target, frame in selected:
+        by_target_hour.append({item["valid_at"] if isinstance(item.get("valid_at"), datetime) else _datetime(item.get("valid_at")): item for item in frame.get("points", []) if _datetime(item.get("valid_at")) is not None})
+    points = []
+    for slot_start, slot_end in slots:
+        hour = slot_start.replace(minute=0, second=0, microsecond=0)
+        if any(hour not in mapping for mapping in by_target_hour):
+            continue
+        section_values = [float(mapping[hour]["value"]) for mapping in by_target_hour]
+        if any(not math.isfinite(value) or value < 0 for value in section_values):
+            continue
+        watts = sum((value / 1000.0) * float(target["peak_power_kwp"]) * 1000.0 for value, (target, _frame) in zip(section_values, selected))
+        frame_ids = [str(frame.get("frame_id")) for _target, frame in selected]
+        generation_ids = [str(target.get("generation_id")) for target, _frame in selected]
+        points.append(_point(watts, slot_start, slot_end, source="solar.slot_forecast.v1", provenance={
+            "schema": "solar.slot_forecast.v1",
+            "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power",
+            "site_id": site_id,
+            "target_date": target_date.isoformat(),
+            "frame_ids": frame_ids,
+            "source_generation_ids": generation_ids,
+            "section_peak_power_kwp": [float(target["peak_power_kwp"]) for target, _frame in selected],
+            "known_at": known_at.isoformat(),
+            "run_initialization_at": [frame.get("provenance", {}).get("run_initialization_at") for _target, frame in selected],
+            "confidence": "complete_section_hour",
+        }))
+    return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "target_date": target_date.isoformat(), "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
+
+
+def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime, *, target_date: date, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    if target_date != known_at.astimezone(zone).date() and open_meteo_frames and open_meteo_targets:
+        return _single_run_solar_forecast(site_id, zone, slots, known_at, target_date, open_meteo_frames, open_meteo_targets)
     local = known_at.astimezone(zone)
     hourly = []
     entities = (binding or {}).get("entities", {}) if isinstance(binding, dict) else {}
@@ -289,7 +359,7 @@ def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding
     return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "method": "hour_energy_as_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
 
 
-def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime) -> dict[str, dict[str, Any]]:
+def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime, *, horizon_start: datetime, horizon_end: datetime) -> dict[str, dict[str, Any]]:
     candidates = [frame for frame in (load_forecast or {}).get("frames", []) if isinstance(frame, dict) and frame.get("site_id") == site_id and frame.get("payload_schema") == "load_forecast.v1" and (_datetime(frame.get("known_at")) or datetime.min.replace(tzinfo=timezone.utc)) <= known_at]
     if not candidates:
         return {}
@@ -298,20 +368,24 @@ def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime
     for raw in frame.get("points", []):
         start = _datetime(raw.get("valid_at"))
         value = _finite(raw.get("value"))
-        if start and value is not None and raw.get("unit") == "W" and start >= known_at:
+        if start and value is not None and raw.get("unit") == "W" and start >= max(known_at, horizon_start) and start < horizon_end:
             result[start.isoformat()] = _point(value, start, start + timedelta(minutes=15), source="load_forecast.v1", provenance={"frame_id": frame.get("frame_id"), "revision": frame.get("revision"), "model_version": (frame.get("quality") or {}).get("model_version"), "known_at": frame.get("known_at"), "site_id": site_id})
     return result
 
 
-def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None) -> dict[str, Any]:
+def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build read-only forecast flows without changing execution or policy gates."""
     zone = ZoneInfo(timezone_name)
-    local_day = known_at.astimezone(zone).date()
+    local_day = target_date or known_at.astimezone(zone).date()
     slots = _local_slots(local_day, zone)
-    solar = _solar_forecast(site_id, zone, solar_facts, solar_binding, slots, known_at)
-    load = _load_points(load_forecast, site_id, known_at)
+    solar = _solar_forecast(site_id, zone, solar_facts, solar_binding, slots, known_at, target_date=local_day, open_meteo_frames=open_meteo_frames, open_meteo_targets=open_meteo_targets)
+    load = _load_points(load_forecast, site_id, known_at, horizon_start=slots[0][0], horizon_end=slots[-1][1])
     solar_by_slot = {point["valid_at"]: point for point in solar["forecast_points"]}
-    battery = _battery_forecast(rows, site_id, zone, slots, load, solar_by_slot, known_at, active_battery_generation_ids)
+    battery = _battery_forecast(
+        rows, site_id, zone, slots, load, solar_by_slot, known_at,
+        active_battery_generation_ids,
+        use_ratio_projection=local_day != known_at.astimezone(zone).date(),
+    )
     series = {
         "solar": solar,
         "consumption": {"schema": "load_forecast.v1", "site_id": site_id, "available": bool(load), "forecast_points": list(load.values()), "execution_eligible": False, "actuator_writes_enabled": False},

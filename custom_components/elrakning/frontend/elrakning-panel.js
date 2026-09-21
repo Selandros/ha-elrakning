@@ -6386,7 +6386,7 @@ class ElrakningPanel {
       this._periodPickerState.open = false;
       this._renderPeriodPicker();
       if (changed) {
-        await Promise.all([this.loadPriceData(next), this.loadPricePlan(next)]);
+        await Promise.all([this.loadPriceData(next), this.loadPricePlan(next), this.loadPowerHistory()]);
       }
       else {
         this.updatePriceSummary();
@@ -8340,7 +8340,11 @@ class ElrakningPanel {
     const requestToken = ++this._powerHistoryRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
     try {
-      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7 });
+      const confirmedDate = this._periodPickerState?.confirmed;
+      const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
+      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
+        ...(requestedDate ? { date: requestedDate } : {}),
+      });
       if (response?.error === "power_unavailable") return;
       if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
@@ -11540,7 +11544,7 @@ class ElrakningPanel {
         ? this.buildMeterDisplayMarkup(powerDisplayPoints[key], "value_kw", className, x, meterY)
         : "";
     };
-    const powerForecastLinesFor = (key, className, visible) => visible && powerForecastPoints[key]?.length
+    const powerForecastLinesFor = (key, className, visible) => visible && powerForecastPoints[key]?.some((point) => isVisiblePowerValue(point.value_kw))
       ? this.buildForecastDisplayMarkup(powerForecastPoints[key], "value_kw", `${className} chart-power-forecast`, x, meterY)
       : "";
     const meterDisplayGeometry = {
