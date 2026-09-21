@@ -19,6 +19,7 @@ MODEL_VERSION = "battery-behavior-profile-v2"
 MODEL_KIND = "autonomous_behavior_baseline"
 MIN_BATTERY_SUPPORT = 3
 MIN_COVERAGE = 0.9
+RATIO_THRESHOLD_W = 100.0
 
 
 def _datetime(value: Any) -> datetime | None:
@@ -172,10 +173,10 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         solar_value = sum(float(item["value"]) for item in solar_at_slot)
         net_load = float(load_row["value"]) - solar_value
         by_solar_context["solar_surplus" if net_load < 0 else "no_solar_surplus"].append(value)
-        if use_ratio_projection and net_load > 100.0 and value >= 0:
+        if use_ratio_projection and net_load > RATIO_THRESHOLD_W and value >= 0:
             ratio = min(2.0, max(0.0, value / net_load))
             by_discharge_ratio.setdefault(_net_load_band(net_load), []).append(ratio)
-        elif use_ratio_projection and net_load < -100.0 and value <= 0:
+        elif use_ratio_projection and net_load < -RATIO_THRESHOLD_W and value <= 0:
             ratio = min(2.0, max(0.0, (-value) / (-net_load)))
             by_charge_ratio.setdefault(_net_load_band(net_load), []).append(ratio)
         if not soc:
@@ -200,17 +201,24 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         soc_key = _soc_band(current_soc_value) if current_soc_value is not None else None
         candidates = []
         net_load = load_value - solar_value
-        if use_ratio_projection and net_load > 100.0:
-            candidates.append(("net_load_ratio", by_discharge_ratio.get(net_key, []), {"net_load_band": net_key, "projection": "discharge_coverage_ratio"}, "discharge_ratio", net_load))
-        elif use_ratio_projection and net_load < -100.0:
-            candidates.append(("net_load_ratio", by_charge_ratio.get(net_key, []), {"net_load_band": net_key, "projection": "charge_capture_ratio"}, "charge_ratio", net_load))
-        if soc_key is not None:
-            candidates.append(("quarter_soc_net", by_quarter_soc_net.get((quarter, soc_key, net_key), []), {"quarter": quarter, "soc_band": soc_key, "net_load_band": net_key}, None, 0.0))
-            candidates.append(("soc_net", by_soc_net.get((soc_key, net_key), []), {"soc_band": soc_key, "net_load_band": net_key}, None, 0.0))
-        solar_context = "solar_surplus" if net_load < 0 else "no_solar_surplus"
-        candidates.append(("solar_context", by_solar_context[solar_context], {"solar_context": solar_context, "net_load_band": net_key}, None, 0.0))
-        candidates.append(("quarter", by_quarter.get(quarter, []), {"quarter": quarter}, None, 0.0))
-        candidates.append(("global", global_values, {}, None, 0.0))
+        near_zero = abs(net_load) < RATIO_THRESHOLD_W
+        if use_ratio_projection and near_zero:
+            if net_load < 0:
+                candidates.append(("near_zero_charge_capture_ratio", by_charge_ratio.get("<=0", []), {"net_load_band": "<=0", "projection": "charge_capture_ratio", "near_zero": True}, "charge_ratio", net_load))
+            elif net_load > 0:
+                candidates.append(("near_zero_discharge_coverage_ratio", by_discharge_ratio.get("0-500", []), {"net_load_band": "0-500", "projection": "discharge_coverage_ratio", "near_zero": True}, "discharge_ratio", net_load))
+        else:
+            if use_ratio_projection and net_load > RATIO_THRESHOLD_W:
+                candidates.append(("net_load_ratio", by_discharge_ratio.get(net_key, []), {"net_load_band": net_key, "projection": "discharge_coverage_ratio"}, "discharge_ratio", net_load))
+            elif use_ratio_projection and net_load < -RATIO_THRESHOLD_W:
+                candidates.append(("net_load_ratio", by_charge_ratio.get(net_key, []), {"net_load_band": net_key, "projection": "charge_capture_ratio"}, "charge_ratio", net_load))
+            if soc_key is not None:
+                candidates.append(("quarter_soc_net", by_quarter_soc_net.get((quarter, soc_key, net_key), []), {"quarter": quarter, "soc_band": soc_key, "net_load_band": net_key}, None, 0.0))
+                candidates.append(("soc_net", by_soc_net.get((soc_key, net_key), []), {"soc_band": soc_key, "net_load_band": net_key}, None, 0.0))
+            solar_context = "solar_surplus" if net_load < 0 else "no_solar_surplus"
+            candidates.append(("solar_context", by_solar_context[solar_context], {"solar_context": solar_context, "net_load_band": net_key}, None, 0.0))
+            candidates.append(("quarter", by_quarter.get(quarter, []), {"quarter": quarter}, None, 0.0))
+            candidates.append(("global", global_values, {}, None, 0.0))
         for level, values, context, projection, projection_net_load in candidates:
             if len(values) >= MIN_BATTERY_SUPPORT:
                 return level, values, context, projection, projection_net_load
@@ -227,6 +235,7 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         level, values, context, projection, projection_net_load = select_values(start, load_point, solar_point)
         if not values:
             continue
+        current_net_load = float(load_point["value_w"]) - float(solar_point["value_w"])
         selected_median = float(median(values))
         if projection == "discharge_ratio":
             value = selected_median * projection_net_load
@@ -241,6 +250,9 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
             "model_kind": MODEL_KIND,
             "method": "robust_context_median",
             "projection": projection,
+            "median_ratio": selected_median if projection else None,
+            "ratio_threshold_w": RATIO_THRESHOLD_W,
+            "near_zero": abs(current_net_load) < RATIO_THRESHOLD_W,
             "context_level": level,
             "context": context,
             "site_id": site_id,

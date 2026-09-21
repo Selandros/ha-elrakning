@@ -246,6 +246,30 @@ def test_open_meteo_missing_hour_fails_closed_for_only_that_hour():
     assert not missing_hour
 
 
+def test_near_zero_balance_uses_bounded_ratio_not_absolute_context_median():
+    known_at = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
+    history = []
+    for day in (7, 14, 20):
+        history.extend(_context_rows(
+            [datetime(2026, 9, day, 18, 15, tzinfo=UTC)],
+            [-200.0], load=100.0, solar=300.0,
+        ))
+    frame = _single_run_frame(values=[44.2328042328] * 24)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", history,
+        _load_frame([(datetime(2026, 9, 22, 6, 0, tzinfo=UTC), 361.0)], known_at),
+        {}, None, known_at,
+        target_date=date(2026, 9, 22),
+        open_meteo_frames=[frame],
+        open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
+    )
+    point = result["series"]["charging"]["forecast_points"][0]
+    assert point["value_w"] < 100.0
+    assert point["provenance"]["context_level"] == "near_zero_charge_capture_ratio"
+    assert point["provenance"]["median_ratio"] == 1.0
+    assert result["series"]["import"]["forecast_points"][0]["value_w"] == 0.0
+
+
 def test_canonical_battery_sign_contract_drives_split_and_grid_balance():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     slots = [datetime(2026, 9, 21, 18, minute, tzinfo=UTC) for minute in (15, 30, 45)]
