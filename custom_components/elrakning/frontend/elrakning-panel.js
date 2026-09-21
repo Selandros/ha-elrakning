@@ -424,6 +424,89 @@ export function selectLoadForecastPoints(frames, { siteId = null, selectedDate =
   return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
 }
 
+function forecastPointValueKw(point) {
+  for (const key of ["value_kw", "forecast_value_kw", "estimated_value_kw"]) {
+    const value = Number(point?.[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  const watts = Number(point?.value_w ?? point?.forecast_value_w ?? point?.estimated_value_w);
+  return Number.isFinite(watts) ? watts / 1000 : null;
+}
+
+function forecastPointIsMarked(point) {
+  const classification = String(
+    point?.classification
+      || point?.data_kind
+      || point?.provenance?.classification
+      || "",
+  ).toLowerCase();
+  return point?.forecast === true
+    || point?.estimated === true
+    || point?.predicted === true
+    || ["forecast", "estimated", "predicted"].includes(classification);
+}
+
+function selectForecastPointsFromFrames(frames, {
+  siteId = null,
+  selectedDate = new Date(),
+  now = new Date(),
+  logicalRole = null,
+} = {}) {
+  const dayStart = localDayStart(selectedDate);
+  const todayStart = localDayStart(now);
+  if (!dayStart || !todayStart) return [];
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  const dayKey = localDateKey(dayStart);
+  const todayKey = localDateKey(todayStart);
+  if (dayKey < todayKey) return [];
+  const firstVisible = dayKey === todayKey ? nextForecastBoundary(now) : dayStart;
+  const candidates = (Array.isArray(frames) ? frames : [])
+    .filter((frame) => (!logicalRole || frame?.logical_role === logicalRole)
+      && (!siteId || !frame?.site_id || frame.site_id === siteId)
+      && Array.isArray(frame?.points)
+      && frame.points.some((point) => {
+        const timestamp = new Date(point?.valid_at || point?.timestamp).getTime();
+        return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+      }))
+    .sort((left, right) => {
+      const knownOrder = new Date(left.known_at || 0).getTime() - new Date(right.known_at || 0).getTime();
+      if (knownOrder) return knownOrder;
+      const revisionOrder = Number(left.revision || 0) - Number(right.revision || 0);
+      return revisionOrder || String(left.frame_id || "").localeCompare(String(right.frame_id || ""));
+    });
+  const frame = candidates.at(-1);
+  if (!frame) return [];
+  const points = new Map();
+  for (const point of frame.points) {
+    const timestamp = new Date(point?.valid_at || point?.timestamp).getTime();
+    const valueKw = forecastPointValueKw(point);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(valueKw)
+      || timestamp < firstVisible.getTime() || timestamp >= dayEnd.getTime()
+      || (siteId && point?.site_id && point.site_id !== siteId)) continue;
+    points.set(timestamp, { timestamp, value_kw: valueKw, forecast: true });
+  }
+  return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
+}
+
+export function selectPowerForecastPoints(source, { siteId = null, selectedDate = new Date(), now = new Date() } = {}) {
+  if (!source || typeof source !== "object") return [];
+  const frames = [];
+  for (const key of ["forecast_frames", "estimated_frames", "forecast", "estimate"]) {
+    const value = source[key];
+    if (Array.isArray(value)) frames.push(...value.map((item) => Array.isArray(item?.points) ? item : { points: [item] }));
+    else if (Array.isArray(value?.points)) frames.push(value);
+  }
+  for (const key of ["forecast_points", "estimated_points", "predicted_points"]) {
+    if (Array.isArray(source[key])) frames.push({ points: source[key] });
+  }
+  if (Array.isArray(source.points)) {
+    const marked = source.points.filter(forecastPointIsMarked);
+    if (marked.length) frames.push({ points: marked });
+  }
+  return selectForecastPointsFromFrames(frames, { siteId, selectedDate, now });
+}
+
 export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
 
 export function isVisiblePowerValue(value) {
@@ -3841,6 +3924,11 @@ class ElrakningPanel {
         }
 
         .chart-power-forecast-load {
+          stroke-dasharray: 8 5;
+          opacity: .68;
+        }
+
+        .chart-power-forecast {
           stroke-dasharray: 8 5;
           opacity: .68;
         }
@@ -11306,7 +11394,8 @@ class ElrakningPanel {
     const rawMeterPoints = Array.isArray(this._meterPowerHistory?.points)
       ? this._meterPowerHistory.points.filter((point) => {
         const timestamp = new Date(point.timestamp).getTime();
-        return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+        return !forecastPointIsMarked(point)
+          && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
       })
       : [];
     const historicalMeterPoints = energyHistoryToMeterStepPoints(energyHistory).filter((point) => (
@@ -11336,7 +11425,8 @@ class ElrakningPanel {
       const rawPoints = Array.isArray(this._powerHistory?.series?.[key]?.points)
         ? this._powerHistory.series[key].points.filter((point) => {
           const timestamp = new Date(point.timestamp).getTime();
-          return Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+          return !forecastPointIsMarked(point)
+            && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
         })
         : [];
       const historicalPoints = energyIntervalsToStepPoints(energyHistory?.series?.[key]).filter((point) => (
@@ -11362,6 +11452,22 @@ class ElrakningPanel {
       selectedDate: dayStart,
       now,
     });
+    const forecastSources = {
+      import: this._meterPowerHistory,
+      export: this._meterPowerHistory,
+      solar: this._powerHistory?.series?.solar,
+      consumption: this._powerHistory?.series?.consumption,
+      charging: this._powerHistory?.series?.charging,
+      discharging: this._powerHistory?.series?.discharging,
+    };
+    const powerForecastPoints = Object.fromEntries(
+      Object.entries(forecastSources).map(([key, source]) => [key, selectPowerForecastPoints(source, {
+        siteId: activeSiteId,
+        selectedDate: dayStart,
+        now,
+      })]),
+    );
+    if (loadForecastPoints.length) powerForecastPoints.consumption = loadForecastPoints;
     this._powerCanonicalPointMaps = Object.fromEntries(
       Object.entries(powerCanonicalPoints).map(([key, points]) => [key, new Map(
         points.filter((point) => point.raw_timestamp !== null).map((point) => [point.timestamp, point]),
@@ -11389,6 +11495,9 @@ class ElrakningPanel {
         ? this.buildMeterDisplayMarkup(powerDisplayPoints[key], "value_kw", className, x, meterY)
         : "";
     };
+    const powerForecastLinesFor = (key, className, visible) => visible && powerForecastPoints[key]?.length
+      ? this.buildMeterDisplayMarkup(powerForecastPoints[key], "value_kw", `${className} chart-power-forecast`, x, meterY)
+      : "";
     const meterDisplayGeometry = {
       import_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "import_kw", x, meterY),
       export_kw: this.buildMeterDisplayGeometry(meterDisplayPoints, "export_kw", x, meterY),
@@ -11399,13 +11508,16 @@ class ElrakningPanel {
     const meterLines = [
       meterLinesFor("import_kw", "chart-meter-import", visibleLayers.import),
       meterLinesFor("export_kw", "chart-meter-export", visibleLayers.export),
+      powerForecastLinesFor("import", "chart-meter-import", visibleLayers.import),
+      powerForecastLinesFor("export", "chart-meter-export", visibleLayers.export),
       powerLinesFor("solar", "chart-power-solar", visibleLayers.solar),
       powerLinesFor("consumption", "chart-power-consumption", visibleLayers.consumption),
-      visibleLayers.consumption && loadForecastPoints.length
-        ? this.buildMeterDisplayMarkup(loadForecastPoints, "value_kw", "chart-power-consumption chart-power-forecast-load", x, meterY)
-        : "",
+      powerForecastLinesFor("solar", "chart-power-solar", visibleLayers.solar),
+      powerForecastLinesFor("consumption", "chart-power-consumption", visibleLayers.consumption),
       powerLinesFor("charging", "chart-power-charging", visibleLayers.charging),
       powerLinesFor("discharging", "chart-power-discharging", visibleLayers.discharging),
+      powerForecastLinesFor("charging", "chart-power-charging", visibleLayers.charging),
+      powerForecastLinesFor("discharging", "chart-power-discharging", visibleLayers.discharging),
     ].join("");
     const meterAreas = [
       visibleLayers.solar
