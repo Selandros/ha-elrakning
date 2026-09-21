@@ -1595,5 +1595,50 @@ INFERRED (roadmap): Long-term data foundation:
   were not live-exercisable. They remain test-only evidence and are not
   represented as live runtime acceptance.
 - Stage 6 is closed and accepted. No manifest change, deploy or restart was
-  performed during this docs closure. The next active implementation scope is
-  **Stage 7 — Controlled execution**; Stage 7 implementation has not started.
+  performed during that docs closure. At that earlier closure boundary, the
+  next scope was **Stage 7 — Controlled execution**; its implementation and
+  acceptance are recorded below.
+
+## 0.0.716–0.0.717 Stage 7 controlled execution acceptance and closure
+
+- Stage 7 initial implementation was released as `0.0.716`, commit
+  `2ca2177a98391658547ec3caad619c0d31ea2e60`. It added persistent,
+  site/resource-scoped permissions defaulting off, a bounded idempotent
+  command ledger, rate limiting, acknowledgement/readback, timeout and
+  failure classification, manual override, rollback/safe fallback and a
+  circuit breaker behind an explicit vendor-neutral adapter boundary.
+- `0.0.717`, commit `556c4a8e97b15a2a63e9db9366449ab26e225b6a`, was the narrow
+  corrective release. It fixed Stage 4 debug-snapshot retention: the latest
+  14 plans per site are selected chronologically from `generated_at` with
+  deterministic `decision_at`/`known_at` fallback, while legacy timestamp-less
+  snapshots sort before valid timestamped plans. Snapshot payloads and hashes
+  remain immutable, and retention is site-scoped.
+- Release gates for `0.0.717` passed: 751 Python tests plus 46 subtests, all
+  MJS tests, compileall/JSON/diff checks, 69/69 remote hashes, `ha core check`,
+  exactly one normal restart, HTTP 200 manifest `0.0.717` and no new
+  Elräkning-specific log errors.
+- Authenticated runtime acceptance on 2026-09-21 verified Vikarbodarna
+  (`76f92eea-5720-4c19-9b43-17028d19a0a4`) with zero permissions, zero command
+  ledger entries, zero breaker entries, no manual override,
+  `execution_eligible=false` and `actuator_writes_enabled=false`. Its current
+  shadow plan and exact debug request matched site, plan, revision and block;
+  the immutable snapshot hash was
+  `823f1be074497d986691b9af7cc34877d331bc6802cf31f157f1c04375d20792`.
+- Fiskvik (`66edee1e-ee32-4511-8e9d-4fc96947c861`) showed the same default-off
+  zero-write state. Its shadow plan and exact debug request matched all IDs;
+  its immutable snapshot hash was
+  `182617632c061d8a6e11dcdcc2bbfde58be1d741fa16e22262a5e1487deaa821`.
+- Retention proof after new plans were generated: Vikarbodarna held 166
+  snapshots across exactly 14 plan IDs, including 26 blocks from the new
+  plan; Fiskvik held 66 snapshots across 6 plan IDs, including 26 blocks from
+  its new plan. The former lexical-retention regression is therefore closed.
+- Live acceptance is intentionally zero-write because no explicitly armed
+  verified actuator exists on either site. Adapter success/acknowledgement,
+  timeout, idempotency, rate-limit, manual-override, rollback and
+  circuit-breaker behavior is accepted as deterministic adapter-test evidence,
+  not as fabricated live hardware execution. No live permission was armed and
+  no physical command was issued. Planner and execution quality remain
+  separate.
+- Stage 7 is closed and accepted on runtime baseline `0.0.717`. Stages 0–7
+  are now the complete accepted roadmap. No Stage 8 is defined; future work,
+  if needed, is post-roadmap enhancement or operations only.

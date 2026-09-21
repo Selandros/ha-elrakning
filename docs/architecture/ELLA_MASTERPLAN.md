@@ -82,6 +82,8 @@ The following is historical context, not the new target architecture:
 | 0.0.698 | Stage 2 unified 15-minute site state and forecasts accepted after authenticated two-site Safari/WS verification. | Site timezone fallback provenance, complete multi-resource solar/net-load semantics, bounded source facts, truthful optional-layer absence and deterministic site isolation. |
 | 0.0.702 | Stage 3 action planner accepted after authenticated two-site Safari/WS and UI verification. | Immutable `ella_action_plan.v1`, shadow/recommend-only semantics, clean action-card contract, action-boundary graph selection and fail-closed resource qualification. |
 | 0.0.715 | Stage 6 solar/ESS enrichment and physical calibration accepted after authenticated two-site runtime verification. | Site-scoped solar calibration and ESS physical/policy separation, action-specific fail-closed eligibility, immutable Stage 6 debug evidence and no-write execution boundary. |
+| 0.0.716 | Stage 7 controlled execution initial implementation deployed; live sites remained unarmed and zero-write. | Persistent permissions, vendor-neutral adapter contract, command ledger, acknowledgement/failure controls and no-write default. |
+| 0.0.717 | Stage 7 retention correction accepted after authenticated runtime verification. | Chronological bounded debug retention, immutable current-plan snapshots and final controlled-execution acceptance. |
 
 The historical “price-only first, solar next, ESS later” roadmap is superseded
 as a product ordering. Solar and ESS remain capabilities in the same planner,
@@ -520,7 +522,7 @@ policy, unknown capacity/limits fail closed, and planned SOC is modelled only
 from verified inputs. Stage 6 is closed and accepted. The next active
 implementation scope is **Stage 7 — Controlled execution**.
 
-### Stage 7 — Controlled execution
+### Stage 7 — Controlled execution (accepted 0.0.717)
 
 Entry: explicit site/resource permissions, accepted shadow/backtest evidence
 and a vendor-neutral actuator contract.
@@ -535,6 +537,36 @@ remain separate; any boundary violation stops further commands.
 Tests: supervised hardware-in-loop or adapter tests, wrong-site prevention,
 stale state, permission removal, duplicate command, timeout, actuator failure,
 rollback, manual override and zero-write tests on unarmed sites.
+
+Runtime closure: Stage 7 initial implementation commit
+`2ca2177a98391658547ec3caad619c0d31ea2e60` was deployed as `0.0.716`.
+The corrective retention release `0.0.717`, commit
+`556c4a8e97b15a2a63e9db9366449ab26e225b6a`, fixed debug-plan retention that
+could evict a new plan through lexical plan-ID ordering. The correction sorts
+by decision-time metadata, retains timestamped plans ahead of legacy
+timestamp-less data, preserves immutable snapshot payloads and keeps the
+fourteen-plan cap site-scoped.
+
+Authenticated runtime acceptance on 2026-09-21 verified Vikarbodarna and
+Fiskvik independently. Both sites had zero permissions, zero command-ledger
+entries, zero breaker entries, no manual override, and
+`execution_eligible=false` plus `actuator_writes_enabled=false`. Both plans
+remained shadow/`NOT_APPLICABLE`; exact plan, revision, block and site IDs
+were accepted by the debug endpoint. The persisted Vikarbodarna store held
+166 snapshots across exactly 14 plan IDs, including 26 blocks from the new
+plan; Fiskvik held 66 snapshots across 6 plan IDs, including its new 26-block
+plan. No permission was armed and no physical command was issued.
+
+The live result is deliberately zero-write because neither site has an
+explicitly armed verified actuator. Adapter acknowledgement, timeout,
+idempotency, rate-limit, manual-override, rollback and circuit-breaker paths
+are accepted from deterministic adapter tests, not represented as live
+hardware execution. Planner quality and execution quality remain separate.
+
+Stage 7 is closed and accepted. Stages 0–7 are the complete accepted roadmap;
+there is no Stage 8. Future work, if any, is post-roadmap enhancement or
+operations and must not be interpreted as another planned implementation
+stage.
 
 ## 16. Acceptance philosophy for every future stage
 
@@ -552,12 +584,13 @@ or cards render.
 
 ## 17. Current implementation boundary
 
-At accepted runtime baseline 0.0.696, the implementation includes the Stage 1
-site-scoped capability inventory and persistent individual-load foundation on
-top of the existing capability-driven price-block planner, canonical load
-enrichment and dashboard/card interaction. It is not yet the vNext action
-planner, unified site-state model, individual-load controller, learning loop
-or physical control architecture described above.
+At accepted runtime baseline 0.0.717, the implementation includes the
+site-scoped capability inventory, unified site state, shadow action planner,
+decision-time debug snapshots, site-scoped learning, solar/ESS enrichment and
+fail-closed controlled-execution boundary on top of the canonical load and
+dashboard foundations. Physical execution remains unavailable unless the
+Stage 7 permission, verified actuator, current plan and safety gates all
+qualify; the live acceptance deliberately armed none.
 
 The current seven-card result is explained by the current third-based price
 classification and contiguous grouping. It is not itself a defect. Future
@@ -565,8 +598,9 @@ card count must emerge from material action changes and constraints.
 
 Stage 0 architecture/contracts, Stage 1 capability/load foundation, Stage 2
 unified site state, Stage 3 shadow/recommend-only action planning, Stage 4
-decision-time debug snapshots, Stage 5 site-scoped evaluation/learning and
-Stage 6 solar/ESS enrichment are implemented and accepted. The next active
-implementation scope is **Stage 7 — Controlled execution**. Solar-first and
-ESS-first behavior remains capability-scoped and must not bypass the accepted
-state, action, debug and learning foundations.
+decision-time debug snapshots, Stage 5 site-scoped evaluation/learning,
+Stage 6 solar/ESS enrichment and Stage 7 controlled execution are implemented
+and accepted. The roadmap is complete; there is no next implementation stage.
+Solar-first, ESS-first and execution behavior remain capability-scoped and
+must not bypass the accepted state, action, debug, learning and permission
+foundations.
