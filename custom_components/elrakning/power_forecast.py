@@ -224,7 +224,7 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
             "known_at": known_at.isoformat(),
             "current_soc_percent": current_soc_value,
             "source_generation_ids": generations,
-            "raw_behavior_sign_convention": "positive_charge_negative_discharge",
+            "raw_behavior_sign_convention": "positive_discharge_negative_charge",
             "confidence": "supported" if len(values) >= 5 else "limited_support",
         }))
     return {
@@ -311,8 +311,8 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
     series = {
         "solar": solar,
         "consumption": {"schema": "load_forecast.v1", "site_id": site_id, "available": bool(load), "forecast_points": list(load.values()), "execution_eligible": False, "actuator_writes_enabled": False},
-        "charging": {"schema": BATTERY_SCHEMA, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "positive_signed_power_to_charge", "display_sign_convention": "positive_charge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
-        "discharging": {"schema": BATTERY_SCHEMA, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, -float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "negative_signed_power_to_discharge", "display_sign_convention": "positive_discharge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
+        "charging": {"schema": BATTERY_SCHEMA, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, -float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "negative_signed_power_to_charge", "display_sign_convention": "positive_charge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
+        "discharging": {"schema": BATTERY_SCHEMA, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "positive_signed_power_to_discharge", "display_sign_convention": "positive_discharge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
         "import": {"schema": "grid_power_forecast.v1", "site_id": site_id, "available": False, "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False},
         "export": {"schema": "grid_power_forecast.v1", "site_id": site_id, "available": False, "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False},
     }
@@ -322,8 +322,8 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
         key = start.isoformat()
         if key not in load or key not in solar_by_slot or key not in battery_by_slot:
             continue
-        balance_w = float(load[key]["value_w"]) - float(solar_by_slot[key]["value_w"]) + float(battery_by_slot[key]["value_w"])
-        provenance = {"schema": "grid_power_forecast.v1", "method": "load_minus_solar_plus_signed_battery_behavior", "model_kind": MODEL_KIND, "site_id": site_id, "known_at": known_at.isoformat(), "load": load[key]["provenance"], "solar": solar_by_slot[key]["provenance"], "battery": battery_by_slot[key]["provenance"], "battery_sign_convention": "positive_charge_negative_discharge", "sign_convention": "positive_import_negative_export"}
+        balance_w = float(load[key]["value_w"]) - float(solar_by_slot[key]["value_w"]) - float(battery_by_slot[key]["value_w"])
+        provenance = {"schema": "grid_power_forecast.v1", "method": "load_minus_solar_minus_signed_battery_behavior", "model_kind": MODEL_KIND, "site_id": site_id, "known_at": known_at.isoformat(), "load": load[key]["provenance"], "solar": solar_by_slot[key]["provenance"], "battery": battery_by_slot[key]["provenance"], "battery_sign_convention": "positive_discharge_negative_charge", "sign_convention": "positive_import_negative_export"}
         grid_import.append(_point(max(0.0, balance_w), start, end, source="grid_power_forecast.v1", provenance=provenance))
         grid_export.append(_point(max(0.0, -balance_w), start, end, source="grid_power_forecast.v1", provenance=provenance))
     series["import"].update({"available": bool(grid_import), "forecast_points": grid_import})

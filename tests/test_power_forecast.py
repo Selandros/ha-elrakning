@@ -80,8 +80,8 @@ def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
     battery = result["battery"]
     assert battery["schema"] == "battery_power_forecast.v1"
     assert battery["available"] is True
-    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 0
-    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 400
+    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 400
+    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 0
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["context_level"] == "quarter_soc_net"
     assert battery["model_version"] == "battery-behavior-profile-v2"
@@ -109,14 +109,14 @@ def test_battery_split_never_emits_negative_magnitudes():
     discharging = {point["valid_at"]: point["value_w"] for point in result["series"]["discharging"]["forecast_points"]}
     assert all(value >= 0 for value in charging.values())
     assert all(value >= 0 for value in discharging.values())
-    assert charging["2026-09-21T18:15:00+00:00"] == 0
-    assert discharging["2026-09-21T18:15:00+00:00"] == 400
-    assert charging["2026-09-21T18:30:00+00:00"] == 250
-    assert discharging["2026-09-21T18:30:00+00:00"] == 0
+    assert charging["2026-09-21T18:15:00+00:00"] == 400
+    assert discharging["2026-09-21T18:15:00+00:00"] == 0
+    assert charging["2026-09-21T18:30:00+00:00"] == 0
+    assert discharging["2026-09-21T18:30:00+00:00"] == 250
     assert charging["2026-09-21T18:45:00+00:00"] == 0
     assert discharging["2026-09-21T18:45:00+00:00"] == 0
-    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 0
-    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 400
+    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 400
+    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 0
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
 
 
@@ -178,9 +178,38 @@ def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inpu
     )
     assert result["series"]["import"]["available"] is True
     assert result["series"]["export"]["available"] is True
-    assert result["series"]["import"]["forecast_points"][0]["value_w"] == 800
+    assert result["series"]["import"]["forecast_points"][0]["value_w"] == 600
     assert result["series"]["export"]["forecast_points"][0]["value_w"] == 0
-    assert result["series"]["import"]["forecast_points"][0]["provenance"]["method"] == "load_minus_solar_plus_signed_battery_behavior"
+    assert result["series"]["import"]["forecast_points"][0]["provenance"]["method"] == "load_minus_solar_minus_signed_battery_behavior"
+
+
+def test_canonical_battery_sign_contract_drives_split_and_grid_balance():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    slots = [datetime(2026, 9, 21, 18, minute, tzinfo=UTC) for minute in (15, 30, 45)]
+    rows = _context_rows(
+        [datetime(2026, 9, day, 18, minute, tzinfo=UTC) for day in (7, 14, 20) for minute in (15, 30, 45)],
+        [500, -500, 0] * 3,
+        load=1000,
+        solar=300,
+    )
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows,
+        _load_frame([(slot, 1000) for slot in slots], known_at),
+        {"this_hour_kwh": 0.3}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
+    )
+    charging = {point["valid_at"]: point["value_w"] for point in result["series"]["charging"]["forecast_points"]}
+    discharging = {point["valid_at"]: point["value_w"] for point in result["series"]["discharging"]["forecast_points"]}
+    imports = {point["valid_at"]: point["value_w"] for point in result["series"]["import"]["forecast_points"]}
+    assert charging["2026-09-21T18:15:00+00:00"] == 0
+    assert discharging["2026-09-21T18:15:00+00:00"] == 500
+    assert imports["2026-09-21T18:15:00+00:00"] == 200
+    assert charging["2026-09-21T18:30:00+00:00"] == 500
+    assert discharging["2026-09-21T18:30:00+00:00"] == 0
+    assert imports["2026-09-21T18:30:00+00:00"] == 1200
+    assert charging["2026-09-21T18:45:00+00:00"] == 0
+    assert discharging["2026-09-21T18:45:00+00:00"] == 0
+    assert imports["2026-09-21T18:45:00+00:00"] == 700
+    assert result["battery"]["forecast_points"][0]["provenance"]["raw_behavior_sign_convention"] == "positive_discharge_negative_charge"
 
 
 def test_load_forecast_requires_canonical_w_unit():
