@@ -30,6 +30,25 @@ def _row(role, start, value, *, site=SITE, support=1.0, quality="good", generati
     }
 
 
+def _soc_row(start, value, *, site=SITE, support=1.0, generation="soc-gen"):
+    row = _row("battery.soc", start, value, site=site, support=support, generation=generation)
+    row["unit"] = "%"
+    return row
+
+
+def _context_rows(starts, battery_values, *, load=1000.0, solar=600.0, soc=65.0):
+    rows = []
+    for start, battery in zip(starts, battery_values):
+        rows.extend([
+            _row("battery.power", start, battery, generation="battery-gen"),
+            _soc_row(start, soc),
+            _row("house.consumption", start, load, generation="load-gen"),
+            _row("solar.production", start, solar / 2, generation="solar-a"),
+            _row("solar.production", start, solar / 2, generation="solar-b"),
+        ])
+    return rows
+
+
 def _load_frame(points, known_at):
     return {"frames": [{
         "site_id": SITE,
@@ -44,10 +63,10 @@ def _load_frame(points, known_at):
 
 def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
-    rows = []
-    for day in (7, 14, 20):
-        start = datetime(2026, 9, day, 18, 15, tzinfo=UTC)
-        rows.append(_row("battery.power", start, -400))
+    rows = _context_rows(
+        [datetime(2026, 9, day, 18, 15, tzinfo=UTC) for day in (7, 14, 20)],
+        [-400, -400, -400],
+    )
     future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
     result = build_power_forecast(
         SITE, "Europe/Stockholm", rows,
@@ -61,9 +80,11 @@ def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
     battery = result["battery"]
     assert battery["schema"] == "battery_power_forecast.v1"
     assert battery["available"] is True
-    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 400
-    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 0
+    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 0
+    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 400
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
+    assert result["series"]["charging"]["forecast_points"][0]["provenance"]["context_level"] == "quarter_soc_net"
+    assert battery["model_version"] == "battery-behavior-profile-v2"
     assert result == build_power_forecast(
         SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
         {"this_hour_kwh": 0.6, "next_hour_kwh": None},
@@ -75,24 +96,27 @@ def test_battery_split_never_emits_negative_magnitudes():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     rows = []
     for day in (7, 14, 20):
-        for minute, value in ((15, -400), (30, 250), (45, 0)):
-            rows.append(_row("battery.power", datetime(2026, 9, day, 18, minute, tzinfo=UTC), value))
+        rows.extend(_context_rows(
+            [datetime(2026, 9, day, 18, minute, tzinfo=UTC) for minute in (15, 30, 45)],
+            [-400, 250, 0],
+        ))
     result = build_power_forecast(
         SITE, "Europe/Stockholm", rows,
-        _load_frame([], known_at), {}, None, known_at,
+        _load_frame([(datetime(2026, 9, 21, 18, minute, tzinfo=UTC), 1000) for minute in (15, 30, 45)], known_at),
+        {"this_hour_kwh": 0.6}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
     )
     charging = {point["valid_at"]: point["value_w"] for point in result["series"]["charging"]["forecast_points"]}
     discharging = {point["valid_at"]: point["value_w"] for point in result["series"]["discharging"]["forecast_points"]}
     assert all(value >= 0 for value in charging.values())
     assert all(value >= 0 for value in discharging.values())
-    assert charging["2026-09-21T18:15:00+00:00"] == 400
-    assert discharging["2026-09-21T18:15:00+00:00"] == 0
-    assert charging["2026-09-21T18:30:00+00:00"] == 0
-    assert discharging["2026-09-21T18:30:00+00:00"] == 250
+    assert charging["2026-09-21T18:15:00+00:00"] == 0
+    assert discharging["2026-09-21T18:15:00+00:00"] == 400
+    assert charging["2026-09-21T18:30:00+00:00"] == 250
+    assert discharging["2026-09-21T18:30:00+00:00"] == 0
     assert charging["2026-09-21T18:45:00+00:00"] == 0
     assert discharging["2026-09-21T18:45:00+00:00"] == 0
-    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 400
-    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 0
+    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 0
+    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 400
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
 
 
@@ -139,14 +163,14 @@ def test_storage_history_rows_preserve_site_id_for_battery_forecast():
         rows = storage.read_site_energy_history(SITE, start, known_at)
         assert rows and all(row["site_id"] == SITE for row in rows)
         result = build_power_forecast(SITE, "Europe/Stockholm", rows, {"frames": []}, {}, None, known_at)
-        assert result["battery"]["available"] is True
+        assert result["battery"]["available"] is False
         storage.close()
 
 
 def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inputs():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     slot = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
-    rows = [_row("battery.power", datetime(2026, 9, day, 18, 15, tzinfo=UTC), 100) for day in (7, 14, 20)]
+    rows = _context_rows([datetime(2026, 9, day, 18, 15, tzinfo=UTC) for day in (7, 14, 20)], [100, 100, 100], load=1000, solar=300)
     result = build_power_forecast(
         SITE, "Europe/Stockholm", rows, _load_frame([(slot, 1000)], known_at),
         {"this_hour_kwh": 0.3, "next_hour_kwh": None},
@@ -154,9 +178,9 @@ def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inpu
     )
     assert result["series"]["import"]["available"] is True
     assert result["series"]["export"]["available"] is True
-    assert result["series"]["import"]["forecast_points"][0]["value_w"] == 600
+    assert result["series"]["import"]["forecast_points"][0]["value_w"] == 800
     assert result["series"]["export"]["forecast_points"][0]["value_w"] == 0
-    assert result["series"]["import"]["forecast_points"][0]["provenance"]["method"] == "load_minus_solar_minus_signed_battery_power"
+    assert result["series"]["import"]["forecast_points"][0]["provenance"]["method"] == "load_minus_solar_plus_signed_battery_behavior"
 
 
 def test_load_forecast_requires_canonical_w_unit():
@@ -166,6 +190,74 @@ def test_load_forecast_requires_canonical_w_unit():
     frame["frames"][0]["points"][0]["unit"] = "kW"
     result = build_power_forecast(SITE, "Europe/Stockholm", [], frame, {}, None, known_at)
     assert result["series"]["consumption"]["available"] is False
+
+
+def test_context_fallback_prefers_soc_and_net_load_over_quarter():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    rows = _context_rows(
+        [datetime(2026, 9, day, 18, 30, tzinfo=UTC) for day in (7, 14, 20)],
+        [-300, -300, -300],
+    )
+    future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
+        {"this_hour_kwh": 0.6}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
+    )
+    point = result["battery"]["forecast_points"][0]
+    assert point["value_w"] == -300
+    assert point["provenance"]["context_level"] == "soc_net"
+    assert point["provenance"]["sample_count"] == 3
+
+
+def test_solar_context_fallback_is_behavior_only_without_soc_feature():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    rows = []
+    for day in (7, 14, 20):
+        start = datetime(2026, 9, day, 19, 0, tzinfo=UTC)
+        rows.extend([
+            _row("battery.power", start, -700),
+            _row("house.consumption", start, 1000),
+            _row("solar.production", start, 0, generation="solar-a"),
+            _row("solar.production", start, 0, generation="solar-b"),
+        ])
+    future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
+        {"this_hour_kwh": 0.6}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
+    )
+    point = result["battery"]["forecast_points"][0]
+    assert point["value_w"] == -700
+    assert point["provenance"]["context_level"] == "solar_context"
+    assert point["provenance"]["context"]["solar_context"] == "no_solar_surplus"
+
+
+def test_future_only_context_samples_do_not_train_baseline():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    rows = _context_rows(
+        [datetime(2026, 9, day, 18, 15, tzinfo=UTC) for day in (21, 22, 23)],
+        [-300, -300, -300],
+    )
+    future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
+        {"this_hour_kwh": 0.6}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
+    )
+    assert result["battery"]["available"] is False
+
+
+def test_insufficient_behavior_support_is_unavailable():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    rows = _context_rows(
+        [datetime(2026, 9, day, 18, 15, tzinfo=UTC) for day in (7, 14)],
+        [-300, -300],
+    )
+    future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
+        {"this_hour_kwh": 0.6}, {"entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
+    )
+    assert result["battery"]["available"] is False
+    assert result["series"]["import"]["available"] is False
 
 
 def test_solar_hour_energy_is_split_only_into_four_aligned_slots():
