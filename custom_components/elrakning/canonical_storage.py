@@ -679,7 +679,8 @@ class CanonicalStorage:
                     f"""SELECT logical_role, source_generation_id, interval_start_us, interval_end_us,
                                resolution_seconds, value, unit, sign_convention, quality_status,
                                coverage_ratio, gap_status, semantic_key, revision,
-                               CASE WHEN ? = 'energy_observations' THEN 1 ELSE 0 END AS live_priority
+                               CASE WHEN ? = 'energy_observations' THEN 1 ELSE 0 END AS live_priority,
+                               site_id
                           FROM {table} AS current
                          WHERE site_id = ?
                            AND interval_start_us < ?
@@ -715,6 +716,7 @@ class CanonicalStorage:
                 "semantic_key": row[11],
                 "revision": int(row[12]),
                 "storage_class": "canonical" if int(row[13]) else "historical",
+                "site_id": row[14],
             }
             for row in sorted(latest.values(), key=lambda item: (item[2], item[0], item[1]))
         ]

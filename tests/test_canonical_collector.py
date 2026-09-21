@@ -1009,6 +1009,7 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
             rows = collector.storage.read_site_energy_history("site-a", start, start + timedelta(minutes=15))
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["source_generation_id"], "gen-a")
+            self.assertEqual(rows[0]["site_id"], "site-a")
             self.assertAlmostEqual(rows[0]["value"], 1000.0)
             self.assertEqual(collector.storage.read_site_energy_history("site-b", start, start + timedelta(minutes=15)), [])
             collector.storage.close()

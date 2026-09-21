@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
 
@@ -6,6 +8,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.power_forecast import build_power_forecast
+from custom_components.elrakning.canonical_storage import CanonicalStorage
 
 
 SITE = "site-a"
@@ -100,6 +103,44 @@ def test_insufficient_support_and_wrong_site_fail_closed():
     assert result["battery"]["available"] is False
     assert result["series"]["import"]["available"] is False
     assert result["site_id"] == SITE
+
+
+def test_storage_history_rows_preserve_site_id_for_battery_forecast():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    start = datetime(2026, 9, 7, 18, 15, tzinfo=UTC)
+    with TemporaryDirectory() as directory:
+        storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
+        storage.open()
+        storage.ensure_source_generation({
+            "site_id": SITE,
+            "logical_role": "battery.power",
+            "generation_id": "battery-gen",
+            "source_identity": {"identity_key": "battery-gen", "identity_strength": "strong"},
+        }, start)
+        for day in (7, 14, 20):
+            observed = datetime(2026, 9, day, 18, 15, tzinfo=UTC)
+            storage.insert_observation({
+                "semantic_key": f"{SITE}|battery.power|battery-gen|{observed.isoformat()}",
+                "site_id": SITE,
+                "logical_role": "battery.power",
+                "source_generation_id": "battery-gen",
+                "interval_start": observed,
+                "observed_at": observed + timedelta(minutes=14),
+                "captured_at": observed + timedelta(minutes=15),
+                "known_at": observed + timedelta(minutes=15),
+                "classification": "measured",
+                "value": -400,
+                "unit": "W",
+                "sign_convention": "positive_discharge_negative_charge",
+                "quality_status": "good",
+                "coverage_ratio": 1.0,
+                "gap_status": "none",
+            })
+        rows = storage.read_site_energy_history(SITE, start, known_at)
+        assert rows and all(row["site_id"] == SITE for row in rows)
+        result = build_power_forecast(SITE, "Europe/Stockholm", rows, {"frames": []}, {}, None, known_at)
+        assert result["battery"]["available"] is True
+        storage.close()
 
 
 def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inputs():
