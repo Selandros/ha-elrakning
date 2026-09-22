@@ -195,6 +195,68 @@ def test_power_learning_uses_active_generation_and_enforces_end_gate():
     asyncio.run(run())
 
 
+def test_legacy_power_records_are_dropped_without_touching_load_learning():
+    async def run():
+        legacy = {
+            "schema": "ella_learning_state.v1", "version": 1,
+            "sites": {"site-a": {
+                "records": [{"frame_id": "load", "valid_at": "2026-09-20T10:00:00+00:00"}],
+                "power_records": [{"series": "battery", "valid_at": "2026-09-20T10:15:00+00:00", "predicted_w": 100.0}],
+            }},
+        }
+        store = EllaLearningStore(object())
+        store.store = _Store(legacy)
+        await store.async_load()
+        assert store.state["sites"]["site-a"]["power_records"] == []
+        assert len(store.state["sites"]["site-a"]["records"]) == 1
+        assert store.public_state("site-a")["power_forecast"]["available"] is False
+        assert store.persistent_power_calibration("site-a")["by_context"] == {}
+
+    asyncio.run(run())
+
+
+def test_near_zero_small_prediction_scores_but_does_not_calibrate():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        known_at = datetime(2026, 9, 20, 19, 0, tzinfo=timezone.utc)
+        valid_at = datetime(2026, 9, 20, 19, 15, tzinfo=timezone.utc)
+        forecast = {
+            "site_id": "site-a", "known_at": known_at.isoformat(), "horizon": {},
+            "battery": {"forecast_points": [{"valid_at": valid_at.isoformat(), "end_at": (valid_at + timedelta(minutes=15)).isoformat(), "value_w": 50.0, "provenance": {"context_level": "near_zero_discharge_coverage_ratio"}}]},
+            "series": {},
+        }
+        actual = [{"site_id": "site-a", "logical_role": "battery.power", "unit": "W", "interval_start": valid_at, "interval_end": valid_at + timedelta(minutes=15), "value": 40.0, "coverage_ratio": 1.0, "quality_status": "good", "gap_status": "complete", "source_generation_id": "battery-a"}]
+        result = await store.async_record_power_forecast("site-a", forecast, actual, valid_at + timedelta(minutes=15))
+        assert result["evaluated"] == 1
+        assert result["calibration"]["by_context"] == {}
+        assert store.state["sites"]["site-a"]["power_records"][0]["series"]["battery"]["absolute_error_w"] == 10.0
+
+    asyncio.run(run())
+
+
+def test_power_learning_normalizes_forecast_offsets_to_utc_slot_keys():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        plus_two = timezone(timedelta(hours=2))
+        known_at = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+        valid_at = datetime(2026, 9, 20, 12, 15, tzinfo=plus_two)
+        end_at = valid_at + timedelta(minutes=15)
+        forecast = {
+            "site_id": "site-a", "known_at": known_at.isoformat(), "horizon": {},
+            "battery": {"forecast_points": [{"valid_at": valid_at.isoformat(), "end_at": end_at.isoformat(), "value_w": 100.0, "provenance": {"context_level": "net_load_ratio"}}]},
+            "series": {},
+        }
+        actual_start = valid_at.astimezone(timezone.utc)
+        actual = [{"site_id": "site-a", "logical_role": "battery.power", "unit": "W", "interval_start": actual_start, "interval_end": actual_start + timedelta(minutes=15), "value": 90.0, "coverage_ratio": 1.0, "quality_status": "good", "gap_status": "complete", "source_generation_id": "battery-a"}]
+        result = await store.async_record_power_forecast("site-a", forecast, actual, actual_start + timedelta(minutes=15))
+        assert result["evaluated"] == 1
+        assert store.state["sites"]["site-a"]["power_records"][0]["valid_at"] == "2026-09-20T10:15:00+00:00"
+
+    asyncio.run(run())
+
+
 def test_power_forecast_learning_requires_causal_qualified_actual_and_is_restart_safe():
     async def run():
         store = EllaLearningStore(object())

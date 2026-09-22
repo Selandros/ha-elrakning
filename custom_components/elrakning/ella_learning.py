@@ -17,7 +17,7 @@ SCHEMA = "ella_learning_state.v1"
 STORE_KEY = "elrakning.ella_learning"
 STORE_VERSION = 1
 MAX_RECORDS_PER_SITE = 512
-POWER_EVIDENCE_SCHEMA = "ella_power_forecast_learning.v1"
+POWER_EVIDENCE_SCHEMA = "ella_power_forecast_learning.v2"
 POWER_CALIBRATION_VERSION = "battery-behavior-profile-v2-error-calibration-v1"
 MAX_POWER_FORECASTS_PER_SITE = 256
 MAX_POWER_RECORDS_PER_SITE = 4096
@@ -38,6 +38,19 @@ class EllaLearningStore:
         cached = await self.store.async_load()
         if isinstance(cached, dict) and cached.get("schema") == SCHEMA and isinstance(cached.get("sites"), dict):
             self.state = {"schema": SCHEMA, "version": 1, "sites": cached["sites"]}
+            self._drop_legacy_power_records()
+
+    def _drop_legacy_power_records(self) -> None:
+        """Discard pre-v2 per-series power records without touching load learning."""
+        for site in self.state.get("sites", {}).values():
+            if not isinstance(site, dict):
+                continue
+            records = site.get("power_records")
+            if isinstance(records, list):
+                site["power_records"] = [
+                    record for record in records
+                    if isinstance(record, dict) and isinstance(record.get("series"), dict)
+                ]
 
     async def async_record(self, site_id: str, evaluation: dict[str, Any], calibration: dict[str, Any] | None = None) -> None:
         if not isinstance(site_id, str) or not site_id.strip():
@@ -120,12 +133,15 @@ class EllaLearningStore:
             }
         solar_by_slot: dict[str, set[str]] = {}
         ends_by_slot: dict[str, dict[str, datetime]] = {}
+        singleton_roles = {"battery.power", "house.consumption", "grid.power/import"}
         for row in actual_rows:
             if not EllaLearningStore._power_actual_qualified(row, site_id, now):
                 continue
             key = row["interval_start"].astimezone(timezone.utc).isoformat()
             role = row.get("logical_role")
             allowed = active_generations.get(str(role))
+            if str(role) in singleton_roles and allowed and len(allowed) > 1:
+                continue
             if allowed and str(row.get("source_generation_id")) not in allowed:
                 continue
             quality_by_slot.setdefault(key, []).append((str(row.get("quality_status")), float(row.get("coverage_ratio"))))
@@ -162,6 +178,8 @@ class EllaLearningStore:
         by_series: dict[str, list[dict[str, Any]]] = {}
         by_context: dict[str, list[dict[str, Any]]] = {}
         for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("series"), dict):
+                continue
             for series, item in (record.get("series") or {}).items():
                 if not isinstance(item, dict) or item.get("signed_error_w") is None:
                     continue
@@ -192,6 +210,8 @@ class EllaLearningStore:
     def _power_calibration(cls, records: list[dict[str, Any]], known_at: datetime) -> dict[str, Any]:
         grouped: dict[str, list[dict[str, Any]]] = {}
         for record in records:
+            if not isinstance(record, dict):
+                continue
             battery = (record.get("series") or {}).get("battery")
             context = record.get("battery_context_level")
             if not isinstance(battery, dict) or not context or not str(context).startswith(("net_load_ratio", "near_zero_")):
@@ -231,6 +251,7 @@ class EllaLearningStore:
         if not site_id or forecast.get("site_id") != site_id or not forecast.get("known_at"):
             return {"written": False, "evaluated": 0, "calibration": self.persistent_power_calibration(site_id)}
         site = self.state.setdefault("sites", {}).setdefault(site_id, {"records": [], "latest": {}})
+        self._drop_legacy_power_records()
         snapshots = site.setdefault("power_forecasts", [])
         forecast_id = self._power_forecast_id(site_id, forecast)
         snapshot = next((item for item in snapshots if item.get("forecast_id") == forecast_id), None)
@@ -253,14 +274,20 @@ class EllaLearningStore:
             for series_name, series in sorted(forecast_series.items()):
                 for point in series.get("forecast_points") or []:
                     valid_at = point.get("valid_at")
-                    if valid_at and str(valid_at) > str(forecast.get("known_at")):
-                        snapshot["points"].setdefault(str(valid_at), {})[series_name] = {
+                    try:
+                        valid_dt = datetime.fromisoformat(str(valid_at).replace("Z", "+00:00"))
+                        known_dt = datetime.fromisoformat(str(forecast.get("known_at")).replace("Z", "+00:00"))
+                    except (TypeError, ValueError):
+                        continue
+                    if valid_dt.tzinfo is None or known_dt.tzinfo is None or known_dt >= valid_dt:
+                        continue
+                    slot_key = valid_dt.astimezone(timezone.utc).isoformat()
+                    snapshot["points"].setdefault(slot_key, {})[series_name] = {
                             "predicted_w": float(point.get("value_w")),
                             "end_at": point.get("end_at"),
                             "provenance": point.get("provenance") or {},
                         }
             snapshots.append(snapshot)
-            snapshots[:] = sorted(snapshots, key=lambda item: (str(item.get("known_at") or ""), item.get("forecast_id") or ""))[-MAX_POWER_FORECASTS_PER_SITE:]
         actuals = self._power_actuals(actual_rows, site_id, now, active_generations)
         records = site.setdefault("power_records", [])
         existing_keys = {item.get("valid_at") for item in records if isinstance(item, dict)}
@@ -277,10 +304,11 @@ class EllaLearningStore:
                     continue
                 if retained_known_at >= valid_dt or valid_dt + timedelta(minutes=15) > now:
                     continue
-                current = candidates.get(str(valid_at))
+                valid_key = valid_dt.astimezone(timezone.utc).isoformat()
+                current = candidates.get(valid_key)
                 candidate_key = (retained_known_at, str(retained.get("forecast_id") or ""))
                 if current is None or candidate_key > (current[0], current[1]):
-                    candidates[str(valid_at)] = (retained_known_at, str(retained.get("forecast_id") or ""), retained, point_series)
+                    candidates[valid_key] = (retained_known_at, str(retained.get("forecast_id") or ""), retained, point_series)
 
         new_records = []
         for valid_at, (forecast_known_at, forecast_id, retained, point_series) in sorted(candidates.items()):
@@ -332,6 +360,24 @@ class EllaLearningStore:
                 existing_keys.add(valid_at)
         records.extend(new_records)
         records[:] = sorted(records, key=lambda item: (str(item.get("valid_at") or ""), item.get("forecast_id") or ""))[-MAX_POWER_RECORDS_PER_SITE:]
+        pending_snapshots = []
+        completed_snapshots = []
+        for item in snapshots:
+            future_target = False
+            for valid_at in (item.get("points") or {}):
+                try:
+                    point_end = datetime.fromisoformat(str(valid_at).replace("Z", "+00:00")) + timedelta(minutes=15)
+                except ValueError:
+                    continue
+                if point_end > now:
+                    future_target = True
+                    break
+            (pending_snapshots if future_target else completed_snapshots).append(item)
+        keep_completed = max(0, MAX_POWER_FORECASTS_PER_SITE - len(pending_snapshots))
+        snapshots[:] = sorted(
+            pending_snapshots + sorted(completed_snapshots, key=lambda item: (str(item.get("known_at") or ""), item.get("forecast_id") or ""))[-keep_completed:],
+            key=lambda item: (str(item.get("known_at") or ""), item.get("forecast_id") or ""),
+        )
         calibration = self._power_calibration(records, now)
         previous_calibration = site.get("power_calibration") or {}
         changed = json.dumps(previous_calibration, sort_keys=True) != json.dumps(calibration, sort_keys=True)
