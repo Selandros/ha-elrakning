@@ -319,6 +319,8 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
         by_target_hour.append({item["valid_at"] if isinstance(item.get("valid_at"), datetime) else _datetime(item.get("valid_at")): item for item in frame.get("points", []) if _datetime(item.get("valid_at")) is not None})
     points = []
     for slot_start, slot_end in slots:
+        if slot_start < known_at:
+            continue
         hour = slot_start.replace(minute=0, second=0, microsecond=0)
         if any(hour not in mapping for mapping in by_target_hour):
             continue
@@ -343,9 +345,7 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
     return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "target_date": target_date.isoformat(), "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
 
 
-def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime, *, target_date: date, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    if target_date != known_at.astimezone(zone).date() and open_meteo_frames and open_meteo_targets:
-        return _single_run_solar_forecast(site_id, zone, slots, known_at, target_date, open_meteo_frames, open_meteo_targets)
+def _forecast_solar_short(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime) -> dict[str, Any]:
     local = known_at.astimezone(zone)
     hourly = []
     entities = (binding or {}).get("entities", {}) if isinstance(binding, dict) else {}
@@ -379,6 +379,33 @@ def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding
             }))
     points.sort(key=lambda item: item["valid_at"])
     return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "method": "hour_energy_as_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
+
+
+def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime, *, target_date: date, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    today = known_at.astimezone(zone).date()
+    open_meteo = {"forecast_points": [], "available": False}
+    if open_meteo_frames and open_meteo_targets:
+        open_meteo = _single_run_solar_forecast(site_id, zone, slots, known_at, target_date, open_meteo_frames, open_meteo_targets)
+    if target_date != today:
+        return open_meteo
+    short = _forecast_solar_short(site_id, zone, facts, binding, slots, known_at)
+    if not open_meteo.get("forecast_points"):
+        return short
+    baseline = {point["valid_at"]: point for point in open_meteo["forecast_points"]}
+    overrides = {point["valid_at"]: point for point in short["forecast_points"]}
+    merged = []
+    for start, _end in slots:
+        key = start.isoformat()
+        point = overrides.get(key) or baseline.get(key)
+        if point is not None and start >= known_at:
+            merged.append(point)
+    return {
+        **open_meteo,
+        "method": "open_meteo_hourly_baseline_with_forecast_solar_short_horizon_override",
+        "forecast_points": merged,
+        "available": bool(merged),
+        "override_source": "forecast_solar.this_hour_kwh_next_hour_kwh",
+    }
 
 
 def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime, *, horizon_start: datetime, horizon_end: datetime) -> dict[str, dict[str, Any]]:

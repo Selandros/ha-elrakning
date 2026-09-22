@@ -246,6 +246,26 @@ def test_open_meteo_missing_hour_fails_closed_for_only_that_hour():
     assert not missing_hour
 
 
+def test_today_open_meteo_baseline_is_extended_by_short_forecast_solar_override():
+    known_at = datetime(2026, 9, 22, 5, 0, tzinfo=UTC)
+    frame = _single_run_frame(target_date=date(2026, 9, 22))
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", [], {"frames": []},
+        {"this_hour_kwh": 0.5, "next_hour_kwh": 0.7},
+        {"binding_fingerprint": "forecast-bind", "entities": {"this_hour_kwh": "sensor.this", "next_hour_kwh": "sensor.next"}},
+        known_at, target_date=date(2026, 9, 22), open_meteo_frames=[frame],
+        open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
+    )
+    points = result["series"]["solar"]["forecast_points"]
+    assert len(points) == 68
+    assert points[0]["valid_at"] == "2026-09-22T05:00:00+00:00"
+    assert points[0]["value_w"] == 500.0
+    assert points[0]["provenance"]["source"] == "forecast_solar"
+    assert points[8]["value_w"] == 945.0
+    assert points[8]["provenance"]["schema"] == "solar.slot_forecast.v1"
+    assert len({point["valid_at"] for point in points}) == len(points)
+
+
 def test_near_zero_balance_uses_bounded_ratio_not_absolute_context_median():
     known_at = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
     history = []
