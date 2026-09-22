@@ -109,15 +109,15 @@ def test_battery_split_never_emits_negative_magnitudes():
     discharging = {point["valid_at"]: point["value_w"] for point in result["series"]["discharging"]["forecast_points"]}
     assert all(value >= 0 for value in charging.values())
     assert all(value >= 0 for value in discharging.values())
-    assert charging["2026-09-21T18:15:00+00:00"] == 400
-    assert discharging["2026-09-21T18:15:00+00:00"] == 0
+    assert charging["2026-09-21T18:15:00+00:00"] == 0
+    assert discharging["2026-09-21T18:15:00+00:00"] == 125
     assert charging["2026-09-21T18:30:00+00:00"] == 0
-    assert discharging["2026-09-21T18:30:00+00:00"] == 250
+    assert discharging["2026-09-21T18:30:00+00:00"] == 125
     assert charging["2026-09-21T18:45:00+00:00"] == 0
-    assert discharging["2026-09-21T18:45:00+00:00"] == 0
-    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 400
-    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 0
-    assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
+    assert discharging["2026-09-21T18:45:00+00:00"] == 125
+    assert result["series"]["charging"]["forecast_points"][0]["value_w"] == 0
+    assert result["series"]["discharging"]["forecast_points"][0]["value_w"] == 125
+    assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 6
 
 
 def test_insufficient_support_and_wrong_site_fail_closed():
@@ -127,6 +127,36 @@ def test_insufficient_support_and_wrong_site_fail_closed():
     assert result["battery"]["available"] is False
     assert result["series"]["import"]["available"] is False
     assert result["site_id"] == SITE
+
+
+def test_today_and_tomorrow_use_the_same_future_ratio_projection():
+    known_at = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
+    rows = []
+    for day in (7, 14, 20):
+        start = datetime(2026, 9, day, 18, 0, tzinfo=UTC)
+        rows.extend(_context_rows([start], [300], load=1200, solar=0, soc=65))
+    today = datetime(2026, 9, 21, 21, 0, tzinfo=UTC)
+    tomorrow = datetime(2026, 9, 22, 21, 0, tzinfo=UTC)
+    load_today = _load_frame([(today, 1200)], known_at)
+    load_tomorrow = _load_frame([(tomorrow, 1200)], known_at)
+    solar_facts = {}
+    binding = None
+    today_frame = _single_run_frame(target_date=today.date(), values=[0.0] * 24)
+    tomorrow_frame = _single_run_frame(target_date=tomorrow.date(), values=[0.0] * 24)
+    target = {"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}
+    today_result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, load_today, solar_facts, binding,
+        known_at, target_date=today.date(), open_meteo_frames=[today_frame], open_meteo_targets=[target],
+    )
+    tomorrow_result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, load_tomorrow, solar_facts, binding,
+        known_at, target_date=tomorrow.date(), open_meteo_frames=[tomorrow_frame], open_meteo_targets=[target],
+    )
+    today_point = today_result["battery"]["forecast_points"][0]
+    tomorrow_point = tomorrow_result["battery"]["forecast_points"][0]
+    assert today_point["provenance"]["context_level"] == "net_load_ratio"
+    assert tomorrow_point["provenance"]["context_level"] == "net_load_ratio"
+    assert today_point["value_w"] == tomorrow_point["value_w"]
 
 
 def test_storage_history_rows_preserve_site_id_for_battery_forecast():
@@ -184,7 +214,7 @@ def test_grid_balance_splits_import_and_export_without_zero_filling_missing_inpu
 
 
 def _single_run_frame(target_date=date(2026, 9, 22), values=None):
-    start = datetime(2026, 9, 21, 22, 0, tzinfo=UTC)
+    start = datetime.combine(target_date - timedelta(days=1), datetime.min.time(), tzinfo=UTC) + timedelta(hours=22)
     points = []
     for index in range(24):
         points.append({"valid_at": start + timedelta(hours=index), "value": (values or [100.0] * 24)[index], "unit": "W/m²", "quality_status": "good"})
@@ -334,14 +364,14 @@ def test_canonical_battery_sign_contract_drives_split_and_grid_balance():
     discharging = {point["valid_at"]: point["value_w"] for point in result["series"]["discharging"]["forecast_points"]}
     imports = {point["valid_at"]: point["value_w"] for point in result["series"]["import"]["forecast_points"]}
     assert charging["2026-09-21T18:15:00+00:00"] == 0
-    assert discharging["2026-09-21T18:15:00+00:00"] == 500
-    assert imports["2026-09-21T18:15:00+00:00"] == 200
-    assert charging["2026-09-21T18:30:00+00:00"] == 500
-    assert discharging["2026-09-21T18:30:00+00:00"] == 0
-    assert imports["2026-09-21T18:30:00+00:00"] == 1200
+    assert discharging["2026-09-21T18:15:00+00:00"] == 250
+    assert imports["2026-09-21T18:15:00+00:00"] == 450
+    assert charging["2026-09-21T18:30:00+00:00"] == 0
+    assert discharging["2026-09-21T18:30:00+00:00"] == 250
+    assert imports["2026-09-21T18:30:00+00:00"] == 450
     assert charging["2026-09-21T18:45:00+00:00"] == 0
-    assert discharging["2026-09-21T18:45:00+00:00"] == 0
-    assert imports["2026-09-21T18:45:00+00:00"] == 700
+    assert discharging["2026-09-21T18:45:00+00:00"] == 250
+    assert imports["2026-09-21T18:45:00+00:00"] == 450
     assert result["battery"]["forecast_points"][0]["provenance"]["raw_behavior_sign_convention"] == "positive_discharge_negative_charge"
 
 

@@ -433,7 +433,8 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
     battery = _battery_forecast(
         rows, site_id, zone, slots, load, solar_by_slot, known_at,
         active_battery_generation_ids,
-        use_ratio_projection=local_day != known_at.astimezone(zone).date(),
+        # Apply the same causal behavior projection to every future slot.
+        use_ratio_projection=True,
         learning_calibration=learning_calibration,
     )
     series = {
