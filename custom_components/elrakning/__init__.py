@@ -118,8 +118,13 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
                         canonical_collector.storage.read_site_energy_history,
                         site_id, now - timedelta(days=60), now,
                     )
+                    active_power_generations: dict[str, set[str]] = {}
+                    for target in site_identity_manager.collection_targets():
+                        if target.get("site_id") != site_id or not target.get("generation_id"):
+                            continue
+                        active_power_generations.setdefault(str(target.get("logical_role")), set()).add(str(target["generation_id"]))
                     power_result = await learning_store.async_record_power_forecast(
-                        site_id, power_forecast, power_rows, dt_util.now()
+                        site_id, power_forecast, power_rows, dt_util.now(), active_power_generations
                     )
                     if power_result.get("written") or power_result.get("calibration_changed"):
                         hass.bus.async_fire("elrakning_load_forecast_update", {

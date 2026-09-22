@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,7 +20,7 @@ MAX_RECORDS_PER_SITE = 512
 POWER_EVIDENCE_SCHEMA = "ella_power_forecast_learning.v1"
 POWER_CALIBRATION_VERSION = "battery-behavior-profile-v2-error-calibration-v1"
 MAX_POWER_FORECASTS_PER_SITE = 256
-MAX_POWER_RECORDS_PER_SITE = 1024
+MAX_POWER_RECORDS_PER_SITE = 4096
 POWER_CALIBRATION_MIN_SUPPORT = 3
 POWER_CALIBRATION_MIN_PREDICTED_W = 100.0
 POWER_CALIBRATION_MIN_FACTOR = 0.8
@@ -102,24 +102,37 @@ class EllaLearningStore:
         return f"power-forecast-{digest[:32]}"
 
     @staticmethod
-    def _power_actuals(actual_rows: list[dict[str, Any]], site_id: str, now: datetime) -> dict[str, dict[str, float]]:
+    def _power_actuals(
+        actual_rows: list[dict[str, Any]],
+        site_id: str,
+        now: datetime,
+        active_generations: dict[str, set[str]] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         grouped: dict[str, dict[str, list[float]]] = {}
         quality_by_slot: dict[str, list[tuple[str, float]]] = {}
-        solar_generations = {
-            str(row.get("source_generation_id")) for row in actual_rows
-            if row.get("site_id") == site_id and row.get("logical_role") == "solar.production"
-            and row.get("source_generation_id")
-        }
+        active_generations = active_generations or {}
+        solar_generations = set(active_generations.get("solar.production") or ())
+        if not solar_generations:
+            solar_generations = {
+                str(row.get("source_generation_id")) for row in actual_rows
+                if row.get("site_id") == site_id and row.get("logical_role") == "solar.production"
+                and row.get("source_generation_id")
+            }
         solar_by_slot: dict[str, set[str]] = {}
+        ends_by_slot: dict[str, dict[str, datetime]] = {}
         for row in actual_rows:
             if not EllaLearningStore._power_actual_qualified(row, site_id, now):
                 continue
             key = row["interval_start"].astimezone(timezone.utc).isoformat()
             role = row.get("logical_role")
+            allowed = active_generations.get(str(role))
+            if allowed and str(row.get("source_generation_id")) not in allowed:
+                continue
             quality_by_slot.setdefault(key, []).append((str(row.get("quality_status")), float(row.get("coverage_ratio"))))
             if role == "solar.production":
                 solar_by_slot.setdefault(key, set()).add(str(row.get("source_generation_id")))
             grouped.setdefault(key, {}).setdefault(str(role), []).append(float(row["value"]))
+            ends_by_slot.setdefault(key, {})[str(role)] = row["interval_end"].astimezone(timezone.utc)
         result: dict[str, dict[str, float]] = {}
         for key, roles in grouped.items():
             values: dict[str, float] = {}
@@ -140,6 +153,7 @@ class EllaLearningStore:
             quality = quality_by_slot.get(key, [])
             values["_coverage_ratio"] = min((item[1] for item in quality), default=0.0)
             values["_quality_status"] = "partial" if any(item[0] == "partial" for item in quality) else "good"
+            values["_ends"] = ends_by_slot.get(key, {})
             result[key] = values
         return result
 
@@ -148,10 +162,14 @@ class EllaLearningStore:
         by_series: dict[str, list[dict[str, Any]]] = {}
         by_context: dict[str, list[dict[str, Any]]] = {}
         for record in records:
-            by_series.setdefault(record["series"], []).append(record)
-            context = record.get("context_level")
-            if record["series"] == "battery" and context:
-                by_context.setdefault(context, []).append(record)
+            for series, item in (record.get("series") or {}).items():
+                if not isinstance(item, dict) or item.get("signed_error_w") is None:
+                    continue
+                entry = {**item, "series": series}
+                by_series.setdefault(series, []).append(entry)
+                context = record.get("battery_context_level") if series == "battery" else None
+                if context:
+                    by_context.setdefault(context, []).append(entry)
 
         def score(items: list[dict[str, Any]]) -> dict[str, Any]:
             errors = [float(item["signed_error_w"]) for item in items]
@@ -174,14 +192,15 @@ class EllaLearningStore:
     def _power_calibration(cls, records: list[dict[str, Any]], known_at: datetime) -> dict[str, Any]:
         grouped: dict[str, list[dict[str, Any]]] = {}
         for record in records:
-            context = record.get("context_level")
-            if record.get("series") != "battery" or not context or not str(context).startswith(("net_load_ratio", "near_zero_")):
+            battery = (record.get("series") or {}).get("battery")
+            context = record.get("battery_context_level")
+            if not isinstance(battery, dict) or not context or not str(context).startswith(("net_load_ratio", "near_zero_")):
                 continue
-            predicted = float(record.get("predicted_w", 0.0))
-            actual = float(record.get("actual_w", 0.0))
+            predicted = float(battery.get("predicted_w", 0.0))
+            actual = float(battery.get("actual_w", 0.0))
             if abs(predicted) < POWER_CALIBRATION_MIN_PREDICTED_W or predicted * actual <= 0:
                 continue
-            grouped.setdefault(str(context), []).append(record)
+            grouped.setdefault(str(context), []).append(battery)
         by_context = {}
         for context, items in sorted(grouped.items()):
             ratios = [float(item["actual_w"]) / float(item["predicted_w"]) for item in items]
@@ -200,7 +219,14 @@ class EllaLearningStore:
             }
         return {"version": POWER_CALIBRATION_VERSION, "known_at": known_at.astimezone(timezone.utc).isoformat(), "by_context": by_context}
 
-    async def async_record_power_forecast(self, site_id: str, forecast: dict[str, Any], actual_rows: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
+    async def async_record_power_forecast(
+        self,
+        site_id: str,
+        forecast: dict[str, Any],
+        actual_rows: list[dict[str, Any]],
+        now: datetime,
+        active_generations: dict[str, set[str]] | None = None,
+    ) -> dict[str, Any]:
         """Persist causal forecast evidence and evaluate only matured observations."""
         if not site_id or forecast.get("site_id") != site_id or not forecast.get("known_at"):
             return {"written": False, "evaluated": 0, "calibration": self.persistent_power_calibration(site_id)}
@@ -235,17 +261,38 @@ class EllaLearningStore:
                         }
             snapshots.append(snapshot)
             snapshots[:] = sorted(snapshots, key=lambda item: (str(item.get("known_at") or ""), item.get("forecast_id") or ""))[-MAX_POWER_FORECASTS_PER_SITE:]
-        actuals = self._power_actuals(actual_rows, site_id, now)
+        actuals = self._power_actuals(actual_rows, site_id, now, active_generations)
         records = site.setdefault("power_records", [])
-        existing_keys = {(item.get("forecast_id"), item.get("valid_at"), item.get("series")) for item in records}
-        for valid_at, point_series in snapshot.get("points", {}).items():
+        existing_keys = {item.get("valid_at") for item in records if isinstance(item, dict)}
+        candidates: dict[str, tuple[datetime, str, dict[str, Any], dict[str, Any]]] = {}
+        for retained in snapshots:
+            try:
+                retained_known_at = datetime.fromisoformat(str(retained.get("known_at")).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            for valid_at, point_series in (retained.get("points") or {}).items():
+                try:
+                    valid_dt = datetime.fromisoformat(str(valid_at).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if retained_known_at >= valid_dt or valid_dt + timedelta(minutes=15) > now:
+                    continue
+                current = candidates.get(str(valid_at))
+                candidate_key = (retained_known_at, str(retained.get("forecast_id") or ""))
+                if current is None or candidate_key > (current[0], current[1]):
+                    candidates[str(valid_at)] = (retained_known_at, str(retained.get("forecast_id") or ""), retained, point_series)
+
+        new_records = []
+        for valid_at, (forecast_known_at, forecast_id, retained, point_series) in sorted(candidates.items()):
+            if valid_at in existing_keys or valid_at not in actuals:
+                continue
             try:
                 valid_dt = datetime.fromisoformat(str(valid_at).replace("Z", "+00:00"))
             except ValueError:
                 continue
-            if valid_dt >= now or valid_at not in actuals:
-                continue
             actual_values = actuals[valid_at]
+            target_end = valid_dt + timedelta(minutes=15)
+            series_results: dict[str, dict[str, Any]] = {}
             for series, predicted_point in point_series.items():
                 actual_key = {"consumption": "load", "solar": "solar", "charging": None, "discharging": None}.get(series, series)
                 if series == "battery":
@@ -255,26 +302,36 @@ class EllaLearningStore:
                     actual_value = max(0.0, -signed) if series == "charging" and signed is not None else (max(0.0, signed) if signed is not None else None)
                 else:
                     actual_value = actual_values.get(actual_key)
-                if actual_value is None:
+                actual_role = {"consumption": "house.consumption", "solar": "solar.production", "battery": "battery.power", "charging": "battery.power", "discharging": "battery.power", "import": "grid.power/import", "export": "grid.power/import"}.get(series, actual_key)
+                actual_end = (actual_values.get("_ends") or {}).get(actual_role)
+                if actual_value is None or actual_end != target_end:
                     continue
                 predicted = float(predicted_point["predicted_w"])
                 error = float(actual_value) - predicted
-                key = (snapshot["forecast_id"], valid_at, series)
-                if key in existing_keys:
-                    continue
                 provenance = predicted_point.get("provenance") or {}
-                records.append({
-                    "schema": POWER_EVIDENCE_SCHEMA, "forecast_id": snapshot["forecast_id"], "site_id": site_id,
-                    "valid_at": valid_at, "series": series, "context_level": provenance.get("context_level"),
-                    "forecast_known_at": snapshot.get("known_at"), "predicted_w": predicted,
-                    "actual_w": float(actual_value), "signed_error_w": error, "absolute_error_w": abs(error),
+                series_results[series] = {
+                    "predicted_w": predicted,
+                    "actual_w": float(actual_value),
+                    "signed_error_w": error,
+                    "absolute_error_w": abs(error),
                     "relative_error": abs(error) / abs(float(actual_value)) if abs(float(actual_value)) > 1 else None,
+                    "provenance": provenance,
+                }
+            if series_results:
+                battery_provenance = (series_results.get("battery") or {}).get("provenance") or {}
+                new_records.append({
+                    "schema": POWER_EVIDENCE_SCHEMA, "site_id": site_id,
+                    "valid_at": valid_at, "end_at": target_end.isoformat(),
+                    "forecast_id": forecast_id, "forecast_known_at": forecast_known_at.isoformat(),
+                    "lead_seconds": int((valid_dt - forecast_known_at).total_seconds()),
+                    "battery_context_level": battery_provenance.get("context_level"),
+                    "series": series_results,
                     "actual_quality": {"quality_status": actual_values.get("_quality_status"), "coverage_ratio": actual_values.get("_coverage_ratio")},
                     "learning_eligible": True, "learning_reason": "qualified_canonical_actual",
-                    "provenance": provenance,
                 })
-                existing_keys.add(key)
-        records[:] = sorted(records, key=lambda item: (str(item.get("valid_at") or ""), item.get("forecast_id") or "", item.get("series") or ""))[-MAX_POWER_RECORDS_PER_SITE:]
+                existing_keys.add(valid_at)
+        records.extend(new_records)
+        records[:] = sorted(records, key=lambda item: (str(item.get("valid_at") or ""), item.get("forecast_id") or ""))[-MAX_POWER_RECORDS_PER_SITE:]
         calibration = self._power_calibration(records, now)
         previous_calibration = site.get("power_calibration") or {}
         changed = json.dumps(previous_calibration, sort_keys=True) != json.dumps(calibration, sort_keys=True)
@@ -285,7 +342,7 @@ class EllaLearningStore:
             "metrics": self._power_metrics(records), "calibration": calibration,
         }
         await self.store.async_save(self.state)
-        return {"written": new_snapshot, "evaluated": len(records), "calibration": calibration, "calibration_changed": changed, "forecast_id": forecast_id}
+        return {"written": new_snapshot, "evaluated": len(new_records), "calibration": calibration, "calibration_changed": changed, "forecast_id": forecast_id}
 
     def persistent_power_calibration(self, site_id: str, known_at: datetime | None = None) -> dict[str, Any]:
         site = self.state.get("sites", {}).get(site_id)

@@ -7,7 +7,7 @@ from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 
-from custom_components.elrakning.ella_learning import EllaLearningStore
+from custom_components.elrakning.ella_learning import EllaLearningStore, MAX_POWER_RECORDS_PER_SITE
 
 
 class _Store:
@@ -112,8 +112,85 @@ def test_power_forecast_evidence_is_immutable_scored_and_calibrated_per_context(
         assert store.state["sites"]["site-a"]["power_forecasts"][0] == original
         assert store.public_state("site-b")["power_forecast"]["available"] is False
         second = await store.async_record_power_forecast("site-a", forecast, actual, now)
-        assert second["evaluated"] == 3
+        assert second["evaluated"] == 0
         assert len(store.state["sites"]["site-a"]["power_records"]) == 3
+
+    asyncio.run(run())
+
+
+def test_power_learning_matures_retained_snapshot_on_later_cadence_and_is_combined():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        start = datetime(2026, 9, 20, 10, 15, tzinfo=timezone.utc)
+        end = start + timedelta(minutes=15)
+
+        def forecast(known_at, valid_at, value):
+            return {
+                "schema": "ella_power_forecast.v1", "site_id": "site-a",
+                "known_at": known_at.isoformat(), "horizon": {"date": "2026-09-20"},
+                "battery": {"forecast_points": [{
+                    "valid_at": valid_at.isoformat(), "end_at": end.isoformat(), "value_w": value,
+                    "provenance": {"context_level": "net_load_ratio"},
+                }]}, "series": {},
+            }
+
+        actual = [{
+            "site_id": "site-a", "logical_role": "battery.power", "unit": "W",
+            "interval_start": start, "interval_end": end, "value": 80.0,
+            "coverage_ratio": 1.0, "quality_status": "good", "gap_status": "complete",
+            "source_generation_id": "battery-active",
+        }]
+        first = await store.async_record_power_forecast(
+            "site-a", forecast(datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc), start, 100.0),
+            actual, datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc),
+            {"battery.power": {"battery-active"}},
+        )
+        assert first["evaluated"] == 0
+        second = await store.async_record_power_forecast(
+            "site-a", forecast(datetime(2026, 9, 20, 10, 30, tzinfo=timezone.utc), end, 120.0),
+            actual, datetime(2026, 9, 20, 10, 45, tzinfo=timezone.utc),
+            {"battery.power": {"battery-active"}},
+        )
+        assert second["evaluated"] == 1
+        records = store.state["sites"]["site-a"]["power_records"]
+        assert len(records) == 1
+        assert records[0]["valid_at"] == start.isoformat()
+        assert records[0]["forecast_id"] == store.state["sites"]["site-a"]["power_forecasts"][0]["forecast_id"]
+        assert records[0]["series"]["battery"]["signed_error_w"] == -20.0
+        assert records[0]["battery_context_level"] == "net_load_ratio"
+        repeated = await store.async_record_power_forecast(
+            "site-a", forecast(datetime(2026, 9, 20, 10, 45, tzinfo=timezone.utc), end + timedelta(minutes=15), 130.0),
+            actual, datetime(2026, 9, 20, 11, 0, tzinfo=timezone.utc),
+            {"battery.power": {"battery-active"}},
+        )
+        assert repeated["evaluated"] == 0
+        assert len(store.state["sites"]["site-a"]["power_records"]) == 1
+
+    asyncio.run(run())
+
+
+def test_power_learning_uses_active_generation_and_enforces_end_gate():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        known_at = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 9, 20, 10, 15, tzinfo=timezone.utc)
+        end = start + timedelta(minutes=15)
+        forecast = {
+            "site_id": "site-a", "known_at": known_at.isoformat(), "horizon": {},
+            "battery": {"forecast_points": [{"valid_at": start.isoformat(), "end_at": end.isoformat(), "value_w": 100.0, "provenance": {"context_level": "net_load_ratio"}}]},
+            "series": {},
+        }
+        rows = []
+        for generation, value in (("battery-closed", -900.0), ("battery-active", 80.0)):
+            rows.append({"site_id": "site-a", "logical_role": "battery.power", "unit": "W", "interval_start": start, "interval_end": end, "value": value, "coverage_ratio": 1.0, "quality_status": "good", "gap_status": "complete", "source_generation_id": generation})
+        before_end = await store.async_record_power_forecast("site-a", forecast, rows, start + timedelta(minutes=14), {"battery.power": {"battery-active"}})
+        assert before_end["evaluated"] == 0
+        after_end = await store.async_record_power_forecast("site-a", forecast, rows, end, {"battery.power": {"battery-active"}})
+        assert after_end["evaluated"] == 1
+        assert store.state["sites"]["site-a"]["power_records"][0]["series"]["battery"]["actual_w"] == 80.0
+        assert MAX_POWER_RECORDS_PER_SITE >= 2880
 
     asyncio.run(run())
 
