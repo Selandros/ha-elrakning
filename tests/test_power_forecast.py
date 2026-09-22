@@ -270,6 +270,32 @@ def test_near_zero_balance_uses_bounded_ratio_not_absolute_context_median():
     assert result["series"]["import"]["forecast_points"][0]["value_w"] == 0.0
 
 
+def test_power_learning_factor_applies_only_to_matching_ratio_context():
+    known_at = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
+    history = []
+    for day in (7, 14, 20):
+        history.extend(_context_rows(
+            [datetime(2026, 9, day, 18, 15, tzinfo=UTC)],
+            [-200.0], load=100.0, solar=300.0,
+        ))
+    frame = _single_run_frame(values=[44.2328042328] * 24)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", history,
+        _load_frame([(datetime(2026, 9, 22, 6, 0, tzinfo=UTC), 361.0)], known_at),
+        {}, None, known_at,
+        target_date=date(2026, 9, 22),
+        open_meteo_frames=[frame],
+        open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
+        learning_calibration={"by_context": {
+            "near_zero_charge_capture_ratio": {"factor": 0.9, "support_count": 3, "model_version": "test"},
+        }},
+    )
+    point = result["series"]["charging"]["forecast_points"][0]
+    assert abs(point["value_w"] - 51.3) < 1e-9
+    assert point["provenance"]["learning_factor"] == 0.9
+    assert point["provenance"]["learning_support_count"] == 3
+
+
 def test_canonical_battery_sign_contract_drives_split_and_grid_balance():
     known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
     slots = [datetime(2026, 9, 21, 18, minute, tzinfo=UTC) for minute in (15, 30, 45)]

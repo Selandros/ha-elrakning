@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from datetime import datetime, timezone, timedelta
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
 
@@ -65,4 +66,81 @@ def test_persistent_calibration_is_prior_day_site_scoped_and_bounded():
         assert calibration["by_slot"]
         assert next(iter(calibration["by_slot"].values()))["factor"] < 1.0
         assert store.persistent_calibration("site-b", "Europe/Stockholm", __import__("datetime").datetime(2026, 9, 20, 12, tzinfo=__import__("datetime").timezone.utc))["by_slot"] == {}
+    asyncio.run(run())
+
+
+def test_power_forecast_evidence_is_immutable_scored_and_calibrated_per_context():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        known_at = datetime(2026, 9, 20, 19, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 9, 20, 21, 0, tzinfo=timezone.utc)
+        points = {}
+        for index in range(3):
+            start = known_at + timedelta(hours=1, minutes=index * 15)
+            points[start.isoformat()] = {
+                "value_w": 100.0,
+                "provenance": {
+                    "context_level": "near_zero_discharge_coverage_ratio",
+                    "sample_count": 16,
+                    "confidence": "supported",
+                },
+            }
+        forecast = {
+            "schema": "ella_power_forecast.v1", "site_id": "site-a",
+            "known_at": known_at.isoformat(), "horizon": {"date": "2026-09-20"},
+            "battery": {"forecast_points": [
+                {"valid_at": key, "end_at": (datetime.fromisoformat(key) + timedelta(minutes=15)).isoformat(), **value}
+                for key, value in points.items()
+            ]},
+            "series": {},
+        }
+        actual = [{
+            "site_id": "site-a", "logical_role": "battery.power", "unit": "W",
+            "interval_start": datetime.fromisoformat(key),
+            "interval_end": datetime.fromisoformat(key) + timedelta(minutes=15),
+            "value": 90.0, "coverage_ratio": 1.0, "quality_status": "good",
+            "gap_status": "complete", "source_generation_id": "battery-a",
+        } for key in points]
+        first = await store.async_record_power_forecast("site-a", forecast, actual, now)
+        assert first["written"] is True
+        assert first["evaluated"] == 3
+        assert first["calibration"]["by_context"]["near_zero_discharge_coverage_ratio"]["factor"] < 1.0
+        assert len(store.state["sites"]["site-a"]["power_forecasts"]) == 1
+        original = copy.deepcopy(store.state["sites"]["site-a"]["power_forecasts"][0])
+        forecast["battery"]["forecast_points"][0]["value_w"] = 9999.0
+        assert store.state["sites"]["site-a"]["power_forecasts"][0] == original
+        assert store.public_state("site-b")["power_forecast"]["available"] is False
+        second = await store.async_record_power_forecast("site-a", forecast, actual, now)
+        assert second["evaluated"] == 3
+        assert len(store.state["sites"]["site-a"]["power_records"]) == 3
+
+    asyncio.run(run())
+
+
+def test_power_forecast_learning_requires_causal_qualified_actual_and_is_restart_safe():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        known_at = datetime(2026, 9, 20, 20, 0, tzinfo=timezone.utc)
+        valid_at = datetime(2026, 9, 20, 20, 15, tzinfo=timezone.utc)
+        forecast = {
+            "site_id": "site-a", "known_at": known_at.isoformat(), "horizon": {},
+            "battery": {"forecast_points": [{
+                "valid_at": valid_at.isoformat(), "end_at": (valid_at + timedelta(minutes=15)).isoformat(),
+                "value_w": 100.0, "provenance": {"context_level": "net_load_ratio"},
+            }]}, "series": {},
+        }
+        poor_actual = [{
+            "site_id": "site-a", "logical_role": "battery.power", "unit": "W",
+            "interval_start": valid_at, "interval_end": valid_at + timedelta(minutes=15),
+            "value": 100.0, "coverage_ratio": 0.5, "quality_status": "partial", "gap_status": "partial",
+        }]
+        result = await store.async_record_power_forecast("site-a", forecast, poor_actual, valid_at + timedelta(hours=1))
+        assert result["evaluated"] == 0
+        restarted = EllaLearningStore(object())
+        restarted.store = _Store(store.state)
+        await restarted.async_load()
+        assert restarted.public_state("site-a")["power_forecast"]["evaluation_count"] == 0
+
     asyncio.run(run())

@@ -67,6 +67,7 @@ async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> No
 
 async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector) -> None:
     """Persist truthful load-profile forecasts for every eligible site."""
+    stage6_store = getattr(hass, "data", {}).get("elrakning", {}).get("ella_stage6_store")
     configs = site_identity_manager.collection_site_configs()
     target_getter = getattr(site_identity_manager, "collection_targets", None)
     targets = target_getter() if callable(target_getter) else []
@@ -93,19 +94,39 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
             if learning_store is not None:
                 await learning_store.async_record(site_id, result.get("evaluation") or {}, result.get("calibration") or {})
             if stage6_store is not None:
-                from .ella_stage6 import build_solar_calibration
-                stage6_rows = await hass.async_add_executor_job(
-                    canonical_collector.storage.read_site_energy_history,
-                    site_id, now - timedelta(days=60), now,
-                )
-                stage6_frames = await hass.async_add_executor_job(
-                    canonical_collector.storage.read_external_input_frames,
-                    now, source_scope="site", site_id=site_id,
-                )
-                solar_frames = [frame for frame in stage6_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
-                prior = stage6_store.public_state(site_id)
-                calibration = build_solar_calibration(site_id, stage6_rows, solar_frames, now, prior)
-                await stage6_store.async_record(site_id, calibration)
+                try:
+                    from .ella_stage6 import build_solar_calibration
+                    stage6_rows = await hass.async_add_executor_job(
+                        canonical_collector.storage.read_site_energy_history,
+                        site_id, now - timedelta(days=60), now,
+                    )
+                    stage6_frames = await hass.async_add_executor_job(
+                        canonical_collector.storage.read_external_input_frames,
+                        now, source_scope="site", site_id=site_id,
+                    )
+                    solar_frames = [frame for frame in stage6_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
+                    prior = stage6_store.public_state(site_id)
+                    calibration = build_solar_calibration(site_id, stage6_rows, solar_frames, now, prior)
+                    await stage6_store.async_record(site_id, calibration)
+                except Exception:
+                    pass
+            if learning_store is not None:
+                from .websocket import _async_power_forecast_state
+                power_forecast = await _async_power_forecast_state(hass, requested_site_id=site_id)
+                if power_forecast.get("available"):
+                    power_rows = await hass.async_add_executor_job(
+                        canonical_collector.storage.read_site_energy_history,
+                        site_id, now - timedelta(days=60), now,
+                    )
+                    power_result = await learning_store.async_record_power_forecast(
+                        site_id, power_forecast, power_rows, dt_util.now()
+                    )
+                    if power_result.get("written") or power_result.get("calibration_changed"):
+                        hass.bus.async_fire("elrakning_load_forecast_update", {
+                            "site_id": site_id,
+                            "power_forecast": True,
+                            "forecast_id": power_result.get("forecast_id"),
+                        })
             if result.get("written"):
                 hass.bus.async_fire("elrakning_load_forecast_update", {
                     "site_id": site_id, "frame_id": result.get("frame_id"),

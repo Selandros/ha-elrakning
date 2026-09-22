@@ -130,7 +130,7 @@ def _point(value_w: float, start: datetime, end: datetime, *, provenance: dict[s
     }
 
 
-def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, use_ratio_projection: bool = False) -> dict[str, Any]:
+def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, use_ratio_projection: bool = False, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     candidate_battery_rows = [row for row in rows if row.get("logical_role") == "battery.power" and _usable_row(row, site_id, known_at)]
     candidate_generations = {str(row.get("source_generation_id")) for row in candidate_battery_rows if row.get("source_generation_id")}
     if active_generation_ids is None and len(candidate_generations) > 1:
@@ -243,6 +243,11 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
             value = -selected_median * (-projection_net_load)
         else:
             value = selected_median
+        learning = (learning_calibration or {}).get("by_context", {}).get(level, {})
+        learning_factor = float(learning.get("factor", 1.0)) if projection and isinstance(learning, dict) else 1.0
+        if projection:
+            learning_factor = min(1.2, max(0.8, learning_factor))
+            value *= learning_factor
         selected_support.append(len(values))
         points.append(_point(value, start, end, source=BATTERY_SCHEMA, provenance={
             "schema": BATTERY_SCHEMA,
@@ -253,6 +258,11 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
             "median_ratio": selected_median if projection else None,
             "ratio_threshold_w": RATIO_THRESHOLD_W,
             "near_zero": abs(current_net_load) < RATIO_THRESHOLD_W,
+            "learning_factor": learning_factor,
+            "learning_support_count": learning.get("support_count", 0) if isinstance(learning, dict) else 0,
+            "learning_model_version": learning.get("model_version") if isinstance(learning, dict) else None,
+            "learning_prior_mae_w": learning.get("prior_mae_w") if isinstance(learning, dict) else None,
+            "learning_prior_bias_w": learning.get("prior_bias_w") if isinstance(learning, dict) else None,
             "context_level": level,
             "context": context,
             "site_id": site_id,
@@ -385,7 +395,7 @@ def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime
     return result
 
 
-def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build read-only forecast flows without changing execution or policy gates."""
     zone = ZoneInfo(timezone_name)
     local_day = target_date or known_at.astimezone(zone).date()
@@ -397,6 +407,7 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
         rows, site_id, zone, slots, load, solar_by_slot, known_at,
         active_battery_generation_ids,
         use_ratio_projection=local_day != known_at.astimezone(zone).date(),
+        learning_calibration=learning_calibration,
     )
     series = {
         "solar": solar,
@@ -418,4 +429,4 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
         grid_export.append(_point(max(0.0, -balance_w), start, end, source="grid_power_forecast.v1", provenance=provenance))
     series["import"].update({"available": bool(grid_import), "forecast_points": grid_import})
     series["export"].update({"available": bool(grid_export), "forecast_points": grid_export})
-    return {"schema": SCHEMA, "site_id": site_id, "timezone": timezone_name, "known_at": known_at.isoformat(), "horizon": {"date": local_day.isoformat(), "start": slots[0][0].isoformat(), "end": slots[-1][1].isoformat()}, "battery": battery, "series": series, "execution_eligible": False, "actuator_writes_enabled": False}
+    return {"schema": SCHEMA, "site_id": site_id, "timezone": timezone_name, "known_at": known_at.isoformat(), "horizon": {"date": local_day.isoformat(), "start": slots[0][0].isoformat(), "end": slots[-1][1].isoformat()}, "battery": battery, "series": series, "available": any(item.get("available") for item in series.values()), "execution_eligible": False, "actuator_writes_enabled": False}

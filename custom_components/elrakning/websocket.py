@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import inspect
+import json
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1267,11 +1268,11 @@ async def websocket_power_history(hass, connection, msg):
     connection.send_result(msg["id"], result)
 
 
-async def _async_power_forecast_state(hass, requested_date: date | None = None) -> dict:
+async def _async_power_forecast_state(hass, requested_date: date | None = None, requested_site_id: str | None = None) -> dict:
     """Return cached, read-only site power forecasts for the active chart day."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
-    site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
+    site_id = requested_site_id or (getattr(identity, "state", {}).get("active_site_id") if identity else None)
     if not site_id or collector is None:
         return {"schema": "ella_power_forecast.v1", "available": False, "reason": "site_or_storage_unavailable", "series": {}}
     now = dt_util.now()
@@ -1286,6 +1287,8 @@ async def _async_power_forecast_state(hass, requested_date: date | None = None) 
     location = site.get("location") if isinstance(site, dict) else {}
     timezone_name, _ = resolve_timezone((location or {}).get("timezone"), getattr(getattr(hass, "config", None), "time_zone", None))
     target_date = requested_date or now.astimezone(ZoneInfo(timezone_name)).date()
+    learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
+    power_calibration = learning_store.persistent_power_calibration(str(site_id), now) if learning_store else {}
     cache_key = (
         str(site_id),
         target_date.isoformat(),
@@ -1293,6 +1296,7 @@ async def _async_power_forecast_state(hass, requested_date: date | None = None) 
         load_frame_ids,
         str(binding_fingerprint or ""),
         tuple(sorted((key, str(value)) for key, value in solar_facts.items() if key != "baselines")),
+        json.dumps(power_calibration, sort_keys=True, separators=(",", ":"), default=str),
     )
     cache = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_cache", {})
     cached = cache.get(cache_key)
@@ -1337,7 +1341,9 @@ async def _async_power_forecast_state(hass, requested_date: date | None = None) 
         target_date=target_date,
         open_meteo_frames=open_meteo_frames,
         open_meteo_targets=open_meteo_targets,
+        learning_calibration=power_calibration,
     )
+    result["learning_calibration"] = power_calibration
     cache.clear()
     cache[cache_key] = result
     return result
