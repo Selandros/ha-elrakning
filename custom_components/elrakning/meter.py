@@ -171,6 +171,8 @@ class MeterManager:
         self.mapping[METER_INVERT_FIELD] = False
         self._history_summary: dict[str, Any] | None = None
         self._history_inflight: dict[tuple[str, str, bool, tuple[tuple[str, str, str], ...]], asyncio.Task] = {}
+        self._history_cache: dict[tuple[str, str, bool, tuple[tuple[str, str, str], ...]], dict[str, Any]] = {}
+        self._history_cache_epoch = 0
         self._phase_current_entities: dict[str, str] = {}
         self._phase_source_entities: dict[str, dict[str, str]] = {"current": {}, "voltage": {}, "active_power": {}}
         self._phase_current_discovery_method = "device_registry_and_phase_metadata"
@@ -195,6 +197,8 @@ class MeterManager:
         phase_kind = next((kind for kind, entities in self._phase_source_entities.items() if entity_id in entities.values()), None)
         if entity_id != self.mapping.get("power_entity") and phase_kind is None and not phase_entity:
             return
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         if phase_entity or phase_kind is not None:
             invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
             phase_values = {
@@ -232,6 +236,7 @@ class MeterManager:
         for task in self._history_inflight.values():
             task.cancel()
         self._history_inflight.clear()
+        self._history_cache.clear()
         if self._state_unsub:
             self._state_unsub()
             self._state_unsub = None
@@ -253,12 +258,16 @@ class MeterManager:
         for task in self._history_inflight.values():
             task.cancel()
         self._history_inflight.clear()
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         mapping = mapping if isinstance(mapping, dict) else {}
         selected = {
             field: _text(mapping.get(field)) or None for field in METER_FIELDS
         }
         selected[METER_INVERT_FIELD] = mapping.get(METER_INVERT_FIELD) is True
         self.mapping = selected
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         self._history_summary = None
         self._clear_phase_context()
         await self.store.async_save(self.mapping)
@@ -272,6 +281,8 @@ class MeterManager:
     async def async_clear(self) -> dict[str, Any]:
         self.mapping = {field: None for field in METER_FIELDS}
         self.mapping[METER_INVERT_FIELD] = False
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         self._history_summary = None
         self._clear_phase_context()
         await self.store.async_remove()
@@ -304,6 +315,8 @@ class MeterManager:
                         raise ValueError(f"invalid_energy_unit:{field}")
             await self._diagnostic("INFO", "meter_validation_success", "Meter mapping validated")
             self.mapping = selected
+            self._history_cache_epoch += 1
+            self._history_cache.clear()
             self._history_summary = None
             await self.store.async_save(self.mapping)
             await self._notify_mapping_changed()
@@ -479,14 +492,21 @@ class MeterManager:
         self._phase_current_entities = phase_entities["current"]
         phase_key = tuple(sorted((kind, phase, entity_id) for kind, entities in phase_entities.items() for phase, entity_id in entities.items()))
         key = (entity_id, date, invert_power, phase_key)
+        cached = self._history_cache.get(key)
+        if cached is not None:
+            return cached
         task = self._history_inflight.get(key)
         if task is None:
+            cache_epoch = self._history_cache_epoch
             task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date, invert_power, phase_entities))
             self._history_inflight[key] = task
-
-            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool, tuple[tuple[str, str, str], ...]] = key) -> None:
+            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool, tuple[tuple[str, str, str], ...]] = key, request_epoch: int = cache_epoch) -> None:
                 if self._history_inflight.get(request_key) is completed:
                     self._history_inflight.pop(request_key, None)
+                if not completed.cancelled() and completed.exception() is None and request_epoch == self._history_cache_epoch:
+                    result = completed.result()
+                    if isinstance(result, dict) and result.get("success") is True:
+                        self._history_cache[request_key] = result
 
             task.add_done_callback(clear_inflight)
         return await asyncio.shield(task)

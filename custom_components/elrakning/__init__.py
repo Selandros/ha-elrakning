@@ -149,6 +149,17 @@ def _schedule_load_forecast_capture(hass, site_identity_manager, canonical_colle
     )
 
 
+async def _async_warm_history(power_manager, meter_manager) -> None:
+    """Warm independent history caches without blocking integration startup."""
+    jobs = []
+    if callable(getattr(power_manager, "async_history", None)):
+        jobs.append(power_manager.async_history(7))
+    if callable(getattr(meter_manager, "async_power_history", None)):
+        jobs.append(meter_manager.async_power_history())
+    if jobs:
+        await asyncio.gather(*jobs, return_exceptions=True)
+
+
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Register the panel before optional runtime initialization can fail."""
     integration_dir = Path(__file__).parent
@@ -256,6 +267,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     canonical_collector = CanonicalCollector(hass, site_identity_manager)
     await canonical_collector.async_start()
     hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
+    frontend_data["history_warmup_task"] = hass.async_create_task(
+        _async_warm_history(power_manager, meter_manager)
+    )
     apply_migrations = getattr(site_identity_manager, "async_apply_canonical_source_migrations", None)
     if apply_migrations is not None:
         await apply_migrations(canonical_collector.storage)
@@ -399,6 +413,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except asyncio.CancelledError:
             pass
     if startup_task := frontend_data.pop("weather_startup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+    if startup_task := frontend_data.pop("history_warmup_task", None):
         startup_task.cancel()
         try:
             await startup_task

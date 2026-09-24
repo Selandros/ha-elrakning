@@ -173,6 +173,8 @@ class PowerManager:
         self.store = Store(hass, 1, STORE_KEY)
         self.mapping: dict[str, Any] = {"solar_entities": [], SOLAR_ARRAY_METADATA_KEY: {}, **{field: None for field in POWER_FIELDS}, "invert_battery_power": False}
         self._history_inflight: dict[tuple[str, str, int], asyncio.Task] = {}
+        self._history_cache: dict[tuple[str, str, int], dict[str, Any]] = {}
+        self._history_cache_epoch = 0
         self._state_unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
 
     def set_mapping_changed_callback(self, callback) -> None:
@@ -195,6 +197,8 @@ class PowerManager:
         }
         if entity_id not in selected:
             return
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         state = await self.async_state()
         new_state = event.data.get("new_state")
         timestamp = getattr(new_state, "last_updated", None)
@@ -235,6 +239,7 @@ class PowerManager:
         for task in self._history_inflight.values():
             task.cancel()
         self._history_inflight.clear()
+        self._history_cache.clear()
         if self._state_unsub:
             self._state_unsub()
             self._state_unsub = None
@@ -259,6 +264,8 @@ class PowerManager:
         for task in self._history_inflight.values():
             task.cancel()
         self._history_inflight.clear()
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         mapping = mapping if isinstance(mapping, dict) else {}
         solar = mapping.get("solar_entities", [])
         solar = solar if isinstance(solar, list) else []
@@ -278,6 +285,8 @@ class PowerManager:
         else:
             selected["battery_power_entity"] = None
         self.mapping = selected
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         await self.store.async_save(self.mapping)
 
     async def async_save_mapping(self, mapping: dict[str, Any]) -> dict[str, Any]:
@@ -324,6 +333,8 @@ class PowerManager:
                 raise ValueError(f"entity_not_found:{field}")
             self._validate_unit(entity_id, state, field in {"consumption_entity", "charging_entity", "discharging_entity", "battery_power_entity"}, field)
         self.mapping = selected
+        self._history_cache_epoch += 1
+        self._history_cache.clear()
         await self.store.async_save(self.mapping)
         await self._notify_mapping_changed()
         return await self.async_state()
@@ -419,11 +430,22 @@ class PowerManager:
             + [f"invert_battery_power={bool(mapping.get('invert_battery_power'))}"]
         )
         key = (mapping_key, date, days)
+        cached = self._history_cache.get(key)
+        if cached is not None:
+            return cached
         task = self._history_inflight.get(key)
         if task is None:
+            cache_epoch = self._history_cache_epoch
             task = asyncio.create_task(self._async_history_fetch(power_entities, mapping, start, end, date))
             self._history_inflight[key] = task
-            task.add_done_callback(lambda completed, request_key=key: self._history_inflight.pop(request_key, None) if self._history_inflight.get(request_key) is completed else None)
+            def complete(completed, request_key=key, request_epoch=cache_epoch):
+                if self._history_inflight.get(request_key) is completed:
+                    self._history_inflight.pop(request_key, None)
+                if not completed.cancelled() and completed.exception() is None and request_epoch == self._history_cache_epoch:
+                    result = completed.result()
+                    if isinstance(result, dict) and result.get("success") is True:
+                        self._history_cache[request_key] = result
+            task.add_done_callback(complete)
         return await asyncio.shield(task)
 
     async def _async_history_fetch(self, entities: list[str], mapping: dict[str, Any], start, end, date: str) -> dict[str, Any]:

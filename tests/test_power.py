@@ -198,6 +198,9 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
                     sys.modules[name] = original
         self.assertTrue(result["success"])
         self.assertEqual(captured, [(datetime(2026, 8, 17, tzinfo=timezone.utc), datetime(2026, 8, 24, tzinfo=timezone.utc), ["sensor.charge"])])
+        cached = await manager.async_history(7)
+        self.assertTrue(cached["success"])
+        self.assertEqual(len(captured), 1)
 
     async def test_state_change_event_contains_live_series_point(self):
         states = {
