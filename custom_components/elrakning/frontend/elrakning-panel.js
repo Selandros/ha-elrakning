@@ -5380,7 +5380,6 @@ class ElrakningPanel {
           box-sizing: border-box;
           color: var(--secondary-text-color);
           cursor: pointer;
-          font: inherit;
           margin: 0;
           min-height: 0;
           min-width: 0;
