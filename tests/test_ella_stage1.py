@@ -1,3 +1,5 @@
+import asyncio
+import time
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -78,6 +80,34 @@ class EllaStage1Tests(unittest.IsolatedAsyncioTestCase):
 
         result = await _async_load_forecast_state(Hass(), "fisk")
         self.assertEqual(result["reason"], "no_supported_history")
+
+    async def test_concurrent_load_forecast_reads_are_shared_per_site(self):
+        class Storage:
+            def __init__(self):
+                self.calls = 0
+
+            def read_external_input_frames(self, *_args, **_kwargs):
+                self.calls += 1
+                time.sleep(0.02)
+                return []
+
+        storage = Storage()
+
+        class Hass:
+            data = {"elrakning": {
+                "site_identity_manager": SimpleNamespace(state={"active_site_id": "vik"}),
+                "canonical_collector": SimpleNamespace(storage=storage),
+            }}
+
+            async def async_add_executor_job(self, function, *args, **kwargs):
+                return await asyncio.to_thread(function, *args, **kwargs)
+
+        first, second = await asyncio.gather(
+            _async_load_forecast_state(Hass(), "vik"),
+            _async_load_forecast_state(Hass(), "vik"),
+        )
+        self.assertEqual(storage.calls, 1)
+        self.assertEqual(first, second)
 
     async def test_load_crud_is_site_scoped_and_deterministic(self):
         registry = _registry()

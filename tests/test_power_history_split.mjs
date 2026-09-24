@@ -11,8 +11,8 @@ const historyHandler = backend.slice(
 assert.match(historyHandler, /manager\.async_history\(msg\.get\("days", 1\)\)/);
 assert.doesNotMatch(historyHandler, /_async_load_forecast_state|_async_power_forecast_state|solar_forecast/);
 assert.match(backend, /vol\.Required\("type"\): POWER_HISTORY_ENRICHMENT_COMMAND/);
-assert.match(backend, /"handler_total_ms"/);
-assert.match(backend, /"power_forecast_ms"/);
+assert.match(backend, /load_forecast_inflight/);
+assert.match(backend, /_async_load_forecast_state_uncached/);
 
 const historyLoader = frontend.slice(
   frontend.indexOf("  async loadPowerHistory()"),
@@ -31,10 +31,5 @@ assert.match(historyLoader, /this\._powerHistory = \{\s*\.\.\.this\._powerHistor
 assert.match(historyLoader, /requestToken !== this\._powerHistoryRequestToken/);
 assert.match(historyLoader, /enrichmentToken !== this\._powerHistoryEnrichmentRequestToken/);
 assert.match(historyLoader, /contextKey !== this\._powerHistoryContextKey/);
-assert.match(historyLoader, /enrichment_request_start/);
-assert.match(historyLoader, /enrichment_guard_rejected/);
-assert.match(historyLoader, /enrichment_merge_end/);
-assert.match(frontend, /ella_plan_request_start/);
-assert.match(frontend, /ella_plan_render/);
 
 console.log("power history split and non-blocking enrichment contract: ok");

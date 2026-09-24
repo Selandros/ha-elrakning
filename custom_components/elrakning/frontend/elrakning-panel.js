@@ -2708,8 +2708,6 @@ class ElrakningPanel {
     this._loadForecastEventUnsubscribePromise = null;
     this._solarEvidenceEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
-    this._enrichmentDiagnosticOrigin = globalThis.performance?.now?.() ?? Date.now();
-    this._recordEnrichmentDiagnostic("panel_construct", { version });
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
     this._eonGridEventUnsubscribePromise = null;
@@ -8394,32 +8392,17 @@ class ElrakningPanel {
 
   async loadPowerHistoryEnrichment({ requestToken, enrichmentToken, siteContextGeneration, contextKey, requestedDate }) {
     if (!this.hass?.callWS) return;
-    const started = globalThis.performance?.now?.() ?? Date.now();
-    this._recordEnrichmentDiagnostic("enrichment_request_start", {
-      requestToken, enrichmentToken, siteContextGeneration, contextKey, requestedDate,
-    });
     try {
       const response = await this.hass.callWS({
         type: "elrakning/power_history_enrichment",
         ...(requestedDate ? { date: requestedDate } : {}),
-      });
-      this._recordEnrichmentDiagnostic("enrichment_response_received", {
-        elapsed_ms: Math.round(((globalThis.performance?.now?.() ?? Date.now()) - started) * 1000) / 1000,
-        backend: response?.diagnostics || null,
       });
       const guardReasons = [];
       if (requestToken !== this._powerHistoryRequestToken) guardReasons.push("history_request_token");
       if (enrichmentToken !== this._powerHistoryEnrichmentRequestToken) guardReasons.push("enrichment_request_token");
       if (siteContextGeneration !== this._siteContextGeneration) guardReasons.push("site_context_generation");
       if (contextKey !== this._powerHistoryContextKey) guardReasons.push("history_context_key");
-      if (guardReasons.length) {
-        this._recordEnrichmentDiagnostic("enrichment_guard_rejected", { reasons: guardReasons });
-        return;
-      }
-      this._recordEnrichmentDiagnostic("enrichment_merge_start", {
-        power_forecast_available: response?.power_forecast?.available === true,
-        load_forecast_available: response?.load_forecast?.available === true,
-      });
+      if (guardReasons.length) return;
       this._powerHistory = {
         ...this._powerHistory,
         power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
@@ -8434,24 +8417,9 @@ class ElrakningPanel {
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
-      this._recordEnrichmentDiagnostic("enrichment_merge_end", {
-        power_forecast_series: Object.keys(this._powerHistory?.power_forecast?.series || {}),
-        load_forecast_frames: Array.isArray(this._loadForecast?.frames) ? this._loadForecast.frames.length : 0,
-        plan_blocks: Array.isArray(this._pricePlan?.plan_blocks) ? this._pricePlan.plan_blocks.length : 0,
-      });
     } catch {
-      this._recordEnrichmentDiagnostic("enrichment_request_rejected", { reason: "transport_or_backend_error" });
       // History remains available when optional enrichment is unavailable.
     }
-  }
-
-  _recordEnrichmentDiagnostic(event, details = {}) {
-    const now = globalThis.performance?.now?.() ?? Date.now();
-    const entry = { event, relative_ms: Math.round((now - this._enrichmentDiagnosticOrigin) * 1000) / 1000, ...details };
-    const target = globalThis.__elrakningEnrichmentDiagnostics || [];
-    target.push(entry);
-    globalThis.__elrakningEnrichmentDiagnostics = target.slice(-100);
-    console.info(`[Elräkning enrichment] ${event}`, entry);
   }
 
   _ellaSelectionBandMarkup(x, plot, startMs, endMs) {
@@ -10150,8 +10118,6 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._pricePlanRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
-    const started = globalThis.performance?.now?.() ?? Date.now();
-    this._recordEnrichmentDiagnostic("ella_plan_request_start", { requestToken, siteContextGeneration });
     const previousPlan = this._pricePlan;
     const previousPlanContextKey = this._pricePlanContextKey
       || ellaPlanContextKey(previousPlan?.site_id, previousPlan?.date);
@@ -10170,26 +10136,9 @@ class ElrakningPanel {
         request.date = requestedDateKey;
       }
       const response = await this.hass.callWS(request);
-      this._recordEnrichmentDiagnostic("ella_plan_response_received", {
-        requestToken,
-        elapsed_ms: Math.round(((globalThis.performance?.now?.() ?? Date.now()) - started) * 1000) / 1000,
-        available: response?.available === true,
-        plan_blocks: Array.isArray(response?.plan_blocks) ? response.plan_blocks.length : 0,
-      });
-      if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) {
-        this._recordEnrichmentDiagnostic("ella_plan_guard_rejected", {
-          reasons: [
-            ...(requestToken !== this._pricePlanRequestToken ? ["plan_request_token"] : []),
-            ...(siteContextGeneration !== this._siteContextGeneration ? ["site_context_generation"] : []),
-          ],
-        });
-        return;
-      }
+      if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
-      if (activeSiteId && response?.site_id && response.site_id !== activeSiteId) {
-        this._recordEnrichmentDiagnostic("ella_plan_guard_rejected", { reasons: ["wrong_site"] });
-        return;
-      }
+      if (activeSiteId && response?.site_id && response.site_id !== activeSiteId) return;
       this._pricePlan = response && typeof response === "object"
         ? response
         : { available: false, reason: "invalid_plan_response", plan_blocks: [] };
@@ -10198,14 +10147,8 @@ class ElrakningPanel {
         this._pricePlan.date || requestedDateKey,
       );
       this._renderPricePlanCards();
-      this._recordEnrichmentDiagnostic("ella_plan_render", {
-        available: this._pricePlan.available === true,
-        plan_blocks: Array.isArray(this._pricePlan.plan_blocks) ? this._pricePlan.plan_blocks.length : 0,
-        site_id_present: Boolean(this._pricePlan.site_id),
-      });
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     } catch {
-      this._recordEnrichmentDiagnostic("ella_plan_request_rejected", { reason: "transport_or_backend_error" });
       if (requestToken !== this._pricePlanRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed;
       const requestedDateKey = requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())

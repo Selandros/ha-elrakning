@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import inspect
 import json
-import time
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1261,7 +1261,6 @@ async def websocket_power_history(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_power_history_enrichment(hass, connection, msg):
     """Return forecast and optional solar state without blocking power history."""
-    started = time.perf_counter()
     requested_date = None
     if msg.get("date"):
         try:
@@ -1270,56 +1269,29 @@ async def websocket_power_history_enrichment(hass, connection, msg):
             requested_date = None
     connection.send_result(
         msg["id"],
-        await _async_power_history_enrichment(hass, requested_date, request_id=msg["id"], started=started),
+        await _async_power_history_enrichment(hass, requested_date),
     )
 
 
-async def _async_power_history_enrichment(
-    hass,
-    requested_date: date | None = None,
-    *,
-    request_id: int | None = None,
-    started: float | None = None,
-) -> dict:
+async def _async_power_history_enrichment(hass, requested_date: date | None = None) -> dict:
     """Build the existing forecast/state enrichment independently of history."""
-    started = started if started is not None else time.perf_counter()
-    timings = {}
-    step_started = time.perf_counter()
     forecast_manager = _solar_forecast_manager(hass)
     forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
-    timings["solar_forecast_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
     enrichment = {
         "solar_forecast": forecast,
         "solar_forecast_baselines": forecast.get("baselines", {}),
     }
-    step_started = time.perf_counter()
     shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
     enrichment["solar_shadow"] = shadow.public_state() if shadow and _site_is_configured(hass) else {"available": False, "snapshots": []}
-    timings["solar_shadow_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
-    step_started = time.perf_counter()
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
     enrichment["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
-    timings["solar_weather_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
-    step_started = time.perf_counter()
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
     enrichment["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
-    timings["solar_pvgis_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
-    step_started = time.perf_counter()
     enrichment["solar_sun"] = build_sun_context(hass)
-    timings["solar_sun_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
-    step_started = time.perf_counter()
     enrichment["load_forecast"] = await _async_load_forecast_state(hass)
-    timings["load_forecast_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
-    step_started = time.perf_counter()
     enrichment["power_forecast"] = await _async_power_forecast_state(
         hass, requested_date, load_forecast=enrichment["load_forecast"]
     )
-    timings["power_forecast_ms"] = round((time.perf_counter() - step_started) * 1000, 3)
-    enrichment["diagnostics"] = {
-        "request_id": request_id,
-        "handler_total_ms": round((time.perf_counter() - started) * 1000, 3),
-        "steps_ms": timings,
-    }
     return enrichment
 
 
@@ -1417,6 +1389,31 @@ async def websocket_power_forecast(hass, connection, msg):
 
 
 async def _async_load_forecast_state(
+    hass,
+    requested_site_id: str | None = None,
+) -> dict:
+    """Share one in-flight immutable frame read between concurrent callers."""
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    site_id = requested_site_id or (getattr(identity, "state", {}).get("active_site_id") if identity else None)
+    if not site_id:
+        return {"available": False, "reason": "site_unconfigured", "frames": []}
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    inflight = domain_data.setdefault("load_forecast_inflight", {})
+    key = str(site_id)
+    task = inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(_async_load_forecast_state_uncached(hass, key))
+        inflight[key] = task
+
+        def clear(completed, request_key=key):
+            if inflight.get(request_key) is completed:
+                inflight.pop(request_key, None)
+
+        task.add_done_callback(clear)
+    return await asyncio.shield(task)
+
+
+async def _async_load_forecast_state_uncached(
     hass,
     requested_site_id: str | None = None,
 ) -> dict:
