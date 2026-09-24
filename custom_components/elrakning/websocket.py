@@ -1331,10 +1331,6 @@ async def _async_power_forecast_state(
         tuple(sorted((key, str(value)) for key, value in solar_facts.items() if key != "baselines")),
         json.dumps(power_calibration, sort_keys=True, separators=(",", ":"), default=str),
     )
-    cache = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_cache", {})
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
     inflight = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_inflight", {})
     inflight_key = cache_key
     task = inflight.get(inflight_key)
@@ -1365,12 +1361,6 @@ async def _async_power_forecast_state(
 
         task.add_done_callback(clear)
     result = await asyncio.shield(task)
-    cache[cache_key] = result
-    # Keep recent day/bucket results available without allowing date changes to
-    # grow the process indefinitely or invalidate unrelated in-flight work.
-    site_cache_keys = [key for key in cache if key[0] == str(site_id)]
-    for old_key in site_cache_keys[:-8]:
-        cache.pop(old_key, None)
     return result
 
 
