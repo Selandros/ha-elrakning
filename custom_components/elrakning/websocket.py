@@ -1335,17 +1335,68 @@ async def _async_power_forecast_state(
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    rows = await hass.async_add_executor_job(
-        collector.storage.read_site_energy_history,
-        str(site_id), now - timedelta(days=30), now,
-    )
-    active_battery_generation_ids = {
-        str(target.get("generation_id"))
-        for target in identity.collection_targets()
-        if target.get("site_id") == str(site_id) and target.get("logical_role") == "battery.power"
-    }
-    site_configs = getattr(identity, "collection_site_configs", lambda: {})()
-    open_meteo_targets = build_single_run_targets(site_configs)
+    inflight = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_inflight", {})
+    inflight_key = cache_key
+    task = inflight.get(inflight_key)
+    if task is None:
+        task = asyncio.create_task(_build_power_forecast_state(
+            hass,
+            site_id,
+            timezone_name,
+            rows=None,
+            load_forecast=load_forecast,
+            binding=binding,
+            now=now,
+            active_battery_generation_ids={
+                str(target.get("generation_id"))
+                for target in identity.collection_targets()
+                if target.get("site_id") == str(site_id) and target.get("logical_role") == "battery.power"
+            },
+            open_meteo_targets=build_single_run_targets(getattr(identity, "collection_site_configs", lambda: {})()),
+            solar_facts=solar_facts,
+            target_date=target_date,
+            power_calibration=power_calibration,
+        ))
+        inflight[inflight_key] = task
+
+        def clear(completed, request_key=inflight_key):
+            if inflight.get(request_key) is completed:
+                inflight.pop(request_key, None)
+
+        task.add_done_callback(clear)
+    result = await asyncio.shield(task)
+    cache[cache_key] = result
+    # Keep recent day/bucket results available without allowing date changes to
+    # grow the process indefinitely or invalidate unrelated in-flight work.
+    site_cache_keys = [key for key in cache if key[0] == str(site_id)]
+    for old_key in site_cache_keys[:-8]:
+        cache.pop(old_key, None)
+    return result
+
+
+async def _build_power_forecast_state(
+    hass,
+    site_id,
+    timezone_name,
+    *,
+    rows,
+    load_forecast,
+    binding,
+    now,
+    active_battery_generation_ids,
+    open_meteo_targets,
+    solar_facts,
+    target_date,
+    power_calibration,
+):
+    """Build one immutable forecast result for a shared site/day computation."""
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    if rows is None:
+        rows = await hass.async_add_executor_job(
+            collector.storage.read_site_energy_history,
+            str(site_id), now - timedelta(days=30), now,
+        )
     open_meteo_frames = []
     try:
         raw_frames = await hass.async_add_executor_job(
@@ -1377,8 +1428,6 @@ async def _async_power_forecast_state(
         learning_calibration=power_calibration,
     )
     result["learning_calibration"] = power_calibration
-    cache.clear()
-    cache[cache_key] = result
     return result
 
 

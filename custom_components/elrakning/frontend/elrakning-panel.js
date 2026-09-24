@@ -2703,6 +2703,7 @@ class ElrakningPanel {
     this._powerHistoryRequestToken = 0;
     this._powerHistoryEnrichmentRequestToken = 0;
     this._powerHistoryContextKey = null;
+    this._powerHistoryInFlight = new Map();
     this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._loadForecastEventUnsubscribePromise = null;
@@ -6387,7 +6388,7 @@ class ElrakningPanel {
       this._periodPickerState.open = false;
       this._renderPeriodPicker();
       if (changed) {
-        await Promise.all([this.loadPriceData(next), this.loadPricePlan(next), this.loadPowerHistory()]);
+        await Promise.all([this.loadPriceData(next), this.loadPricePlan(next), this.loadPowerHistory(next)]);
       }
       else {
         this.updatePriceSummary();
@@ -8336,14 +8337,31 @@ class ElrakningPanel {
     }
   }
 
-  async loadPowerHistory() {
+  async loadPowerHistory(selectedDate = null) {
     if (!this.hass?.callWS) return;
+    const confirmedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed;
+    const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
+    const cycleKey = `${this._siteContextGeneration}:${requestedDate || ""}`;
+    const existing = this._powerHistoryInFlight.get(cycleKey);
+    if (existing) return existing.history;
+    const cycle = { history: null, enrichment: null };
+    this._powerHistoryInFlight.set(cycleKey, cycle);
+    cycle.history = this._loadPowerHistoryCycle({ requestedDate, cycle });
+    cycle.history.finally(() => {
+      const cleanup = () => {
+        if (this._powerHistoryInFlight.get(cycleKey) === cycle) this._powerHistoryInFlight.delete(cycleKey);
+      };
+      if (cycle.enrichment) cycle.enrichment.finally(cleanup);
+      else cleanup();
+    }).catch(() => {});
+    return cycle.history;
+  }
+
+  async _loadPowerHistoryCycle({ requestedDate, cycle }) {
     const requestToken = ++this._powerHistoryRequestToken;
     const enrichmentToken = ++this._powerHistoryEnrichmentRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
     try {
-      const confirmedDate = this._periodPickerState?.confirmed;
-      const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
       const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
         ...(requestedDate ? { date: requestedDate } : {}),
       });
@@ -8375,7 +8393,7 @@ class ElrakningPanel {
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
-      void this.loadPowerHistoryEnrichment({
+      cycle.enrichment = this.loadPowerHistoryEnrichment({
         requestToken,
         enrichmentToken,
         siteContextGeneration,
@@ -10044,6 +10062,7 @@ class ElrakningPanel {
     this._readyEventUnsubscribePromise = null;
     this._connectionReadyListener = null;
     this._backendHydrationPromise = null;
+    this._powerHistoryInFlight.clear();
     this._loadDiagnosticsState = null;
     this._diagnosticsBound = false;
     this._diagnosticsDomNodes = null;

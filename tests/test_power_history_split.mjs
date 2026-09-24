@@ -18,15 +18,15 @@ assert.match(backend, /not_required_for_empty_load_plan/);
 assert.match(backend, /_minimal_action_plan/);
 
 const historyLoader = frontend.slice(
-  frontend.indexOf("  async loadPowerHistory()"),
+  frontend.indexOf("  async loadPowerHistory(selectedDate = null)"),
   frontend.indexOf("  _ellaSelectionBandMarkup"),
 );
 assert.match(historyLoader, /type: "elrakning\/power_history"/);
 assert.match(historyLoader, /this\._refreshPowerEnergyState\(\)/);
-assert.match(historyLoader, /void this\.loadPowerHistoryEnrichment\(/);
+assert.match(historyLoader, /cycle\.enrichment = this\.loadPowerHistoryEnrichment\(/);
 assert.ok(
   historyLoader.indexOf("this._refreshPowerEnergyState()")
-    < historyLoader.indexOf("void this.loadPowerHistoryEnrichment("),
+    < historyLoader.indexOf("cycle.enrichment = this.loadPowerHistoryEnrichment("),
   "history must render before enrichment is awaited",
 );
 assert.match(historyLoader, /type: "elrakning\/power_history_enrichment"/);
@@ -34,5 +34,12 @@ assert.match(historyLoader, /this\._powerHistory = \{\s*\.\.\.this\._powerHistor
 assert.match(historyLoader, /requestToken !== this\._powerHistoryRequestToken/);
 assert.match(historyLoader, /enrichmentToken !== this\._powerHistoryEnrichmentRequestToken/);
 assert.match(historyLoader, /contextKey !== this\._powerHistoryContextKey/);
+assert.match(historyLoader, /const cycleKey = `\$\{this\._siteContextGeneration\}:\$\{requestedDate \|\| ""\}`/);
+assert.match(historyLoader, /const existing = this\._powerHistoryInFlight\.get\(cycleKey\)/);
+assert.match(historyLoader, /if \(existing\) return existing\.history/);
+assert.match(frontend, /this\.loadPowerHistory\(next\)/);
+assert.match(backend, /power_forecast_inflight/);
+assert.match(backend, /async def _build_power_forecast_state\(/);
+assert.doesNotMatch(backend, /cache\.clear\(\)\s*\n\s*cache\[cache_key\]/);
 
 console.log("power history split and non-blocking enrichment contract: ok");
