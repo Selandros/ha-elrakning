@@ -88,6 +88,7 @@ BILLING_HISTORY_COMMAND = f"{DOMAIN}/billing_history"
 POWER_SAVE_COMMAND = f"{DOMAIN}/power_save"
 POWER_STATE_COMMAND = f"{DOMAIN}/power_state"
 POWER_HISTORY_COMMAND = f"{DOMAIN}/power_history"
+POWER_HISTORY_ENRICHMENT_COMMAND = f"{DOMAIN}/power_history_enrichment"
 POWER_FORECAST_COMMAND = f"{DOMAIN}/power_forecast"
 LOAD_FORECAST_COMMAND = f"{DOMAIN}/load_forecast"
 FORECAST_EVALUATION_COMMAND = f"{DOMAIN}/ella_forecast_evaluation"
@@ -159,6 +160,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_power_save)
     websocket_api.async_register_command(hass, websocket_power_state)
     websocket_api.async_register_command(hass, websocket_power_history)
+    websocket_api.async_register_command(hass, websocket_power_history_enrichment)
     websocket_api.async_register_command(hass, websocket_power_forecast)
     websocket_api.async_register_command(hass, websocket_load_forecast)
     websocket_api.async_register_command(hass, websocket_ella_forecast_evaluation)
@@ -1246,28 +1248,50 @@ async def websocket_power_history(hass, connection, msg):
         "series": {},
         "error": "power_unavailable",
     }
-    forecast_manager = _solar_forecast_manager(hass)
-    forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
-    result["solar_forecast"] = forecast
-    result["solar_forecast_baselines"] = forecast.get("baselines", {})
-    shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
-    result["solar_shadow"] = shadow.public_state() if shadow and _site_is_configured(hass) else {"available": False, "snapshots": []}
-    weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
-    result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
-    pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
-    result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
-    result["solar_sun"] = build_sun_context(hass)
-    result["load_forecast"] = await _async_load_forecast_state(hass)
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): POWER_HISTORY_ENRICHMENT_COMMAND,
+        vol.Optional("date"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_power_history_enrichment(hass, connection, msg):
+    """Return forecast and optional solar state without blocking power history."""
     requested_date = None
     if msg.get("date"):
         try:
             requested_date = date.fromisoformat(msg["date"])
         except ValueError:
             requested_date = None
-    result["power_forecast"] = await _async_power_forecast_state(
-        hass, requested_date, load_forecast=result["load_forecast"]
+    connection.send_result(
+        msg["id"],
+        await _async_power_history_enrichment(hass, requested_date),
     )
-    connection.send_result(msg["id"], result)
+
+
+async def _async_power_history_enrichment(hass, requested_date: date | None = None) -> dict:
+    """Build the existing forecast/state enrichment independently of history."""
+    forecast_manager = _solar_forecast_manager(hass)
+    forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
+    enrichment = {
+        "solar_forecast": forecast,
+        "solar_forecast_baselines": forecast.get("baselines", {}),
+    }
+    shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
+    enrichment["solar_shadow"] = shadow.public_state() if shadow and _site_is_configured(hass) else {"available": False, "snapshots": []}
+    weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
+    enrichment["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
+    pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
+    enrichment["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
+    enrichment["solar_sun"] = build_sun_context(hass)
+    enrichment["load_forecast"] = await _async_load_forecast_state(hass)
+    enrichment["power_forecast"] = await _async_power_forecast_state(
+        hass, requested_date, load_forecast=enrichment["load_forecast"]
+    )
+    return enrichment
 
 
 async def _async_power_forecast_state(

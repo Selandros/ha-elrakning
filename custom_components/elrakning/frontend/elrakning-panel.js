@@ -2701,6 +2701,8 @@ class ElrakningPanel {
     this._ellaSelection = null;
     this._ellaDebugRequestToken = 0;
     this._powerHistoryRequestToken = 0;
+    this._powerHistoryEnrichmentRequestToken = 0;
+    this._powerHistoryContextKey = null;
     this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._loadForecastEventUnsubscribePromise = null;
@@ -8337,6 +8339,7 @@ class ElrakningPanel {
   async loadPowerHistory() {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._powerHistoryRequestToken;
+    const enrichmentToken = ++this._powerHistoryEnrichmentRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
     try {
       const confirmedDate = this._periodPickerState?.confirmed;
@@ -8354,28 +8357,66 @@ class ElrakningPanel {
         series[key] = { ...(series[key] || {}), points: [...merged.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp)) };
       }
       this._powerHistory = {
-        date: response?.date || null,
+        date: response?.date || requestedDate || null,
         series,
-        power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
-        solar_analysis: response?.solar_analysis || { available: false, days: [] },
-        solar_forecast: response?.solar_forecast || { available: false },
-        solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
-        solar_shadow: response?.solar_shadow || { available: false, days: [] },
+        power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} },
+        solar_analysis: { available: false, days: [] },
+        solar_forecast: { available: false },
+        solar_forecast_baselines: {},
+        solar_shadow: { available: false, days: [] },
         solar_evidence: this._powerHistory?.solar_evidence || { available: false, days: [] },
-        solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
-        solar_sun: response?.solar_sun || { available: false },
+        solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
+        solar_sun: { available: false },
       };
-      this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
+      this._loadForecast = { available: false, reason: "enrichment_pending", frames: [] };
+      this._powerHistoryContextKey = `${siteContextGeneration}:${requestedDate || response?.date || ""}`;
       this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+      void this.loadPowerHistoryEnrichment({
+        requestToken,
+        enrichmentToken,
+        siteContextGeneration,
+        contextKey: this._powerHistoryContextKey,
+        requestedDate,
+      });
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
-    this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
       this._loadForecast = { available: false, reason: "history_unavailable", frames: [] };
       this._refreshPowerEnergyState();
+    }
+  }
+
+  async loadPowerHistoryEnrichment({ requestToken, enrichmentToken, siteContextGeneration, contextKey, requestedDate }) {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({
+        type: "elrakning/power_history_enrichment",
+        ...(requestedDate ? { date: requestedDate } : {}),
+      });
+      if (requestToken !== this._powerHistoryRequestToken
+        || enrichmentToken !== this._powerHistoryEnrichmentRequestToken
+        || siteContextGeneration !== this._siteContextGeneration
+        || contextKey !== this._powerHistoryContextKey) return;
+      this._powerHistory = {
+        ...this._powerHistory,
+        power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
+        solar_analysis: response?.solar_analysis || { available: false, days: [] },
+        solar_forecast: response?.solar_forecast || { available: false },
+        solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
+        solar_shadow: response?.solar_shadow || { available: false, days: [] },
+        solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
+        solar_sun: response?.solar_sun || { available: false },
+      };
+      this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
+      this._renderSolarEvidence();
+      this._renderPricePlanCards();
+      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    } catch {
+      // History remains available when optional enrichment is unavailable.
     }
   }
 
