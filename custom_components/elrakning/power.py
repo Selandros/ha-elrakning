@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from time import monotonic
 from collections.abc import Awaitable, Callable
 from datetime import datetime, time, timedelta, timezone
 from functools import partial
@@ -400,11 +399,8 @@ class PowerManager:
         divisor = 1000 if unit == "wh" else 1 if unit == "kwh" else 0.001 if unit == "mwh" else None
         return _state_number(state, {"wh", "kwh", "mwh"}, divisor) if divisor else None
 
-    async def async_history(self, days: int = 1, diagnostics: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def async_history(self, days: int = 1) -> dict[str, Any]:
         now = dt_util.now()
-        started = monotonic()
-        if diagnostics is not None:
-            diagnostics["manager_start"] = started
         days = max(1, min(7, int(days)))
         current_day_start = dt_util.start_of_local_day(now)
         start = dt_util.start_of_local_day(now - timedelta(days=days - 1))
@@ -436,17 +432,11 @@ class PowerManager:
         key = (mapping_key, date, days)
         cached = self._history_cache.get(key)
         if cached is not None:
-            if diagnostics is not None:
-                diagnostics.update({"cache_hit": True, "cache_lookup_ms": (monotonic() - started) * 1000})
             return cached
-        if diagnostics is not None:
-            diagnostics["cache_hit"] = False
         task = self._history_inflight.get(key)
         if task is None:
             cache_epoch = self._history_cache_epoch
-            if diagnostics is not None:
-                diagnostics["history_fetch_start"] = monotonic()
-            task = asyncio.create_task(self._async_history_fetch(power_entities, mapping, start, end, date, diagnostics))
+            task = asyncio.create_task(self._async_history_fetch(power_entities, mapping, start, end, date))
             self._history_inflight[key] = task
             def complete(completed, request_key=key, request_epoch=cache_epoch):
                 if self._history_inflight.get(request_key) is completed:
@@ -456,14 +446,9 @@ class PowerManager:
                     if isinstance(result, dict) and result.get("success") is True:
                         self._history_cache[request_key] = result
             task.add_done_callback(complete)
-        elif diagnostics is not None:
-            diagnostics["inflight_wait"] = True
         return await asyncio.shield(task)
 
-    async def _async_history_fetch(self, entities: list[str], mapping: dict[str, Any], start, end, date: str, diagnostics: dict[str, Any] | None = None) -> dict[str, Any]:
-        recorder_started = monotonic()
-        if diagnostics is not None:
-            diagnostics["recorder_start"] = recorder_started
+    async def _async_history_fetch(self, entities: list[str], mapping: dict[str, Any], start, end, date: str) -> dict[str, Any]:
         try:
             from homeassistant.components.recorder import get_instance, history
 
@@ -481,11 +466,6 @@ class PowerManager:
             ))
         except Exception:
             return {"success": False, "date": date, "series": {}, "error": "history_unavailable"}
-        if diagnostics is not None:
-            diagnostics["recorder_end"] = monotonic()
-            diagnostics["raw_entity_counts"] = {
-                entity_id: len(history_by_entity.get(entity_id, [])) for entity_id in entities
-            }
         raw = {}
         battery_entity = mapping.get("battery_power_entity")
         soc_entity = mapping.get("soc_entity")
@@ -504,28 +484,16 @@ class PowerManager:
             "discharging": {"points": self._battery_history_points("discharging", mapping, raw)},
             "soc": {"points": self._points_for_entity(soc_entity, raw)},
         }
-        if diagnostics is not None:
-            diagnostics["parse_end"] = monotonic()
-            diagnostics["series_counts"] = {
-                key: len(value.get("points", [])) for key, value in series.items()
-            }
         result = {"success": True, "date": date, "series": series}
         hass_data = getattr(self.hass, "data", {})
         forecast = hass_data.get("elrakning", {}).get("solar_forecast_manager") if isinstance(hass_data, dict) else None
         weather_manager = hass_data.get("elrakning", {}).get("solar_weather_manager") if isinstance(hass_data, dict) else None
         forecast_facts = forecast.public_state() if forecast else {"available": False}
         weather_context = weather_manager.public_state() if weather_manager else {"available": False, "hourly_forecast": []}
-        analysis_started = monotonic()
         result["solar_analysis"] = self._solar_analysis(
             series["solar"]["points"], start, now=dt_util.now(),
             forecast=forecast_facts, weather=weather_context,
         )
-        if diagnostics is not None:
-            diagnostics["solar_analysis_end"] = monotonic()
-            diagnostics["manager_fetch_total_ms"] = (monotonic() - recorder_started) * 1000
-            diagnostics["solar_analysis_ms"] = (diagnostics["solar_analysis_end"] - analysis_started) * 1000
-            diagnostics["recorder_ms"] = (diagnostics["recorder_end"] - recorder_started) * 1000
-            diagnostics["parse_ms"] = (diagnostics["parse_end"] - diagnostics["recorder_end"]) * 1000
         return result
 
     def _solar_analysis(self, actual_points: list[dict[str, Any]], start, now, forecast=None, weather=None) -> dict[str, Any]:

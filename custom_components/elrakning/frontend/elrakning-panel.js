@@ -2707,10 +2707,6 @@ class ElrakningPanel {
     this._solarEvidenceEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
     this._backendHydrationPromise = null;
-    this._startupDiagnosticStartedAt = globalThis.performance?.now?.() ?? 0;
-    this._startupDiagnosticStartedWallClock = new Date().toISOString();
-    this._startupDiagnosticEvents = [];
-    this._startupDiagnostic("panel_construct", { version });
     this._readyEventUnsubscribePromise = null;
     this._eonGridEventUnsubscribePromise = null;
     this._connectionReadyListener = null;
@@ -2749,29 +2745,7 @@ class ElrakningPanel {
     };
   }
 
-  _startupDiagnostic(event, details = {}) {
-    const now = globalThis.performance?.now?.() ?? 0;
-    const elapsedMs = Number.isFinite(now) && Number.isFinite(this._startupDiagnosticStartedAt)
-      ? Math.max(0, now - this._startupDiagnosticStartedAt)
-      : null;
-    const entry = {
-      elapsed_s: elapsedMs === null ? null : Number((elapsedMs / 1000).toFixed(3)),
-      event,
-      ...details,
-    };
-    this._startupDiagnosticEvents.push(entry);
-    if (this._startupDiagnosticEvents.length > 160) this._startupDiagnosticEvents.shift();
-    const snapshot = {
-      version: this.version,
-      started_at: this._startupDiagnosticStartedWallClock,
-      events: this._startupDiagnosticEvents.slice(),
-    };
-    globalThis.__elrakningStartupDiagnostics = snapshot;
-    globalThis.console?.info?.(`[Elräkning startup +${entry.elapsed_s ?? "?"}s] ${event}`, details);
-  }
-
   render() {
-    this._startupDiagnostic("panel_mount");
     this.host.innerHTML = `
       <div class="theme-background" aria-hidden="true"></div>
       <main class="page">
@@ -5406,6 +5380,7 @@ class ElrakningPanel {
           box-sizing: border-box;
           color: var(--secondary-text-color);
           cursor: pointer;
+          font: inherit;
           margin: 0;
           min-height: 0;
           min-width: 0;
@@ -8044,11 +8019,9 @@ class ElrakningPanel {
     const values = days.flatMap((day) => [day.chargingKwh, day.dischargingKwh]).filter((value) => Number.isFinite(value));
     const maximum = values.length ? Math.max(...values) : 0;
     if (!values.length) {
-      this._startupDiagnostic("battery_history_placeholder_render", { configured: true, point_count: 0 });
       chart.textContent = "Ingen batterihistorik tillgänglig";
       return;
     }
-    this._startupDiagnostic("battery_history_render", { configured: true, day_count: days.length, value_count: values.length });
     const width = 960;
     const height = 320;
     const plot = { left: 42, right: 8, top: 12, bottom: 50 };
@@ -8128,11 +8101,9 @@ class ElrakningPanel {
     );
     const values = days.flatMap((day) => [day.producedKwh, day.forecastKwh]).filter((value) => Number.isFinite(value));
     if (!values.length) {
-      this._startupDiagnostic("solar_history_placeholder_render", { configured: true, point_count: 0 });
       chart.textContent = "Ingen solhistorik tillgänglig";
       return;
     }
-    this._startupDiagnostic("solar_history_render", { configured: true, day_count: days.length, value_count: values.length });
     const niceMax = (value) => {
       const exponent = 10 ** Math.floor(Math.log10(Math.max(value, 1)));
       const normalized = value / exponent;
@@ -8259,11 +8230,9 @@ class ElrakningPanel {
       .filter((point) => Number.isFinite(point.timestamp) && point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime() && Number.isFinite(point.value))
       .sort((left, right) => left.timestamp - right.timestamp);
     if (!points.length) {
-      this._startupDiagnostic("consumption_history_placeholder_render", { configured: true, point_count: 0 });
       chart.textContent = "Ingen historik idag";
       return;
     }
-    this._startupDiagnostic("consumption_history_render", { configured: true, point_count: points.length });
     const width = 960;
     const height = 340;
     const plot = { left: 44, right: 8, top: 8, bottom: 8 };
@@ -8356,20 +8325,12 @@ class ElrakningPanel {
   async loadPowerState(loadHistory = false) {
     if (!this.hass?.callWS) return;
     const request = this._beginPowerStateRequest();
-    this._startupDiagnostic("power_state_request_start");
     try {
       const state = await request.hass.callWS({ type: "elrakning/power_state" });
-      this._startupDiagnostic("power_state_response", {
-        success: state?.success !== false,
-        error: state?.error || null,
-        runtime_status: state?.runtime_status || state?.status || null,
-      });
       if (state?.success === false && state.error === "power_unavailable") return;
-      const applied = this._applyPowerStateResponse(request, state);
-      if (applied) this._startupDiagnostic("power_state_state_applied", { configured: Boolean(state?.consumption_entity || state?.solar_entities?.length || state?.soc_entity) });
+      this._applyPowerStateResponse(request, state);
       if (loadHistory) await this.loadPowerHistory();
-    } catch (error) {
-      this._startupDiagnostic("power_state_request_rejected", { error: error?.name || "Error" });
+    } catch {
       // Keep optional power cards unconfigured when state is unavailable.
     }
   }
@@ -8378,20 +8339,12 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._powerHistoryRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
-    this._startupDiagnostic("power_history_request_start");
     try {
       const confirmedDate = this._periodPickerState?.confirmed;
       const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
-      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7, diagnostics: true,
+      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
         ...(requestedDate ? { date: requestedDate } : {}),
       });
-      const responseSeries = response?.series && typeof response.series === "object" ? response.series : {};
-      this._startupDiagnostic("power_history_response", {
-        success: response?.success !== false,
-        error: response?.error || null,
-        series_counts: Object.fromEntries(Object.entries(responseSeries).map(([key, value]) => [key, Array.isArray(value?.points) ? value.points.length : 0])),
-      });
-      if (response?.power_history_diagnostics) this._startupDiagnostic("power_history_backend_timing", response.power_history_diagnostics);
       if (response?.error === "power_unavailable") return;
       if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
@@ -8414,21 +8367,12 @@ class ElrakningPanel {
         solar_sun: response?.solar_sun || { available: false },
       };
       this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
-      this._startupDiagnostic("power_history_state_applied", {
-        series_counts: Object.fromEntries(Object.entries(series).map(([key, value]) => [key, Array.isArray(value?.points) ? value.points.length : 0])),
-        consumption_points: Array.isArray(series.consumption?.points) ? series.consumption.points.length : 0,
-        solar_points: Array.isArray(series.solar?.points) ? series.solar.points.length : 0,
-        battery_points: Array.isArray(series.charging?.points) || Array.isArray(series.discharging?.points)
-          ? (series.charging?.points?.length || 0) + (series.discharging?.points?.length || 0)
-          : 0,
-      });
       this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
-    } catch (error) {
-      this._startupDiagnostic("power_history_request_rejected", { error: error?.name || "Error" });
+    } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
     this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
       this._loadForecast = { available: false, reason: "history_unavailable", frames: [] };
@@ -9837,7 +9781,6 @@ class ElrakningPanel {
     this.hass = hass;
     this._flushPerformanceWatchdogStartup();
     if (connectionChanged) {
-      this._startupDiagnostic("ha_connection_attached");
       this._diagnosticsLifecycleGeneration += 1;
       this._diagnosticsRequestGeneration += 1;
       this._powerStateLifecycleGeneration += 1;
@@ -9961,16 +9904,10 @@ class ElrakningPanel {
         "elrakning_diagnostics_update",
       );
       this._readyEventUnsubscribePromise = hass.connection.subscribeEvents(
-        () => {
-          this._startupDiagnostic("integration_ready_event");
-          return this._refreshBackendState(true);
-        },
+        () => this._refreshBackendState(true),
         "elrakning_integration_ready",
       );
-      this._connectionReadyListener = () => {
-        this._startupDiagnostic("ha_connection_ready");
-        return this._refreshBackendState(true);
-      };
+      this._connectionReadyListener = () => this._refreshBackendState(true);
       hass.connection.addEventListener?.("ready", this._connectionReadyListener);
       this._eventConnection = hass.connection;
       this._refreshBackendState(true);
@@ -10086,7 +10023,6 @@ class ElrakningPanel {
 
   async _refreshBackendState(loadHistory = true) {
     if (this._backendHydrationPromise) return this._backendHydrationPromise;
-    this._startupDiagnostic("backend_hydration_start", { load_history: loadHistory });
     this._backendHydrationPromise = Promise.all([
       this.loadPriceData(),
       this.loadPricePlan(),
@@ -10100,7 +10036,6 @@ class ElrakningPanel {
       this._loadDebugPreference(),
       this._loadChartPreferences(),
     ]).finally(() => {
-      this._startupDiagnostic("backend_hydration_complete");
       this._backendHydrationPromise = null;
       // Billing history is not required for initial live or chart history.
       // Defer its larger Recorder query until critical hydration is complete.
@@ -10111,7 +10046,6 @@ class ElrakningPanel {
 
   async loadPriceData(selectedDate = null) {
     if (!this.hass?.callWS) return;
-    this._startupDiagnostic("price_data_request_start");
     try {
       const request = { type: "elrakning/price_data" };
       const requestedDate = selectedDate instanceof Date ? selectedDate : null;
@@ -10119,16 +10053,9 @@ class ElrakningPanel {
         request.date = `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`;
       }
       const response = await this.hass.callWS(request);
-      this._startupDiagnostic("price_data_response", {
-        has_energy_history: Boolean(response?.energy_history),
-        energy_history_keys: response?.energy_history && typeof response.energy_history === "object"
-          ? Object.keys(response.energy_history)
-          : [],
-      });
       if (response?.error === "integration_unavailable") return;
       this.priceSnapshot = response;
-    } catch (error) {
-      this._startupDiagnostic("price_data_request_rejected", { error: error?.name || "Error" });
+    } catch {
       return;
     }
     this.priceData = {
@@ -10141,9 +10068,6 @@ class ElrakningPanel {
     this._eonGridPrice = this.priceSnapshot.adjustments?.grid_price || null;
     this._updatePriceComparisonControls();
     this.updatePriceSummary();
-    this._startupDiagnostic("price_data_state_applied", {
-      has_energy_history: Boolean(this.priceSnapshot?.energy_history),
-    });
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     this._renderInvoiceEstimateCard();
   }
@@ -10807,20 +10731,12 @@ class ElrakningPanel {
 
   async loadMeterState(loadHistory = false) {
     if (!this.hass?.callWS) return;
-    this._startupDiagnostic("meter_state_request_start");
     try {
       const state = await this.hass.callWS({ type: "elrakning/meter_state" });
-      this._startupDiagnostic("meter_state_response", {
-        success: state?.success !== false,
-        error: state?.error || null,
-        runtime_status: state?.runtime_status || state?.status || null,
-      });
       if (state?.success === false && state.error === "meter_unavailable") return;
       this._applyMeterState(state);
-      this._startupDiagnostic("meter_state_state_applied", { configured: state?.configured === true || Boolean(state?.power_entity) });
       if (loadHistory) await this.loadMeterPowerHistory();
-    } catch (error) {
-      this._startupDiagnostic("meter_state_request_rejected", { error: error?.name || "Error" });
+    } catch {
       // Keep the meter card unconfigured when state is unavailable.
     }
   }
@@ -10830,16 +10746,10 @@ class ElrakningPanel {
     const entityId = this._meterState?.power_entity || null;
     const requestToken = ++this._meterHistoryRequestToken;
     this._meterHistorySummary = null;
-    this._startupDiagnostic("meter_power_history_request_start", { entity_id: entityId });
     try {
       const request = { type: "elrakning/meter_power_history" };
       if (entityId) request.entity_id = entityId;
       const response = await this.hass.callWS(request);
-      this._startupDiagnostic("meter_power_history_response", {
-        success: response?.success !== false,
-        error: response?.error || null,
-        point_count: Array.isArray(response?.points) ? response.points.length : 0,
-      });
       if (response?.error === "meter_unavailable") return;
       if (requestToken !== this._meterHistoryRequestToken || entityId !== (this._meterState?.power_entity || null)) return;
       if (!response?.success) {
@@ -10892,12 +10802,8 @@ class ElrakningPanel {
         date: response?.date || null,
         point_count: this._meterPowerHistory.points.length,
       };
-      this._startupDiagnostic("meter_power_history_state_applied", {
-        point_count: this._meterPowerHistory.points.length,
-      });
     } catch (error) {
       if (requestToken !== this._meterHistoryRequestToken) return;
-      this._startupDiagnostic("meter_power_history_request_rejected", { error: error?.name || "Error" });
       this._meterHistorySummary = {
         entity_id: entityId,
         success: false,

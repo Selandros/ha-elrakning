@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import inspect
 import json
-from time import monotonic
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1237,136 +1236,45 @@ async def websocket_power_state(hass, connection, msg):
         vol.Required("type"): POWER_HISTORY_COMMAND,
         vol.Optional("days", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=7)),
         vol.Optional("date"): str,
-        vol.Optional("diagnostics", default=False): bool,
     }
 )
 @websocket_api.async_response
 async def websocket_power_history(hass, connection, msg):
-    request_started = monotonic()
-    diagnostics = {
-        "request_id": str(msg.get("id")),
-        "handler_entry": request_started,
-        "days": msg.get("days", 1),
-        "diagnostics_enabled": bool(msg.get("diagnostics")),
-    } if msg.get("diagnostics") else None
     manager = _power_manager(hass)
-    if diagnostics is not None:
-        diagnostics["manager_call_start"] = monotonic()
-    result = await manager.async_history(msg.get("days", 1), diagnostics=diagnostics) if manager else {
+    result = await manager.async_history(msg.get("days", 1)) if manager else {
         "success": False,
         "series": {},
         "error": "power_unavailable",
     }
-    if diagnostics is not None:
-        diagnostics["manager_call_end"] = monotonic()
     forecast_manager = _solar_forecast_manager(hass)
-    if diagnostics is not None:
-        diagnostics["solar_facts_start"] = monotonic()
     forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
-    if diagnostics is not None:
-        diagnostics["solar_facts_end"] = monotonic()
     result["solar_forecast"] = forecast
     result["solar_forecast_baselines"] = forecast.get("baselines", {})
     shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
-    if diagnostics is not None:
-        diagnostics["solar_shadow_start"] = monotonic()
     result["solar_shadow"] = shadow.public_state() if shadow and _site_is_configured(hass) else {"available": False, "snapshots": []}
-    if diagnostics is not None:
-        diagnostics["solar_shadow_end"] = monotonic()
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
-    if diagnostics is not None:
-        diagnostics["solar_weather_start"] = monotonic()
     result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
-    if diagnostics is not None:
-        diagnostics["solar_weather_end"] = monotonic()
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
-    if diagnostics is not None:
-        diagnostics["solar_pvgis_start"] = monotonic()
     result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
-    if diagnostics is not None:
-        diagnostics["solar_pvgis_end"] = monotonic()
-    if diagnostics is not None:
-        diagnostics["solar_sun_start"] = monotonic()
     result["solar_sun"] = build_sun_context(hass)
-    if diagnostics is not None:
-        diagnostics["solar_sun_end"] = monotonic()
-    if diagnostics is not None:
-        diagnostics["state_enrichment_start"] = monotonic()
-        diagnostics["load_forecast_start"] = monotonic()
-    result["load_forecast"] = await _async_load_forecast_state(hass, diagnostics=diagnostics)
-    if diagnostics is not None:
-        diagnostics["load_forecast_end"] = monotonic()
+    result["load_forecast"] = await _async_load_forecast_state(hass)
     requested_date = None
     if msg.get("date"):
         try:
             requested_date = date.fromisoformat(msg["date"])
         except ValueError:
             requested_date = None
-    if diagnostics is not None:
-        diagnostics["power_forecast_start"] = monotonic()
-    result["power_forecast"] = await _async_power_forecast_state(hass, requested_date, diagnostics=diagnostics)
-    if diagnostics is not None:
-        diagnostics["power_forecast_end"] = monotonic()
-    if diagnostics is not None:
-        diagnostics["state_enrichment_end"] = monotonic()
-        diagnostics["payload_series_counts"] = {
-            key: len(value.get("points", [])) for key, value in result.get("series", {}).items()
-            if isinstance(value, dict)
-        }
-        diagnostics["manager_ms"] = (diagnostics["manager_call_end"] - diagnostics["manager_call_start"]) * 1000
-        diagnostics["solar_facts_ms"] = (diagnostics["solar_facts_end"] - diagnostics["solar_facts_start"]) * 1000
-        diagnostics["solar_shadow_ms"] = (diagnostics["solar_shadow_end"] - diagnostics["solar_shadow_start"]) * 1000
-        diagnostics["solar_weather_ms"] = (diagnostics["solar_weather_end"] - diagnostics["solar_weather_start"]) * 1000
-        diagnostics["solar_pvgis_ms"] = (diagnostics["solar_pvgis_end"] - diagnostics["solar_pvgis_start"]) * 1000
-        diagnostics["solar_sun_ms"] = (diagnostics["solar_sun_end"] - diagnostics["solar_sun_start"]) * 1000
-        diagnostics["load_forecast_ms"] = (diagnostics["load_forecast_end"] - diagnostics["load_forecast_start"]) * 1000
-        diagnostics["power_forecast_ms"] = (diagnostics["power_forecast_end"] - diagnostics["power_forecast_start"]) * 1000
-        diagnostics["state_enrichment_ms"] = (diagnostics["state_enrichment_end"] - diagnostics["state_enrichment_start"]) * 1000
-        diagnostics["handler_total_ms"] = (monotonic() - request_started) * 1000
-        result["power_history_diagnostics"] = diagnostics
+    result["power_forecast"] = await _async_power_forecast_state(
+        hass, requested_date, load_forecast=result["load_forecast"]
+    )
     connection.send_result(msg["id"], result)
-
-
-async def _async_timed_executor_job(hass, operation: str, function, diagnostics: dict[str, Any] | None = None):
-    """Run one executor job and expose queue versus execution timing to diagnostics."""
-    if diagnostics is None:
-        return await hass.async_add_executor_job(function)
-    submitted = monotonic()
-    execution = {}
-
-    def invoke():
-        execution["start"] = monotonic()
-        try:
-            return function()
-        finally:
-            execution["end"] = monotonic()
-
-    try:
-        result = await hass.async_add_executor_job(invoke)
-    except Exception:
-        finished = monotonic()
-        diagnostics.setdefault("executor", {})[operation] = {
-            "queue_ms": (execution.get("start", finished) - submitted) * 1000,
-            "execution_ms": (execution.get("end", finished) - execution.get("start", finished)) * 1000,
-            "total_ms": (finished - submitted) * 1000,
-            "error": True,
-        }
-        raise
-    finished = monotonic()
-    diagnostics.setdefault("executor", {})[operation] = {
-        "queue_ms": (execution["start"] - submitted) * 1000,
-        "execution_ms": (execution["end"] - execution["start"]) * 1000,
-        "total_ms": (finished - submitted) * 1000,
-        "error": False,
-    }
-    return result
 
 
 async def _async_power_forecast_state(
     hass,
     requested_date: date | None = None,
     requested_site_id: str | None = None,
-    diagnostics: dict[str, Any] | None = None,
+    load_forecast: dict[str, Any] | None = None,
 ) -> dict:
     """Return cached, read-only site power forecasts for the active chart day."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1376,7 +1284,8 @@ async def _async_power_forecast_state(
         return {"schema": "ella_power_forecast.v1", "available": False, "reason": "site_or_storage_unavailable", "series": {}}
     now = dt_util.now()
     bucket = int(now.timestamp()) // 900
-    load_forecast = await _async_load_forecast_state(hass, site_id, diagnostics, "power_forecast_load")
+    if load_forecast is None:
+        load_forecast = await _async_load_forecast_state(hass, site_id)
     load_frame_ids = tuple(sorted(str(frame.get("frame_id")) for frame in load_forecast.get("frames", []) if isinstance(frame, dict)))
     forecast_manager = _solar_forecast_manager(hass)
     solar_facts = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
@@ -1387,10 +1296,7 @@ async def _async_power_forecast_state(
     timezone_name, _ = resolve_timezone((location or {}).get("timezone"), getattr(getattr(hass, "config", None), "time_zone", None))
     target_date = requested_date or now.astimezone(ZoneInfo(timezone_name)).date()
     learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
-    calibration_started = monotonic()
     power_calibration = learning_store.persistent_power_calibration(str(site_id), now) if learning_store else {}
-    if diagnostics is not None:
-        diagnostics["power_calibration_ms"] = (monotonic() - calibration_started) * 1000
     cache_key = (
         str(site_id),
         target_date.isoformat(),
@@ -1404,17 +1310,10 @@ async def _async_power_forecast_state(
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    rows = await _async_timed_executor_job(
-        hass,
-        "power_forecast_site_energy_history",
-        partial(
-            collector.storage.read_site_energy_history,
-            str(site_id), now - timedelta(days=30), now,
-        ),
-        diagnostics,
+    rows = await hass.async_add_executor_job(
+        collector.storage.read_site_energy_history,
+        str(site_id), now - timedelta(days=30), now,
     )
-    if diagnostics is not None:
-        diagnostics["power_forecast_history_row_count"] = len(rows)
     active_battery_generation_ids = {
         str(target.get("generation_id"))
         for target in identity.collection_targets()
@@ -1424,9 +1323,7 @@ async def _async_power_forecast_state(
     open_meteo_targets = build_single_run_targets(site_configs)
     open_meteo_frames = []
     try:
-        raw_frames = await _async_timed_executor_job(
-            hass,
-            "power_forecast_open_meteo_frames",
+        raw_frames = await hass.async_add_executor_job(
             partial(
                 collector.storage.read_external_input_frames,
                 now,
@@ -1434,10 +1331,7 @@ async def _async_power_forecast_state(
                 site_id=str(site_id),
                 logical_role="solar.irradiance.day_ahead_pv_forecast",
             ),
-            diagnostics,
         )
-        if diagnostics is not None:
-            diagnostics["power_forecast_open_meteo_frame_count"] = len(raw_frames)
         open_meteo_frames = [
             {
                 **frame,
@@ -1449,7 +1343,6 @@ async def _async_power_forecast_state(
         ]
     except Exception:
         open_meteo_frames = []
-    build_started = monotonic()
     result = build_power_forecast(
         str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now,
         active_battery_generation_ids,
@@ -1458,12 +1351,6 @@ async def _async_power_forecast_state(
         open_meteo_targets=open_meteo_targets,
         learning_calibration=power_calibration,
     )
-    if diagnostics is not None:
-        diagnostics["power_forecast_build_ms"] = (monotonic() - build_started) * 1000
-        diagnostics["power_forecast_output_series_counts"] = {
-            key: len(value.get("points", [])) for key, value in result.get("series", {}).items()
-            if isinstance(value, dict)
-        }
     result["learning_calibration"] = power_calibration
     cache.clear()
     cache[cache_key] = result
@@ -1479,8 +1366,6 @@ async def websocket_power_forecast(hass, connection, msg):
 async def _async_load_forecast_state(
     hass,
     requested_site_id: str | None = None,
-    diagnostics: dict[str, Any] | None = None,
-    timing_prefix: str = "load_forecast",
 ) -> dict:
     """Serialize the active site's immutable load forecast, if available."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1490,9 +1375,7 @@ async def _async_load_forecast_state(
         return {"available": False, "reason": "site_unconfigured", "frames": []}
     now = dt_util.now().astimezone()
     try:
-        frames = await _async_timed_executor_job(
-            hass,
-            f"{timing_prefix}_frames",
+        frames = await hass.async_add_executor_job(
             partial(
                 collector.storage.read_external_input_frames,
                 now,
@@ -1500,11 +1383,9 @@ async def _async_load_forecast_state(
                 site_id=site_id,
                 logical_role="load.forecast",
             ),
-            diagnostics,
         )
     except Exception:
         return {"available": False, "reason": "history_unavailable", "frames": []}
-    serialize_started = monotonic()
     serialized = []
     for frame in frames:
         serialized.append({
@@ -1519,10 +1400,6 @@ async def _async_load_forecast_state(
                         "unit": point["unit"], "quality_status": point["quality_status"],
                         "point": point["point"]} for point in frame["points"]],
         })
-    if diagnostics is not None:
-        diagnostics[f"{timing_prefix}_frame_count"] = len(serialized)
-        diagnostics[f"{timing_prefix}_point_count"] = sum(len(frame.get("points", [])) for frame in serialized)
-        diagnostics[f"{timing_prefix}_serialize_ms"] = (monotonic() - serialize_started) * 1000
     return {"available": bool(serialized), "reason": None if serialized else "no_supported_history", "frames": serialized}
 
 
