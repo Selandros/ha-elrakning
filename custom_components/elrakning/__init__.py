@@ -346,7 +346,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await canonical_collector.async_capture_forecast_solar(trigger="startup")
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
-    await solar_evidence_manager.async_startup_catch_up()
+    # Evidence catch-up is independent of panel readiness and may perform Recorder/HTTP work.
+    # Keep it off the critical startup path so live state and history can hydrate immediately.
+    frontend_data["solar_evidence_startup_task"] = hass.async_create_task(
+        solar_evidence_manager.async_startup_catch_up()
+    )
     solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())
     async_register_eon_handoff_views(hass)
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
@@ -419,6 +423,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except asyncio.CancelledError:
             pass
     if startup_task := frontend_data.pop("history_warmup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+    if startup_task := frontend_data.pop("solar_evidence_startup_task", None):
         startup_task.cancel()
         try:
             await startup_task

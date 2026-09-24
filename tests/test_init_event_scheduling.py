@@ -197,7 +197,8 @@ def test_site_independent_forecast_and_evidence_providers_are_wired():
     assert "site_identity_manager.forecast_collection_targets" in source
     assert "site_identity_manager.collection_site_configs" in source
     assert "await solar_forecast_manager.async_capture_collection_baselines()" in source
-    assert "await solar_evidence_manager.async_startup_catch_up()" in source
+    assert 'frontend_data["solar_evidence_startup_task"] = hass.async_create_task(' in source
+    assert "solar_evidence_manager.async_startup_catch_up()" in source
 
 
 def test_baseline_capture_precedes_evidence_startup_catch_up():
@@ -206,7 +207,7 @@ def test_baseline_capture_precedes_evidence_startup_catch_up():
     coordinator_source = source_path.with_name("coordinator.py").read_text(encoding="utf-8")
 
     baseline = source.index("await solar_forecast_manager.async_capture_collection_baselines()")
-    catch_up = source.index("await solar_evidence_manager.async_startup_catch_up()")
+    catch_up = source.index('frontend_data["solar_evidence_startup_task"] = hass.async_create_task(')
     assert baseline < catch_up
     assert "for delay in (15, 30, 60, 120, 240)" in coordinator_source
     assert "cancel_midnight_recovery" in source
