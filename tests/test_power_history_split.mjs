@@ -13,6 +13,8 @@ assert.doesNotMatch(historyHandler, /_async_load_forecast_state|_async_power_for
 assert.match(backend, /vol\.Required\("type"\): POWER_HISTORY_ENRICHMENT_COMMAND/);
 assert.match(backend, /load_forecast_inflight/);
 assert.match(backend, /_async_load_forecast_state_uncached/);
+assert.match(backend, /_skip_load_forecast/);
+assert.match(backend, /not_required_for_empty_load_plan/);
 
 const historyLoader = frontend.slice(
   frontend.indexOf("  async loadPowerHistory()"),

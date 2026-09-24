@@ -1559,7 +1559,12 @@ async def websocket_ella_site_state(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "canonical_storage_unavailable", "site_id": site_id})
         return
     from .ella_capabilities import build_capability_inventory
-    forecast = await _async_load_forecast_state(hass, site_id)
+    skip_load_forecast = msg.get("_skip_load_forecast") is True
+    forecast = (
+        {"available": False, "reason": "not_required_for_empty_load_plan", "frames": []}
+        if skip_load_forecast
+        else await _async_load_forecast_state(hass, site_id)
+    )
     learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
     forecast_evaluation = learning_store.public_state(site_id) if learning_store else None
     stage6_store = hass.data.get(DOMAIN, {}).get("ella_stage6_store")
@@ -1626,7 +1631,19 @@ async def websocket_ella_action_plan(hass, connection, msg):
 
     capture = _Capture()
     state_handler = getattr(websocket_ella_site_state, "__wrapped__", websocket_ella_site_state)
-    state_result = state_handler(hass, capture, msg)
+    plan_msg = dict(msg)
+    plan_site_id, _ = _ella_requested_site(hass, msg)
+    registry = _ella_load_registry(hass)
+    if isinstance(plan_site_id, str) and registry is not None:
+        try:
+            configured_loads = registry.list_for_site(plan_site_id)
+        except Exception:
+            configured_loads = None
+        if configured_loads == []:
+            # Price-only plans without configured individual loads do not need
+            # the expensive load forecast to produce a truthful normal-operation plan.
+            plan_msg["_skip_load_forecast"] = True
+    state_result = state_handler(hass, capture, plan_msg)
     if inspect.isawaitable(state_result):
         await state_result
     state = capture.payload
