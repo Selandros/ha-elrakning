@@ -5,7 +5,7 @@ const source = fs.readFileSync("custom_components/elrakning/websocket.py", "utf8
 
 assert.match(source, /POWER_HISTORY_ENRICHMENT_COMMAND = f"\{DOMAIN\}\/power_history_enrichment"/);
 assert.match(source, /connection\.send_result\(msg\["id"\], result\)\s*\n\s*\n\s*\n@websocket_api\.websocket_command/);
-assert.match(source, /enrichment\["load_forecast"\] = await _async_load_forecast_state\(hass\)/);
+assert.match(source, /enrichment\["load_forecast"\] = await _async_load_forecast_state\(hass, trace=trace\)/);
 assert.match(source, /_async_power_forecast_state\(\s*hass, requested_date, load_forecast=enrichment\["load_forecast"\]/);
 assert.match(source, /if load_forecast is None:\s*load_forecast = await _async_load_forecast_state\(hass, site_id\)/);
 

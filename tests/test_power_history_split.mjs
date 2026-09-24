@@ -15,6 +15,8 @@ assert.match(backend, /load_forecast_inflight/);
 assert.match(backend, /_async_load_forecast_state_uncached/);
 assert.match(backend, /_skip_load_forecast/);
 assert.match(backend, /not_required_for_empty_load_plan/);
+assert.match(backend, /load_read_external_input_frames/);
+assert.match(backend, /build_action_plan/);
 
 const historyLoader = frontend.slice(
   frontend.indexOf("  async loadPowerHistory()"),
@@ -33,5 +35,8 @@ assert.match(historyLoader, /this\._powerHistory = \{\s*\.\.\.this\._powerHistor
 assert.match(historyLoader, /requestToken !== this\._powerHistoryRequestToken/);
 assert.match(historyLoader, /enrichmentToken !== this\._powerHistoryEnrichmentRequestToken/);
 assert.match(historyLoader, /contextKey !== this\._powerHistoryContextKey/);
+assert.match(frontend, /__elrakningStartupDiagnostics/);
+assert.match(frontend, /ella_plan_response_received/);
+assert.match(frontend, /enrichment_response_received/);
 
 console.log("power history split and non-blocking enrichment contract: ok");

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import inspect
 import json
+import time
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1273,8 +1274,10 @@ async def websocket_power_history_enrichment(hass, connection, msg):
     )
 
 
-async def _async_power_history_enrichment(hass, requested_date: date | None = None) -> dict:
+async def _async_power_history_enrichment(hass, requested_date: date | None = None, *, request_id: int | None = None) -> dict:
     """Build the existing forecast/state enrichment independently of history."""
+    trace = {"origin": time.perf_counter(), "request_id": request_id, "steps": []}
+    _diag_step(trace, "enrichment_handler_entry", trace["origin"])
     forecast_manager = _solar_forecast_manager(hass)
     forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
     enrichment = {
@@ -1288,10 +1291,16 @@ async def _async_power_history_enrichment(hass, requested_date: date | None = No
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
     enrichment["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
     enrichment["solar_sun"] = build_sun_context(hass)
-    enrichment["load_forecast"] = await _async_load_forecast_state(hass)
+    step_started = time.perf_counter()
+    enrichment["load_forecast"] = await _async_load_forecast_state(hass, trace=trace)
+    _diag_step(trace, "load_forecast_total", step_started, frame_count=len(enrichment["load_forecast"].get("frames", [])))
+    step_started = time.perf_counter()
     enrichment["power_forecast"] = await _async_power_forecast_state(
-        hass, requested_date, load_forecast=enrichment["load_forecast"]
+        hass, requested_date, load_forecast=enrichment["load_forecast"], trace=trace
     )
+    _diag_step(trace, "power_forecast_total", step_started, series_count=len(enrichment["power_forecast"].get("series", {})))
+    _diag_step(trace, "enrichment_handler_return", trace["origin"])
+    enrichment["diagnostics"] = _diag_payload(trace)
     return enrichment
 
 
@@ -1300,6 +1309,7 @@ async def _async_power_forecast_state(
     requested_date: date | None = None,
     requested_site_id: str | None = None,
     load_forecast: dict[str, Any] | None = None,
+    trace: dict | None = None,
 ) -> dict:
     """Return cached, read-only site power forecasts for the active chart day."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1335,10 +1345,12 @@ async def _async_power_forecast_state(
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
+    step_started = time.perf_counter()
     rows = await hass.async_add_executor_job(
         collector.storage.read_site_energy_history,
         str(site_id), now - timedelta(days=30), now,
     )
+    _diag_step(trace, "power_read_site_energy_history", step_started, row_count=len(rows))
     active_battery_generation_ids = {
         str(target.get("generation_id"))
         for target in identity.collection_targets()
@@ -1348,6 +1360,7 @@ async def _async_power_forecast_state(
     open_meteo_targets = build_single_run_targets(site_configs)
     open_meteo_frames = []
     try:
+        step_started = time.perf_counter()
         raw_frames = await hass.async_add_executor_job(
             partial(
                 collector.storage.read_external_input_frames,
@@ -1366,8 +1379,11 @@ async def _async_power_forecast_state(
             }
             for frame in raw_frames
         ]
+        _diag_step(trace, "power_read_open_meteo_frames", step_started, frame_count=len(raw_frames))
     except Exception:
         open_meteo_frames = []
+        _diag_step(trace, "power_read_open_meteo_frames", step_started, frame_count=0, error="unavailable")
+    step_started = time.perf_counter()
     result = build_power_forecast(
         str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now,
         active_battery_generation_ids,
@@ -1376,6 +1392,7 @@ async def _async_power_forecast_state(
         open_meteo_targets=open_meteo_targets,
         learning_calibration=power_calibration,
     )
+    _diag_step(trace, "build_power_forecast", step_started, series_count=len(result.get("series", {})))
     result["learning_calibration"] = power_calibration
     cache.clear()
     cache[cache_key] = result
@@ -1391,6 +1408,8 @@ async def websocket_power_forecast(hass, connection, msg):
 async def _async_load_forecast_state(
     hass,
     requested_site_id: str | None = None,
+    *,
+    trace: dict | None = None,
 ) -> dict:
     """Share one in-flight immutable frame read between concurrent callers."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1401,8 +1420,9 @@ async def _async_load_forecast_state(
     inflight = domain_data.setdefault("load_forecast_inflight", {})
     key = str(site_id)
     task = inflight.get(key)
+    joined_existing = task is not None
     if task is None:
-        task = asyncio.create_task(_async_load_forecast_state_uncached(hass, key))
+        task = asyncio.create_task(_async_load_forecast_state_uncached(hass, key, trace=trace))
         inflight[key] = task
 
         def clear(completed, request_key=key):
@@ -1410,12 +1430,17 @@ async def _async_load_forecast_state(
                 inflight.pop(request_key, None)
 
         task.add_done_callback(clear)
-    return await asyncio.shield(task)
+    wait_started = time.perf_counter()
+    result = await asyncio.shield(task)
+    _diag_step(trace, "load_forecast_inflight_wait", wait_started, shared=joined_existing)
+    return result
 
 
 async def _async_load_forecast_state_uncached(
     hass,
     requested_site_id: str | None = None,
+    *,
+    trace: dict | None = None,
 ) -> dict:
     """Serialize the active site's immutable load forecast, if available."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1425,6 +1450,7 @@ async def _async_load_forecast_state_uncached(
         return {"available": False, "reason": "site_unconfigured", "frames": []}
     now = dt_util.now().astimezone()
     try:
+        step_started = time.perf_counter()
         frames = await hass.async_add_executor_job(
             partial(
                 collector.storage.read_external_input_frames,
@@ -1434,8 +1460,11 @@ async def _async_load_forecast_state_uncached(
                 logical_role="load.forecast",
             ),
         )
+        _diag_step(trace, "load_read_external_input_frames", step_started, frame_count=len(frames))
     except Exception:
+        _diag_step(trace, "load_read_external_input_frames", step_started, frame_count=0, error="unavailable")
         return {"available": False, "reason": "history_unavailable", "frames": []}
+    step_started = time.perf_counter()
     serialized = []
     for frame in frames:
         serialized.append({
@@ -1450,6 +1479,7 @@ async def _async_load_forecast_state_uncached(
                         "unit": point["unit"], "quality_status": point["quality_status"],
                         "point": point["point"]} for point in frame["points"]],
         })
+    _diag_step(trace, "load_serialize_frames", step_started, frame_count=len(serialized), point_count=sum(len(frame.get("points", [])) for frame in serialized))
     return {"available": bool(serialized), "reason": None if serialized else "no_supported_history", "frames": serialized}
 
 
@@ -1485,6 +1515,30 @@ def _ella_site_manager(hass):
 
 def _ella_load_registry(hass):
     return hass.data.get(DOMAIN, {}).get("ella_load_registry")
+
+
+def _diag_step(trace, name, started, **details):
+    """Record one bounded diagnostic timing for the temporary trace release."""
+    if not isinstance(trace, dict):
+        return
+    finished = time.perf_counter()
+    trace.setdefault("steps", []).append({
+        "name": name,
+        "start_ms": round((started - trace["origin"]) * 1000, 3),
+        "end_ms": round((finished - trace["origin"]) * 1000, 3),
+        "duration_ms": round((finished - started) * 1000, 3),
+        **details,
+    })
+
+
+def _diag_payload(trace):
+    if not isinstance(trace, dict):
+        return None
+    return {
+        "request_id": trace.get("request_id"),
+        "total_ms": round((time.perf_counter() - trace["origin"]) * 1000, 3),
+        "steps": trace.get("steps", []),
+    }
 
 
 def _ella_requested_site(hass, msg, *, required: bool = False):
@@ -1527,6 +1581,7 @@ async def websocket_ella_site_state(hass, connection, msg):
     """Return the read-only, site-scoped Stage 2 decision state."""
     identity = _ella_site_manager(hass)
     registry = _ella_load_registry(hass)
+    trace = msg.get("_ella_diagnostic_trace")
     site_id, error = _ella_requested_site(hass, msg)
     if error or identity is None or registry is None:
         connection.send_result(msg["id"], {"success": False, "error": error or "site_state_unavailable"})
@@ -1551,7 +1606,9 @@ async def websocket_ella_site_state(hass, connection, msg):
     decision_at = dt_util.now()
     entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
     coordinator = entry.runtime_data if entry else None
+    step_started = time.perf_counter()
     price_data = await coordinator.async_get_price_data(target) if coordinator else PriceData(None, None, target, (), "price_unavailable")
+    _diag_step(trace, "price_data", step_started)
     binding = identity.global_binding("nord_pool") if callable(getattr(identity, "global_binding", None)) else None
     source_id = binding.get("binding_fingerprint") if isinstance(binding, dict) else None
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
@@ -1560,11 +1617,13 @@ async def websocket_ella_site_state(hass, connection, msg):
         return
     from .ella_capabilities import build_capability_inventory
     skip_load_forecast = msg.get("_skip_load_forecast") is True
+    step_started = time.perf_counter()
     forecast = (
         {"available": False, "reason": "not_required_for_empty_load_plan", "frames": []}
         if skip_load_forecast
-        else await _async_load_forecast_state(hass, site_id)
+        else await _async_load_forecast_state(hass, site_id, trace=trace)
     )
+    _diag_step(trace, "load_forecast", step_started, skipped=skip_load_forecast, frame_count=len(forecast.get("frames", [])))
     learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
     forecast_evaluation = learning_store.public_state(site_id) if learning_store else None
     stage6_store = hass.data.get(DOMAIN, {}).get("ella_stage6_store")
@@ -1575,14 +1634,18 @@ async def websocket_ella_site_state(hass, connection, msg):
         )
         from .ella_site_state import local_day_slots
         day_slots = local_day_slots(target, timezone_name)
+        step_started = time.perf_counter()
         actual_rows = await hass.async_add_executor_job(
             collector.storage.read_site_energy_history,
             site_id, day_slots[0][0] - timedelta(days=60), day_slots[-1][1],
         )
+        _diag_step(trace, "read_site_energy_history", step_started, row_count=len(actual_rows))
         model_points = build_historical_model_points(actual_rows, timezone_name, day_slots[0][0], day_slots[-1][1])
+        step_started = time.perf_counter()
         all_frames = await hass.async_add_executor_job(
             partial(collector.storage.read_external_input_frames, decision_at, source_scope="site", site_id=site_id)
         )
+        _diag_step(trace, "read_external_input_frames", step_started, frame_count=len(all_frames))
         solar_frames = [frame for frame in all_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
         economic_frames = [frame for frame in all_frames if frame.get("payload_schema") == "eon.grid_economic_active_snapshot.v1"]
         prior_stage6 = stage6_store.public_state(site_id) if stage6_store else None
@@ -1597,6 +1660,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             {**load, **availability_by_id.get(load.get("load_id"), {})}
             for load in configured_loads
         ]
+        step_started = time.perf_counter()
         state = build_site_state(
             site_id, timezone_name, target, decision_at,
             periods=price_data.periods if price_data and not price_data.error else (),
@@ -1612,9 +1676,12 @@ async def websocket_ella_site_state(hass, connection, msg):
             stage6=stage6,
             timezone_source=timezone_source,
         )
+        _diag_step(trace, "build_site_state", step_started, slot_count=len(state.get("slots", [])))
     except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as err:
         connection.send_result(msg["id"], {"success": False, "error": str(err), "site_id": site_id})
         return
+    if trace is not None:
+        state["_ella_diagnostics"] = _diag_payload(trace)
     connection.send_result(msg["id"], {"success": True, **state})
 
 
@@ -1629,6 +1696,8 @@ async def websocket_ella_action_plan(hass, connection, msg):
         def send_result(self, _message_id, payload):
             self.payload = payload
 
+    trace = {"origin": time.perf_counter(), "request_id": msg.get("id"), "steps": []}
+    _diag_step(trace, "handler_entry", trace["origin"])
     capture = _Capture()
     state_handler = getattr(websocket_ella_site_state, "__wrapped__", websocket_ella_site_state)
     plan_msg = dict(msg)
@@ -1643,17 +1712,25 @@ async def websocket_ella_action_plan(hass, connection, msg):
             # Price-only plans without configured individual loads do not need
             # the expensive load forecast to produce a truthful normal-operation plan.
             plan_msg["_skip_load_forecast"] = True
+    plan_msg["_ella_diagnostic_trace"] = trace
+    step_started = time.perf_counter()
     state_result = state_handler(hass, capture, plan_msg)
     if inspect.isawaitable(state_result):
         await state_result
+    _diag_step(trace, "site_state_handler", step_started)
     state = capture.payload
     if not isinstance(state, dict) or state.get("success") is not True:
         connection.send_result(msg["id"], state or {"success": False, "error": "site_state_unavailable"})
         return
+    site_state_diagnostics = state.pop("_ella_diagnostics", None)
+    step_started = time.perf_counter()
     result = build_action_plan({key: value for key, value in state.items() if key != "success"})
+    _diag_step(trace, "build_action_plan", step_started, block_count=len(result.get("plan_blocks", [])))
     snapshot_store = hass.data.get(DOMAIN, {}).get("ella_debug_snapshot_store")
     if result.get("available") is True and snapshot_store is not None:
         await snapshot_store.async_put_plan({key: value for key, value in state.items() if key != "success"}, result)
+    _diag_step(trace, "handler_return", trace["origin"])
+    result["diagnostics"] = _diag_payload(trace)
     connection.send_result(msg["id"], result)
 
 
