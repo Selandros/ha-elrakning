@@ -8382,7 +8382,7 @@ class ElrakningPanel {
     try {
       const confirmedDate = this._periodPickerState?.confirmed;
       const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
-      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
+      const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7, diagnostics: true,
         ...(requestedDate ? { date: requestedDate } : {}),
       });
       const responseSeries = response?.series && typeof response.series === "object" ? response.series : {};
@@ -8391,6 +8391,7 @@ class ElrakningPanel {
         error: response?.error || null,
         series_counts: Object.fromEntries(Object.entries(responseSeries).map(([key, value]) => [key, Array.isArray(value?.points) ? value.points.length : 0])),
       });
+      if (response?.power_history_diagnostics) this._startupDiagnostic("power_history_backend_timing", response.power_history_diagnostics);
       if (response?.error === "power_unavailable") return;
       if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};

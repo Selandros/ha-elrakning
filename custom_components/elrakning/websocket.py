@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import inspect
 import json
+from time import monotonic
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1236,35 +1237,93 @@ async def websocket_power_state(hass, connection, msg):
         vol.Required("type"): POWER_HISTORY_COMMAND,
         vol.Optional("days", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=7)),
         vol.Optional("date"): str,
+        vol.Optional("diagnostics", default=False): bool,
     }
 )
 @websocket_api.async_response
 async def websocket_power_history(hass, connection, msg):
+    request_started = monotonic()
+    diagnostics = {
+        "request_id": str(msg.get("id")),
+        "handler_entry": request_started,
+        "days": msg.get("days", 1),
+        "diagnostics_enabled": bool(msg.get("diagnostics")),
+    } if msg.get("diagnostics") else None
     manager = _power_manager(hass)
-    result = await manager.async_history(msg.get("days", 1)) if manager else {
+    if diagnostics is not None:
+        diagnostics["manager_call_start"] = monotonic()
+    result = await manager.async_history(msg.get("days", 1), diagnostics=diagnostics) if manager else {
         "success": False,
         "series": {},
         "error": "power_unavailable",
     }
+    if diagnostics is not None:
+        diagnostics["manager_call_end"] = monotonic()
     forecast_manager = _solar_forecast_manager(hass)
+    if diagnostics is not None:
+        diagnostics["solar_facts_start"] = monotonic()
     forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
+    if diagnostics is not None:
+        diagnostics["solar_facts_end"] = monotonic()
     result["solar_forecast"] = forecast
     result["solar_forecast_baselines"] = forecast.get("baselines", {})
     shadow = hass.data.get(DOMAIN, {}).get("solar_shadow_manager")
+    if diagnostics is not None:
+        diagnostics["solar_shadow_start"] = monotonic()
     result["solar_shadow"] = shadow.public_state() if shadow and _site_is_configured(hass) else {"available": False, "snapshots": []}
+    if diagnostics is not None:
+        diagnostics["solar_shadow_end"] = monotonic()
     weather_manager = hass.data.get(DOMAIN, {}).get("solar_weather_manager")
+    if diagnostics is not None:
+        diagnostics["solar_weather_start"] = monotonic()
     result["solar_weather"] = weather_manager.public_state() if weather_manager else {"available": False, "source": "smhi", "status": "unavailable", "current": {}, "hourly_forecast": []}
+    if diagnostics is not None:
+        diagnostics["solar_weather_end"] = monotonic()
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
+    if diagnostics is not None:
+        diagnostics["solar_pvgis_start"] = monotonic()
     result["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
+    if diagnostics is not None:
+        diagnostics["solar_pvgis_end"] = monotonic()
+    if diagnostics is not None:
+        diagnostics["solar_sun_start"] = monotonic()
     result["solar_sun"] = build_sun_context(hass)
+    if diagnostics is not None:
+        diagnostics["solar_sun_end"] = monotonic()
+    if diagnostics is not None:
+        diagnostics["state_enrichment_start"] = monotonic()
+        diagnostics["load_forecast_start"] = monotonic()
     result["load_forecast"] = await _async_load_forecast_state(hass)
+    if diagnostics is not None:
+        diagnostics["load_forecast_end"] = monotonic()
     requested_date = None
     if msg.get("date"):
         try:
             requested_date = date.fromisoformat(msg["date"])
         except ValueError:
             requested_date = None
+    if diagnostics is not None:
+        diagnostics["power_forecast_start"] = monotonic()
     result["power_forecast"] = await _async_power_forecast_state(hass, requested_date)
+    if diagnostics is not None:
+        diagnostics["power_forecast_end"] = monotonic()
+    if diagnostics is not None:
+        diagnostics["state_enrichment_end"] = monotonic()
+        diagnostics["payload_series_counts"] = {
+            key: len(value.get("points", [])) for key, value in result.get("series", {}).items()
+            if isinstance(value, dict)
+        }
+        diagnostics["manager_ms"] = (diagnostics["manager_call_end"] - diagnostics["manager_call_start"]) * 1000
+        diagnostics["solar_facts_ms"] = (diagnostics["solar_facts_end"] - diagnostics["solar_facts_start"]) * 1000
+        diagnostics["solar_shadow_ms"] = (diagnostics["solar_shadow_end"] - diagnostics["solar_shadow_start"]) * 1000
+        diagnostics["solar_weather_ms"] = (diagnostics["solar_weather_end"] - diagnostics["solar_weather_start"]) * 1000
+        diagnostics["solar_pvgis_ms"] = (diagnostics["solar_pvgis_end"] - diagnostics["solar_pvgis_start"]) * 1000
+        diagnostics["solar_sun_ms"] = (diagnostics["solar_sun_end"] - diagnostics["solar_sun_start"]) * 1000
+        diagnostics["load_forecast_ms"] = (diagnostics["load_forecast_end"] - diagnostics["load_forecast_start"]) * 1000
+        diagnostics["power_forecast_ms"] = (diagnostics["power_forecast_end"] - diagnostics["power_forecast_start"]) * 1000
+        diagnostics["state_enrichment_ms"] = (diagnostics["state_enrichment_end"] - diagnostics["state_enrichment_start"]) * 1000
+        diagnostics["handler_total_ms"] = (monotonic() - request_started) * 1000
+        result["power_history_diagnostics"] = diagnostics
     connection.send_result(msg["id"], result)
 
 
