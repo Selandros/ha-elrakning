@@ -197,8 +197,8 @@ class MeterManager:
         phase_kind = next((kind for kind, entities in self._phase_source_entities.items() if entity_id in entities.values()), None)
         if entity_id != self.mapping.get("power_entity") and phase_kind is None and not phase_entity:
             return
-        self._history_cache_epoch += 1
-        self._history_cache.clear()
+        # Live points are merged by the frontend; keep the expensive Recorder
+        # snapshot reusable until the mapping or period changes.
         if phase_entity or phase_kind is not None:
             invert_power = bool(self.mapping.get(METER_INVERT_FIELD))
             phase_values = {

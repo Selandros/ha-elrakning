@@ -197,8 +197,8 @@ class PowerManager:
         }
         if entity_id not in selected:
             return
-        self._history_cache_epoch += 1
-        self._history_cache.clear()
+        # Live points are merged by the frontend; keep the expensive Recorder
+        # snapshot reusable until the mapping or period changes.
         state = await self.async_state()
         new_state = event.data.get("new_state")
         timestamp = getattr(new_state, "last_updated", None)

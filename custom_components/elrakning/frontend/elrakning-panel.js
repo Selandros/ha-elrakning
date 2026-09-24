@@ -10032,12 +10032,14 @@ class ElrakningPanel {
       this.loadRetainedHistory(),
       this.loadMeterState(loadHistory),
       this.loadPowerState(loadHistory),
-      this.loadBillingHistory(),
       this.loadSolarEvidence(),
       this._loadDebugPreference(),
       this._loadChartPreferences(),
     ]).finally(() => {
       this._backendHydrationPromise = null;
+      // Billing history is not required for initial live or chart history.
+      // Defer its larger Recorder query until critical hydration is complete.
+      void this.loadBillingHistory();
     });
     return this._backendHydrationPromise;
   }

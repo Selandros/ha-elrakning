@@ -230,6 +230,20 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
             "point": {"timestamp": changed.last_updated.isoformat(), "value_kw": 0.36},
         }])
 
+    async def test_state_change_keeps_completed_history_cache_for_live_merge(self):
+        states = {"sensor.solar": _state(0.36, "kW")}
+        hass = _hass(states)
+        manager = power.PowerManager(hass)
+        manager.mapping = {"solar_entities": ["sensor.solar"], **{field: None for field in power.POWER_FIELDS}}
+        key = ("cached", "2026-08-23", 7)
+        manager._history_cache[key] = {"success": True}
+        manager._history_cache_epoch = 4
+        changed = _state(0.42, "kW", datetime(2026, 8, 23, 12, 5, tzinfo=timezone.utc))
+        states["sensor.solar"] = changed
+        await manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.solar", "new_state": changed}))
+        self.assertIn(key, manager._history_cache)
+        self.assertEqual(manager._history_cache_epoch, 4)
+
     async def test_soc_state_change_event_contains_live_series_point(self):
         states = {"sensor.soc": _state(73, "%")}
         fired = []

@@ -97,6 +97,24 @@ def _hass(*entity_ids):
 
 
 class MeterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_state_change_keeps_completed_history_cache_for_live_merge(self):
+        hass = _hass("sensor.power")
+        hass.bus.async_fire = lambda *args: None
+        manager = meter.MeterManager(hass)
+        await manager.async_save_mapping({"power_entity": "sensor.power"})
+        key = ("sensor.power", "2026-08-23", False, ())
+        manager._history_cache[key] = {"success": True}
+        manager._history_cache_epoch = 3
+        changed = types.SimpleNamespace(
+            state="100",
+            attributes={"unit_of_measurement": "W", "device_class": "power"},
+            last_updated=datetime(2026, 8, 23, 12, 5, tzinfo=timezone.utc),
+        )
+        hass.states.get = lambda entity_id: changed if entity_id == "sensor.power" else None
+        await manager._async_state_changed(types.SimpleNamespace(data={"entity_id": "sensor.power", "new_state": changed}))
+        self.assertIn(key, manager._history_cache)
+        self.assertEqual(manager._history_cache_epoch, 3)
+
     async def test_unconfigured_meter_does_not_expose_stale_phase_context(self):
         hass = _hass("sensor.phase_l1", "sensor.phase_l2", "sensor.phase_l3")
         manager = meter.MeterManager(hass)
