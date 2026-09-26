@@ -1731,11 +1731,14 @@ async def _async_optimizer_runtime_inputs(hass, site_id):
             self.payload = payload
 
     capture = _Capture()
-    await websocket_ella_site_state(
+    state_handler = getattr(websocket_ella_site_state, "__wrapped__", websocket_ella_site_state)
+    state_result = state_handler(
         hass,
         capture,
         {"id": 1, "type": ELLA_SITE_STATE_COMMAND, "site_id": site_id},
     )
+    if inspect.isawaitable(state_result):
+        await state_result
     state = capture.payload if isinstance(capture.payload, dict) else {}
     twin = state.get("ess_digital_twin") if isinstance(state.get("ess_digital_twin"), dict) else {}
     return {
