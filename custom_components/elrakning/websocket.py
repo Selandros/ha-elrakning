@@ -1750,12 +1750,18 @@ async def _async_optimizer_runtime_inputs(hass, site_id):
             "resource_id": resources[0]["resource_id"],
             "method": "strong_registry_config_entry_and_device_identity",
         }
+    resource_state = resources[0].get("state") if len(resources) == 1 and isinstance(resources[0], dict) else {}
+    soc_percent = resource_state.get("soc_percent") if isinstance(resource_state, dict) else None
+    try:
+        soc_fraction = float(soc_percent) / 100.0
+    except (TypeError, ValueError):
+        soc_fraction = None
     return {
         "site_id": site_id,
         "known_at": decision_at.isoformat(),
         "slots": slots,
         "ess": {
-            "soc_fraction": twin.get("soc_fraction"),
+            "soc_fraction": soc_fraction,
             "resource_identity": resource_identity,
         },
     }
