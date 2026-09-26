@@ -11591,6 +11591,13 @@ class ElrakningPanel {
     const periods = this._periodPickerState?.mode === "hour"
       ? selectHourlyPricePeriods(this.priceData.periods, this._periodPickerState.confirmed)
       : this.priceData.periods;
+    if (!periods.length) {
+      this._priceChartLiveSignature = this._getPriceChartLiveSignature();
+      const legend = this.host.querySelector("[data-meter-legend]");
+      if (legend) legend.hidden = true;
+      chart.innerHTML = "<div class=\"empty-chart\"><strong>Ingen prisdata för vald dag.</strong></div>";
+      return;
+    }
     const visibleLayers = this._effectiveChartLayerState();
     this._updatePriceComparisonControls();
     const prices = periods.map((period) => this._periodCustomerPrice(period));

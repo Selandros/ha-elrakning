@@ -35,6 +35,8 @@ assert.match(frontend, /substage = "render_solar_evidence"/);
 assert.match(frontend, /substage = "render_price_plan_cards"/);
 assert.match(frontend, /substage = "render_price_chart"/);
 assert.match(frontend, /\.\.\.sanitizeDiagnosticError\(error\)/);
+const hourlyChart = frontend.slice(frontend.indexOf("_renderHourlyPriceChart"));
+assert.match(hourlyChart, /if \(!periods\.length\)[\s\S]*?return;[\s\S]*?const firstStart = new Date\(periods\[0\]\.start\)/);
 const historyCycle = frontend.slice(frontend.indexOf("async _loadPowerHistoryCycle"));
 assert.ok(historyCycle.indexOf("enrichment_request_start") < historyCycle.indexOf("this._rebuildLivePowerMaxima"));
 assert.match(historyCycle, /history_render_failed/);
