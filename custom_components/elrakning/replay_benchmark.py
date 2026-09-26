@@ -313,6 +313,142 @@ class ThresholdBaseline:
         return _simulate_battery_actions(enriched, ess, actions)
 
 
+class EconomicOptimizerBaseline:
+    """Read-only adapter for the Step 8 optimizer; never exposes execution."""
+
+    name = "optimizer"
+
+    def __init__(self, *, site_id: str, decision_at: datetime, economics: dict[str, Any], resource_id: str):
+        self.site_id = site_id
+        self.decision_at = decision_at
+        self.economics = dict(economics)
+        self.resource_id = resource_id
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> list[dict[str, Any]]:
+        if ess is None:
+            raise ValueError("ess_limits_missing")
+        from .economic_optimizer import build_economic_plan
+
+        inputs = {
+            "site_id": self.site_id,
+            "known_at": self.decision_at,
+            "slots": slots,
+            "economics": self.economics,
+            "replanning": None,
+            "ess": {
+                "soc_fraction": ess.initial_soc_fraction,
+                "capacity_kwh": ess.capacity_kwh,
+                "reserve_soc_fraction": ess.reserve_soc_fraction,
+                "max_charge_kw": ess.max_charge_kw,
+                "max_discharge_kw": ess.max_discharge_kw,
+                "charge_efficiency": ess.charge_efficiency,
+                "discharge_efficiency": ess.discharge_efficiency,
+                "resource_identity": {
+                    "available": True,
+                    "site_id": self.site_id,
+                    "resource_id": self.resource_id,
+                    "method": "strong_registry_config_entry_and_device_identity",
+                },
+            },
+        }
+        plan = build_economic_plan(inputs)
+        if plan.get("available") is not True:
+            raise ValueError(str(plan.get("reason") or "optimizer_unavailable"))
+        return [{
+            "valid_at": point["valid_at"],
+            "battery_signed_kw": point["discharge_kw"] - point["charge_kw"],
+            "charge_kw": point["charge_kw"],
+            "discharge_kw": point["discharge_kw"],
+            "grid_import_kw": point["import_kw"],
+            "grid_export_kw": point["export_kw"],
+            "energy_kwh": point["energy_kwh"],
+        } for point in plan["points"]]
+
+
+def compute_regret(candidate_scorecard: dict[str, Any], reference_scorecard: dict[str, Any], *, reference_kind: str) -> dict[str, Any]:
+    """Compare evaluation scorecards without making the reference a decision input."""
+    candidate_cost = _number(candidate_scorecard.get("cost_sek"))
+    reference_cost = _number(reference_scorecard.get("cost_sek"))
+    return {
+        "available": candidate_cost is not None and reference_cost is not None,
+        "candidate_cost_sek": candidate_cost,
+        "reference_cost_sek": reference_cost,
+        "cost_regret_sek": None if candidate_cost is None or reference_cost is None else round(candidate_cost - reference_cost, 9),
+        "reference_kind": reference_kind,
+        "evaluation_only": True,
+        "hindsight_used_for_decision": False,
+    }
+
+
+def build_hindsight_oracle(
+    *,
+    site_id: str,
+    decision_at: datetime,
+    slots: list[dict[str, Any]],
+    actual_rows: Iterable[dict[str, Any]],
+    economics: dict[str, Any],
+    ess: ESSReplayLimits | None,
+    resource_id: str,
+) -> dict[str, Any]:
+    """Build an evaluation-only oracle from matured actual load/solar data.
+
+    The oracle is intentionally a separate artifact. Its post-decision actuals
+    are never passed to the replay decision or optimizer baseline.
+    """
+    actual_by_time: dict[str, dict[str, float]] = {}
+    for row in actual_rows:
+        if not isinstance(row, dict) or row.get("site_id") != site_id or not _qualified(row):
+            continue
+        start = _iso(row.get("interval_start"))
+        value = _number(row.get("value"))
+        if start is None or value is None:
+            continue
+        if row.get("logical_role") == "house.consumption":
+            actual_by_time.setdefault(start, {})["load_kw"] = value / 1000.0
+        elif row.get("logical_role") == "solar.production":
+            actual_by_time.setdefault(start, {})["solar_kw"] = value / 1000.0
+    oracle_slots = []
+    for slot in slots:
+        values = actual_by_time.get(_iso(slot.get("valid_at")) or "")
+        if not values or "load_kw" not in values or "solar_kw" not in values:
+            return {
+                "available": False,
+                "reason": "hindsight_actual_load_or_solar_missing",
+                "evaluation_only": True,
+                "hindsight_used_for_decision": False,
+                "provenance": {"source": "matured_actual_outcomes", "decision_at": _iso(decision_at)},
+            }
+        oracle_slots.append({**slot, **values})
+    try:
+        points = EconomicOptimizerBaseline(
+            site_id=site_id,
+            decision_at=decision_at,
+            economics=economics,
+            resource_id=resource_id,
+        ).simulate(oracle_slots, ess)
+    except ValueError as error:
+        return {
+            "available": False,
+            "reason": str(error),
+            "evaluation_only": True,
+            "hindsight_used_for_decision": False,
+            "provenance": {"source": "matured_actual_outcomes", "decision_at": _iso(decision_at)},
+        }
+    return {
+        "available": True,
+        "evaluation_only": True,
+        "hindsight_used_for_decision": False,
+        "provenance": {
+            "source": "matured_actual_outcomes",
+            "decision_at": _iso(decision_at),
+            "hindsight": True,
+            "model_kind": "evaluation_only_oracle",
+        },
+        "points": points,
+        "scorecard": _score(points, oracle_slots, ess),
+    }
+
+
 def _validate_ess(ess: ESSReplayLimits | None) -> list[str]:
     if ess is None:
         return ["ess_limits_missing"]

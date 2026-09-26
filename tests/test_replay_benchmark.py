@@ -7,10 +7,13 @@ install_elrakning_package_stub()
 
 from custom_components.elrakning.replay_benchmark import (
     CheapestPriceBaseline,
+    EconomicOptimizerBaseline,
     ESSReplayLimits,
     FixedBatteryBaseline,
     ThresholdBaseline,
     build_replay_run,
+    build_hindsight_oracle,
+    compute_regret,
     select_causal_frames,
 )
 
@@ -158,3 +161,46 @@ def test_explicit_fixed_cheapest_and_threshold_baselines_are_deterministic_and_b
                               model_identity={"model": "fixture"}, ess=ESS,
                               baselines=(fixed, cheapest, threshold))
     assert result["run_fingerprint"] == repeat["run_fingerprint"]
+
+
+def test_optimizer_adapter_is_read_only_and_regret_is_evaluation_only():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    optimizer = EconomicOptimizerBaseline(
+        site_id=SITE,
+        decision_at=decision,
+        resource_id="ess-a",
+        economics={"known_at": decision.isoformat(), "valid_from": decision.isoformat()},
+    )
+    try:
+        optimizer.simulate(_slots(decision + timedelta(minutes=15), count=4), ESS)
+    except ValueError as error:
+        assert str(error) == "horizon_outside_24_to_36_hours"
+    else:
+        raise AssertionError("short optimizer horizon was accepted")
+    regret = compute_regret({"cost_sek": 12.5}, {"cost_sek": 10.0}, reference_kind="hindsight_oracle")
+    assert regret == {
+        "available": True,
+        "candidate_cost_sek": 12.5,
+        "reference_cost_sek": 10.0,
+        "cost_regret_sek": 2.5,
+        "reference_kind": "hindsight_oracle",
+        "evaluation_only": True,
+        "hindsight_used_for_decision": False,
+    }
+
+
+def test_hindsight_oracle_is_evaluation_only_and_fail_closed_without_actual_inputs():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    result = build_hindsight_oracle(
+        site_id=SITE,
+        decision_at=decision,
+        slots=_slots(decision + timedelta(minutes=15), count=4),
+        actual_rows=[],
+        economics={"known_at": decision.isoformat(), "valid_from": decision.isoformat()},
+        ess=ESS,
+        resource_id="ess-a",
+    )
+    assert result["available"] is False
+    assert result["reason"] == "hindsight_actual_load_or_solar_missing"
+    assert result["evaluation_only"] is True
+    assert result["hindsight_used_for_decision"] is False
