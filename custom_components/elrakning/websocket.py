@@ -1741,13 +1741,22 @@ async def _async_optimizer_runtime_inputs(hass, site_id):
         await state_result
     state = capture.payload if isinstance(capture.payload, dict) else {}
     twin = state.get("ess_digital_twin") if isinstance(state.get("ess_digital_twin"), dict) else {}
+    resources = twin.get("resources") if isinstance(twin.get("resources"), list) else []
+    resource_identity = None
+    if len(resources) == 1 and isinstance(resources[0], dict) and isinstance(resources[0].get("resource_id"), str):
+        resource_identity = {
+            "available": True,
+            "site_id": site_id,
+            "resource_id": resources[0]["resource_id"],
+            "method": "strong_registry_config_entry_and_device_identity",
+        }
     return {
         "site_id": site_id,
         "known_at": decision_at.isoformat(),
         "slots": slots,
         "ess": {
             "soc_fraction": twin.get("soc_fraction"),
-            "resource_identity": twin.get("resource_identity"),
+            "resource_identity": resource_identity,
         },
     }
 
