@@ -7,7 +7,7 @@ const backend = fs.readFileSync("custom_components/elrakning/websocket.py", "utf
 for (const event of [
   "date_change", "history_request_start", "history_reused", "history_response_received",
   "history_stale_rejected", "enrichment_request_start", "enrichment_response_received",
-  "enrichment_stale_rejected", "enrichment_merge",
+  "enrichment_stale_rejected", "enrichment_merge", "history_cycle_failed", "history_cycle_cleanup",
 ]) assert.match(frontend, new RegExp(`\\"${event}\\"`));
 assert.match(frontend, /_recordPowerFlowDiagnostic\(event, details = \{\}\)/);
 assert.match(frontend, /relative_ms: roundDiagnosticMs\(performance\.now\(\)\)/);

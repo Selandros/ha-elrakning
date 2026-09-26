@@ -8401,6 +8401,11 @@ class ElrakningPanel {
     cycle.history.finally(() => {
       const cleanup = () => {
         if (this._powerHistoryInFlight.get(cycleKey) === cycle) this._powerHistoryInFlight.delete(cycleKey);
+        this._recordPowerFlowDiagnostic("history_cycle_cleanup", {
+          requested_date: requestedDate,
+          enrichment_started: Boolean(cycle.enrichment),
+          active_history_jobs: this._powerHistoryInFlight.size,
+        });
       };
       if (cycle.enrichment) cycle.enrichment.finally(cleanup);
       else cleanup();
@@ -8413,16 +8418,20 @@ class ElrakningPanel {
     const requestToken = ++this._powerHistoryRequestToken;
     const enrichmentToken = ++this._powerHistoryEnrichmentRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
+    let stage = "request";
     try {
       const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
         ...(requestedDate ? { date: requestedDate } : {}),
       });
+      stage = "response";
       this._recordPowerFlowDiagnostic("history_response_received", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
       if (response?.error === "power_unavailable") return;
       if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) {
+        stage = "stale_guard";
         this._recordPowerFlowDiagnostic("history_stale_rejected", { requested_date: requestedDate, request_token: requestToken });
         return;
       }
+      stage = "state_apply";
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
       for (const [key, points] of Object.entries(this._powerLivePoints)) {
         if (!points.size) continue;
@@ -8448,10 +8457,12 @@ class ElrakningPanel {
       this._powerHistoryContextKey = `${siteContextGeneration}:${requestedDate || response?.date || ""}`;
       this._rebuildLivePowerMaxima();
       this._refreshPowerEnergyState();
+      stage = "history_render";
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
       this._recordPowerFlowDiagnostic("history_render", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
+      stage = "enrichment_start";
       this._recordPowerFlowDiagnostic("enrichment_request_start", { requested_date: requestedDate, active_enrichment_jobs: 1 });
       cycle.enrichment = this.loadPowerHistoryEnrichment({
         requestToken,
@@ -8460,7 +8471,13 @@ class ElrakningPanel {
         contextKey: this._powerHistoryContextKey,
         requestedDate,
       });
-    } catch {
+    } catch (error) {
+      this._recordPowerFlowDiagnostic("history_cycle_failed", {
+        requested_date: requestedDate,
+        stage,
+        error_name: error?.name || "Error",
+        duration_ms: roundDiagnosticMs(performance.now() - started),
+      });
       if (requestToken !== this._powerHistoryRequestToken) return;
       this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false }, solar_pvgis: { available: false, source: "jrc_pvgis" }, solar_open_meteo: { available: false, source: "open_meteo" } };
       this._loadForecast = { available: false, reason: "history_unavailable", frames: [] };
