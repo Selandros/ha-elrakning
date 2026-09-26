@@ -67,6 +67,13 @@ def test_runtime_site_state_keeps_target_date_out_of_collection_target_loop():
     assert "for target in targets:" not in source
 
 
+def test_economic_optimizer_websocket_schema_accepts_inputs():
+    source = (Path(__file__).parents[1] / "custom_components/elrakning/websocket.py").read_text()
+    marker = '@websocket_api.websocket_command({\n    vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND,'
+    assert marker in source
+    assert 'vol.Optional("inputs", default=None): dict' in source
+
+
 def test_state_load_precedence_and_no_zero_fill():
     site = "site-a"
     decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)

@@ -283,7 +283,10 @@ def _sanitize_facility(facility: dict) -> dict:
     return result
 
 
-@websocket_api.websocket_command({vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND})
+@websocket_api.websocket_command({
+    vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND,
+    vol.Optional("inputs", default=None): dict,
+})
 @websocket_api.async_response
 async def websocket_economic_optimizer(hass, connection, msg):
     """Return a read-only deterministic Step 8 plan or an explicit unavailable result."""
