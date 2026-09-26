@@ -118,7 +118,7 @@ Status: foundation established through the former capability and site-state
 work; positive live flexible-load and complete multi-ESS cases remain limited
 by current site configuration.
 
-### 6 — Forecast & baseline behavior (ACTIVE)
+### 6 — Forecast & baseline behavior (COMPLETE)
 
 Build the read-only forecast layer for Last, Sol, signed battery behavior and
 derived Köp/Sälj. Keep actual history separate and expose the six canonical
@@ -139,7 +139,19 @@ Persistent frozen forecast evidence, matured target-slot evaluation,
 context-level calibration and bounded learning belong here. Learning must not
 change execution safety constraints.
 
-Status: active. `0.0.757` is the protected stable baseline for this work.
+Status: complete on `0.0.758`, commit `4357d4aade6c53c8c6c22383165258d46eb59a4a`.
+The released contract explicitly identifies `baseline_forecast` as separate
+from actual and `ella_plan`, preserves frame/source-generation/quality
+provenance through the load and power payloads, and restricts autonomous
+battery context training to active site-scoped solar generations. The release
+passed the full regression gates and was deployed with exact tracked-payload
+hash equality, `ha core check`, one normal Core restart, HTTP 200
+manifest/panel checks and no new Elräkning-specific errors. Runtime fallback
+verification against the fresh Vikarbodarna canonical DB confirmed site
+isolation, canonical battery sign/grid balance, persistent matured power
+evaluation and bounded context calibration. Missing causal single-run source
+frames remain unavailable rather than being fabricated; this is the intended
+partial-horizon behavior.
 
 ### 7 — ESS Digital Twin & Battery Health
 
@@ -151,7 +163,7 @@ Acceptance: no aggregate without verified resource mapping; trajectory obeys
 capacity/power/efficiency/reserve constraints; unknown physical facts remain
 unknown; health/calibration is bounded and cannot widen hard limits.
 
-Status: next main step. Existing Stage 6 physical facts and fail-closed
+Status: next main step / ACTIVE after Step 6 closure. Existing Stage 6 physical facts and fail-closed
 eligibility are inputs, not proof that the full twin is complete.
 
 ### 8 — Economics & deterministic optimizer

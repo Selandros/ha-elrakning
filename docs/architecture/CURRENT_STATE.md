@@ -10,12 +10,41 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.757` is stable. Masterplan v2 step 6 is ACTIVE and
-  step 7 is next; steps 0–5 are established foundation with remaining
+- Runtime baseline `0.0.758` is stable after Masterplan v2 step 6 closure.
+  Step 6 — Forecast & baseline behavior is COMPLETE and step 7 is ACTIVE/NEXT;
+  steps 0–5 are established foundation with remaining
   hardening, retention, and multi-site details tracked explicitly.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.
 - Stage/Phase labels in the historical sections below describe former release
   milestones only and are not active roadmap instructions.
+
+## 0.0.758 Masterplan v2 Step 6 closure
+
+- VERIFIED (release/runtime, 2026-09-26): Step 6 — Forecast & baseline
+  behavior closed on `0.0.758`, commit
+  `4357d4aade6c53c8c6c22383165258d46eb59a4a`. The power payload now names
+  the `baseline_forecast` layer explicitly and keeps it separate from actual
+  history and `ella_plan`; all six flow series retain slot-level source,
+  classification and provenance.
+- VERIFIED (tests): 784 Python tests and 46 subtests passed, all MJS tests,
+  compileall, JSON validation and `git diff --check` passed. Regression
+  coverage includes causal cutoff, site/source-generation isolation,
+  canonical battery sign/grid balance, active solar-generation selection,
+  load-frame provenance and deterministic baseline behavior.
+- VERIFIED (deployment): the exact tracked integration payload matched remote
+  SHA256 hashes; `ha core check` passed; exactly one normal Core restart was
+  issued; the deployed manifest and panel both returned HTTP 200 and manifest
+  version `0.0.758`; the served panel hash matched the deployed file.
+- VERIFIED (runtime fallback evidence): fresh Vikarbodarna canonical storage
+  remained site-scoped with the corrected active battery generation and causal
+  Open-Meteo single-run frames. Persistent power-learning contained 375
+  combined matured records with bounded context calibration. A current-day
+  single-run frame was absent at the snapshot time, so the baseline correctly
+  remained partial/short-horizon instead of inventing slots. This is runtime
+  fail-closed evidence, not a claim that every source horizon was live-filled.
+- No Stage 7+ implementation, optimizer, actuator behavior or execution gate
+  changed. Step 7 — ESS Digital Twin & Battery Health is now the active next
+  main scope.
 
 ## Release and repository
 

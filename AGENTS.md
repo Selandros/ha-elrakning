@@ -1,5 +1,12 @@
 # Elräkning project instructions
 
+## Current roadmap checkpoint
+
+Masterplan v2 step 6 — Forecast & baseline behavior is complete on runtime
+baseline `0.0.758`; step 7 — ESS Digital Twin & Battery Health is the next
+active main scope. `actual -> baseline_forecast -> ella_plan` remains the
+layer contract, and physical control remains gated by step 14.
+
 ## Architecture memory
 
 Before planning or modifying work involving data/history/storage, multi-site,
