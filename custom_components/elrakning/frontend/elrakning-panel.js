@@ -8696,7 +8696,7 @@ class ElrakningPanel {
     const siteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || this._pricePlan?.site_id || null;
     const selectedDate = this._periodPickerState?.confirmed;
     const requestedDate = selectedDate instanceof Date && Number.isFinite(selectedDate.getTime()) ? localDateKey(selectedDate) : null;
-    void this._recordDiagnostic("power_flow", "INFO", event, JSON.stringify({
+    void this._recordDiagnostic("frontend_power_flow", "INFO", event, JSON.stringify({
       relative_ms: roundDiagnosticMs(performance.now()),
       request_generation: this._powerHistoryRequestToken,
       site_context_generation: this._siteContextGeneration,

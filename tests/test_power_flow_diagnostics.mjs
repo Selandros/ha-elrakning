@@ -25,5 +25,10 @@ assert.match(backend, /time\.monotonic\(\)/);
 assert.match(backend, /async def _power_flow_diagnostic\(/);
 assert.match(backend, /relative_ms/);
 assert.doesNotMatch(backend, /payload = \{"mono_ms"/);
+assert.match(backend, /frontend_power_flow/);
+assert.match(frontend, /this\._recordDiagnostic\("frontend_power_flow"/);
+assert.match(frontend, /type: "elrakning\/diagnostics_clear"/);
+assert.match(backend, /async def websocket_diagnostics_clear\(/);
+assert.match(backend, /async_clear_diagnostics\(\)/);
 
 console.log("power flow day-switch diagnostics contract: ok");

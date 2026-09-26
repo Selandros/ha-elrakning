@@ -22,7 +22,7 @@ assert.match(panel, /performance_monitor_stopped/);
 assert.match(panel, /Visibility: \$\{document\.visibilityState\}/);
 assert.match(panel, /state\.stopped && event !== "performance_monitor_stopped"/);
 assert.match(panel, /_recordSlowRender\("price-chart"/);
-assert.match(websocket, /vol\.In\(\{"meter", "price", "performance"\}\)/);
+assert.match(websocket, /vol\.In\(\{"meter", "price", "performance", "frontend_power_flow"\}\)/);
 assert.doesNotMatch(panel, /setInterval\(/);
 const loader = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-loader.js", import.meta.url), "utf8");
 assert.match(loader, /disconnectedCallback\(\) \{[\s\S]*_panel\?\.destroy\?\.\(\)[\s\S]*_panel = null[\s\S]*_loadedVersion = null/);
