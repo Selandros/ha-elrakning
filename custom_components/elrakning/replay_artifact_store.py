@@ -1,0 +1,121 @@
+"""Bounded immutable Step 9 replay artifacts and holdout qualification."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from copy import deepcopy
+from typing import Any
+
+try:
+    from homeassistant.helpers.storage import Store
+except ModuleNotFoundError:  # pragma: no cover
+    class Store:  # type: ignore[no-redef]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+
+SCHEMA = "ella_replay_artifact.v1"
+STORE_KEY = "elrakning.replay_artifacts"
+STORE_VERSION = 1
+MAX_ARTIFACTS_PER_SITE = 128
+REQUIRED_HOLDOUTS = {"season", "site", "dst", "gap", "source_generation_change", "publication_cutoff"}
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+
+
+def _fingerprint(value: Any) -> str:
+    return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def normalize_artifact(artifact: Any) -> dict[str, Any] | None:
+    if not isinstance(artifact, dict) or artifact.get("schema") != SCHEMA:
+        return None
+    required = ("site_id", "decision_at", "horizon", "input_identity", "qualification", "scorecards", "artifact_id")
+    if any(not artifact.get(key) for key in required):
+        return None
+    if not isinstance(artifact["site_id"], str) or not isinstance(artifact["scorecards"], dict):
+        return None
+    payload = {key: value for key, value in artifact.items() if key != "artifact_id"}
+    if artifact["artifact_id"] != _fingerprint(payload):
+        return None
+    result = deepcopy(artifact)
+    result["immutable"] = True
+    return result
+
+
+def build_artifact(
+    run: dict[str, Any], *, dataset_identity: dict[str, Any], parameter_identity: dict[str, Any], holdouts: list[dict[str, Any]] | None = None
+) -> dict[str, Any] | None:
+    if not isinstance(run, dict) or not isinstance(dataset_identity, dict) or not isinstance(parameter_identity, dict):
+        return None
+    if not isinstance(run.get("site_id"), str) or not run.get("decision_at") or not run.get("qualification"):
+        return None
+    artifact = {
+        "schema": SCHEMA,
+        "site_id": run["site_id"],
+        "decision_at": run["decision_at"],
+        "horizon": {"slot_count": sum(len(item.get("points", [])) for item in (run.get("baselines") or {}).values() if isinstance(item, dict))},
+        "run_fingerprint": run.get("run_fingerprint"),
+        "dataset_identity": deepcopy(dataset_identity),
+        "input_identity": deepcopy(run.get("input_identity") or {}),
+        "model_identity": deepcopy((run.get("input_identity") or {}).get("model") or {}),
+        "calibration_identity": deepcopy((run.get("input_identity") or {}).get("calibration") or {}),
+        "parameter_identity": deepcopy(parameter_identity),
+        "qualification": deepcopy(run["qualification"]),
+        "scorecards": deepcopy(run.get("baselines") or {}),
+        "holdouts": deepcopy(holdouts or []),
+        "provenance": {"source": "causal_replay", "hindsight_used_for_decision": False},
+    }
+    artifact["artifact_id"] = _fingerprint(artifact)
+    return artifact
+
+
+def validate_holdout_matrix(cases: Any) -> dict[str, Any]:
+    if not isinstance(cases, list):
+        return {"qualified": False, "reasons": ["holdout_matrix_missing"]}
+    seen = set()
+    reasons = []
+    for case in cases:
+        if not isinstance(case, dict) or case.get("kind") not in REQUIRED_HOLDOUTS:
+            reasons.append("holdout_kind_missing")
+            continue
+        seen.add(case["kind"])
+        if not case.get("run_fingerprint") or case.get("contaminated") or case.get("incomplete"):
+            reasons.append(f"holdout_{case['kind']}_unqualified")
+    reasons.extend(f"holdout_{kind}_missing" for kind in sorted(REQUIRED_HOLDOUTS - seen))
+    return {"qualified": not reasons, "reasons": sorted(set(reasons)), "kinds": sorted(seen)}
+
+
+class ReplayArtifactStore:
+    """Persistent, immutable, exact-site artifact store with bounded retention."""
+
+    def __init__(self, hass: Any) -> None:
+        self.store = Store(hass, STORE_VERSION, STORE_KEY)
+        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}, "available": True}
+
+    async def async_load(self) -> None:
+        cached = await self.store.async_load()
+        if cached is None:
+            return
+        if not isinstance(cached, dict) or cached.get("schema") != SCHEMA or not isinstance(cached.get("sites"), dict):
+            self.state = {"schema": SCHEMA, "version": 1, "sites": {}, "available": False, "reason": "artifact_schema_mismatch"}
+            return
+        self.state = {"schema": SCHEMA, "version": 1, "sites": cached["sites"], "available": True}
+
+    async def async_append(self, artifact: Any) -> bool:
+        normalized = normalize_artifact(artifact)
+        if normalized is None or self.state.get("available") is not True:
+            return False
+        site = normalized["site_id"]
+        records = [item for item in self.state.setdefault("sites", {}).setdefault(site, []) if isinstance(item, dict)]
+        if any(item.get("artifact_id") == normalized["artifact_id"] for item in records):
+            return False
+        records.append(normalized)
+        records.sort(key=lambda item: (str(item.get("decision_at")), str(item.get("artifact_id"))))
+        self.state["sites"][site] = records[-MAX_ARTIFACTS_PER_SITE:]
+        await self.store.async_save(self.state)
+        return True
+

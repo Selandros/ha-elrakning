@@ -21,6 +21,22 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - Stage/Phase labels in the historical sections below describe former release
   milestones only and are not active roadmap instructions.
 
+## 0.0.788 Masterplan v2 Step 9 artifact checkpoint
+
+- IMPLEMENTED/TESTED: `ella_replay_artifact.v1` is an immutable, exact-site
+  artifact contract with run/dataset/source/model/calibration/parameter
+  identities, qualification/contamination state, scorecards and provenance.
+  `ReplayArtifactStore` uses the existing Home Assistant Store pattern, rejects
+  schema mismatches fail-closed, deduplicates fingerprints and retains at most
+  128 artifacts per site. Read-only append/list websocket commands are exposed;
+  no execution path exists.
+- IMPLEMENTED/TESTED: deterministic holdout qualification covers season, site,
+  DST, gaps, source-generation changes and publication cutoffs. Contaminated
+  or incomplete cases cannot qualify.
+- OPEN RUNTIME GATE: no artifact has yet been published/read back through the
+  deployed HA runtime, and live holdout evidence is not claimed without that
+  verification. Step 9 remains ACTIVE/PARTIAL.
+
 ## 0.0.785 Masterplan v2 Step 9 baseline checkpoint
 
 - IMPLEMENTED/TESTED: fixed, cheapest-price and threshold battery baselines

@@ -46,6 +46,7 @@ from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
 from .economic_optimizer import build_economic_plan, build_eon_economics, derive_provider_reference
 from .ella_ess_facts import EllaEssFactsStore
+from .replay_artifact_store import ReplayArtifactStore
 from .ella_economic_policy import EllaEconomicPolicyStore
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
@@ -121,6 +122,8 @@ ELLA_EXECUTION_DISPATCH_COMMAND = f"{DOMAIN}/ella_execution/dispatch"
 ECONOMIC_OPTIMIZER_COMMAND = f"{DOMAIN}/economic_optimizer"
 ESS_FACTS_LIST_COMMAND = f"{DOMAIN}/ess_facts/list"
 ESS_FACTS_IMPORT_COMMAND = f"{DOMAIN}/ess_facts/import"
+REPLAY_ARTIFACT_APPEND_COMMAND = f"{DOMAIN}/replay_artifact/append"
+REPLAY_ARTIFACT_LIST_COMMAND = f"{DOMAIN}/replay_artifact/list"
 ECONOMIC_POLICY_IMPORT_COMMAND = f"{DOMAIN}/economic_policy/import"
 ECONOMIC_POLICY_STATE_COMMAND = f"{DOMAIN}/economic_policy/state"
 UPDATE_EVENT = "elrakning_price_update"
@@ -196,6 +199,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_economic_optimizer)
     websocket_api.async_register_command(hass, websocket_ess_facts_list)
     websocket_api.async_register_command(hass, websocket_ess_facts_import)
+    websocket_api.async_register_command(hass, websocket_replay_artifact_append)
+    websocket_api.async_register_command(hass, websocket_replay_artifact_list)
     websocket_api.async_register_command(hass, websocket_economic_policy_import)
     websocket_api.async_register_command(hass, websocket_economic_policy_state)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
@@ -325,6 +330,27 @@ async def websocket_ess_facts_list(hass, connection, msg):
     store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
     facts = store.list_site(msg["site_id"]) if isinstance(store, EllaEssFactsStore) else []
     connection.send_result(msg["id"], {"schema": "ella_ess_facts.v1", "site_id": msg["site_id"], "facts": facts})
+
+
+@websocket_api.websocket_command({vol.Required("type"): REPLAY_ARTIFACT_APPEND_COMMAND, vol.Required("artifact"): dict})
+@websocket_api.async_response
+async def websocket_replay_artifact_append(hass, connection, msg):
+    """Persist one already-built immutable replay artifact without execution."""
+    store = hass.data.get(DOMAIN, {}).get("replay_artifact_store")
+    if not isinstance(store, ReplayArtifactStore):
+        connection.send_error(msg["id"], "not_ready", "Replay artifact store is not ready")
+        return
+    accepted = await store.async_append(msg["artifact"])
+    connection.send_result(msg["id"], {"schema": "ella_replay_artifact.v1", "accepted": accepted})
+
+
+@websocket_api.websocket_command({vol.Required("type"): REPLAY_ARTIFACT_LIST_COMMAND, vol.Required("site_id"): str})
+@websocket_api.async_response
+async def websocket_replay_artifact_list(hass, connection, msg):
+    """Return immutable artifacts for one exact site only."""
+    store = hass.data.get(DOMAIN, {}).get("replay_artifact_store")
+    records = store.state.get("sites", {}).get(msg["site_id"], []) if isinstance(store, ReplayArtifactStore) else []
+    connection.send_result(msg["id"], {"schema": "ella_replay_artifact.v1", "site_id": msg["site_id"], "artifacts": records})
 
 
 @websocket_api.websocket_command({vol.Required("type"): ESS_FACTS_IMPORT_COMMAND, vol.Required("facts"): list})
