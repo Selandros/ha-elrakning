@@ -120,10 +120,26 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
     slots = inputs.get("slots")
     ess = inputs.get("ess")
     replanning = inputs.get("replanning")
+    economics = inputs.get("economics")
     if not isinstance(site_id, str) or not site_id or not known_at:
         return None, "site_or_known_at_missing"
     if not isinstance(slots, list) or not MIN_SLOTS <= len(slots) <= MAX_SLOTS:
         return None, "horizon_outside_24_to_36_hours"
+    if not isinstance(economics, dict):
+        return None, "decision_economics_provenance_missing"
+    economics_known_at = _moment(_iso(economics.get("known_at")) or "")
+    economics_valid_from = _moment(_iso(economics.get("valid_from")) or "")
+    economics_valid_to = _moment(_iso(economics.get("valid_to")) or "") if economics.get("valid_to") else None
+    known_moment = _moment(known_at)
+    if (
+        known_moment is None
+        or economics_known_at is None
+        or economics_valid_from is None
+        or economics_known_at > known_moment
+        or economics_valid_from > known_moment
+        or (economics_valid_to is not None and economics_valid_to <= known_moment)
+    ):
+        return None, "decision_economics_not_valid"
     if not isinstance(ess, dict):
         return None, "verified_ess_facts_missing"
     resource_identity = ess.get("resource_identity")
@@ -159,7 +175,6 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
     if policy_values["previous_charge_kw"] > values["max_charge_kw"] or policy_values["previous_discharge_kw"] > values["max_discharge_kw"]:
         return None, "invalid_previous_action"
     normalized_slots = []
-    known_moment = _moment(known_at)
     previous_valid_at = None
     previous_moment = None
     for slot in slots:
@@ -183,6 +198,8 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
             export_value_source = "explicit_export_compensation"
         if known_moment is None or valid_moment <= known_moment:
             return None, "forecast_not_causal"
+        if valid_moment < economics_valid_from or (economics_valid_to is not None and valid_moment >= economics_valid_to):
+            return None, "decision_economics_not_valid"
         if required["load_kw"] < 0 or required["solar_kw"] < 0:
             return None, "invalid_economic_input"
         if previous_valid_at is not None and valid_at <= previous_valid_at:
@@ -201,6 +218,7 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
         "site_id": site_id, "known_at": known_at, "slots": normalized_slots,
         "ess": {**values, "resource_identity": resource_identity},
         "replanning": policy_values,
+        "economics": economics,
         "efficiency_provenance": efficiency_provenance,
         "replanning_provenance": policy_provenance,
     }, None
@@ -299,6 +317,9 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
             "replanning_provenance": normalized["replanning_provenance"],
         },
         "economics_provenance": {
+            "known_at": normalized["economics"].get("known_at"),
+            "valid_from": normalized["economics"].get("valid_from"),
+            "valid_to": normalized["economics"].get("valid_to"),
             "export_value_policy": "explicit_or_spot_minus_25_percent",
             "derived_export_value_fallback": {
                 "formula": "spot_price_sek_per_kwh * 0.75",

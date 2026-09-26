@@ -30,6 +30,12 @@ def _inputs(site_id="site-a", solar=0.0):
     return {
         "site_id": site_id,
         "known_at": datetime(2026, 9, 27, 11, tzinfo=timezone.utc).isoformat(),
+        "economics": {
+            "known_at": datetime(2026, 9, 27, 10, tzinfo=timezone.utc).isoformat(),
+            "valid_from": datetime(2026, 9, 27, 0, tzinfo=timezone.utc).isoformat(),
+            "valid_to": datetime(2026, 10, 1, 0, tzinfo=timezone.utc).isoformat(),
+            "source_schema": "test.economics.v1",
+        },
         "slots": slots,
         "ess": {
             "resource_identity": {
@@ -61,6 +67,9 @@ def test_missing_economics_or_ess_facts_fail_closed():
     del inputs["slots"][0]["import_price_sek_per_kwh"]
     assert build_economic_plan(inputs)["reason"] == "decision_economics_or_forecast_missing"
     inputs = _inputs()
+    del inputs["economics"]
+    assert build_economic_plan(inputs)["reason"] == "decision_economics_provenance_missing"
+    inputs = _inputs()
     del inputs["ess"]["capacity_kwh"]
     assert build_economic_plan(inputs)["reason"] == "verified_ess_bounds_missing"
     inputs = _inputs()
@@ -75,6 +84,12 @@ def test_known_at_and_15_minute_causal_gate():
     inputs = _inputs()
     inputs["slots"][1]["valid_at"] = (datetime(2026, 9, 27, 13, tzinfo=timezone.utc)).isoformat()
     assert build_economic_plan(inputs)["reason"] == "slots_not_15_minute_aligned"
+
+
+def test_future_tariff_window_fails_closed_before_valid_from():
+    inputs = _inputs()
+    inputs["economics"]["valid_from"] = datetime(2026, 10, 1, tzinfo=timezone.utc).isoformat()
+    assert build_economic_plan(inputs)["reason"] == "decision_economics_not_valid"
 
 
 @pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
