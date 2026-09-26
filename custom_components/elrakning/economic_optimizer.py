@@ -21,6 +21,7 @@ MODEL_VERSION = "highs-mpc-v1"
 SLOT_SECONDS = 900
 MIN_SLOTS = 96
 MAX_SLOTS = 144
+EXPORT_FALLBACK_FACTOR = 0.75
 
 
 def _number(value: Any) -> float | None:
@@ -119,10 +120,19 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
         valid_at = _iso(slot.get("valid_at"))
         valid_moment = _moment(valid_at) if valid_at else None
         required = {key: _number(slot.get(key)) for key in (
-            "load_kw", "solar_kw", "import_price_sek_per_kwh", "export_value_sek_per_kwh",
+            "load_kw", "solar_kw", "import_price_sek_per_kwh",
         )}
         if not valid_at or valid_moment is None or any(value is None for value in required.values()):
             return None, "decision_economics_or_forecast_missing"
+        explicit_export = slot.get("export_value_sek_per_kwh")
+        if explicit_export is None:
+            export_value = required["import_price_sek_per_kwh"] * EXPORT_FALLBACK_FACTOR
+            export_value_source = "derived_export_value_fallback"
+        else:
+            export_value = _number(explicit_export)
+            if export_value is None:
+                return None, "decision_economics_or_forecast_missing"
+            export_value_source = "explicit_export_compensation"
         if known_moment is None or valid_moment <= known_moment:
             return None, "forecast_not_causal"
         if required["load_kw"] < 0 or required["solar_kw"] < 0:
@@ -133,7 +143,12 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
             return None, "slots_not_15_minute_aligned"
         previous_valid_at = valid_at
         previous_moment = valid_moment
-        normalized_slots.append({"valid_at": valid_at, **required})
+        normalized_slots.append({
+            "valid_at": valid_at,
+            **required,
+            "export_value_sek_per_kwh": export_value,
+            "export_value_source": export_value_source,
+        })
     return {
         "site_id": site_id, "known_at": known_at, "slots": normalized_slots,
         "ess": {**values, "resource_identity": resource_identity},
@@ -212,6 +227,7 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
             "import_kw": round(float(solution[offset + 2]), 9),
             "export_kw": round(float(solution[offset + 3]), 9),
             "energy_kwh": round(float(solution[offset + 7]), 9),
+            "export_value_source": slot["export_value_source"],
         })
         offset += 8
     canonical_inputs = {**normalized, "model_version": MODEL_VERSION}
@@ -230,6 +246,14 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
             "fixed_fees_in_objective": False,
             "degradation_cost": "omitted_unavailable",
             "replanning_policy": replanning,
+        },
+        "economics_provenance": {
+            "export_value_policy": "explicit_or_spot_minus_25_percent",
+            "derived_export_value_fallback": {
+                "formula": "spot_price_sek_per_kwh * 0.75",
+                "factor": EXPORT_FALLBACK_FACTOR,
+                "source_type": "derived_policy",
+            },
         },
         "constraint_provenance": {
             "verified_ess_facts": True,

@@ -101,6 +101,36 @@ def test_negative_price_and_export_value_are_modeled_without_fixed_fee_objective
     assert result["constraint_provenance"]["execution_eligible"] is False
 
 
+@pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
+def test_missing_export_value_uses_explicit_spot_minus_25_percent_fallback():
+    inputs = _inputs()
+    for slot in inputs["slots"]:
+        slot.pop("export_value_sek_per_kwh")
+    result = build_economic_plan(inputs)
+    assert result["available"] is True
+    assert result["economics_provenance"]["derived_export_value_fallback"]["factor"] == 0.75
+    assert {point["export_value_source"] for point in result["points"]} == {"derived_export_value_fallback"}
+
+
+@pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
+def test_explicit_export_value_wins_over_fallback():
+    result = build_economic_plan(_inputs())
+    assert result["available"] is True
+    assert {point["export_value_source"] for point in result["points"]} == {"explicit_export_compensation"}
+
+
+def test_negative_spot_price_is_used_mathematically_by_export_fallback():
+    inputs = _inputs()
+    for slot in inputs["slots"]:
+        slot.pop("export_value_sek_per_kwh")
+        slot["import_price_sek_per_kwh"] = -0.20
+    normalized, reason = MODULE._validate_inputs(inputs)
+    assert reason is None
+    assert normalized is not None
+    assert normalized["slots"][0]["export_value_sek_per_kwh"] == pytest.approx(-0.15)
+    assert normalized["slots"][0]["export_value_source"] == "derived_export_value_fallback"
+
+
 def test_site_isolation_is_part_of_result_fingerprint():
     first = build_economic_plan(_inputs("site-a"))
     second = build_economic_plan(_inputs("site-b"))

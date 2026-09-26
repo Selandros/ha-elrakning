@@ -177,11 +177,17 @@ degradation and peak-policy inputs without double counting. Build deterministic
 LP/MILP/MPC planning at 15-minute resolution over 24–36 hours with bounded
 replanning, hysteresis and rate limits.
 
+When explicit export compensation is absent, the optimizer uses the explicit
+derived policy `spot_price_sek_per_kwh * 0.75`; this is marked as derived
+provenance, never provider fact. Explicit export compensation wins immediately,
+and a missing spot price remains fail-closed. This policy does not disable export
+and preserves future explicit export pricing.
+
 Acceptance: economic inputs are decision-time valid; negative prices/export
 are represented; optimizer output is reproducible, constrained and separate
 from baseline forecast and execution.
 
-Status: PARTIAL implementation on `0.0.768`; not runtime-eligible and not
+Status: PARTIAL implementation on `0.0.769`; not runtime-eligible and not
 complete. A separate read-only HiGHS deterministic MIP core and websocket
 contract exist with causal 15-minute 24–36 hour validation, physical ESS
 constraints, import/export complementarity, strict shared-resource identity

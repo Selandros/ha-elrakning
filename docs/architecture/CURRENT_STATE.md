@@ -10,7 +10,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.768` is stable after Masterplan v2 step 7 closure and
+- Runtime baseline `0.0.769` is stable after Masterplan v2 step 7 closure and
   the Step 8 read-only optimizer implementation.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health are COMPLETE; Step 8 is ACTIVE with a partial implementation;
@@ -84,6 +84,19 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   fail-closed until those existing site facts are valid.
 - STATUS: Step 8 is not complete. No economics or ESS facts were fabricated,
   and no historical evidence was backfilled.
+
+## 0.0.769 Masterplan v2 Step 8 economics policy checkpoint
+
+- IMPLEMENTED/TESTED: Missing per-slot export compensation is normalized by the
+  explicit derived policy `spot_price_sek_per_kwh * 0.75`. Explicit provider or
+  site export compensation always wins; missing spot price remains unavailable.
+  The result carries derived-fallback provenance and does not treat the policy
+  as provider fact or double-count fixed fees.
+- VERIFIED: The E.ON tariff snapshot remains authoritative but future-dated
+  (`source_start_date=2026-10-01`); it is not labeled current before that date.
+- STATUS: Step 8 remains PARTIAL. Runtime closure still requires verified
+  reserve/min-SOC, charge/discharge hard limits, efficiency and explicit
+  replanning/rate-limit policy values for the active ESS.
 
 ## Release and repository
 
