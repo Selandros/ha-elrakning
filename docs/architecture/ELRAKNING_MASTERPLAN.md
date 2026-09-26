@@ -6,7 +6,7 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.773`.
+- Stable runtime baseline: `0.0.774`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
@@ -187,7 +187,7 @@ Acceptance: economic inputs are decision-time valid; negative prices/export
 are represented; optimizer output is reproducible, constrained and separate
 from baseline forecast and execution.
 
-Status: PARTIAL implementation on `0.0.773`; not runtime-eligible and not
+Status: PARTIAL implementation on `0.0.774`; not runtime-eligible and not
 complete. A separate read-only HiGHS deterministic MIP core and websocket
 contract exist with causal 15-minute 24–36 hour validation, physical ESS
 constraints, import/export complementarity, strict shared-resource identity

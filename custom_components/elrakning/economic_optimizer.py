@@ -54,6 +54,72 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def derive_provider_reference(grid_state: dict[str, Any], binding: dict[str, Any] | None = None) -> str | None:
+    """Derive a stable reference from the exact E.ON agreement components."""
+    if not isinstance(grid_state, dict) or grid_state.get("provider") not in {None, "eon"}:
+        return None
+    agreement = grid_state.get("agreement") if isinstance(grid_state.get("agreement"), dict) else {}
+    grid_price = grid_state.get("grid_price") if isinstance(grid_state.get("grid_price"), dict) else {}
+    facility = (binding or {}).get("facility") if isinstance(binding, dict) else None
+    facility = facility if isinstance(facility, dict) else grid_state.get("facility")
+    facility = facility if isinstance(facility, dict) else {}
+    identity = {
+        "provider": "eon",
+        "installation_identifier": facility.get("installation_identifier"),
+        "point_of_delivery_number": facility.get("point_of_delivery_number"),
+        "agreement": {key: agreement.get(key) for key in ("type", "start_date", "end_date")},
+        "grid_price": {key: grid_price.get(key) for key in (
+            "vat_included", "price_basis", "fixed_monthly_sek",
+            "transfer_ore_per_kwh_gross", "energy_tax_ore_per_kwh_gross",
+            "variable_total_ore_per_kwh_gross", "yearly_estimated_sek",
+        )},
+    }
+    if not identity["installation_identifier"] and not identity["point_of_delivery_number"]:
+        return None
+    if any(identity["grid_price"].get(key) is None for key in (
+        "vat_included", "price_basis", "fixed_monthly_sek",
+        "transfer_ore_per_kwh_gross", "energy_tax_ore_per_kwh_gross",
+        "variable_total_ore_per_kwh_gross",
+    )):
+        return None
+    return f"eon-agreement-{_fingerprint(identity)[:32]}"
+
+
+def build_eon_economics(grid_state: dict[str, Any], binding: dict[str, Any] | None, decision_at: Any) -> dict[str, Any] | None:
+    """Normalize an existing E.ON agreement without copying provider values into storage."""
+    if not isinstance(grid_state, dict) or not isinstance(grid_state.get("agreement"), dict):
+        return None
+    grid_price = grid_state.get("grid_price")
+    agreement = grid_state["agreement"]
+    reference = derive_provider_reference(grid_state, binding)
+    known_at = _iso(decision_at)
+    provider_valid_from = agreement.get("start_date")
+    if not isinstance(grid_price, dict) or not reference or not known_at or not isinstance(provider_valid_from, str):
+        return None
+    if len(provider_valid_from) == 10:
+        provider_valid_from = f"{provider_valid_from}T00:00:00+00:00"
+    provider_valid_to = agreement.get("end_date")
+    if isinstance(provider_valid_to, str) and len(provider_valid_to) == 10:
+        provider_valid_to = f"{provider_valid_to}T00:00:00+00:00"
+    required = ("fixed_monthly_sek", "transfer_ore_per_kwh_gross", "energy_tax_ore_per_kwh_gross", "variable_total_ore_per_kwh_gross", "vat_included")
+    if any(grid_price.get(key) is None for key in required) or grid_price.get("vat_included") is not True:
+        return None
+    return {
+        "source_schema": "eon.grid_economic_active_snapshot.v1",
+        "known_at": known_at,
+        "valid_from": provider_valid_from,
+        "valid_to": provider_valid_to,
+        "provider_valid_from": provider_valid_from,
+        "provider_reference": reference,
+        "component_provenance": {
+            "provider": "eon",
+            "vat_treatment": "gross_included",
+            "fixed_fee_not_in_marginal_objective": True,
+            "agreement_metadata_preserved": True,
+        },
+    }
+
+
 def _unavailable(reason: str, **extra: Any) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
@@ -142,6 +208,7 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
             not isinstance(override, dict)
             or override.get("source_type") != "user_configured_planning_applicability_override"
             or override.get("provider_valid_from") != economics.get("provider_valid_from")
+            or override.get("provider_reference") != economics.get("provider_reference")
             or not isinstance(override.get("provider_reference"), str)
             or override_known is None or override_effective is None
             or override_known > known_moment or override_effective > known_moment

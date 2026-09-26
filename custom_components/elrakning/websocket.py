@@ -44,7 +44,7 @@ from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
-from .economic_optimizer import build_economic_plan
+from .economic_optimizer import build_economic_plan, build_eon_economics
 from .ella_ess_facts import EllaEssFactsStore
 from .ella_economic_policy import EllaEconomicPolicyStore
 from .power_forecast import build_power_forecast
@@ -291,6 +291,14 @@ async def websocket_economic_optimizer(hass, connection, msg):
     facts_store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
     if isinstance(inputs, dict) and isinstance(facts_store, EllaEssFactsStore):
         inputs = facts_store.apply_to_optimizer_inputs(inputs)
+    if isinstance(inputs, dict) and "economics" not in inputs:
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        grid_manager = hass.data.get(DOMAIN, {}).get("grid_manager")
+        binding = site_manager.active_binding("grid") if site_manager and hasattr(site_manager, "active_binding") else None
+        grid_state = grid_manager.public_state_for_binding(binding) if grid_manager and binding else None
+        normalized_economics = build_eon_economics(grid_state, binding, inputs.get("known_at")) if isinstance(grid_state, dict) else None
+        if normalized_economics is not None:
+            inputs["economics"] = normalized_economics
     policy_store = hass.data.get(DOMAIN, {}).get("ella_economic_policy_store")
     if isinstance(inputs, dict) and isinstance(policy_store, EllaEconomicPolicyStore):
         economics = inputs.get("economics")

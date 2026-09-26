@@ -14,6 +14,8 @@ SPEC = importlib.util.spec_from_file_location(
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 build_economic_plan = MODULE.build_economic_plan
+build_eon_economics = MODULE.build_eon_economics
+derive_provider_reference = MODULE.derive_provider_reference
 
 
 def _inputs(site_id="site-a", solar=0.0):
@@ -97,17 +99,53 @@ def test_future_provider_tariff_with_known_applicability_override_is_eligible():
     inputs = _inputs()
     inputs["economics"]["provider_valid_from"] = datetime(2026, 10, 1, tzinfo=timezone.utc).isoformat()
     inputs["economics"]["valid_from"] = datetime(2026, 10, 1, tzinfo=timezone.utc).isoformat()
+    inputs["economics"]["provider_reference"] = "eon-agreement-fingerprint"
     inputs["economics"]["planning_applicability_override"] = {
         "source_type": "user_configured_planning_applicability_override",
         "known_at": inputs["known_at"],
         "effective_from": inputs["known_at"],
         "provider_valid_from": inputs["economics"]["provider_valid_from"],
-        "provider_reference": "eon-agreement-fingerprint",
+        "provider_reference": inputs["economics"]["provider_reference"],
     }
     result = build_economic_plan(inputs)
     assert result["available"] is True
     assert result["economics_provenance"]["provider_valid_from"] == "2026-10-01T00:00:00+00:00"
     assert result["economics_provenance"]["planning_applicability_override"]["source_type"] == "user_configured_planning_applicability_override"
+
+
+def test_eon_runtime_payload_derives_matching_reference_without_copying_prices():
+    state = {
+        "provider": "eon",
+        "agreement": {"type": "ELECTRICITY_CONS_GRID", "start_date": "2026-10-01", "end_date": None},
+        "facility": {"installation_identifier": "installation:verified"},
+        "grid_price": {
+            "vat_included": True,
+            "price_basis": "gross",
+            "fixed_monthly_sek": 226.25,
+            "transfer_ore_per_kwh_gross": 97.0,
+            "energy_tax_ore_per_kwh_gross": 45.0,
+            "variable_total_ore_per_kwh_gross": 142.0,
+        },
+    }
+    economics = build_eon_economics(state, {"facility": state["facility"]}, "2026-09-26T12:00:00+00:00")
+    assert economics["provider_valid_from"] == "2026-10-01T00:00:00+00:00"
+    assert economics["provider_reference"] == derive_provider_reference(state, {"facility": state["facility"]})
+    assert "fixed_monthly_sek" not in economics
+
+
+def test_future_provider_override_reference_mismatch_fails_closed():
+    inputs = _inputs()
+    inputs["economics"]["provider_valid_from"] = "2026-10-01T00:00:00+00:00"
+    inputs["economics"]["valid_from"] = "2026-10-01T00:00:00+00:00"
+    inputs["economics"]["provider_reference"] = "eon-agreement-real"
+    inputs["economics"]["planning_applicability_override"] = {
+        "source_type": "user_configured_planning_applicability_override",
+        "known_at": inputs["known_at"],
+        "effective_from": inputs["known_at"],
+        "provider_valid_from": inputs["economics"]["provider_valid_from"],
+        "provider_reference": "eon-agreement-wrong",
+    }
+    assert build_economic_plan(inputs)["reason"] == "decision_economics_not_valid"
 
 
 @pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
