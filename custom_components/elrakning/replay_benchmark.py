@@ -449,6 +449,109 @@ def build_hindsight_oracle(
     }
 
 
+def build_actual_evaluation_scorecard(
+    *, site_id: str, slots: list[dict[str, Any]], actual_rows: Iterable[dict[str, Any]], ess: ESSReplayLimits | None
+) -> dict[str, Any]:
+    """Score matured actual outcomes only; never feeds them into a decision."""
+    actual_by_time: dict[str, dict[str, float]] = {}
+    for row in actual_rows:
+        if not isinstance(row, dict) or row.get("site_id") != site_id or not _qualified(row):
+            continue
+        start = _iso(row.get("interval_start"))
+        value = _number(row.get("value"))
+        if start is None or value is None:
+            continue
+        role = row.get("logical_role")
+        if role == "house.consumption":
+            actual_by_time.setdefault(start, {})["load_kw"] = value / 1000.0
+        elif role == "solar.production":
+            actual_by_time.setdefault(start, {})["solar_kw"] = value / 1000.0
+        elif role == "grid.power/import":
+            actual_by_time.setdefault(start, {})["grid_kw"] = value / 1000.0
+        elif role == "battery.power":
+            actual_by_time.setdefault(start, {})["battery_kw"] = value / 1000.0
+        elif role == "battery.soc":
+            actual_by_time.setdefault(start, {})["soc_fraction"] = value / 100.0
+    if any(_iso(slot.get("valid_at")) not in actual_by_time for slot in slots):
+        return {
+            "available": False,
+            "reason": "actual_outcome_coverage_incomplete",
+            "provenance": {"source": "matured_actual_outcomes", "site_id": site_id},
+        }
+    import_kwh = export_kwh = throughput_kwh = 0.0
+    cost = 0.0
+    peak_kw = 0.0
+    reserve_violations = 0
+    missing_price = False
+    for slot in slots:
+        values = actual_by_time[_iso(slot["valid_at"])]
+        grid_kw = values.get("grid_kw")
+        if grid_kw is None:
+            return {"available": False, "reason": "actual_grid_power_missing", "provenance": {"source": "matured_actual_outcomes", "site_id": site_id}}
+        dt_hours = float(slot.get("duration_hours", 0.25))
+        import_kw = max(0.0, grid_kw)
+        export_kw = max(0.0, -grid_kw)
+        import_kwh += import_kw * dt_hours
+        export_kwh += export_kw * dt_hours
+        peak_kw = max(peak_kw, import_kw)
+        battery_kw = values.get("battery_kw")
+        if battery_kw is not None:
+            throughput_kwh += abs(battery_kw) * dt_hours
+        if ess is not None and values.get("soc_fraction") is not None and values["soc_fraction"] < ess.reserve_soc_fraction - 1e-9:
+            reserve_violations += 1
+        price = _number(slot.get("import_price_sek_per_kwh"))
+        export_value = _number(slot.get("export_value_sek_per_kwh"))
+        if price is None or export_value is None:
+            missing_price = True
+        else:
+            cost += import_kw * dt_hours * price - export_kw * dt_hours * export_value
+    return {
+        "available": True,
+        "cost_sek": None if missing_price else round(cost, 9),
+        "cost_status": "unavailable_missing_price" if missing_price else "qualified",
+        "import_kwh": round(import_kwh, 9),
+        "export_kwh": round(export_kwh, 9),
+        "peak_import_kw": round(peak_kw, 9),
+        "throughput_kwh": round(throughput_kwh, 9),
+        "efc": round(throughput_kwh / (2 * ess.capacity_kwh), 9) if ess else None,
+        "reserve_violation_count": reserve_violations,
+        "degradation": {"available": False, "reason": "verified_degradation_evidence_missing", "source": "none"},
+        "provenance": {"source": "matured_actual_outcomes", "site_id": site_id, "evaluation_only": True},
+    }
+
+
+def evaluate_plan_against_actual(
+    *, site_id: str, plan_points: list[dict[str, Any]], slots: list[dict[str, Any]], actual_rows: Iterable[dict[str, Any]], ess: ESSReplayLimits | None
+) -> dict[str, Any]:
+    """Apply a causal plan's battery actions to matured actual load/solar."""
+    actual_by_time: dict[str, dict[str, float]] = {}
+    for row in actual_rows:
+        if not isinstance(row, dict) or row.get("site_id") != site_id or not _qualified(row):
+            continue
+        start = _iso(row.get("interval_start")); value = _number(row.get("value"))
+        if start is None or value is None:
+            continue
+        if row.get("logical_role") == "house.consumption": actual_by_time.setdefault(start, {})["load_kw"] = value / 1000.0
+        elif row.get("logical_role") == "solar.production": actual_by_time.setdefault(start, {})["solar_kw"] = value / 1000.0
+    if any(_iso(slot.get("valid_at")) not in actual_by_time for slot in slots):
+        return {"available": False, "reason": "actual_load_solar_coverage_incomplete", "evaluation_only": True}
+    evaluated = []
+    for plan, slot in zip(plan_points, slots):
+        values = actual_by_time[_iso(slot["valid_at"])]
+        evaluated.append({
+            "valid_at": slot["valid_at"], "load_kw": values["load_kw"], "solar_kw": values["solar_kw"],
+            "charge_kw": float(plan.get("charge_kw", 0.0)), "discharge_kw": float(plan.get("discharge_kw", 0.0)),
+            "grid_import_kw": max(0.0, values["load_kw"] - values["solar_kw"] + float(plan.get("charge_kw", 0.0)) - float(plan.get("discharge_kw", 0.0))),
+            "grid_export_kw": max(0.0, -(values["load_kw"] - values["solar_kw"] + float(plan.get("charge_kw", 0.0)) - float(plan.get("discharge_kw", 0.0)))),
+            "energy_kwh": plan.get("energy_kwh"),
+        })
+    scorecard = _score(evaluated, slots, ess)
+    scorecard["peak_import_kw"] = round(max((point["grid_import_kw"] for point in evaluated), default=0.0), 9)
+    scorecard["degradation"] = {"available": False, "reason": "verified_degradation_evidence_missing", "source": "none"}
+    scorecard["provenance"] = {"source": "matured_actual_outcomes", "site_id": site_id, "evaluation_only": True}
+    return {"available": True, "scorecard": scorecard, "points": evaluated, "evaluation_only": True}
+
+
 def _validate_ess(ess: ESSReplayLimits | None) -> list[str]:
     if ess is None:
         return ["ess_limits_missing"]

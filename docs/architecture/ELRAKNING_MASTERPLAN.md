@@ -6,7 +6,7 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.786`.
+- Stable runtime baseline: `0.0.787`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
@@ -214,9 +214,10 @@ baselines, the read-only Step 8 optimizer adapter and evaluation-only hindsight
 oracle contract are implemented in `replay_benchmark.py` and
 covered by deterministic unit tests. The full benchmark suite is not complete;
 the historical Vikarbodarna foundation replay is runtime-verified, while the
-persistent benchmark artifact, full optimizer comparison, forecast/optimizer
-regret scorecards and holdout matrix remain pending. No execution or actuator
-path is included.
+persistent benchmark artifact and the complete holdout matrix remain pending.
+Evaluation scorecards now expose actual-outcome peak/tariff/throughput/EFC
+metrics with explicit unavailable degradation provenance, and plan evaluation
+is separate from causal decisions. No execution or actuator path is included.
 
 ### 10 — Shadow & advisory planning
 

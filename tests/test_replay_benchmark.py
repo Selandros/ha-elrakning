@@ -13,6 +13,8 @@ from custom_components.elrakning.replay_benchmark import (
     ThresholdBaseline,
     build_replay_run,
     build_hindsight_oracle,
+    build_actual_evaluation_scorecard,
+    evaluate_plan_against_actual,
     compute_regret,
     select_causal_frames,
 )
@@ -204,3 +206,24 @@ def test_hindsight_oracle_is_evaluation_only_and_fail_closed_without_actual_inpu
     assert result["reason"] == "hindsight_actual_load_or_solar_missing"
     assert result["evaluation_only"] is True
     assert result["hindsight_used_for_decision"] is False
+
+
+def test_actual_metrics_and_regret_evaluation_are_provenance_bound_and_degradation_unavailable():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    slots = _slots(decision + timedelta(minutes=15), count=4)
+    actual = []
+    for slot in slots:
+        for role, value in (("house.consumption", 1000.0), ("solar.production", 500.0), ("grid.power/import", 500.0)):
+            actual.append({
+                "site_id": SITE, "logical_role": role, "interval_start": slot["valid_at"],
+                "value": value, "quality_status": "good", "coverage_ratio": 1.0, "gap_status": "complete",
+            })
+    actual_score = build_actual_evaluation_scorecard(site_id=SITE, slots=slots, actual_rows=actual, ess=ESS)
+    assert actual_score["available"] is True
+    assert actual_score["provenance"]["evaluation_only"] is True
+    assert actual_score["degradation"]["available"] is False
+    plan = [{"valid_at": slot["valid_at"], "charge_kw": 0.0, "discharge_kw": 0.0, "energy_kwh": None} for slot in slots]
+    evaluated = evaluate_plan_against_actual(site_id=SITE, plan_points=plan, slots=slots, actual_rows=actual, ess=ESS)
+    assert evaluated["available"] is True
+    assert evaluated["scorecard"]["cost_sek"] == actual_score["cost_sek"]
+    assert evaluated["scorecard"]["provenance"]["evaluation_only"] is True
