@@ -180,6 +180,7 @@ def build_site_state(
     economic_frames: Iterable[dict[str, Any]] = (),
     forecast_evaluation: dict[str, Any] | None = None,
     stage6: dict[str, Any] | None = None,
+    ess_digital_twin: dict[str, Any] | None = None,
     timezone_source: str = "site_location",
 ) -> dict[str, Any]:
     """Build a read-only state snapshot from already verified facts."""
@@ -290,6 +291,11 @@ def build_site_state(
             "schema": "ella_stage6_state.v1", "site_id": site_id,
             "solar": {"calibration": {"available": False, "reason": "stage6_not_loaded"}},
             "ess": {"action_eligibility": {}},
+            "execution_eligible": False, "actuator_writes_enabled": False,
+        },
+        "ess_digital_twin": ess_digital_twin or {
+            "schema": "ella_ess_digital_twin.v1", "site_id": site_id,
+            "available": False, "reason": "ess_twin_not_loaded",
             "execution_eligible": False, "actuator_writes_enabled": False,
         },
         "source_facts": sorted(source_facts, key=lambda item: (item.get("logical_role") or "", item.get("frame_id") or "")),

@@ -6,12 +6,13 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.757`.
+- Stable runtime baseline: `0.0.765`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
-- **Active step: 6 — Forecast and baseline behavior.**
-- Next main step: 7 — ESS Digital Twin and Battery Health.
+- Step 6 — Forecast and baseline behavior is complete.
+- **Active step: 8 — Economics and deterministic optimizer.**
+- Step 7 — ESS Digital Twin and Battery Health is complete on `0.0.765`.
 - Runtime/Operations/Hardening is cross-cutting, not a roadmap step.
 - No physical control is permitted before step 14 is accepted.
 
@@ -163,8 +164,11 @@ Acceptance: no aggregate without verified resource mapping; trajectory obeys
 capacity/power/efficiency/reserve constraints; unknown physical facts remain
 unknown; health/calibration is bounded and cannot widen hard limits.
 
-Status: next main step / ACTIVE after Step 6 closure. Existing Stage 6 physical facts and fail-closed
-eligibility are inputs, not proof that the full twin is complete.
+Status: COMPLETE on `0.0.765`. The read-only twin exposes exact-site,
+active-generation observed ESS facts, throughput and deterministic bounded
+trajectory semantics. Resource aggregation, EFC/SOH, efficiency/loss,
+temperature and derating remain explicitly unavailable when runtime lacks a
+verified physical mapping or source; no unknown fact is inferred.
 
 ### 8 — Economics & deterministic optimizer
 

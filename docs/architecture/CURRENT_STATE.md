@@ -10,8 +10,9 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.758` is stable after Masterplan v2 step 6 closure.
-  Step 6 — Forecast & baseline behavior is COMPLETE and step 7 is ACTIVE/NEXT;
+- Runtime baseline `0.0.765` is stable after Masterplan v2 step 7 closure.
+  Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
+  Battery Health are COMPLETE; Step 8 is ACTIVE/NEXT;
   steps 0–5 are established foundation with remaining
   hardening, retention, and multi-site details tracked explicitly.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.
@@ -43,8 +44,26 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   remained partial/short-horizon instead of inventing slots. This is runtime
   fail-closed evidence, not a claim that every source horizon was live-filled.
 - No Stage 7+ implementation, optimizer, actuator behavior or execution gate
-  changed. Step 7 — ESS Digital Twin & Battery Health is now the active next
-  main scope.
+  changed. The Step 7 twin is read-only and does not enable physical control.
+
+## 0.0.765 Masterplan v2 Step 7 closure
+
+- VERIFIED (tests): the new `ella_ess_digital_twin.v1` contract is deterministic,
+  exact-site and active-generation scoped. It exposes observed battery power,
+  SOC and capacity, bounded throughput, and explicit unavailable states for
+  missing resource mapping, EFC/SOH, efficiency/loss, temperature and derating.
+- VERIFIED (tests): a mapped ESS trajectory obeys capacity, power, efficiency
+  and reserve bounds; active-generation ambiguity fails closed; no actuator
+  write path is exposed or enabled.
+- VERIFIED (runtime replay, fresh Vikarbodarna canonical DB): the corrected
+  battery generation, SOC and 25 kWh capacity are present. The source ledger
+  does not provide one shared verified resource mapping for all three roles, so
+  aggregate state, EFC/SOH, energy-balance efficiency/loss and derating remain
+  unavailable by contract. Active battery throughput was 475.03 kWh across
+  1,864 qualified 15-minute samples. No physical fact was fabricated.
+- RELEASE: `0.0.765` contains the Step 7 read-only twin and is the new runtime
+  baseline; Step 8 is the next main scope. Deployment evidence is recorded in
+  the release report for this version.
 
 ## Release and repository
 

@@ -43,6 +43,7 @@ from .ella_capabilities import build_capability_inventory
 from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
+from .ella_ess_twin import build_ess_digital_twin
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
@@ -1730,6 +1731,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             solar_frames = []
             economic_frames = []
             stage6 = prior_stage6
+            ess_digital_twin = build_ess_digital_twin(site_id, [], decision_at)
         else:
             actual_rows = await hass.async_add_executor_job(
                 collector.storage.read_site_energy_history,
@@ -1742,6 +1744,25 @@ async def websocket_ella_site_state(hass, connection, msg):
             solar_frames = [frame for frame in all_frames if str(frame.get("payload_schema", "")).startswith("forecast_solar.")]
             economic_frames = [frame for frame in all_frames if frame.get("payload_schema") == "eon.grid_economic_active_snapshot.v1"]
             stage6 = build_stage6_state(site_id, actual_rows, solar_frames, decision_at, prior_stage6)
+            targets = [
+                target for target in identity.collection_targets()
+                if target.get("site_id") == site_id
+            ]
+            active_generations = {}
+            resource_bindings = {}
+            for target in targets:
+                role = target.get("logical_role")
+                generation = target.get("generation_id")
+                if not role or not generation:
+                    continue
+                active_generations.setdefault(role, set()).add(str(generation))
+                if target.get("resource_id"):
+                    resource_bindings[str(generation)] = str(target["resource_id"])
+            ess_digital_twin = build_ess_digital_twin(
+                site_id, actual_rows, decision_at,
+                active_generations=active_generations,
+                resource_bindings=resource_bindings,
+            )
         availability_by_id = {
             item.get("load_id"): item
             for item in (inventory.get("individual_loads", {}).get("items", []) if isinstance(inventory.get("individual_loads"), dict) else [])
@@ -1764,6 +1785,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             economic_frames=economic_frames,
             forecast_evaluation=forecast_evaluation,
             stage6=stage6,
+            ess_digital_twin=ess_digital_twin,
             timezone_source=timezone_source,
         )
     except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as err:
