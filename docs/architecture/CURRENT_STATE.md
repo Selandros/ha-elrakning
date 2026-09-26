@@ -10,7 +10,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.767` is stable after Masterplan v2 step 7 closure and
+- Runtime baseline `0.0.768` is stable after Masterplan v2 step 7 closure and
   the Step 8 read-only optimizer implementation.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health are COMPLETE; Step 8 is ACTIVE with a partial implementation;
