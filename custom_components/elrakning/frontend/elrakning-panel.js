@@ -2285,6 +2285,13 @@ export function solarEvidenceOpenMeteoHidden(debugEnabled) {
   return !Boolean(debugEnabled);
 }
 
+export function applySolarEvidenceOpenMeteoVisibility(element, debugEnabled) {
+  if (!element) return;
+  const hidden = solarEvidenceOpenMeteoHidden(debugEnabled);
+  element.hidden = hidden;
+  if (element.style) element.style.display = hidden ? "none" : "";
+}
+
 export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(), weather = null, sun = null) {
   const lines = [];
   if (Number.isFinite(day?.producedKwh)) {
@@ -7249,7 +7256,7 @@ class ElrakningPanel {
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (priceSource) priceSource.hidden = !this._debugEnabled;
-    if (openMeteo) openMeteo.hidden = solarEvidenceOpenMeteoHidden(this._debugEnabled);
+    applySolarEvidenceOpenMeteoVisibility(openMeteo, this._debugEnabled);
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
@@ -8299,7 +8306,7 @@ class ElrakningPanel {
     const commonTarget = Number.isFinite(Number(progress.forecast_solar_target)) ? Number(progress.forecast_solar_target) : 14;
     summary.innerHTML = `<div class="solar-evidence-progress"><div data-solar-evidence-open-meteo><strong>Open-Meteo</strong><span>${omComplete} / ${omTarget}</span><meter min="0" max="${omTarget}" value="${omComplete}"></meter></div><div><strong>Forecast.Solar common</strong><span>${commonComplete} / ${commonTarget}</span><meter min="0" max="${commonTarget}" value="${commonComplete}"></meter></div></div><small class="solar-evidence-protocol">${evidence.protocol_version || "evidence-v1"} · LOCKED</small>`;
     const openMeteo = summary.querySelector("[data-solar-evidence-open-meteo]");
-    if (openMeteo) openMeteo.hidden = solarEvidenceOpenMeteoHidden(this._debugEnabled);
+    applySolarEvidenceOpenMeteoVisibility(openMeteo, this._debugEnabled);
     status.textContent = evidence.status || "INSUFFICIENT – KEEP COLLECTING";
     list.innerHTML = [...days].sort((left, right) => String(right.date || "").localeCompare(String(left.date || ""))).map((day) => {
       const number = (value) => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null;
