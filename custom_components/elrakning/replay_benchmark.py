@@ -224,6 +224,95 @@ class SelfConsumptionBaseline:
         return result
 
 
+def _simulate_battery_actions(slots: list[dict[str, Any]], ess: ESSReplayLimits | None, actions: dict[str, str]) -> list[dict[str, Any]]:
+    if ess is None:
+        raise ValueError("ess_limits_missing")
+    energy = ess.initial_soc_fraction * ess.capacity_kwh
+    result = []
+    for slot in slots:
+        dt_hours = float(slot.get("duration_hours", 0.25))
+        action = actions.get(slot["valid_at"], "idle")
+        charge = float(slot.get("charge_kw", 0.0)) if action == "charge" else 0.0
+        discharge = float(slot.get("discharge_kw", 0.0)) if action == "discharge" else 0.0
+        charge = min(max(0.0, charge), ess.max_charge_kw,
+                     max(0.0, (ess.capacity_kwh - energy) / (dt_hours * ess.charge_efficiency)))
+        discharge = min(max(0.0, discharge), ess.max_discharge_kw,
+                         max(0.0, (energy - ess.reserve_soc_fraction * ess.capacity_kwh) * ess.discharge_efficiency / dt_hours))
+        energy = energy + charge * dt_hours * ess.charge_efficiency - discharge * dt_hours / ess.discharge_efficiency
+        grid = float(slot["load_kw"]) - float(slot["solar_kw"]) + charge - discharge
+        result.append({
+            "valid_at": slot["valid_at"], "battery_signed_kw": discharge - charge,
+            "charge_kw": charge, "discharge_kw": discharge,
+            "grid_import_kw": max(0.0, grid), "grid_export_kw": max(0.0, -grid),
+            "energy_kwh": energy,
+        })
+    return result
+
+
+class FixedBatteryBaseline:
+    """Explicit fixed schedule; missing actions remain idle."""
+
+    name = "fixed"
+
+    def __init__(self, actions: dict[str, str], *, charge_kw: float, discharge_kw: float):
+        self.actions = dict(actions)
+        self.charge_kw = float(charge_kw)
+        self.discharge_kw = float(discharge_kw)
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> list[dict[str, Any]]:
+        actions = {key: value for key, value in self.actions.items() if value in {"idle", "charge", "discharge"}}
+        enriched = [dict(slot, charge_kw=self.charge_kw, discharge_kw=self.discharge_kw) for slot in slots]
+        return _simulate_battery_actions(enriched, ess, actions)
+
+
+class CheapestPriceBaseline:
+    """Deterministic price-ranked schedule with explicit slot counts."""
+
+    name = "cheapest"
+
+    def __init__(self, *, charge_slot_count: int, discharge_slot_count: int, charge_kw: float, discharge_kw: float):
+        self.charge_slot_count = int(charge_slot_count)
+        self.discharge_slot_count = int(discharge_slot_count)
+        self.charge_kw = float(charge_kw)
+        self.discharge_kw = float(discharge_kw)
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> list[dict[str, Any]]:
+        if any(_number(slot.get("import_price_sek_per_kwh")) is None for slot in slots):
+            raise ValueError("price_input_missing")
+        ordered = sorted(slots, key=lambda slot: (float(slot["import_price_sek_per_kwh"]), slot["valid_at"]))
+        charge = {slot["valid_at"] for slot in ordered[:max(0, self.charge_slot_count)]}
+        discharge = {slot["valid_at"] for slot in sorted(ordered, key=lambda slot: (-float(slot["import_price_sek_per_kwh"]), slot["valid_at"]))[:max(0, self.discharge_slot_count)]}
+        actions = {key: "charge" for key in charge}
+        actions.update({key: "discharge" for key in discharge if key not in actions})
+        enriched = [dict(slot, charge_kw=self.charge_kw, discharge_kw=self.discharge_kw) for slot in slots]
+        return _simulate_battery_actions(enriched, ess, actions)
+
+
+class ThresholdBaseline:
+    """Deterministic price thresholds supplied by the benchmark scenario."""
+
+    name = "threshold"
+
+    def __init__(self, *, charge_below_sek_per_kwh: float, discharge_above_sek_per_kwh: float, charge_kw: float, discharge_kw: float):
+        self.charge_below = float(charge_below_sek_per_kwh)
+        self.discharge_above = float(discharge_above_sek_per_kwh)
+        self.charge_kw = float(charge_kw)
+        self.discharge_kw = float(discharge_kw)
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> list[dict[str, Any]]:
+        if any(_number(slot.get("import_price_sek_per_kwh")) is None for slot in slots):
+            raise ValueError("price_input_missing")
+        actions = {}
+        for slot in slots:
+            price = float(slot["import_price_sek_per_kwh"])
+            if price < self.charge_below:
+                actions[slot["valid_at"]] = "charge"
+            elif price > self.discharge_above:
+                actions[slot["valid_at"]] = "discharge"
+        enriched = [dict(slot, charge_kw=self.charge_kw, discharge_kw=self.discharge_kw) for slot in slots]
+        return _simulate_battery_actions(enriched, ess, actions)
+
+
 def _validate_ess(ess: ESSReplayLimits | None) -> list[str]:
     if ess is None:
         return ["ess_limits_missing"]

@@ -21,6 +21,23 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - Stage/Phase labels in the historical sections below describe former release
   milestones only and are not active roadmap instructions.
 
+## 0.0.785 Masterplan v2 Step 9 baseline checkpoint
+
+- IMPLEMENTED/TESTED: fixed, cheapest-price and threshold battery baselines
+  are explicit parameterized replay consumers. They preserve the canonical
+  sign convention, ESS bounds, deterministic ordering and fail closed when
+  required price inputs are absent. They have no runtime execution path.
+- RUNTIME-VERIFIED: the historical Vikarbodarna replay selected the latest
+  mature qualified load frame known at `2026-09-24T20:08:31Z`, paired only with
+  causal qualified solar and price frames, and evaluated 96/96 actual outcomes.
+  Two identical runs were qualified and produced the same fingerprint
+  `237fe7b6ad35d8ca3e8a2d9655adb53f07c3e41987faff8dad759fd1f6bcab38` and
+  identical scorecards. The current partial load frame remains separately
+  fail-closed and was not used by the historical replay.
+- OPEN: persistent benchmark artifacts, hindsight oracle isolation, optimizer
+  comparison, forecast/optimizer regret, complete metrics and seasonal/site/
+  DST/gap/source-change/publication-cutoff holdouts.
+
 ## 0.0.784 Masterplan v2 Step 9 replay foundation checkpoint
 
 - IMPLEMENTED/TESTED: `ella_replay_benchmark.v1` is a pure, non-persistent,

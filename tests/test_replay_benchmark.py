@@ -6,7 +6,10 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.replay_benchmark import (
+    CheapestPriceBaseline,
     ESSReplayLimits,
+    FixedBatteryBaseline,
+    ThresholdBaseline,
     build_replay_run,
     select_causal_frames,
 )
@@ -131,3 +134,27 @@ def test_canonical_sign_balance_and_constraint_scorecard():
     assert self_consumption["points"][0]["grid_import_kw"] == 0.0
     assert self_consumption["scorecard"]["constraint_violations"] == 0
     assert self_consumption["scorecard"]["safety_qualified"] is True
+
+
+def test_explicit_fixed_cheapest_and_threshold_baselines_are_deterministic_and_bounded():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    slots = _slots(decision + timedelta(minutes=15), count=4)
+    prices = [0.40, 0.10, 0.90, 0.20]
+    for slot, price in zip(slots, prices):
+        slot["import_price_sek_per_kwh"] = price
+        slot["export_value_sek_per_kwh"] = price * 0.75
+    fixed = FixedBatteryBaseline({slots[0]["valid_at"]: "charge", slots[2]["valid_at"]: "discharge"}, charge_kw=2.0, discharge_kw=2.0)
+    cheapest = CheapestPriceBaseline(charge_slot_count=1, discharge_slot_count=1, charge_kw=2.0, discharge_kw=2.0)
+    threshold = ThresholdBaseline(charge_below_sek_per_kwh=0.15, discharge_above_sek_per_kwh=0.85, charge_kw=2.0, discharge_kw=2.0)
+    result = build_replay_run(site_id=SITE, decision_at=decision, frames=_frames(), slots=slots,
+                              model_identity={"model": "fixture"}, ess=ESS,
+                              baselines=(fixed, cheapest, threshold))
+    assert result["qualification"]["qualified"] is True
+    assert set(result["baselines"]) == {"fixed", "cheapest", "threshold"}
+    for item in result["baselines"].values():
+        assert item["scorecard"]["constraint_violations"] == 0
+        assert item["scorecard"]["safety_qualified"] is True
+    repeat = build_replay_run(site_id=SITE, decision_at=decision, frames=_frames(), slots=slots,
+                              model_identity={"model": "fixture"}, ess=ESS,
+                              baselines=(fixed, cheapest, threshold))
+    assert result["run_fingerprint"] == repeat["run_fingerprint"]
