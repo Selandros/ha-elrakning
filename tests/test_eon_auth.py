@@ -76,6 +76,27 @@ def test_auth_errors_do_not_echo_credentials():
         raise AssertionError("invalid form was accepted")
 
 
+def test_authenticator_response_shape_is_bounded_and_redacted():
+    html = (
+        '<form action="https://example.invalid/callback?token=secret-query">'
+        '<input type="hidden" name="token" value="secret-token">'
+        '<input type="hidden" name="state" value="secret-state">'
+        '<input type="text" name="username" value="private-user">'
+        '</form>'
+    )
+    shape = auth.authenticator_response_shape(html, 200, "text/html; charset=utf-8")
+    serialized = repr(shape)
+    assert shape["status"] == 200
+    assert shape["result_kind"] == "html"
+    assert "secret-token" not in serialized
+    assert "secret-state" not in serialized
+    assert "secret-query" not in serialized
+    assert "private-user" not in serialized
+    assert "username" in shape["field_names"]
+    assert "<redacted>" in shape["field_names"]
+    assert len(shape["field_names"]) <= 16
+
+
 def test_session_expiry_uses_numeric_epoch_milliseconds_first():
     now = time.time()
     expiry = auth._expiry_from_session({

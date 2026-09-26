@@ -498,7 +498,7 @@ def test_legacy_web_config_is_migrated_without_losing_app_config():
 
 def test_saving_app_credentials_replaces_active_auth_method():
     class _Session:
-        def __init__(self, hass):
+        def __init__(self, hass, diagnostic_callback=None):
             pass
 
         async def async_login(self, account_id, password):

@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import math
+import re
 import secrets
 import time
 from datetime import datetime, timezone
@@ -53,6 +54,7 @@ class _HiddenInputParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.values: dict[str, str] = {}
+        self.field_types: dict[str, str] = {}
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag.lower() != "input":
@@ -60,8 +62,47 @@ class _HiddenInputParser(HTMLParser):
         fields = dict(attrs)
         name = fields.get("name")
         value = fields.get("value")
+        if isinstance(name, str) and name:
+            input_type = fields.get("type")
+            self.field_types[name] = input_type.lower() if isinstance(input_type, str) and input_type else "text"
         if name in {"token", "state"} and isinstance(value, str):
             self.values[name] = value
+
+
+def _safe_auth_field_name(name: str) -> str:
+    """Return a bounded field label without exposing sensitive field names."""
+    if re.search(r"token|secret|password|cookie|credential|auth|code", name, re.IGNORECASE):
+        return "<redacted>"
+    return name[:48]
+
+
+def authenticator_response_shape(html: Any, status: int | None, content_type: str | None) -> dict[str, Any]:
+    """Describe an authenticator response without retaining content or values."""
+    if not isinstance(html, str):
+        return {
+            "status": status,
+            "content_type": (content_type or "")[:80],
+            "result_kind": type(html).__name__,
+            "redirect_kind": "none",
+            "field_names": [],
+            "field_types": {},
+        }
+    parser = _HiddenInputParser()
+    parser.feed(html)
+    names = sorted({_safe_auth_field_name(name) for name in parser.field_types})[:16]
+    field_types = {
+        _safe_auth_field_name(name): parser.field_types[name]
+        for name in sorted(parser.field_types)[:16]
+    }
+    return {
+        "status": status,
+        "content_type": (content_type or "")[:80],
+        "result_kind": "html",
+        "redirect_kind": "none",
+        "body_length": len(html),
+        "field_names": names,
+        "field_types": field_types,
+    }
 
 
 def parse_authenticator_form(html: str) -> dict[str, str]:
@@ -103,12 +144,21 @@ def parse_app_token_response(payload: Any) -> dict[str, Any]:
 class EonAppSession:
     """Run the verified E.ON app login and keep tokens in memory only."""
 
-    def __init__(self, hass) -> None:
+    def __init__(self, hass, diagnostic_callback=None) -> None:
         self._session: ClientSession = async_create_clientsession(hass, cookie_jar=CookieJar())
         self._bearer_session: ClientSession = async_create_clientsession(hass, cookie_jar=CookieJar())
+        self._diagnostic_callback = diagnostic_callback
         self._access_token: str | None = None
         self._expires_at = 0.0
         self.customer_id: str | None = None
+
+    async def _record_diagnostic(self, payload: dict[str, Any]) -> None:
+        if self._diagnostic_callback is not None:
+            await self._diagnostic_callback(
+                "ERROR",
+                "authenticator_response_shape",
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            )
 
     @property
     def is_valid(self) -> bool:
@@ -144,8 +194,19 @@ class EonAppSession:
                 data={"accountId": account_id.strip(), "password": password},
                 allow_redirects=False,
             ) as response:
-                form = parse_authenticator_form(await response.text())
+                body = await response.text()
+                shape = authenticator_response_shape(
+                    body,
+                    response.status,
+                    response.headers.get("Content-Type"),
+                )
+                try:
+                    form = parse_authenticator_form(body)
+                except EonAuthError:
+                    await self._record_diagnostic({"stage": "authenticator_form_parse", **shape})
+                    raise
             if response.status >= 400:
+                await self._record_diagnostic({"stage": "authenticator_http_error", **shape})
                 raise EonAuthError("authenticator_failed")
             async with self._session.post(auth_url, data=form, allow_redirects=False) as response:
                 redirect = response.headers.get("Location")

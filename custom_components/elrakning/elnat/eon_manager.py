@@ -140,7 +140,7 @@ class EonGridManager:
         return self.public_state()
 
     async def async_save_app_credentials(self, account_id: str, password: str) -> dict[str, Any]:
-        session = EonAppSession(self.hass)
+        session = EonAppSession(self.hass, self._auth_diagnostic)
         customer_id = await session.async_login(account_id, password)
         self._cancel_web_refresh()
         self._app_session = session
@@ -456,11 +456,17 @@ class EonGridManager:
         self, config: dict[str, Any], session: EonAppSession | None = None
     ) -> EonAppSession:
         """Return the cached app session, logging in only when it is absent or expired."""
-        session = session or self._app_session or EonAppSession(self.hass)
+        session = session or self._app_session or EonAppSession(self.hass, self._auth_diagnostic)
         if not session.is_valid:
             await session.async_login(config["account_id"], config["password"])
         self._app_session = session
         return session
+
+    async def _auth_diagnostic(self, level: str, event: str, message: str) -> None:
+        """Forward bounded E.ON auth diagnostics through the existing store."""
+        manager = self.hass.data.get(DOMAIN, {}).get("elhandel_manager")
+        if manager is not None:
+            await manager.async_diagnostic(level, "eon_auth", event, message)
 
     async def _get_web_session(self, config: dict[str, Any]) -> EonSession:
         """Return the cached web session without rebuilding its cookie jar."""
