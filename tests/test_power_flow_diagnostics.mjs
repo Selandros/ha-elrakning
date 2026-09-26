@@ -7,7 +7,7 @@ const backend = fs.readFileSync("custom_components/elrakning/websocket.py", "utf
 for (const event of [
   "date_change", "history_request_start", "history_reused", "history_response_received",
   "history_stale_rejected", "enrichment_request_start", "enrichment_response_received",
-  "enrichment_stale_rejected", "enrichment_merge", "history_cycle_failed", "history_cycle_cleanup",
+  "enrichment_stale_rejected", "enrichment_merge", "history_cycle_failed", "history_cycle_cleanup", "history_render_failed",
 ]) assert.match(frontend, new RegExp(`\\"${event}\\"`));
 assert.match(frontend, /_recordPowerFlowDiagnostic\(event, details = \{\}\)/);
 assert.match(frontend, /relative_ms: roundDiagnosticMs\(performance\.now\(\)\)/);
@@ -27,6 +27,9 @@ assert.match(backend, /relative_ms/);
 assert.doesNotMatch(backend, /payload = \{"mono_ms"/);
 assert.match(backend, /frontend_power_flow/);
 assert.match(frontend, /this\._recordDiagnostic\("frontend_power_flow"/);
+const historyCycle = frontend.slice(frontend.indexOf("async _loadPowerHistoryCycle"));
+assert.ok(historyCycle.indexOf("enrichment_request_start") < historyCycle.indexOf("this._rebuildLivePowerMaxima"));
+assert.match(historyCycle, /history_render_failed/);
 assert.match(frontend, /type: "elrakning\/diagnostics_clear"/);
 assert.match(backend, /async def websocket_diagnostics_clear\(/);
 assert.match(backend, /async_clear_diagnostics\(\)/);

@@ -25,9 +25,9 @@ assert.match(historyLoader, /type: "elrakning\/power_history"/);
 assert.match(historyLoader, /this\._refreshPowerEnergyState\(\)/);
 assert.match(historyLoader, /cycle\.enrichment = this\.loadPowerHistoryEnrichment\(/);
 assert.ok(
-  historyLoader.indexOf("this._refreshPowerEnergyState()")
+  historyLoader.indexOf("this._powerHistoryContextKey =")
     < historyLoader.indexOf("cycle.enrichment = this.loadPowerHistoryEnrichment("),
-  "history must render before enrichment is awaited",
+  "history state must be established before enrichment starts",
 );
 assert.match(historyLoader, /type: "elrakning\/power_history_enrichment"/);
 assert.match(historyLoader, /this\._powerHistory = \{\s*\.\.\.this\._powerHistory/);

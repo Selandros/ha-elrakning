@@ -8455,13 +8455,6 @@ class ElrakningPanel {
       };
       this._loadForecast = { available: false, reason: "enrichment_pending", frames: [] };
       this._powerHistoryContextKey = `${siteContextGeneration}:${requestedDate || response?.date || ""}`;
-      this._rebuildLivePowerMaxima();
-      this._refreshPowerEnergyState();
-      stage = "history_render";
-      this._renderSolarEvidence();
-      this._renderPricePlanCards();
-      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
-      this._recordPowerFlowDiagnostic("history_render", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
       stage = "enrichment_start";
       this._recordPowerFlowDiagnostic("enrichment_request_start", { requested_date: requestedDate, active_enrichment_jobs: 1 });
       cycle.enrichment = this.loadPowerHistoryEnrichment({
@@ -8471,6 +8464,22 @@ class ElrakningPanel {
         contextKey: this._powerHistoryContextKey,
         requestedDate,
       });
+      try {
+        stage = "history_render";
+        this._rebuildLivePowerMaxima();
+        this._refreshPowerEnergyState();
+        this._renderSolarEvidence();
+        this._renderPricePlanCards();
+        if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+        this._recordPowerFlowDiagnostic("history_render", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
+      } catch (error) {
+        this._recordPowerFlowDiagnostic("history_render_failed", {
+          requested_date: requestedDate,
+          stage,
+          error_name: error?.name || "Error",
+          duration_ms: roundDiagnosticMs(performance.now() - started),
+        });
+      }
     } catch (error) {
       this._recordPowerFlowDiagnostic("history_cycle_failed", {
         requested_date: requestedDate,
