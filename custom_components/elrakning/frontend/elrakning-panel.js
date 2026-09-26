@@ -2281,6 +2281,10 @@ export function solarEvidenceStatus(evidenceDays, date, today = localDateKey(new
   return date === today ? "–" : "❌";
 }
 
+export function solarEvidenceOpenMeteoHidden(debugEnabled) {
+  return !Boolean(debugEnabled);
+}
+
 export function buildSolarHistoryTooltipLines(day, liveForecast, now = new Date(), weather = null, sun = null) {
   const lines = [];
   if (Number.isFinite(day?.producedKwh)) {
@@ -7236,6 +7240,7 @@ class ElrakningPanel {
     const eonSource = this.host.querySelector("[data-eon-grid-source]");
     const meterSource = this.host.querySelector("[data-meter-source]");
     const priceSource = this.host.querySelector('[data-card-source="price"]');
+    const openMeteo = this.host.querySelector("[data-solar-evidence-open-meteo]");
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
@@ -7244,6 +7249,7 @@ class ElrakningPanel {
     if (eonSource) eonSource.hidden = !this._debugEnabled || this._eonGridState?.configured !== true;
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (priceSource) priceSource.hidden = !this._debugEnabled;
+    if (openMeteo) openMeteo.hidden = solarEvidenceOpenMeteoHidden(this._debugEnabled);
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
@@ -8291,7 +8297,9 @@ class ElrakningPanel {
     const omTarget = Number.isFinite(Number(progress.open_meteo_target)) ? Number(progress.open_meteo_target) : 21;
     const commonComplete = Number.isFinite(Number(progress.forecast_solar_common)) ? Number(progress.forecast_solar_common) : 0;
     const commonTarget = Number.isFinite(Number(progress.forecast_solar_target)) ? Number(progress.forecast_solar_target) : 14;
-    summary.innerHTML = `<div class="solar-evidence-progress"><div><strong>Open-Meteo</strong><span>${omComplete} / ${omTarget}</span><meter min="0" max="${omTarget}" value="${omComplete}"></meter></div><div><strong>Forecast.Solar common</strong><span>${commonComplete} / ${commonTarget}</span><meter min="0" max="${commonTarget}" value="${commonComplete}"></meter></div></div><small class="solar-evidence-protocol">${evidence.protocol_version || "evidence-v1"} · LOCKED</small>`;
+    summary.innerHTML = `<div class="solar-evidence-progress"><div data-solar-evidence-open-meteo><strong>Open-Meteo</strong><span>${omComplete} / ${omTarget}</span><meter min="0" max="${omTarget}" value="${omComplete}"></meter></div><div><strong>Forecast.Solar common</strong><span>${commonComplete} / ${commonTarget}</span><meter min="0" max="${commonTarget}" value="${commonComplete}"></meter></div></div><small class="solar-evidence-protocol">${evidence.protocol_version || "evidence-v1"} · LOCKED</small>`;
+    const openMeteo = summary.querySelector("[data-solar-evidence-open-meteo]");
+    if (openMeteo) openMeteo.hidden = solarEvidenceOpenMeteoHidden(this._debugEnabled);
     status.textContent = evidence.status || "INSUFFICIENT – KEEP COLLECTING";
     list.innerHTML = [...days].sort((left, right) => String(right.date || "").localeCompare(String(left.date || ""))).map((day) => {
       const number = (value) => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null;
