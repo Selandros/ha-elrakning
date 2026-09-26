@@ -44,7 +44,7 @@ from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
-from .economic_optimizer import build_economic_plan, build_eon_economics
+from .economic_optimizer import build_economic_plan, build_eon_economics, derive_provider_reference
 from .ella_ess_facts import EllaEssFactsStore
 from .ella_economic_policy import EllaEconomicPolicyStore
 from .power_forecast import build_power_forecast
@@ -339,7 +339,24 @@ async def websocket_economic_policy_import(hass, connection, msg):
     if not isinstance(store, EllaEconomicPolicyStore):
         connection.send_error(msg["id"], "not_ready", "Economic policy store is not ready")
         return
-    accepted = await store.async_upsert(msg["override"])
+    override = dict(msg["override"])
+    if not isinstance(override.get("provider_reference"), str):
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        grid_manager = hass.data.get(DOMAIN, {}).get("grid_manager")
+        active_site = getattr(site_manager, "state", {}).get("active_site_id") if site_manager else None
+        binding = site_manager.active_binding("grid") if site_manager and hasattr(site_manager, "active_binding") else None
+        if override.get("site_id") != active_site or not grid_manager or not binding:
+            connection.send_result(msg["id"], {"schema": "ella_economic_policy.v1", "accepted": False, "error": "provider_reference_unavailable"})
+            return
+        grid_state = grid_manager.public_state_for_binding(binding)
+        reference = derive_provider_reference(grid_state, binding) if isinstance(grid_state, dict) else None
+        agreement = grid_state.get("agreement") if isinstance(grid_state, dict) else None
+        if not reference or not isinstance(agreement, dict) or not isinstance(agreement.get("start_date"), str):
+            connection.send_result(msg["id"], {"schema": "ella_economic_policy.v1", "accepted": False, "error": "provider_reference_unavailable"})
+            return
+        override["provider_reference"] = reference
+        override.setdefault("provider_valid_from", agreement["start_date"])
+    accepted = await store.async_upsert(override)
     connection.send_result(msg["id"], {"schema": "ella_economic_policy.v1", "accepted": accepted})
 
 

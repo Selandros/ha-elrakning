@@ -24,6 +24,8 @@ def _iso(value: Any) -> str | None:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat() if value.tzinfo else None
     if isinstance(value, str) and value:
+        if len(value) == 10:
+            value = f"{value}T00:00:00+00:00"
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
