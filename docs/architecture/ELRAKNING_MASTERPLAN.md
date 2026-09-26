@@ -6,7 +6,7 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.765`.
+- Stable runtime baseline: `0.0.770`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
@@ -187,15 +187,19 @@ Acceptance: economic inputs are decision-time valid; negative prices/export
 are represented; optimizer output is reproducible, constrained and separate
 from baseline forecast and execution.
 
-Status: PARTIAL implementation on `0.0.769`; not runtime-eligible and not
+Status: PARTIAL implementation on `0.0.770`; not runtime-eligible and not
 complete. A separate read-only HiGHS deterministic MIP core and websocket
 contract exist with causal 15-minute 24–36 hour validation, physical ESS
 constraints, import/export complementarity, strict shared-resource identity
-resolution and deterministic provenance. Explicit replanning, hysteresis and
-rate-limit values are part of the contract; absent values remain fail-closed.
-Runtime closure still requires decision-time current grid/export economics and
-one unambiguous verified ESS resource contract. The former Stage 3 planner
-does not equal this optimizer.
+resolution and deterministic provenance. A generic `ella_ess_facts.v1` HA Store
+and authenticated import/list path provide auditable site/resource facts without
+embedding site data in Git. Runtime/device facts override lower-priority manual
+facts. Replanning defaults are deterministic product policy derived only from
+resolved ESS caps, and planning-only efficiency assumptions remain separate from
+Step 7 physical efficiency facts. Runtime closure still requires an imported
+active-site fact set, decision-time current grid/export economics and a valid
+tariff window; before a tariff's `valid_from`, the plan remains unavailable rather
+than relabeled current. The former Stage 3 planner does not equal this optimizer.
 
 ### 9 — Replay, backtest, benchmarks & regret
 

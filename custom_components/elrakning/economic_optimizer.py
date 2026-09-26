@@ -22,6 +22,7 @@ SLOT_SECONDS = 900
 MIN_SLOTS = 96
 MAX_SLOTS = 144
 EXPORT_FALLBACK_FACTOR = 0.75
+PLANNING_EFFICIENCY_SOURCE = "conservative_calibration_planning_assumption"
 
 
 def _number(value: Any) -> float | None:
@@ -64,6 +65,53 @@ def _unavailable(reason: str, **extra: Any) -> dict[str, Any]:
     }
 
 
+def _resolve_planning_efficiency(ess: dict[str, Any]) -> tuple[float | None, float | None, dict[str, Any]]:
+    """Resolve planning-only efficiency without changing Step 7 physical facts."""
+    charge = _number(ess.get("charge_efficiency"))
+    discharge = _number(ess.get("discharge_efficiency"))
+    if charge is not None and discharge is not None:
+        return charge, discharge, {"source_type": "verified_physical_fact"}
+    assumption = ess.get("planning_efficiency")
+    if not isinstance(assumption, dict) or assumption.get("source_type") != PLANNING_EFFICIENCY_SOURCE:
+        return None, None, {}
+    charge = _number(assumption.get("charge_efficiency"))
+    discharge = _number(assumption.get("discharge_efficiency"))
+    if charge is None or discharge is None or not 0 < charge <= 1 or not 0 < discharge <= 1:
+        return None, None, {}
+    return charge, discharge, {
+        "source_type": PLANNING_EFFICIENCY_SOURCE,
+        "uncertainty": assumption.get("uncertainty", "bounded_planning_only"),
+        "physical_safety_limit": False,
+    }
+
+
+def _resolve_replanning_policy(ess: dict[str, Any], replanning: Any) -> tuple[dict[str, float] | None, dict[str, Any]]:
+    """Use explicit policy or deterministic product defaults derived from ESS caps."""
+    if isinstance(replanning, dict) and all(_number(replanning.get(key)) is not None for key in (
+        "max_charge_ramp_kw", "max_discharge_ramp_kw", "hysteresis_kw",
+        "previous_charge_kw", "previous_discharge_kw",
+    )):
+        return {key: float(replanning[key]) for key in (
+            "max_charge_ramp_kw", "max_discharge_ramp_kw", "hysteresis_kw",
+            "previous_charge_kw", "previous_discharge_kw",
+        )}, {"source_type": "site_override"}
+    charge_cap = _number(ess.get("max_charge_kw"))
+    discharge_cap = _number(ess.get("max_discharge_kw"))
+    if charge_cap is None or discharge_cap is None:
+        return None, {}
+    return {
+        "max_charge_ramp_kw": charge_cap,
+        "max_discharge_ramp_kw": discharge_cap,
+        "hysteresis_kw": 0.05 * min(charge_cap, discharge_cap),
+        "previous_charge_kw": 0.0,
+        "previous_discharge_kw": 0.0,
+    }, {
+        "source_type": "product_policy_default",
+        "previous_action_source": "no_prior_action",
+        "hysteresis_formula": "0.05 * min(max_charge_kw, max_discharge_kw)",
+    }
+
+
 def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(inputs, dict):
         return None, "inputs_missing"
@@ -87,13 +135,14 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
         or resource_identity.get("method") != "strong_registry_config_entry_and_device_identity"
     ):
         return None, "shared_ess_resource_identity_missing"
-    if not isinstance(replanning, dict):
-        return None, "explicit_replanning_policy_missing"
     required_ess = (
         "soc_fraction", "capacity_kwh", "reserve_soc_fraction", "max_charge_kw",
         "max_discharge_kw", "charge_efficiency", "discharge_efficiency",
     )
     values = {key: _number(ess.get(key)) for key in required_ess}
+    charge_efficiency, discharge_efficiency, efficiency_provenance = _resolve_planning_efficiency(ess)
+    values["charge_efficiency"] = charge_efficiency
+    values["discharge_efficiency"] = discharge_efficiency
     if any(value is None for value in values.values()):
         return None, "verified_ess_bounds_missing"
     if not 0 <= values["reserve_soc_fraction"] <= values["soc_fraction"] <= 1:
@@ -102,10 +151,9 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
         return None, "invalid_verified_ess_bounds"
     if not 0 < values["charge_efficiency"] <= 1 or not 0 < values["discharge_efficiency"] <= 1:
         return None, "invalid_verified_efficiency"
-    policy_fields = ("max_charge_ramp_kw", "max_discharge_ramp_kw", "hysteresis_kw", "previous_charge_kw", "previous_discharge_kw")
-    policy_values = {key: _number(replanning.get(key)) for key in policy_fields}
-    if any(value is None for value in policy_values.values()):
-        return None, "explicit_replanning_policy_incomplete"
+    policy_values, policy_provenance = _resolve_replanning_policy(ess, replanning)
+    if policy_values is None:
+        return None, "replanning_policy_or_ess_caps_missing"
     if any(value < 0 for value in policy_values.values()) or policy_values["hysteresis_kw"] > max(values["max_charge_kw"], values["max_discharge_kw"]):
         return None, "invalid_replanning_policy"
     if policy_values["previous_charge_kw"] > values["max_charge_kw"] or policy_values["previous_discharge_kw"] > values["max_discharge_kw"]:
@@ -153,6 +201,8 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
         "site_id": site_id, "known_at": known_at, "slots": normalized_slots,
         "ess": {**values, "resource_identity": resource_identity},
         "replanning": policy_values,
+        "efficiency_provenance": efficiency_provenance,
+        "replanning_provenance": policy_provenance,
     }, None
 
 
@@ -246,6 +296,7 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
             "fixed_fees_in_objective": False,
             "degradation_cost": "omitted_unavailable",
             "replanning_policy": replanning,
+            "replanning_provenance": normalized["replanning_provenance"],
         },
         "economics_provenance": {
             "export_value_policy": "explicit_or_spot_minus_25_percent",
@@ -261,6 +312,7 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
             "no_simultaneous_charge_discharge": True,
             "baseline_forecast_input_only": True,
             "execution_eligible": False,
+            "efficiency": normalized["efficiency_provenance"],
         },
         "input_fingerprint": _fingerprint(canonical_inputs),
     }

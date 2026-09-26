@@ -10,7 +10,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.769` is stable after Masterplan v2 step 7 closure and
+- Runtime baseline `0.0.770` is stable after Masterplan v2 step 7 closure and
   the Step 8 read-only optimizer implementation.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health are COMPLETE; Step 8 is ACTIVE with a partial implementation;
@@ -99,6 +99,22 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   replanning/rate-limit policy values for the active ESS.
 
 ## Release and repository
+
+## 0.0.770 Masterplan v2 Step 8 facts/policy checkpoint
+
+- IMPLEMENTED/TESTED: `ella_ess_facts.v1` is a generic HA Store with exact
+  site/resource scope, auditable source priority, idempotent append/update
+  semantics, and authenticated WebSocket import/list operations. No
+  site-specific values are stored in Git.
+- IMPLEMENTED/TESTED: the read-only optimizer can consume exact-resource
+  imported reserve/capacity/power facts, use deterministic product-policy
+  replanning defaults derived from resolved caps, and use a clearly separate
+  bounded planning-efficiency assumption. Step 7 physical efficiency remains
+  unknown and is never widened by the planning assumption.
+- STATUS: Step 8 remains PARTIAL. The active site's explicit evidence still
+  must be imported through the authenticated path, and the E.ON tariff remains
+  unavailable before its `valid_from=2026-10-01`. No runtime facts or evidence
+  were fabricated or backfilled.
 
 - VERIFIED (runtime, 2026-09-06): Release `0.0.624` is deployed and runtime
   accepted for the provider-attribution/current-price fix. Authenticated

@@ -45,6 +45,7 @@ from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
 from .economic_optimizer import build_economic_plan
+from .ella_ess_facts import EllaEssFactsStore
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
@@ -117,6 +118,8 @@ ELLA_EXECUTION_PERMISSION_SET_COMMAND = f"{DOMAIN}/ella_execution/permission_set
 ELLA_EXECUTION_OVERRIDE_COMMAND = f"{DOMAIN}/ella_execution/manual_override"
 ELLA_EXECUTION_DISPATCH_COMMAND = f"{DOMAIN}/ella_execution/dispatch"
 ECONOMIC_OPTIMIZER_COMMAND = f"{DOMAIN}/economic_optimizer"
+ESS_FACTS_LIST_COMMAND = f"{DOMAIN}/ess_facts/list"
+ESS_FACTS_IMPORT_COMMAND = f"{DOMAIN}/ess_facts/import"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -188,6 +191,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ella_execution_override)
     websocket_api.async_register_command(hass, websocket_ella_execution_dispatch)
     websocket_api.async_register_command(hass, websocket_economic_optimizer)
+    websocket_api.async_register_command(hass, websocket_ess_facts_list)
+    websocket_api.async_register_command(hass, websocket_ess_facts_import)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -277,8 +282,33 @@ def _sanitize_facility(facility: dict) -> dict:
 @websocket_api.async_response
 async def websocket_economic_optimizer(hass, connection, msg):
     """Return a read-only deterministic Step 8 plan or an explicit unavailable result."""
-    result = build_economic_plan(msg.get("inputs"))
+    inputs = msg.get("inputs")
+    facts_store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
+    if isinstance(inputs, dict) and isinstance(facts_store, EllaEssFactsStore):
+        inputs = facts_store.apply_to_optimizer_inputs(inputs)
+    result = build_economic_plan(inputs)
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({vol.Required("type"): ESS_FACTS_LIST_COMMAND, vol.Required("site_id"): str})
+@websocket_api.async_response
+async def websocket_ess_facts_list(hass, connection, msg):
+    """Return non-secret manually verified ESS facts for one exact site."""
+    store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
+    facts = store.list_site(msg["site_id"]) if isinstance(store, EllaEssFactsStore) else []
+    connection.send_result(msg["id"], {"schema": "ella_ess_facts.v1", "site_id": msg["site_id"], "facts": facts})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ESS_FACTS_IMPORT_COMMAND, vol.Required("facts"): list})
+@websocket_api.async_response
+async def websocket_ess_facts_import(hass, connection, msg):
+    """Append/update verified facts through authenticated HA WebSocket access."""
+    store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
+    if not isinstance(store, EllaEssFactsStore):
+        connection.send_error(msg["id"], "not_ready", "ESS facts store is not ready")
+        return
+    accepted = await store.async_upsert(msg["facts"])
+    connection.send_result(msg["id"], {"schema": "ella_ess_facts.v1", "accepted": accepted})
 
 
 def _safe_key_name(key: object) -> bool:

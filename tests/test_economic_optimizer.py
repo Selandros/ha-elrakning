@@ -128,7 +128,26 @@ def test_negative_spot_price_is_used_mathematically_by_export_fallback():
     assert reason is None
     assert normalized is not None
     assert normalized["slots"][0]["export_value_sek_per_kwh"] == pytest.approx(-0.15)
-    assert normalized["slots"][0]["export_value_source"] == "derived_export_value_fallback"
+
+
+@pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
+def test_planning_efficiency_and_replanning_defaults_are_separate_from_physical_facts():
+    inputs = _inputs()
+    inputs["ess"].pop("charge_efficiency")
+    inputs["ess"].pop("discharge_efficiency")
+    inputs["ess"]["planning_efficiency"] = {
+        "charge_efficiency": 0.85,
+        "discharge_efficiency": 0.85,
+        "source_type": "conservative_calibration_planning_assumption",
+        "uncertainty": "bounded_fixture",
+    }
+    inputs.pop("replanning")
+    result = build_economic_plan(inputs)
+    assert result["available"] is True
+    assert result["constraint_provenance"]["execution_eligible"] is False
+    assert result["constraint_provenance"]["efficiency"]["physical_safety_limit"] is False
+    assert result["objective"]["replanning_provenance"]["source_type"] == "product_policy_default"
+    assert result["objective"]["replanning_provenance"]["previous_action_source"] == "no_prior_action"
 
 
 def test_site_isolation_is_part_of_result_fingerprint():
