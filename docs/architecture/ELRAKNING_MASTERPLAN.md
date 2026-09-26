@@ -11,7 +11,7 @@ are superseded; their commits remain available in Git history.
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
 - Step 6 — Forecast and baseline behavior is complete.
-- **Active step: 8 — Economics and deterministic optimizer.**
+- **Active step: 9 — Replay, backtest, benchmarks and regret.**
 - Step 7 — ESS Digital Twin and Battery Health is complete on `0.0.765`.
 - Runtime/Operations/Hardening is cross-cutting, not a roadmap step.
 - No physical control is permitted before step 14 is accepted.
@@ -187,23 +187,19 @@ Acceptance: economic inputs are decision-time valid; negative prices/export
 are represented; optimizer output is reproducible, constrained and separate
 from baseline forecast and execution.
 
-Status: PARTIAL implementation on `0.0.775`; not runtime-eligible and not
-complete. A separate read-only HiGHS deterministic MIP core and websocket
-contract exist with causal 15-minute 24–36 hour validation, physical ESS
-constraints, import/export complementarity, strict shared-resource identity
-resolution and deterministic provenance. A generic `ella_ess_facts.v1` HA Store
-and authenticated import/list path provide auditable site/resource facts without
-embedding site data in Git. Runtime/device facts override lower-priority manual
-facts. Replanning defaults are deterministic product policy derived only from
-resolved ESS caps, and planning-only efficiency assumptions remain separate from
-Step 7 physical efficiency facts. Runtime closure still requires an imported
-active-site fact set, decision-time current grid/export economics and a valid
-tariff window. A separate site-scoped planning-applicability override may apply
-an existing complete provider agreement earlier without changing provider
-validity metadata or backdating replay. The former Stage 3 planner does not equal
-this optimizer.
+Status: COMPLETE on runtime baseline `0.0.775` after authenticated
+Vikarbodarna verification on 2026-09-26. The separate read-only HiGHS
+deterministic MIP core produced a 96-slot plan from causal Step 6 load/solar
+baseline inputs, the exact shared ESS resource and the existing E.ON agreement.
+The site-scoped planning-applicability override became effective at its recorded
+decision time without changing provider `valid_from=2026-10-01` metadata.
+Two identical runtime calls produced identical fingerprints, points and
+objective breakdowns. The plan preserved explicit derived export fallback
+(`spot_price * 0.75`), exact site/resource provenance, constrained ESS behavior
+and `execution_eligible=false`. No physical control or actuator path was used.
+The former Stage 3 planner does not equal this optimizer.
 
-### 9 — Replay, backtest, benchmarks & regret
+### 9 — Replay, backtest, benchmarks & regret (ACTIVE/NEXT)
 
 Run chronological, causal replay against no-battery, self-consumption,
 fixed/cheapest/threshold, optimizer and hindsight-oracle baselines. Report
@@ -213,8 +209,8 @@ export, peak, throughput, EFC, reserve, degradation and safety metrics.
 Acceptance: seasonal/site holdouts, DST, gaps, source changes and publication
 cutoffs are covered; contaminated or incomplete runs are non-qualifying.
 
-Status: partial replay foundation exists; the full benchmark suite is not
-complete.
+Status: ACTIVE/NEXT. Partial replay foundation exists; the full benchmark suite
+is not complete. No Step 9 implementation was included in the Step 8 closure.
 
 ### 10 — Shadow & advisory planning
 

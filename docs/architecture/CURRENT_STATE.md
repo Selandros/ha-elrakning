@@ -10,10 +10,11 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.775` is stable after Masterplan v2 step 7 closure and
-  the Step 8 read-only optimizer implementation.
+- Runtime baseline `0.0.775` is stable after Masterplan v2 step 8 closure and
+  the Step 8 read-only optimizer runtime verification.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
-  Battery Health are COMPLETE; Step 8 is ACTIVE with a partial implementation;
+  Battery Health and Step 8 — Economics & deterministic optimizer are COMPLETE;
+  Step 9 — Replay, backtest, benchmarks & regret is ACTIVE/NEXT;
   steps 0–5 are established foundation with remaining
   hardening, retention, and multi-site details tracked explicitly.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.
@@ -127,14 +128,31 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - IMPLEMENTED/TESTED: Authenticated override import derives the provider
   reference server-side from the active E.ON binding when omitted; no manual
   fingerprint entry is required.
-- VERIFIED (runtime, 0.0.771): The active Vikarbodarna site/resource contains
+- HISTORICAL CHECKPOINT (0.0.771): The active Vikarbodarna site/resource contained
   six imported facts with the expected source priorities; planning efficiency
   remains explicitly planning-only. The optimizer still fails closed before
   the E.ON tariff `valid_from=2026-10-01`.
-- STATUS: Step 8 remains PARTIAL because the explicit active-site planning
-  applicability decision has not yet been imported, and current economics are
-  otherwise unavailable before the provider tariff window. No runtime facts or
-  evidence were fabricated or backfilled.
+- STATUS AT THAT CHECKPOINT: Step 8 remained PARTIAL because the explicit
+  active-site planning applicability decision had not yet been imported. This
+  historical status was superseded by the authenticated 0.0.775 runtime
+  closure below.
+
+## 0.0.775 Masterplan v2 Step 8 runtime closure
+
+- VERIFIED (runtime, 2026-09-26): Authenticated
+  `elrakning/economic_optimizer` execution for Vikarbodarna used 96 causal
+  15-minute Step 6 load/solar baseline slots, the exact shared ESS resource
+  and the existing E.ON economics agreement.
+- VERIFIED: The site-scoped applicability override was persisted with
+  `known_at/effective_from=2026-09-26T15:26:30.184000+00:00`; provider
+  `valid_from=2026-10-01` and provider provenance remained unchanged.
+- VERIFIED: The optimizer returned `available=true`, 96 points, HiGHS
+  deterministic MIP output, objective breakdown, constraint provenance and
+  `execution_eligible=false`. Missing explicit export compensation used the
+  derived `spot_price * 0.75` policy with derived provenance.
+- VERIFIED: Repeating the identical authenticated call produced equal
+  fingerprint, points and objective. No actuator or execution operation was
+  invoked. Step 8 is COMPLETE; Step 9 is ACTIVE/NEXT.
 
 - VERIFIED (runtime, 2026-09-06): Release `0.0.624` is deployed and runtime
   accepted for the provider-attribution/current-price fix. Authenticated
