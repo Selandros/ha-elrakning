@@ -1,10 +1,21 @@
 # Elräkning – Current State
 
-Updated: 2026-09-20
+Updated: 2026-09-26
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
+
+## Canonical roadmap status
+
+- The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
+  Masterplan v2, steps 0–14.
+- Runtime baseline `0.0.757` is stable. Masterplan v2 step 6 is ACTIVE and
+  step 7 is next; steps 0–5 are established foundation with remaining
+  hardening, retention, and multi-site details tracked explicitly.
+- Runtime/Operations/Hardening is cross-cutting, not a separate stage.
+- Stage/Phase labels in the historical sections below describe former release
+  milestones only and are not active roadmap instructions.
 
 ## Release and repository
 
@@ -480,27 +491,12 @@ VERIFIED (read-only measurement, 2026-09-04): The read-only audit measured:
 These are point-in-time measurements, not growth-rate guarantees. Growth rate
 is UNKNOWN.
 
-## Architecture roadmap (LOCKED direction, not implementation status)
+## Historical architecture roadmap
 
-The intended dependency order is: canonical data contract; long-term storage;
-site-independent collection; immutable known-at frames; quality/provenance;
-Recorder/statistics verification; replay/backtest; digital twin; baselines/KPIs;
-optimizer V1; shadow; forecast/calibration; Battery Health/degradation; Fiskvik
-expansion; flexible loads; fast safety control; real-control adapter and safety
-review; only then possible physical control. Peak/fuse safety may develop in
-parallel, but physical control remains gated on its completion and verification.
-
-## Next architectural milestone
-
-INFERRED (roadmap): Long-term data foundation:
-
-1. separate background collection from UI active-site context;
-2. define compact 15-minute model data with `site_id`, `observed_at`,
-   `known_at`, source fingerprints, and quality;
-3. freeze forecast/price/weather input frames;
-4. establish deterministic replay and battery digital-twin backtesting;
-5. keep Vikarbodarna shadow-only and make Fiskvik collection-ready from day
-   one.
+The former 0–17 implementation order and the ELLA Phase/Stage roadmaps are
+retained in Git history as evidence only. Their requirements have been
+reconciled into the canonical Masterplan v2; do not treat their old headings
+or milestone names below as active scope.
 
 ## C.2.3 Open-Meteo producer contract
 
@@ -1412,9 +1408,10 @@ INFERRED (roadmap): Long-term data foundation:
   fingerprint is authoritative, address/name heuristics are not used; legacy
   ELLA binding is historical transition state only; configured and runtime-
   available entities are distinct; all actuator execution remains disabled.
-- The next active implementation scope is **Stage 2 — Unified 15-minute site
-  state and forecasts**. Stage 2 must preserve the accepted site isolation,
-  provenance, fail-closed and no-write boundaries.
+- At that historical point, the next implementation scope was **Stage 2 —
+  Unified 15-minute site state and forecasts**. This former milestone
+  preserved the accepted site isolation, provenance, fail-closed and no-write
+  boundaries; it is now mapped to v2 foundation and forecast scope.
 
 ## 0.0.697–0.0.698 Stage 2 unified 15-minute site state and forecasts
 
@@ -1451,9 +1448,9 @@ INFERRED (roadmap): Long-term data foundation:
   horizon-relevant `source_facts` (six relevant Vikarbodarna facts for the
   verified requested date), truthful unresolved economic-frame handling and
   no actuator/device writes.
-- Stage 2 is closed and accepted. The next active implementation scope is
-  **Stage 3 — Action planner in shadow/recommend-only mode**. Stage 3 is now
-  closed and accepted below.
+- Stage 2 is closed and accepted. At that historical point, the next scope was
+  **Stage 3 — Action planner in shadow/recommend-only mode**; this former
+  milestone is now mapped to v2 steps 6 and 10.
 
 ## 0.0.702 Stage 3 action planner in shadow/recommend-only mode
 
@@ -1492,9 +1489,9 @@ INFERRED (roadmap): Long-term data foundation:
   `2026-09-20T16:30:00+00:00` to `2026-09-20T22:00:00+00:00` in the price and
   SOC charts. Current-card centering remains edge-clamped at maximum scroll;
   that is the expected geometry limitation for the final card, not a failure.
-- Stage 3 is closed and accepted. The next active implementation scope is
-  **Stage 4 — Debug snapshot and explainability**. Stage 4 must use existing
-  Debug mode only: clicking an ELLA card exposes `Visa data` and
+- Stage 3 is closed and accepted. At that historical point, the next scope was
+  **Stage 4 — Debug snapshot and explainability**. That former milestone used
+  existing Debug mode only: clicking an ELLA card exposed `Visa data` and
   `Kopiera data` backed by a stored decision-time snapshot, not mutable
   current sensor state. The payload must include the exact site, block,
   revision, provenance, actions, constraints, capability availability and
@@ -1639,6 +1636,9 @@ INFERRED (roadmap): Long-term data foundation:
   not as fabricated live hardware execution. No live permission was armed and
   no physical command was issued. Planner and execution quality remain
   separate.
-- Stage 7 is closed and accepted on runtime baseline `0.0.717`. Stages 0–7
-  are now the complete accepted roadmap. No Stage 8 is defined; future work,
-  if needed, is post-roadmap enhancement or operations only.
+- This records the historical closure of the former ELLA Stage 0–7 roadmap.
+  It is superseded as the active roadmap by Masterplan v2; its runtime
+  evidence remains mapped into the v2 foundation, shadow, diagnostics, and
+  safety scope. The active v2 step is 6 and step 7 is next. This historical
+  closure must not be read as claiming that the older Stage labels were the
+  complete long-term Energy Intelligence plan.

@@ -132,13 +132,14 @@ until safe downsampling is understood.
 
 ### Memory follows reality
 
-`ELRAKNING_MASTERPLAN.md` contains future goals and locked direction,
-`ARCHITECTURE_DECISIONS.md` contains durable decisions and invariants, and
-`CURRENT_STATE.md` contains current implementation and evidence. Keep these
-levels separate. Update CURRENT_STATE when implementation or a milestone
-changes; update ARCHITECTURE_DECISIONS for an accepted durable decision; update
-the masterplan when roadmap or vision changes. A memory regression or
-irreversible data risk must be prominent, not hidden in a report conclusion.
+`ELRAKNING_MASTERPLAN.md` contains the canonical Masterplan v2, active step,
+future goals, and locked direction; `ARCHITECTURE_DECISIONS.md` contains
+durable decisions and invariants; and `CURRENT_STATE.md` contains current
+implementation and evidence. Keep these levels separate. Update CURRENT_STATE
+when implementation or a milestone changes; update ARCHITECTURE_DECISIONS for
+an accepted durable decision; update the masterplan when roadmap or vision
+changes. A memory regression or irreversible data risk must be prominent, not
+hidden in a report conclusion.
 
 ### External architecture material
 
