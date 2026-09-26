@@ -93,6 +93,24 @@ def test_future_tariff_window_fails_closed_before_valid_from():
 
 
 @pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
+def test_future_provider_tariff_with_known_applicability_override_is_eligible():
+    inputs = _inputs()
+    inputs["economics"]["provider_valid_from"] = datetime(2026, 10, 1, tzinfo=timezone.utc).isoformat()
+    inputs["economics"]["valid_from"] = datetime(2026, 10, 1, tzinfo=timezone.utc).isoformat()
+    inputs["economics"]["planning_applicability_override"] = {
+        "source_type": "user_configured_planning_applicability_override",
+        "known_at": inputs["known_at"],
+        "effective_from": inputs["known_at"],
+        "provider_valid_from": inputs["economics"]["provider_valid_from"],
+        "provider_reference": "eon-agreement-fingerprint",
+    }
+    result = build_economic_plan(inputs)
+    assert result["available"] is True
+    assert result["economics_provenance"]["provider_valid_from"] == "2026-10-01T00:00:00+00:00"
+    assert result["economics_provenance"]["planning_applicability_override"]["source_type"] == "user_configured_planning_applicability_override"
+
+
+@pytest.mark.skipif(MODULE.Highs is None, reason="highspy is not installed in the local test environment")
 def test_real_highs_mip_is_deterministic_and_has_no_simultaneous_flow():
     first = build_economic_plan(_inputs())
     second = build_economic_plan(_inputs())

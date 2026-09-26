@@ -35,6 +35,7 @@ from .ella_learning import EllaLearningStore
 from .ella_stage6 import EllaStage6CalibrationStore
 from .ella_execution import EllaExecutionStore
 from .ella_ess_facts import EllaEssFactsStore
+from .ella_economic_policy import EllaEconomicPolicyStore
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
@@ -261,6 +262,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ella_ess_facts_store = EllaEssFactsStore(hass)
     await ella_ess_facts_store.async_load()
     hass.data.setdefault(DOMAIN, {})["ella_ess_facts_store"] = ella_ess_facts_store
+    ella_economic_policy_store = EllaEconomicPolicyStore(hass)
+    await ella_economic_policy_store.async_load()
+    hass.data.setdefault(DOMAIN, {})["ella_economic_policy_store"] = ella_economic_policy_store
     cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
     await cadence_audit_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager

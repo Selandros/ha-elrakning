@@ -131,12 +131,30 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
     economics_valid_from = _moment(_iso(economics.get("valid_from")) or "")
     economics_valid_to = _moment(_iso(economics.get("valid_to")) or "") if economics.get("valid_to") else None
     known_moment = _moment(known_at)
+    provider_valid_from = _moment(_iso(economics.get("provider_valid_from")) or "") if economics.get("provider_valid_from") else None
+    override = economics.get("planning_applicability_override")
+    override_allowed = False
+    override_effective = None
+    if provider_valid_from is not None and known_moment is not None and provider_valid_from > known_moment:
+        override_known = _moment(_iso(override.get("known_at")) or "") if isinstance(override, dict) else None
+        override_effective = _moment(_iso(override.get("effective_from")) or "") if isinstance(override, dict) else None
+        if (
+            not isinstance(override, dict)
+            or override.get("source_type") != "user_configured_planning_applicability_override"
+            or override.get("provider_valid_from") != economics.get("provider_valid_from")
+            or not isinstance(override.get("provider_reference"), str)
+            or override_known is None or override_effective is None
+            or override_known > known_moment or override_effective > known_moment
+        ):
+            return None, "decision_economics_not_valid"
+        override_allowed = True
+    effective_economics_valid_from = override_effective if override_allowed and override_effective is not None else economics_valid_from
     if (
         known_moment is None
         or economics_known_at is None
         or economics_valid_from is None
         or economics_known_at > known_moment
-        or economics_valid_from > known_moment
+        or (economics_valid_from > known_moment and not override_allowed)
         or (economics_valid_to is not None and economics_valid_to <= known_moment)
     ):
         return None, "decision_economics_not_valid"
@@ -198,7 +216,7 @@ def _validate_inputs(inputs: Any) -> tuple[dict[str, Any] | None, str | None]:
             export_value_source = "explicit_export_compensation"
         if known_moment is None or valid_moment <= known_moment:
             return None, "forecast_not_causal"
-        if valid_moment < economics_valid_from or (economics_valid_to is not None and valid_moment >= economics_valid_to):
+        if effective_economics_valid_from is None or valid_moment < effective_economics_valid_from or (economics_valid_to is not None and valid_moment >= economics_valid_to):
             return None, "decision_economics_not_valid"
         if required["load_kw"] < 0 or required["solar_kw"] < 0:
             return None, "invalid_economic_input"
@@ -320,6 +338,8 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
             "known_at": normalized["economics"].get("known_at"),
             "valid_from": normalized["economics"].get("valid_from"),
             "valid_to": normalized["economics"].get("valid_to"),
+            "provider_valid_from": normalized["economics"].get("provider_valid_from"),
+            "planning_applicability_override": normalized["economics"].get("planning_applicability_override"),
             "export_value_policy": "explicit_or_spot_minus_25_percent",
             "derived_export_value_fallback": {
                 "formula": "spot_price_sek_per_kwh * 0.75",

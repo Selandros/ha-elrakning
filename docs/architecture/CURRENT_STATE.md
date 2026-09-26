@@ -10,7 +10,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.771` is stable after Masterplan v2 step 7 closure and
+- Runtime baseline `0.0.773` is stable after Masterplan v2 step 7 closure and
   the Step 8 read-only optimizer implementation.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health are COMPLETE; Step 8 is ACTIVE with a partial implementation;
@@ -100,7 +100,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 ## Release and repository
 
-## 0.0.771 Masterplan v2 Step 8 facts/policy checkpoint
+## 0.0.773 Masterplan v2 Step 8 facts/policy checkpoint
 
 - IMPLEMENTED/TESTED: `ella_ess_facts.v1` is a generic HA Store with exact
   site/resource scope, auditable source priority, idempotent append/update
@@ -114,13 +114,20 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - IMPLEMENTED/TESTED: Economic inputs now require explicit decision-time
   provenance and valid_from/valid_to coverage. A future tariff fails closed
   instead of being mislabeled current.
+- IMPLEMENTED/TESTED: A separate site-scoped economic applicability override
+  can reference an existing provider agreement without copying its tariff
+  values, changing provider `valid_from`, or backdating historical replay.
+- IMPLEMENTED/TESTED: The optimizer accepts the override only when its
+  provider reference, decision-time `known_at` and `effective_from` are valid;
+  otherwise the future provider tariff remains fail-closed.
 - VERIFIED (runtime, 0.0.771): The active Vikarbodarna site/resource contains
   six imported facts with the expected source priorities; planning efficiency
   remains explicitly planning-only. The optimizer still fails closed before
   the E.ON tariff `valid_from=2026-10-01`.
-- STATUS: Step 8 remains PARTIAL because decision-time-valid current economics
-  are not available before that tariff window. No runtime facts or evidence
-  were fabricated or backfilled.
+- STATUS: Step 8 remains PARTIAL because the explicit active-site planning
+  applicability decision has not yet been imported, and current economics are
+  otherwise unavailable before the provider tariff window. No runtime facts or
+  evidence were fabricated or backfilled.
 
 - VERIFIED (runtime, 2026-09-06): Release `0.0.624` is deployed and runtime
   accepted for the provider-attribution/current-price fix. Authenticated

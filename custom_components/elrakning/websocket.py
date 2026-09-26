@@ -46,6 +46,7 @@ from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
 from .economic_optimizer import build_economic_plan
 from .ella_ess_facts import EllaEssFactsStore
+from .ella_economic_policy import EllaEconomicPolicyStore
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
@@ -120,6 +121,8 @@ ELLA_EXECUTION_DISPATCH_COMMAND = f"{DOMAIN}/ella_execution/dispatch"
 ECONOMIC_OPTIMIZER_COMMAND = f"{DOMAIN}/economic_optimizer"
 ESS_FACTS_LIST_COMMAND = f"{DOMAIN}/ess_facts/list"
 ESS_FACTS_IMPORT_COMMAND = f"{DOMAIN}/ess_facts/import"
+ECONOMIC_POLICY_IMPORT_COMMAND = f"{DOMAIN}/economic_policy/import"
+ECONOMIC_POLICY_STATE_COMMAND = f"{DOMAIN}/economic_policy/state"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -193,6 +196,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_economic_optimizer)
     websocket_api.async_register_command(hass, websocket_ess_facts_list)
     websocket_api.async_register_command(hass, websocket_ess_facts_import)
+    websocket_api.async_register_command(hass, websocket_economic_policy_import)
+    websocket_api.async_register_command(hass, websocket_economic_policy_state)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -286,6 +291,13 @@ async def websocket_economic_optimizer(hass, connection, msg):
     facts_store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
     if isinstance(inputs, dict) and isinstance(facts_store, EllaEssFactsStore):
         inputs = facts_store.apply_to_optimizer_inputs(inputs)
+    policy_store = hass.data.get(DOMAIN, {}).get("ella_economic_policy_store")
+    if isinstance(inputs, dict) and isinstance(policy_store, EllaEconomicPolicyStore):
+        economics = inputs.get("economics")
+        if isinstance(economics, dict) and isinstance(inputs.get("site_id"), str):
+            override = policy_store.resolve(inputs["site_id"], inputs.get("known_at"))
+            if override is not None and "planning_applicability_override" not in economics:
+                inputs["economics"] = {**economics, "planning_applicability_override": override}
     result = build_economic_plan(inputs)
     connection.send_result(msg["id"], result)
 
@@ -309,6 +321,27 @@ async def websocket_ess_facts_import(hass, connection, msg):
         return
     accepted = await store.async_upsert(msg["facts"])
     connection.send_result(msg["id"], {"schema": "ella_ess_facts.v1", "accepted": accepted})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ECONOMIC_POLICY_IMPORT_COMMAND, vol.Required("override"): dict})
+@websocket_api.async_response
+async def websocket_economic_policy_import(hass, connection, msg):
+    """Persist an explicit applicability decision without copying tariff values."""
+    store = hass.data.get(DOMAIN, {}).get("ella_economic_policy_store")
+    if not isinstance(store, EllaEconomicPolicyStore):
+        connection.send_error(msg["id"], "not_ready", "Economic policy store is not ready")
+        return
+    accepted = await store.async_upsert(msg["override"])
+    connection.send_result(msg["id"], {"schema": "ella_economic_policy.v1", "accepted": accepted})
+
+
+@websocket_api.websocket_command({vol.Required("type"): ECONOMIC_POLICY_STATE_COMMAND, vol.Required("site_id"): str})
+@websocket_api.async_response
+async def websocket_economic_policy_state(hass, connection, msg):
+    """Return the persisted applicability metadata for one exact site."""
+    store = hass.data.get(DOMAIN, {}).get("ella_economic_policy_store")
+    state = store.state.get("sites", {}).get(msg["site_id"], {}) if isinstance(store, EllaEconomicPolicyStore) else {}
+    connection.send_result(msg["id"], {"schema": "ella_economic_policy.v1", "site_id": msg["site_id"], "state": state})
 
 
 def _safe_key_name(key: object) -> bool:
