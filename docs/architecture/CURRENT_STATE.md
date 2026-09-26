@@ -10,7 +10,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.775` is stable after Masterplan v2 step 8 closure and
+- Runtime baseline `0.0.784` is stable after Masterplan v2 step 8 closure and
   the Step 8 read-only optimizer runtime verification.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health and Step 8 — Economics & deterministic optimizer are COMPLETE;
@@ -20,6 +20,29 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.
 - Stage/Phase labels in the historical sections below describe former release
   milestones only and are not active roadmap instructions.
+
+## 0.0.784 Masterplan v2 Step 9 replay foundation checkpoint
+
+- IMPLEMENTED/TESTED: `ella_replay_benchmark.v1` is a pure, non-persistent,
+  site-scoped causal replay artifact. It selects immutable frames with
+  `known_at <= decision_at`, excludes future and wrong-site inputs, rejects
+  ambiguous or unqualified selected frames, carries source-generation,
+  model/calibration/schema identity, and emits a deterministic run fingerprint.
+- IMPLEMENTED/TESTED: no-battery and self-consumption-only baselines use the
+  canonical positive-grid-import/negative-grid-export balance and canonical
+  positive-discharge/negative-charge battery sign. Scorecards expose cost,
+  import/export, throughput/EFC where applicable, reserve/constraint/safety
+  qualification and truthful unavailable cost status.
+- IMPLEMENTED/TESTED: exact-site isolation, publication cutoff, source
+  replacement, stale/gap/incomplete input, ambiguity, DST slot shape and
+  deterministic output are covered by focused tests. No execution or actuator
+  path is present, and actual outcomes are never used in decision selection.
+- RUNTIME STATUS: release `0.0.784` ships the pure foundation and its remote
+  payload is verified after deployment. Authenticated live replay execution
+  against the current Vikarbodarna forecast could not be completed from the
+  available non-interactive verification path; no runtime claim is made for
+  that artifact. The full benchmark family, holdouts, regret and live replay
+  artifact verification remain open.
 
 ## 0.0.758 Masterplan v2 Step 6 closure
 

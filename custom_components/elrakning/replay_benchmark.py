@@ -1,0 +1,405 @@
+"""Causal, site-scoped replay foundation for Step 9.
+
+This module is deliberately pure: it reads caller-supplied immutable frames and
+outcomes, performs no Home Assistant I/O, and exposes no execution path.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+from typing import Any, Iterable, Protocol
+
+
+SCHEMA = "ella_replay_benchmark.v1"
+MODEL_VERSION = "causal-replay-foundation-v1"
+UTC = timezone.utc
+QUALIFIED_QUALITY = {"good", "valid", "complete"}
+BAD_GAP_STATES = {"gap", "gapped", "missing", "stale", "ambiguous"}
+SINGLETON_ROLES = {
+    "house.consumption",
+    "grid.power/import",
+    "battery.power",
+    "battery.soc",
+}
+
+
+def _iso(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return None
+        return value.astimezone(UTC).isoformat()
+    if isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone(UTC).isoformat() if parsed.tzinfo else None
+    return None
+
+
+def _moment(value: Any) -> datetime | None:
+    normalized = _iso(value)
+    if normalized is None:
+        return None
+    return datetime.fromisoformat(normalized)
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and number not in (float("inf"), float("-inf")) else None
+
+
+def _fingerprint(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _qualified(row: dict[str, Any]) -> bool:
+    coverage = _number(row.get("coverage_ratio"))
+    return (
+        row.get("quality_status") in QUALIFIED_QUALITY
+        and coverage is not None
+        and coverage >= 0.9
+        and row.get("gap_status") not in BAD_GAP_STATES
+    )
+
+
+def _frame_qualified(frame: dict[str, Any]) -> bool:
+    return (
+        frame.get("quality_status") in QUALIFIED_QUALITY
+        and frame.get("gap_status") not in BAD_GAP_STATES
+        and frame.get("status") not in BAD_GAP_STATES
+    )
+
+
+def select_causal_frames(
+    frames: Iterable[dict[str, Any]],
+    *,
+    site_id: str,
+    decision_at: datetime,
+) -> dict[str, Any]:
+    """Select the latest immutable frame revision visible at one decision time."""
+    if not isinstance(site_id, str) or not site_id or decision_at.tzinfo is None:
+        return {"available": False, "frames": [], "reasons": ["site_or_decision_time_missing"]}
+    selected: dict[str, dict[str, Any]] = {}
+    ambiguous: set[str] = set()
+    future_count = 0
+    wrong_site_count = 0
+    for frame in frames:
+        if not isinstance(frame, dict):
+            continue
+        frame_site = frame.get("site_id")
+        source_scope = frame.get("source_scope")
+        if frame_site not in (site_id, None) or (frame_site is None and source_scope != "global"):
+            wrong_site_count += 1
+            continue
+        known_at = _moment(frame.get("known_at"))
+        if known_at is None:
+            continue
+        if known_at > decision_at.astimezone(UTC):
+            future_count += 1
+            continue
+        semantic_key = frame.get("semantic_key") or frame.get("frame_id")
+        if not isinstance(semantic_key, str) or not semantic_key:
+            continue
+        revision = int(frame.get("revision") or 0)
+        candidate = selected.get(semantic_key)
+        if candidate is not None:
+            candidate_key = (_moment(candidate.get("known_at")), int(candidate.get("revision") or 0))
+            current_key = (known_at, revision)
+            if current_key == candidate_key and candidate.get("frame_id") != frame.get("frame_id"):
+                ambiguous.add(semantic_key)
+            if current_key <= candidate_key:
+                continue
+        selected[semantic_key] = frame
+    for semantic_key in ambiguous:
+        selected.pop(semantic_key, None)
+    reasons: list[str] = []
+    if ambiguous:
+        reasons.append("ambiguous_frame_revision")
+    return {
+        "available": not ambiguous,
+        "frames": [selected[key] for key in sorted(selected)],
+        "reasons": reasons,
+        "future_frame_count": future_count,
+        "wrong_site_frame_count": wrong_site_count,
+    }
+
+
+def _frame_identity(frame: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "frame_id": frame.get("frame_id"),
+        "semantic_key": frame.get("semantic_key"),
+        "revision": frame.get("revision"),
+        "source_generation_id": frame.get("source_generation_id"),
+        "schema_version": frame.get("schema_version"),
+        "dataset_version": frame.get("dataset_version"),
+        "known_at": _iso(frame.get("known_at")),
+        "model_version": (frame.get("provenance") or {}).get("model_version"),
+        "calibration_version": (frame.get("provenance") or {}).get("calibration_version"),
+    }
+
+
+@dataclass(frozen=True)
+class ESSReplayLimits:
+    """Verified physical values needed only by the self-consumption baseline."""
+
+    capacity_kwh: float
+    reserve_soc_fraction: float
+    max_charge_kw: float
+    max_discharge_kw: float
+    charge_efficiency: float
+    discharge_efficiency: float
+    initial_soc_fraction: float
+
+
+class ReplayBaseline(Protocol):
+    name: str
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> list[dict[str, Any]]:
+        ...
+
+
+class NoBatteryBaseline:
+    """Counterfactual with no battery flow and canonical grid balance."""
+
+    name = "no_battery"
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None = None) -> list[dict[str, Any]]:
+        result = []
+        for slot in slots:
+            load = float(slot["load_kw"])
+            solar = float(slot["solar_kw"])
+            grid = load - solar
+            result.append({
+                "valid_at": slot["valid_at"],
+                "battery_signed_kw": 0.0,
+                "charge_kw": 0.0,
+                "discharge_kw": 0.0,
+                "grid_import_kw": max(0.0, grid),
+                "grid_export_kw": max(0.0, -grid),
+                "energy_kwh": None,
+            })
+        return result
+
+
+class SelfConsumptionBaseline:
+    """Deterministic PV-surplus charging and load-covering discharge baseline."""
+
+    name = "self_consumption_only"
+
+    def simulate(self, slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> list[dict[str, Any]]:
+        if ess is None:
+            raise ValueError("ess_limits_missing")
+        energy = ess.initial_soc_fraction * ess.capacity_kwh
+        result = []
+        for slot in slots:
+            load = float(slot["load_kw"])
+            solar = float(slot["solar_kw"])
+            dt_hours = float(slot.get("duration_hours", 0.25))
+            surplus = solar - load
+            charge = min(max(0.0, surplus), ess.max_charge_kw)
+            available_charge = max(0.0, (ess.capacity_kwh - energy) / (dt_hours * ess.charge_efficiency))
+            charge = min(charge, available_charge)
+            deficit = max(0.0, -surplus)
+            available_discharge = max(0.0, (energy - ess.reserve_soc_fraction * ess.capacity_kwh) * ess.discharge_efficiency / dt_hours)
+            discharge = min(deficit, ess.max_discharge_kw, available_discharge)
+            energy = energy + charge * dt_hours * ess.charge_efficiency - discharge * dt_hours / ess.discharge_efficiency
+            grid = load - solar + charge - discharge
+            result.append({
+                "valid_at": slot["valid_at"],
+                "battery_signed_kw": discharge - charge,
+                "charge_kw": charge,
+                "discharge_kw": discharge,
+                "grid_import_kw": max(0.0, grid),
+                "grid_export_kw": max(0.0, -grid),
+                "energy_kwh": energy,
+            })
+        return result
+
+
+def _validate_ess(ess: ESSReplayLimits | None) -> list[str]:
+    if ess is None:
+        return ["ess_limits_missing"]
+    values = (ess.capacity_kwh, ess.reserve_soc_fraction, ess.max_charge_kw,
+              ess.max_discharge_kw, ess.charge_efficiency,
+              ess.discharge_efficiency, ess.initial_soc_fraction)
+    if any(value != value for value in values):
+        return ["ess_limits_non_numeric"]
+    if not 0 <= ess.reserve_soc_fraction <= ess.initial_soc_fraction <= 1:
+        return ["ess_soc_bounds_invalid"]
+    if ess.capacity_kwh <= 0 or ess.max_charge_kw < 0 or ess.max_discharge_kw < 0:
+        return ["ess_power_or_capacity_invalid"]
+    if not 0 < ess.charge_efficiency <= 1 or not 0 < ess.discharge_efficiency <= 1:
+        return ["ess_efficiency_invalid"]
+    return []
+
+
+def _actual_by_slot(actual_rows: Iterable[dict[str, Any]], site_id: str) -> tuple[dict[str, dict[str, float]], list[str]]:
+    grouped: dict[str, dict[str, float]] = {}
+    reasons: list[str] = []
+    for row in actual_rows:
+        if not isinstance(row, dict) or row.get("site_id") != site_id:
+            continue
+        if not _qualified(row):
+            continue
+        start = _iso(row.get("interval_start"))
+        value = _number(row.get("value"))
+        if start is None or value is None:
+            continue
+        role = row.get("logical_role")
+        if role not in {"grid.power/import", "battery.power", "battery.soc"}:
+            continue
+        target = grouped.setdefault(start, {})
+        key = {"grid.power/import": "grid_kw", "battery.power": "battery_kw", "battery.soc": "soc_fraction"}[role]
+        target[key] = value / 1000 if key != "soc_fraction" else value / 100
+    return grouped, reasons
+
+
+def _score(points: list[dict[str, Any]], slots: list[dict[str, Any]], ess: ESSReplayLimits | None) -> dict[str, Any]:
+    by_time = {point["valid_at"]: point for point in points}
+    cost = 0.0
+    import_kwh = export_kwh = throughput_kwh = 0.0
+    missing_prices = False
+    reserve_violations = 0
+    constraint_violations = 0
+    for slot in slots:
+        point = by_time[slot["valid_at"]]
+        dt_hours = float(slot.get("duration_hours", 0.25))
+        import_kwh += point["grid_import_kw"] * dt_hours
+        export_kwh += point["grid_export_kw"] * dt_hours
+        throughput_kwh += (point["charge_kw"] + point["discharge_kw"]) * dt_hours
+        price = _number(slot.get("import_price_sek_per_kwh"))
+        export_value = _number(slot.get("export_value_sek_per_kwh"))
+        if price is None or export_value is None:
+            missing_prices = True
+        else:
+            cost += point["grid_import_kw"] * dt_hours * price - point["grid_export_kw"] * dt_hours * export_value
+        if ess is not None and point["energy_kwh"] is not None and point["energy_kwh"] < ess.reserve_soc_fraction * ess.capacity_kwh - 1e-9:
+            reserve_violations += 1
+        if point["charge_kw"] < -1e-9 or point["discharge_kw"] < -1e-9:
+            constraint_violations += 1
+        if ess is not None and (point["charge_kw"] > ess.max_charge_kw + 1e-9 or point["discharge_kw"] > ess.max_discharge_kw + 1e-9):
+            constraint_violations += 1
+    return {
+        "cost_sek": None if missing_prices else round(cost, 9),
+        "import_kwh": round(import_kwh, 9),
+        "export_kwh": round(export_kwh, 9),
+        "throughput_kwh": round(throughput_kwh, 9),
+        "efc": round(throughput_kwh / (2 * ess.capacity_kwh), 9) if ess else None,
+        "reserve_violation_count": reserve_violations,
+        "constraint_violations": constraint_violations,
+        "safety_qualified": reserve_violations == 0 and constraint_violations == 0,
+        "cost_status": "unavailable_missing_price" if missing_prices else "qualified",
+    }
+
+
+def build_replay_run(
+    *,
+    site_id: str,
+    decision_at: datetime,
+    frames: Iterable[dict[str, Any]],
+    slots: list[dict[str, Any]],
+    actual_rows: Iterable[dict[str, Any]] = (),
+    model_identity: dict[str, Any] | None = None,
+    ess: ESSReplayLimits | None = None,
+    baselines: Iterable[ReplayBaseline] = (NoBatteryBaseline(), SelfConsumptionBaseline()),
+    timezone_name: str = "UTC",
+) -> dict[str, Any]:
+    """Build one deterministic, non-persistent replay/benchmark artifact."""
+    selected = select_causal_frames(frames, site_id=site_id, decision_at=decision_at)
+    reasons = list(selected["reasons"])
+    if not isinstance(model_identity, dict) or not model_identity:
+        reasons.append("model_identity_missing")
+    if not isinstance(slots, list) or not slots:
+        reasons.append("slots_missing")
+    previous = None
+    frame_ids = {frame.get("frame_id") for frame in selected["frames"]}
+    for frame in selected["frames"]:
+        if not _frame_qualified(frame):
+            reasons.append("frame_quality_unqualified")
+    normalized_slots: list[dict[str, Any]] = []
+    for slot in slots if isinstance(slots, list) else []:
+        valid_at = _moment(slot.get("valid_at")) if isinstance(slot, dict) else None
+        end_at = _moment(slot.get("end_at")) if isinstance(slot, dict) else None
+        load = _number(slot.get("load_kw")) if isinstance(slot, dict) else None
+        solar = _number(slot.get("solar_kw")) if isinstance(slot, dict) else None
+        source_frame_ids = slot.get("frame_ids", []) if isinstance(slot, dict) else []
+        if valid_at is None or end_at is None or load is None or solar is None or load < 0 or solar < 0:
+            reasons.append("slot_input_invalid")
+            continue
+        if previous is not None and valid_at != previous + timedelta(minutes=15):
+            reasons.append("slot_gap_or_misalignment")
+        if end_at - valid_at != timedelta(minutes=15):
+            reasons.append("slot_duration_invalid")
+        if valid_at <= decision_at.astimezone(UTC):
+            reasons.append("slot_not_future_at_decision")
+        if not isinstance(source_frame_ids, list) or not source_frame_ids or not set(source_frame_ids).issubset(frame_ids):
+            reasons.append("slot_frame_provenance_missing")
+        previous = valid_at
+        normalized_slots.append({
+            "valid_at": valid_at.isoformat(),
+            "end_at": end_at.isoformat(),
+            "duration_hours": 0.25,
+            "load_kw": load,
+            "solar_kw": solar,
+            "import_price_sek_per_kwh": slot.get("import_price_sek_per_kwh"),
+            "export_value_sek_per_kwh": slot.get("export_value_sek_per_kwh"),
+            "frame_ids": sorted(source_frame_ids),
+        })
+    if len(normalized_slots) != len(slots):
+        reasons.append("incomplete_slot_set")
+    ess_reasons = _validate_ess(ess)
+    actual_by_slot, _ = _actual_by_slot(actual_rows, site_id)
+    # Irrelevant future or other-site frames are safely excluded. Contamination
+    # is reserved for data referenced by the replay that cannot be qualified.
+    contamination = "slot_frame_provenance_missing" in reasons or "frame_quality_unqualified" in reasons
+    if contamination:
+        reasons.append("contaminated_frame_input")
+    baseline_results: dict[str, Any] = {}
+    for baseline in baselines:
+        try:
+            points = baseline.simulate(normalized_slots, ess)
+        except ValueError as error:
+            baseline_results[baseline.name] = {"available": False, "reason": str(error)}
+            continue
+        baseline_results[baseline.name] = {
+            "available": True,
+            "points": points,
+            "scorecard": _score(points, normalized_slots, ess),
+        }
+    qualified = not reasons and not ess_reasons and bool(normalized_slots) and all(
+        item.get("available") is True for item in baseline_results.values()
+    )
+    all_reasons = reasons + ess_reasons
+    canonical = {
+        "schema": SCHEMA,
+        "model_version": MODEL_VERSION,
+        "site_id": site_id,
+        "decision_at": _iso(decision_at),
+        "timezone": timezone_name,
+        "qualification": {
+            "qualified": qualified,
+            "reasons": sorted(set(all_reasons)),
+            "contaminated": contamination,
+            "incomplete": any(reason.startswith(("slot_", "incomplete_")) for reason in all_reasons),
+            "actual_outcome_count": len(actual_by_slot),
+            "hindsight_used_for_decision": False,
+        },
+        "input_identity": {
+            "frame_ids": sorted(frame_ids),
+            "frames": [_frame_identity(frame) for frame in selected["frames"]],
+            "model": model_identity,
+            "calibration": (model_identity or {}).get("calibration"),
+            "schema": SCHEMA,
+        },
+        "baselines": baseline_results,
+    }
+    canonical["run_fingerprint"] = _fingerprint(canonical)
+    return canonical

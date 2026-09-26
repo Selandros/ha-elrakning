@@ -6,7 +6,7 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.775`.
+- Stable runtime baseline: `0.0.784`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
@@ -209,8 +209,11 @@ export, peak, throughput, EFC, reserve, degradation and safety metrics.
 Acceptance: seasonal/site holdouts, DST, gaps, source changes and publication
 cutoffs are covered; contaminated or incomplete runs are non-qualifying.
 
-Status: ACTIVE/NEXT. Partial replay foundation exists; the full benchmark suite
-is not complete. No Step 9 implementation was included in the Step 8 closure.
+Status: ACTIVE. The causal replay foundation is implemented in
+`replay_benchmark.py` and covered by deterministic unit tests; the full
+benchmark suite is not complete and runtime artifact verification remains
+pending. No Step 9 baseline family beyond no-battery and self-consumption-only
+is included.
 
 ### 10 — Shadow & advisory planning
 

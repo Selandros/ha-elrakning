@@ -3,8 +3,9 @@
 ## Current roadmap checkpoint
 
 Masterplan v2 step 8 — Economics & deterministic optimizer is complete on
-runtime baseline `0.0.775`; step 9 — Replay, backtest, benchmarks & regret is
-the active main scope. `actual -> baseline_forecast -> ella_plan` remains
+runtime baseline `0.0.784`; step 9 — Replay, backtest, benchmarks & regret is
+the active main scope with its causal replay foundation implemented but not
+closed. `actual -> baseline_forecast -> ella_plan` remains
 the layer contract, and physical control remains gated by step 14.
 
 ## Architecture memory
