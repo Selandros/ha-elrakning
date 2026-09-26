@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from tests._elrakning_test_bootstrap import (
     install_elrakning_package_stub,
@@ -58,6 +59,12 @@ def test_local_day_handles_normal_and_dst_days():
     assert len(local_day_slots(date(2026, 1, 15), "Europe/Stockholm")) == 96
     assert len(local_day_slots(date(2026, 3, 29), "Europe/Stockholm")) == 92
     assert len(local_day_slots(date(2026, 10, 25), "Europe/Stockholm")) == 100
+
+
+def test_runtime_site_state_keeps_target_date_out_of_collection_target_loop():
+    source = (Path(__file__).parents[1] / "custom_components/elrakning/websocket.py").read_text()
+    assert "for collection_target in targets:" in source
+    assert "for target in targets:" not in source
 
 
 def test_state_load_precedence_and_no_zero_fill():

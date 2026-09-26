@@ -1850,16 +1850,16 @@ async def websocket_ella_site_state(hass, connection, msg):
             active_generations = {}
             resource_bindings = {}
             ess_bindings = {}
-            for target in targets:
-                role = target.get("logical_role")
-                generation = target.get("generation_id")
+            for collection_target in targets:
+                role = collection_target.get("logical_role")
+                generation = collection_target.get("generation_id")
                 if not role or not generation:
                     continue
                 active_generations.setdefault(role, set()).add(str(generation))
-                if target.get("resource_id"):
-                    resource_bindings[str(generation)] = str(target["resource_id"])
+                if collection_target.get("resource_id"):
+                    resource_bindings[str(generation)] = str(collection_target["resource_id"])
                 if role in {"battery.power", "battery.soc", "battery.capacity"}:
-                    ess_bindings[role] = target
+                    ess_bindings[role] = collection_target
             shared_ess = resolve_shared_ess_resource(site_id, ess_bindings, active_generations)
             if shared_ess.get("available"):
                 for generation in shared_ess["generation_ids"].values():
