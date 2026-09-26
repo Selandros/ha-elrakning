@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
+from types import SimpleNamespace
 
 from tests._elrakning_test_bootstrap import (
     install_elrakning_package_stub,
@@ -13,6 +13,7 @@ install_optional_dependency_stubs()
 
 from custom_components.elrakning.coordinator import PricePeriod
 from custom_components.elrakning.ella_site_state import build_site_state, local_day_slots, resolve_timezone
+from custom_components.elrakning import websocket as websocket_module
 
 
 UTC = timezone.utc
@@ -61,17 +62,118 @@ def test_local_day_handles_normal_and_dst_days():
     assert len(local_day_slots(date(2026, 10, 25), "Europe/Stockholm")) == 100
 
 
-def test_runtime_site_state_keeps_target_date_out_of_collection_target_loop():
-    source = (Path(__file__).parents[1] / "custom_components/elrakning/websocket.py").read_text()
-    assert "for collection_target in targets:" in source
-    assert "for target in targets:" not in source
+def test_runtime_site_state_executes_collection_targets_without_date_shadowing(monkeypatch):
+    site = "site-a"
+    target_date = date(2026, 9, 20)
+    decision = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    slots = local_day_slots(target_date, "Europe/Stockholm")
+
+    class _Runtime:
+        async def async_get_price_data(self, requested_date):
+            return SimpleNamespace(
+                error=None,
+                periods=[PricePeriod(start, end, 1.0) for start, end in slots],
+            )
+
+    class _Storage:
+        def read_site_energy_history(self, *args):
+            return []
+
+        def read_external_input_frames(self, *args, **kwargs):
+            return []
+
+    class _Collector:
+        storage = _Storage()
+
+    class _Identity:
+        state = {
+            "active_site_id": site,
+            "sites": [{"site_id": site}],
+            "site_configs": {site: {"location": {"timezone": "Europe/Stockholm"}}},
+        }
+
+        def global_binding(self, role):
+            return {"binding_fingerprint": "price-binding"} if role == "nord_pool" else None
+
+        def collection_targets(self):
+            return [
+                {"site_id": site, "logical_role": "battery.power", "generation_id": "battery-generation", "resource_id": "ess-resource"},
+                {"site_id": site, "logical_role": "battery.soc", "generation_id": "soc-generation", "resource_id": "ess-resource"},
+                {"site_id": site, "logical_role": "battery.capacity", "generation_id": "capacity-generation", "resource_id": "ess-resource"},
+            ]
+
+    class _Registry:
+        def list_for_site(self, requested_site):
+            return []
+
+    class _Entries:
+        def async_entries(self, domain):
+            return [SimpleNamespace(runtime_data=_Runtime())]
+
+    class _Hass:
+        data = {
+            "elrakning": {
+                "site_identity_manager": _Identity(),
+                "ella_load_registry": _Registry(),
+                "canonical_collector": _Collector(),
+            }
+        }
+        config = SimpleNamespace(time_zone="Europe/Stockholm")
+        config_entries = _Entries()
+
+        async def async_add_executor_job(self, function, *args):
+            return function(*args)
+
+    monkeypatch.setattr(websocket_module, "build_capability_inventory", lambda *args, **kwargs: {"capabilities": []})
+    monkeypatch.setattr(websocket_module, "build_stage6_state", lambda *args, **kwargs: {"execution_eligible": False})
+    monkeypatch.setattr(websocket_module, "build_ess_digital_twin", lambda *args, **kwargs: {
+        "available": False, "execution_eligible": False, "actuator_writes_enabled": False,
+    })
+    monkeypatch.setattr(websocket_module, "resolve_shared_ess_resource", lambda *args, **kwargs: {"available": False})
+
+    class _Connection:
+        payload = None
+
+        def send_result(self, _message_id, payload):
+            self.payload = payload
+
+    connection = _Connection()
+    import asyncio
+    asyncio.run(websocket_module.websocket_ella_site_state(
+        _Hass(), connection,
+        {"id": 1, "type": "elrakning/ella_site_state", "site_id": site, "date": target_date.isoformat()},
+    ))
+
+    assert connection.payload["success"] is True
+    assert connection.payload["horizon"]["date"] == target_date.isoformat()
+    assert len(connection.payload["slots"]) == 96
+    assert connection.payload["execution_eligible"] is False
+    assert connection.payload["actuator_writes_enabled"] is False
 
 
-def test_economic_optimizer_websocket_schema_accepts_inputs():
-    source = (Path(__file__).parents[1] / "custom_components/elrakning/websocket.py").read_text()
-    marker = '@websocket_api.websocket_command({\n    vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND,'
-    assert marker in source
-    assert 'vol.Optional("inputs", default=None): dict' in source
+def test_economic_optimizer_handler_executes_inputs_contract(monkeypatch):
+    captured = {}
+
+    class _Connection:
+        def send_result(self, _message_id, payload):
+            captured.update(payload)
+
+    class _Hass:
+        data = {"elrakning": {"ella_ess_facts_store": None}}
+
+    async def runtime_inputs(_hass, _site_id):
+        return {"site_id": "site-a", "known_at": "2026-09-20T12:00:00+00:00", "slots": [], "ess": {}}
+
+    monkeypatch.setattr(websocket_module, "_async_optimizer_runtime_inputs", runtime_inputs)
+    monkeypatch.setattr(websocket_module, "build_economic_plan", lambda inputs: {
+        "available": False, "reason": "horizon_outside_24_to_36_hours", "site_id": inputs["site_id"],
+    })
+    import asyncio
+    asyncio.run(websocket_module.websocket_economic_optimizer(
+        _Hass(), _Connection(), {"id": 1, "type": "elrakning/economic_optimizer", "site_id": "site-a"},
+    ))
+
+    assert captured == {"available": False, "reason": "horizon_outside_24_to_36_hours", "site_id": "site-a"}
 
 
 def test_state_load_precedence_and_no_zero_fill():

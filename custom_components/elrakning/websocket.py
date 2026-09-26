@@ -8,7 +8,7 @@ import inspect
 import json
 import time
 from functools import partial
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import voluptuous as vol
@@ -286,11 +286,16 @@ def _sanitize_facility(facility: dict) -> dict:
 @websocket_api.websocket_command({
     vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND,
     vol.Optional("inputs", default=None): dict,
+    vol.Optional("site_id", default=None): str,
 })
 @websocket_api.async_response
 async def websocket_economic_optimizer(hass, connection, msg):
     """Return a read-only deterministic Step 8 plan or an explicit unavailable result."""
     inputs = msg.get("inputs")
+    if not isinstance(inputs, dict):
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+        site_id = msg.get("site_id") or (site_manager.state.get("active_site_id") if site_manager else None)
+        inputs = await _async_optimizer_runtime_inputs(hass, site_id)
     facts_store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
     if isinstance(inputs, dict) and isinstance(facts_store, EllaEssFactsStore):
         inputs = facts_store.apply_to_optimizer_inputs(inputs)
@@ -1623,10 +1628,138 @@ async def _build_power_forecast_state(
     return result
 
 
+def _optimizer_datetime(value):
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+
+
+async def _async_optimizer_runtime_inputs(hass, site_id):
+    """Build optimizer inputs from the existing causal baseline forecast only."""
+    decision_at = dt_util.now().astimezone(timezone.utc)
+    if not isinstance(site_id, str) or not site_id:
+        return {"site_id": site_id or "", "known_at": decision_at.isoformat(), "slots": []}
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    config = (getattr(identity, "state", {}).get("site_configs", {}).get(site_id, {}) if identity else {})
+    timezone_name, _ = resolve_timezone(
+        (config.get("location") or {}).get("timezone"),
+        getattr(getattr(hass, "config", None), "time_zone", None),
+    )
+    zone = ZoneInfo(timezone_name)
+    local_today = decision_at.astimezone(zone).date()
+    load_forecast = await _async_load_forecast_state(hass, site_id)
+    power_states = [
+        await _async_power_forecast_state(
+            hass,
+            requested_date=local_today + timedelta(days=offset),
+            requested_site_id=site_id,
+            load_forecast=load_forecast,
+        )
+        for offset in (0, 1)
+    ]
+    price_by_valid_at = {}
+    entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
+    coordinator = entry.runtime_data if entry else None
+    if coordinator is not None:
+        for target_date in (local_today, local_today + timedelta(days=1)):
+            data = await coordinator.async_get_price_data(target_date)
+            if data is None or data.error:
+                continue
+            for period in data.periods:
+                start = _optimizer_datetime(getattr(period, "start", None))
+                price = getattr(period, "price", None)
+                if start is None:
+                    continue
+                try:
+                    price = float(price)
+                except (TypeError, ValueError):
+                    continue
+                if price == price and abs(price) != float("inf"):
+                    price_by_valid_at[start] = price
+
+    points_by_valid_at = {}
+    for forecast in power_states:
+        series = forecast.get("series", {}) if isinstance(forecast, dict) else {}
+        load_points = (series.get("consumption") or {}).get("forecast_points", [])
+        solar_points = (series.get("solar") or {}).get("forecast_points", [])
+        loads = {valid_at: point for point in load_points if isinstance(point, dict) for valid_at in [_optimizer_datetime(point.get("valid_at"))] if valid_at is not None}
+        solar = {valid_at: point for point in solar_points if isinstance(point, dict) for valid_at in [_optimizer_datetime(point.get("valid_at"))] if valid_at is not None}
+        for valid_at in sorted(set(loads) & set(solar) & set(price_by_valid_at)):
+            if valid_at is None or valid_at <= decision_at or valid_at in points_by_valid_at:
+                continue
+            load_kw = loads[valid_at].get("value_kw")
+            solar_kw = solar[valid_at].get("value_kw")
+            try:
+                load_kw, solar_kw = float(load_kw), float(solar_kw)
+            except (TypeError, ValueError):
+                continue
+            if not all(value == value and abs(value) != float("inf") and value >= 0 for value in (load_kw, solar_kw)):
+                continue
+            points_by_valid_at[valid_at] = {
+                "valid_at": valid_at.isoformat(),
+                "load_kw": load_kw,
+                "solar_kw": solar_kw,
+                "import_price_sek_per_kwh": price_by_valid_at[valid_at],
+            }
+
+    selected = []
+    current = []
+    for valid_at in sorted(points_by_valid_at):
+        if current and (valid_at - current[-1]).total_seconds() != 900:
+            if len(current) >= 96 and not selected:
+                selected = current
+            current = []
+        current.append(valid_at)
+    if len(current) >= 96 and not selected:
+        selected = current
+    if not selected:
+        selected = current
+    slots = [points_by_valid_at[valid_at] for valid_at in selected[:144]]
+
+    class _Capture:
+        def __init__(self):
+            self.payload = None
+
+        def send_result(self, _message_id, payload):
+            self.payload = payload
+
+    capture = _Capture()
+    await websocket_ella_site_state(
+        hass,
+        capture,
+        {"id": 1, "type": ELLA_SITE_STATE_COMMAND, "site_id": site_id},
+    )
+    state = capture.payload if isinstance(capture.payload, dict) else {}
+    twin = state.get("ess_digital_twin") if isinstance(state.get("ess_digital_twin"), dict) else {}
+    return {
+        "site_id": site_id,
+        "known_at": decision_at.isoformat(),
+        "slots": slots,
+        "ess": {
+            "soc_fraction": twin.get("soc_fraction"),
+            "resource_identity": twin.get("resource_identity"),
+        },
+    }
+
+
 @websocket_api.websocket_command({vol.Required("type"): POWER_FORECAST_COMMAND})
 @websocket_api.async_response
 async def websocket_power_forecast(hass, connection, msg):
-    connection.send_result(msg["id"], await _async_power_forecast_state(hass))
+    requested_date = None
+    if msg.get("date"):
+        try:
+            requested_date = date.fromisoformat(msg["date"])
+        except ValueError:
+            connection.send_result(msg["id"], {"available": False, "reason": "invalid_date", "series": {}})
+            return
+    connection.send_result(msg["id"], await _async_power_forecast_state(hass, requested_date=requested_date))
 
 
 async def _async_load_forecast_state(
