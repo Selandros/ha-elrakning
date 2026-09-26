@@ -285,7 +285,7 @@ def _sanitize_facility(facility: dict) -> dict:
 
 @websocket_api.websocket_command({
     vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND,
-    vol.Optional("inputs", default=None): dict,
+    vol.Optional("inputs"): dict,
     vol.Optional("site_id", default=None): str,
 })
 @websocket_api.async_response
@@ -1749,7 +1749,10 @@ async def _async_optimizer_runtime_inputs(hass, site_id):
     }
 
 
-@websocket_api.websocket_command({vol.Required("type"): POWER_FORECAST_COMMAND})
+@websocket_api.websocket_command({
+    vol.Required("type"): POWER_FORECAST_COMMAND,
+    vol.Optional("date"): str,
+})
 @websocket_api.async_response
 async def websocket_power_forecast(hass, connection, msg):
     requested_date = None
