@@ -366,6 +366,21 @@ function roundDiagnosticMs(value) {
   return Math.round(Number(value) * 1000) / 1000;
 }
 
+const DIAGNOSTIC_ERROR_MESSAGE_LIMIT = 512;
+const DIAGNOSTIC_ERROR_STACK_LIMIT = 2048;
+
+export function sanitizeDiagnosticError(error) {
+  const redact = (value, limit) => String(value || "")
+    .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "[redacted-id]")
+    .replace(/\b(?:[0-9a-f]{16,}|\d{10,})\b/gi, "[redacted-token]")
+    .slice(0, limit);
+  return {
+    error_name: String(error?.name || "Error").slice(0, 96),
+    error_message: redact(error?.message, DIAGNOSTIC_ERROR_MESSAGE_LIMIT),
+    error_stack: redact(error?.stack, DIAGNOSTIC_ERROR_STACK_LIMIT),
+  };
+}
+
 function localDayStart(value) {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
@@ -8420,6 +8435,7 @@ class ElrakningPanel {
     const enrichmentToken = ++this._powerHistoryEnrichmentRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
     let stage = "request";
+    let substage = "request";
     try {
       const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
         ...(requestedDate ? { date: requestedDate } : {}),
@@ -8467,17 +8483,25 @@ class ElrakningPanel {
       });
       try {
         stage = "history_render";
+        substage = "rebuild_live_power_maxima";
         this._rebuildLivePowerMaxima();
+        substage = "refresh_power_energy_state";
         this._refreshPowerEnergyState();
+        substage = "render_solar_evidence";
         this._renderSolarEvidence();
+        substage = "render_price_plan_cards";
         this._renderPricePlanCards();
-        if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+        if (this.host.querySelector(".price-chart")) {
+          substage = "render_price_chart";
+          this.renderPriceChart();
+        }
         this._recordPowerFlowDiagnostic("history_render", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
       } catch (error) {
         this._recordPowerFlowDiagnostic("history_render_failed", {
           requested_date: requestedDate,
           stage,
-          error_name: error?.name || "Error",
+          substage,
+          ...sanitizeDiagnosticError(error),
           duration_ms: roundDiagnosticMs(performance.now() - started),
         });
       }
@@ -8498,6 +8522,7 @@ class ElrakningPanel {
   async loadPowerHistoryEnrichment({ requestToken, enrichmentToken, siteContextGeneration, contextKey, requestedDate }) {
     if (!this.hass?.callWS) return;
     const started = performance.now();
+    let substage = "request";
     try {
       const response = await this.hass.callWS({
         type: "elrakning/power_history_enrichment",
@@ -8514,6 +8539,7 @@ class ElrakningPanel {
       }
       this._recordPowerFlowDiagnostic("enrichment_response_received", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started), accepted: true });
       const mergeStarted = performance.now();
+      substage = "merge_state_apply";
       this._powerHistory = {
         ...this._powerHistory,
         power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
@@ -8527,12 +8553,22 @@ class ElrakningPanel {
         solar_open_meteo: response?.solar_open_meteo || this._powerHistory?.solar_open_meteo || { available: false, source: "open_meteo" },
       };
       this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
+      substage = "render_solar_evidence";
       this._renderSolarEvidence();
+      substage = "render_price_plan_cards";
       this._renderPricePlanCards();
-      if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+      if (this.host.querySelector(".price-chart")) {
+        substage = "render_price_chart";
+        this.renderPriceChart();
+      }
       this._recordPowerFlowDiagnostic("enrichment_merge", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - mergeStarted), series: Object.keys(this._powerHistory.power_forecast?.series || {}) });
-    } catch {
-      this._recordPowerFlowDiagnostic("enrichment_failed", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
+    } catch (error) {
+      this._recordPowerFlowDiagnostic("enrichment_failed", {
+        requested_date: requestedDate,
+        substage,
+        ...sanitizeDiagnosticError(error),
+        duration_ms: roundDiagnosticMs(performance.now() - started),
+      });
       // History remains available when optional enrichment is unavailable.
     }
   }
