@@ -9,6 +9,7 @@ spec.loader.exec_module(module)
 append = module.append_diagnostic
 sanitize = module.sanitize_diagnostic_text
 sanitize_source = module.sanitize_source_data
+runtime_metadata = module.runtime_metadata
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -88,6 +89,16 @@ class DiagnosticsTests(unittest.TestCase):
         append(logs, "INFO", "integration", "integration_start", "Integration started · Version: 0.0.64")
         self.assertEqual(len(logs), 1)
         self.assertIn("Version: 0.0.64", logs[0]["message"])
+
+    def test_runtime_metadata_is_bounded_and_non_sensitive(self):
+        result = runtime_metadata("0.0.765")
+        self.assertEqual(result["integration_version"], "0.0.765")
+        self.assertIn(result["python_implementation"], {"CPython", "PyPy", "Jython", "IronPython"})
+        self.assertRegex(result["python_version"], r"^\d+\.\d+")
+        self.assertTrue(result["machine"])
+        self.assertTrue(result["system"])
+        self.assertNotIn("path", " ".join(result).lower())
+        self.assertNotIn("token", " ".join(result).lower())
 
 
 if __name__ == "__main__":

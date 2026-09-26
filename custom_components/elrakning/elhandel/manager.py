@@ -19,7 +19,7 @@ from ..const import (
     ELECTRICITY_PROVIDER_UPDATE_EVENT,
     SUPPORTED_ELECTRICITY_PROVIDERS,
 )
-from ..diagnostics import append_diagnostic
+from ..diagnostics import append_diagnostic, runtime_metadata
 from .providers.greenely_source import merge_consumption_samples
 from .providers.greenely_client import GreenelyError
 from .models import ProviderData, _safe_facility_name, serialize_provider_state
@@ -124,6 +124,12 @@ class ElhandelManager:
         self.diagnostics = []
         await self.diagnostics_store.async_save(self.diagnostics)
         await self.async_diagnostic("INFO", "integration", "integration_start", f"Integration started · Version: {version}")
+        await self.async_diagnostic(
+            "INFO",
+            "integration",
+            "runtime_environment",
+            json.dumps(runtime_metadata(version), sort_keys=True, separators=(",", ":")),
+        )
         self.state["configured"] = configured
         self.state["provider"] = GREENELY_PROVIDER if configured else None
         self.state["provider_name"] = SUPPORTED_ELECTRICITY_PROVIDERS[GREENELY_PROVIDER] if configured else None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import platform
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,6 +20,17 @@ DIAGNOSTIC_SENSITIVE = re.compile(
     r"access[_-]?token|refresh[_-]?token|id[_-]?token",
     re.IGNORECASE,
 )
+
+
+def runtime_metadata(integration_version: str) -> dict[str, str]:
+    """Return bounded runtime metadata without filesystem or credential details."""
+    return {
+        "integration_version": str(integration_version),
+        "python_implementation": str(platform.python_implementation()),
+        "python_version": str(platform.python_version()),
+        "machine": str(platform.machine()),
+        "system": str(platform.system()),
+    }
 
 
 def sanitize_source_data(value: Any, key: str = "") -> Any:
