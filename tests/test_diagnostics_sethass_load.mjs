@@ -10,10 +10,11 @@ assert.match(bind, /_bindDiagnostics\(loadInitial = false\)/);
 assert.match(bind, /const requestGeneration = \+\+this\._diagnosticsRequestGeneration/);
 assert.match(bind, /const lifecycleGeneration = this\._diagnosticsLifecycleGeneration/);
 assert.match(bind, /const requestHass = this\.hass/);
-assert.match(bind, /requestHass\.callWS\(\{ type: "elrakning\/diagnostics_state" \}\)/);
-assert.match(bind, /if \(!isCurrentRequest\(\)\) return;\s*render\(response\.logs\)/);
+assert.match(bind, /requestHass\.callWS\(\{ type: "elrakning\/diagnostics_state", include_inventory: false \}\)/);
+assert.match(bind, /if \(!isCurrentRequest\(\)\) return false;\s*render\(response\.logs\)/);
 assert.match(bind, /if \(isCurrentRequest\(\)\) status\.textContent = "Varning"/);
 assert.match(bind, /if \(loadInitial\) load\(\)/);
+assert.match(bind, /const loaded = await load\(\);[\s\S]*const clipboardEntries = .*\.slice\(\)/);
 assert.doesNotMatch(bind, /\n\s*load\(\);\s*\n\s*}/);
 
 assert.match(setHass, /const connectionChanged = Boolean\(hass\?\.connection && this\._eventConnection !== hass\.connection\)/);

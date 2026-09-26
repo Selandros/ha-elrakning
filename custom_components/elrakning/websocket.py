@@ -864,13 +864,16 @@ async def websocket_electricity_provider_source_data(hass, connection, msg):
     await manager.async_diagnostic("INFO", "websocket", "source_response_sent", "Response sent")
 
 
-@websocket_api.websocket_command({vol.Required("type"): DIAGNOSTICS_STATE_COMMAND})
+@websocket_api.websocket_command({
+    vol.Required("type"): DIAGNOSTICS_STATE_COMMAND,
+    vol.Optional("include_inventory", default=True): bool,
+})
 @websocket_api.async_response
 async def websocket_diagnostics_state(hass, connection, msg):
     manager = _elhandel_manager(hass)
     site_identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     inventory = None
-    if site_identity is not None and _ella_load_registry(hass) is not None:
+    if msg.get("include_inventory", True) and site_identity is not None and _ella_load_registry(hass) is not None:
         site_id = getattr(site_identity, "state", {}).get("active_site_id")
         if isinstance(site_id, str):
             inventory = build_capability_inventory(
@@ -1303,6 +1306,9 @@ async def websocket_power_history_enrichment(hass, connection, msg):
 
 async def _power_flow_diagnostic(hass, level: str, event: str, details: dict) -> None:
     """Write bounded day-switch diagnostics through the existing UI log store."""
+    if event == "load_input_frames_read_complete":
+        # High-frequency frame reads are useful in transient profiling, but not in the bounded UI store.
+        return
     manager = _elhandel_manager(hass)
     if manager is None:
         return

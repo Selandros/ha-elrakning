@@ -23,6 +23,7 @@ for (const event of [
 assert.match(backend, /power_flow_diagnostics/);
 assert.match(backend, /time\.monotonic\(\)/);
 assert.match(backend, /async def _power_flow_diagnostic\(/);
+assert.match(backend, /if event == "load_input_frames_read_complete":[\s\S]*?return/);
 assert.match(backend, /relative_ms/);
 assert.doesNotMatch(backend, /payload = \{"mono_ms"/);
 assert.match(backend, /frontend_power_flow/);

@@ -67,6 +67,7 @@ export function diagnosticComponent(component) {
     price: "Pris",
     performance: "Performance",
     websocket: "Websocket",
+    frontend_power_flow: "Frontend power flow",
   }[component] || component || "Elräkning";
 }
 
@@ -9451,11 +9452,13 @@ class ElrakningPanel {
         && lifecycleGeneration === this._diagnosticsLifecycleGeneration
         && this.hass === requestHass;
       try {
-        const response = await requestHass.callWS({ type: "elrakning/diagnostics_state" });
-        if (!isCurrentRequest()) return;
+        const response = await requestHass.callWS({ type: "elrakning/diagnostics_state", include_inventory: false });
+        if (!isCurrentRequest()) return false;
         render(response.logs);
+        return true;
       } catch {
         if (isCurrentRequest()) status.textContent = "Varning";
+        return false;
       }
     };
     this._loadDiagnosticsState = load;
@@ -9464,6 +9467,8 @@ class ElrakningPanel {
     if (!this._diagnosticsBound || domChanged) {
       copy.addEventListener("click", async () => {
         try {
+          const loaded = await load();
+          if (!loaded) copyStatus.textContent = "Varning";
           const clipboardEntries = this._diagnosticEntries.slice();
           await this._copyText(formatDiagnosticsText(clipboardEntries, this.version));
           copyStatus.textContent = "Kopierat";
