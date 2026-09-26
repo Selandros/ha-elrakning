@@ -2739,6 +2739,7 @@ class ElrakningPanel {
     this._chartPreferencesReady = false;
     this._chartPreferencesSavePromise = Promise.resolve();
     this._meterPowerHistory = createMeterPowerHistoryState();
+    this._dailyEnergyDiagnosticSignature = null;
     this._livePowerMaxima = { date: null, house: 0, solar: 0, grid: 0, battery: 0 };
     this._meterTooltipPoints = [];
     this._meterCanonicalPoints = [];
@@ -7899,6 +7900,24 @@ class ElrakningPanel {
     const consumptionAvailable = consumptionConfigured && powerEnergyAvailable("consumption") && Number.isFinite(power.consumption_energy_kwh);
     const exportKwh = this._calculateMeterEnergy("export_kw");
     const importKwh = this._calculateMeterEnergy("import_kw");
+    const dailyEnergyDiagnostic = JSON.stringify({
+      power_date: this._powerHistory?.date || null,
+      meter_date: this._meterPowerHistory?.date || null,
+      power_solar_points: this._powerHistory?.series?.solar?.points?.length || 0,
+      power_consumption_points: this._powerHistory?.series?.consumption?.points?.length || 0,
+      meter_points: this._meterPowerHistory?.points?.length || 0,
+      solar_energy_kwh: Number.isFinite(power.solar_energy_kwh) ? power.solar_energy_kwh : null,
+      consumption_energy_kwh: Number.isFinite(power.consumption_energy_kwh) ? power.consumption_energy_kwh : null,
+      import_kwh: Number.isFinite(importKwh) ? importKwh : null,
+      export_kwh: Number.isFinite(exportKwh) ? exportKwh : null,
+    });
+    if (dailyEnergyDiagnostic !== this._dailyEnergyDiagnosticSignature && (importKwh === null || exportKwh === null)) {
+      this._dailyEnergyDiagnosticSignature = dailyEnergyDiagnostic;
+      this._recordPowerFlowDiagnostic("daily_energy_inputs", {
+        inputs: JSON.parse(dailyEnergyDiagnostic),
+        reason: "meter_energy_unavailable",
+      });
+    }
     const hasAnyPart = solarConfigured || consumptionConfigured;
     card.hidden = !hasAnyPart;
     if (!hasAnyPart) {
