@@ -286,7 +286,7 @@ def _sanitize_facility(facility: dict) -> dict:
 @websocket_api.websocket_command({
     vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND,
     vol.Optional("inputs"): dict,
-    vol.Optional("site_id", default=None): str,
+    vol.Optional("site_id"): str,
 })
 @websocket_api.async_response
 async def websocket_economic_optimizer(hass, connection, msg):
