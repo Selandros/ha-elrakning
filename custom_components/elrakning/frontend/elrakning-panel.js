@@ -361,6 +361,10 @@ function localDateKey(value) {
   return Number.isFinite(date.getTime()) ? date.toLocaleDateString("sv-SE") : null;
 }
 
+function roundDiagnosticMs(value) {
+  return Math.round(Number(value) * 1000) / 1000;
+}
+
 function localDayStart(value) {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
@@ -6388,7 +6392,12 @@ class ElrakningPanel {
       this._periodPickerState.open = false;
       this._renderPeriodPicker();
       if (changed) {
+        this._recordPowerFlowDiagnostic("date_change", { requested_date: localDateKey(next) });
+        const dateChangeStarted = performance.now();
         await Promise.all([this.loadPriceData(next), this.loadPricePlan(next), this.loadPowerHistory(next)]);
+        this._recordPowerFlowDiagnostic("date_change_complete", {
+          requested_date: localDateKey(next), duration_ms: roundDiagnosticMs(performance.now() - dateChangeStarted),
+        });
       }
       else {
         this.updatePriceSummary();
@@ -8343,9 +8352,13 @@ class ElrakningPanel {
     const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
     const cycleKey = `${this._siteContextGeneration}:${requestedDate || ""}`;
     const existing = this._powerHistoryInFlight.get(cycleKey);
-    if (existing) return existing.history;
+    if (existing) {
+      this._recordPowerFlowDiagnostic("history_reused", { requested_date: requestedDate, active_history_jobs: this._powerHistoryInFlight.size });
+      return existing.history;
+    }
     const cycle = { history: null, enrichment: null };
     this._powerHistoryInFlight.set(cycleKey, cycle);
+    this._recordPowerFlowDiagnostic("history_request_start", { requested_date: requestedDate, active_history_jobs: this._powerHistoryInFlight.size });
     cycle.history = this._loadPowerHistoryCycle({ requestedDate, cycle });
     cycle.history.finally(() => {
       const cleanup = () => {
@@ -8358,6 +8371,7 @@ class ElrakningPanel {
   }
 
   async _loadPowerHistoryCycle({ requestedDate, cycle }) {
+    const started = performance.now();
     const requestToken = ++this._powerHistoryRequestToken;
     const enrichmentToken = ++this._powerHistoryEnrichmentRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
@@ -8365,8 +8379,12 @@ class ElrakningPanel {
       const response = await this.hass.callWS({ type: "elrakning/power_history", days: 7,
         ...(requestedDate ? { date: requestedDate } : {}),
       });
+      this._recordPowerFlowDiagnostic("history_response_received", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
       if (response?.error === "power_unavailable") return;
-      if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) return;
+      if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) {
+        this._recordPowerFlowDiagnostic("history_stale_rejected", { requested_date: requestedDate, request_token: requestToken });
+        return;
+      }
       const series = response?.success && response?.series && typeof response.series === "object" ? response.series : {};
       for (const [key, points] of Object.entries(this._powerLivePoints)) {
         if (!points.size) continue;
@@ -8393,6 +8411,8 @@ class ElrakningPanel {
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+      this._recordPowerFlowDiagnostic("history_render", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
+      this._recordPowerFlowDiagnostic("enrichment_request_start", { requested_date: requestedDate, active_enrichment_jobs: 1 });
       cycle.enrichment = this.loadPowerHistoryEnrichment({
         requestToken,
         enrichmentToken,
@@ -8410,6 +8430,7 @@ class ElrakningPanel {
 
   async loadPowerHistoryEnrichment({ requestToken, enrichmentToken, siteContextGeneration, contextKey, requestedDate }) {
     if (!this.hass?.callWS) return;
+    const started = performance.now();
     try {
       const response = await this.hass.callWS({
         type: "elrakning/power_history_enrichment",
@@ -8420,7 +8441,12 @@ class ElrakningPanel {
       if (enrichmentToken !== this._powerHistoryEnrichmentRequestToken) guardReasons.push("enrichment_request_token");
       if (siteContextGeneration !== this._siteContextGeneration) guardReasons.push("site_context_generation");
       if (contextKey !== this._powerHistoryContextKey) guardReasons.push("history_context_key");
-      if (guardReasons.length) return;
+      if (guardReasons.length) {
+        this._recordPowerFlowDiagnostic("enrichment_stale_rejected", { requested_date: requestedDate, reasons: guardReasons, duration_ms: roundDiagnosticMs(performance.now() - started) });
+        return;
+      }
+      this._recordPowerFlowDiagnostic("enrichment_response_received", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started), accepted: true });
+      const mergeStarted = performance.now();
       this._powerHistory = {
         ...this._powerHistory,
         power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
@@ -8435,7 +8461,9 @@ class ElrakningPanel {
       this._renderSolarEvidence();
       this._renderPricePlanCards();
       if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+      this._recordPowerFlowDiagnostic("enrichment_merge", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - mergeStarted), series: Object.keys(this._powerHistory.power_forecast?.series || {}) });
     } catch {
+      this._recordPowerFlowDiagnostic("enrichment_failed", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
       // History remains available when optional enrichment is unavailable.
     }
   }
@@ -8620,6 +8648,20 @@ class ElrakningPanel {
     } catch {
       // The save flow must remain usable if diagnostics transport is unavailable.
     }
+  }
+
+  _recordPowerFlowDiagnostic(event, details = {}) {
+    const siteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || this._pricePlan?.site_id || null;
+    const selectedDate = this._periodPickerState?.confirmed;
+    const requestedDate = selectedDate instanceof Date && Number.isFinite(selectedDate.getTime()) ? localDateKey(selectedDate) : null;
+    void this._recordDiagnostic("power_flow", "INFO", event, JSON.stringify({
+      mono_ms: roundDiagnosticMs(performance.now()),
+      request_generation: this._powerHistoryRequestToken,
+      site_context_generation: this._siteContextGeneration,
+      site_id: siteId,
+      selected_date: requestedDate,
+      ...details,
+    }));
   }
 
   async _copyText(text) {

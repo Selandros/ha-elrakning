@@ -6,6 +6,7 @@ import asyncio
 import logging
 import inspect
 import json
+import time
 from functools import partial
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1243,13 +1244,29 @@ async def websocket_power_state(hass, connection, msg):
 )
 @websocket_api.async_response
 async def websocket_power_history(hass, connection, msg):
+    manager = _elhandel_manager(hass)
+    started = time.monotonic()
+    counters = hass.data.setdefault(DOMAIN, {}).setdefault("power_flow_diagnostics", {"history_active": 0, "enrichment_active": 0, "forecast_active": 0})
+    counters["history_active"] += 1
+    await _power_flow_diagnostic(hass, "INFO", "history_handler_start", {
+        "request_id": msg.get("id"), "date": msg.get("date"), "history_active": counters["history_active"],
+    })
     manager = _power_manager(hass)
-    result = await manager.async_history(msg.get("days", 1)) if manager else {
-        "success": False,
-        "series": {},
-        "error": "power_unavailable",
-    }
-    connection.send_result(msg["id"], result)
+    try:
+        result = await manager.async_history(msg.get("days", 1)) if manager else {
+            "success": False,
+            "series": {},
+            "error": "power_unavailable",
+        }
+        connection.send_result(msg["id"], result)
+    finally:
+        counters["history_active"] = max(0, counters["history_active"] - 1)
+        await _power_flow_diagnostic(hass, "INFO", "history_handler_end", {
+            "request_id": msg.get("id"), "date": msg.get("date"),
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+            "history_active": counters["history_active"],
+            "series_counts": {key: len(value.get("points", [])) for key, value in (result.get("series", {}) if "result" in locals() else {}).items() if isinstance(value, dict)},
+        })
 
 
 @websocket_api.websocket_command(
@@ -1267,13 +1284,35 @@ async def websocket_power_history_enrichment(hass, connection, msg):
             requested_date = date.fromisoformat(msg["date"])
         except ValueError:
             requested_date = None
-    connection.send_result(
-        msg["id"],
-        await _async_power_history_enrichment(hass, requested_date),
-    )
+    started = time.monotonic()
+    counters = hass.data.setdefault(DOMAIN, {}).setdefault("power_flow_diagnostics", {"history_active": 0, "enrichment_active": 0, "forecast_active": 0})
+    counters["enrichment_active"] += 1
+    await _power_flow_diagnostic(hass, "INFO", "enrichment_handler_start", {
+        "request_id": msg.get("id"), "date": msg.get("date"), "enrichment_active": counters["enrichment_active"],
+    })
+    try:
+        connection.send_result(msg["id"], await _async_power_history_enrichment(hass, requested_date, msg.get("id")))
+    finally:
+        counters["enrichment_active"] = max(0, counters["enrichment_active"] - 1)
+        await _power_flow_diagnostic(hass, "INFO", "enrichment_handler_end", {
+            "request_id": msg.get("id"), "date": msg.get("date"),
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+            "enrichment_active": counters["enrichment_active"],
+        })
 
 
-async def _async_power_history_enrichment(hass, requested_date: date | None = None) -> dict:
+async def _power_flow_diagnostic(hass, level: str, event: str, details: dict) -> None:
+    """Write bounded day-switch diagnostics through the existing UI log store."""
+    manager = _elhandel_manager(hass)
+    if manager is None:
+        return
+    identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    active_site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
+    payload = {"mono_ms": round(time.monotonic() * 1000, 3), "site_id": active_site_id, **details}
+    await manager.async_diagnostic(level, "power_flow", event, json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str))
+
+
+async def _async_power_history_enrichment(hass, requested_date: date | None = None, request_id=None) -> dict:
     """Build the existing forecast/state enrichment independently of history."""
     forecast_manager = _solar_forecast_manager(hass)
     forecast = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
@@ -1288,10 +1327,22 @@ async def _async_power_history_enrichment(hass, requested_date: date | None = No
     pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
     enrichment["solar_pvgis"] = pvgis_manager.public_state() if pvgis_manager and _site_is_configured(hass) else {"available": False, "source": "jrc_pvgis"}
     enrichment["solar_sun"] = build_sun_context(hass)
-    enrichment["load_forecast"] = await _async_load_forecast_state(hass)
+    load_started = time.monotonic()
+    enrichment["load_forecast"] = await _async_load_forecast_state(hass, request_id=request_id)
+    await _power_flow_diagnostic(hass, "INFO", "load_forecast_complete", {
+        "request_id": request_id, "date": requested_date.isoformat() if requested_date else None,
+        "duration_ms": round((time.monotonic() - load_started) * 1000, 3),
+        "frame_count": len(enrichment["load_forecast"].get("frames", [])),
+    })
+    power_started = time.monotonic()
     enrichment["power_forecast"] = await _async_power_forecast_state(
-        hass, requested_date, load_forecast=enrichment["load_forecast"]
+        hass, requested_date, load_forecast=enrichment["load_forecast"], request_id=request_id
     )
+    await _power_flow_diagnostic(hass, "INFO", "power_forecast_complete", {
+        "request_id": request_id, "date": requested_date.isoformat() if requested_date else None,
+        "duration_ms": round((time.monotonic() - power_started) * 1000, 3),
+        "series_count": len(enrichment["power_forecast"].get("series", {})),
+    })
     return enrichment
 
 
@@ -1300,6 +1351,7 @@ async def _async_power_forecast_state(
     requested_date: date | None = None,
     requested_site_id: str | None = None,
     load_forecast: dict[str, Any] | None = None,
+    request_id=None,
 ) -> dict:
     """Return cached, read-only site power forecasts for the active chart day."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1331,10 +1383,15 @@ async def _async_power_forecast_state(
         tuple(sorted((key, str(value)) for key, value in solar_facts.items() if key != "baselines")),
         json.dumps(power_calibration, sort_keys=True, separators=(",", ":"), default=str),
     )
+    counters = hass.data.setdefault(DOMAIN, {}).setdefault("power_flow_diagnostics", {"history_active": 0, "enrichment_active": 0, "forecast_active": 0})
     inflight = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_inflight", {})
     inflight_key = cache_key
     task = inflight.get(inflight_key)
     if task is None:
+        counters["forecast_active"] += 1
+        await _power_flow_diagnostic(hass, "INFO", "power_forecast_new", {
+            "request_id": request_id, "date": target_date.isoformat(), "forecast_active": counters["forecast_active"],
+        })
         task = asyncio.create_task(_build_power_forecast_state(
             hass,
             site_id,
@@ -1352,14 +1409,24 @@ async def _async_power_forecast_state(
             solar_facts=solar_facts,
             target_date=target_date,
             power_calibration=power_calibration,
+            request_id=request_id,
         ))
         inflight[inflight_key] = task
 
         def clear(completed, request_key=inflight_key):
             if inflight.get(request_key) is completed:
                 inflight.pop(request_key, None)
+                counters["forecast_active"] = max(0, counters["forecast_active"] - 1)
+                asyncio.create_task(_power_flow_diagnostic(hass, "INFO", "power_forecast_task_complete", {
+                    "request_id": request_id, "date": target_date.isoformat(),
+                    "forecast_active": counters["forecast_active"],
+                }))
 
         task.add_done_callback(clear)
+    else:
+        await _power_flow_diagnostic(hass, "INFO", "power_forecast_join_existing", {
+            "request_id": request_id, "date": target_date.isoformat(), "forecast_active": counters["forecast_active"],
+        })
     result = await asyncio.shield(task)
     return result
 
@@ -1378,17 +1445,24 @@ async def _build_power_forecast_state(
     solar_facts,
     target_date,
     power_calibration,
+    request_id=None,
 ):
     """Build one immutable forecast result for a shared site/day computation."""
     collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     if rows is None:
+        history_started = time.monotonic()
         rows = await hass.async_add_executor_job(
             collector.storage.read_site_energy_history,
             str(site_id), now - timedelta(days=30), now,
         )
+        await _power_flow_diagnostic(hass, "INFO", "power_history_read_complete", {
+            "request_id": request_id, "date": target_date.isoformat(),
+            "duration_ms": round((time.monotonic() - history_started) * 1000, 3), "row_count": len(rows),
+        })
     open_meteo_frames = []
     try:
+        frames_started = time.monotonic()
         raw_frames = await hass.async_add_executor_job(
             partial(
                 collector.storage.read_external_input_frames,
@@ -1398,6 +1472,10 @@ async def _build_power_forecast_state(
                 logical_role="solar.irradiance.day_ahead_pv_forecast",
             ),
         )
+        await _power_flow_diagnostic(hass, "INFO", "power_input_frames_read_complete", {
+            "request_id": request_id, "date": target_date.isoformat(),
+            "duration_ms": round((time.monotonic() - frames_started) * 1000, 3), "frame_count": len(raw_frames),
+        })
         open_meteo_frames = [
             {
                 **frame,
@@ -1409,6 +1487,7 @@ async def _build_power_forecast_state(
         ]
     except Exception:
         open_meteo_frames = []
+    build_started = time.monotonic()
     result = build_power_forecast(
         str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now,
         active_battery_generation_ids,
@@ -1417,6 +1496,11 @@ async def _build_power_forecast_state(
         open_meteo_targets=open_meteo_targets,
         learning_calibration=power_calibration,
     )
+    await _power_flow_diagnostic(hass, "INFO", "power_forecast_build_complete", {
+        "request_id": request_id, "date": target_date.isoformat(),
+        "duration_ms": round((time.monotonic() - build_started) * 1000, 3),
+        "series_count": len(result.get("series", {})),
+    })
     result["learning_calibration"] = power_calibration
     return result
 
@@ -1430,6 +1514,7 @@ async def websocket_power_forecast(hass, connection, msg):
 async def _async_load_forecast_state(
     hass,
     requested_site_id: str | None = None,
+    request_id=None,
 ) -> dict:
     """Share one in-flight immutable frame read between concurrent callers."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1441,7 +1526,7 @@ async def _async_load_forecast_state(
     key = str(site_id)
     task = inflight.get(key)
     if task is None:
-        task = asyncio.create_task(_async_load_forecast_state_uncached(hass, key))
+        task = asyncio.create_task(_async_load_forecast_state_uncached(hass, key, request_id))
         inflight[key] = task
 
         def clear(completed, request_key=key):
@@ -1455,6 +1540,7 @@ async def _async_load_forecast_state(
 async def _async_load_forecast_state_uncached(
     hass,
     requested_site_id: str | None = None,
+    request_id=None,
 ) -> dict:
     """Serialize the active site's immutable load forecast, if available."""
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
@@ -1464,6 +1550,7 @@ async def _async_load_forecast_state_uncached(
         return {"available": False, "reason": "site_unconfigured", "frames": []}
     now = dt_util.now().astimezone()
     try:
+        started = time.monotonic()
         frames = await hass.async_add_executor_job(
             partial(
                 collector.storage.read_external_input_frames,
@@ -1473,6 +1560,10 @@ async def _async_load_forecast_state_uncached(
                 logical_role="load.forecast",
             ),
         )
+        await _power_flow_diagnostic(hass, "INFO", "load_input_frames_read_complete", {
+            "request_id": request_id, "site_id": site_id,
+            "duration_ms": round((time.monotonic() - started) * 1000, 3), "frame_count": len(frames),
+        })
     except Exception:
         return {"available": False, "reason": "history_unavailable", "frames": []}
     serialized = []
