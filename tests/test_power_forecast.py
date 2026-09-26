@@ -53,9 +53,11 @@ def _load_frame(points, known_at):
     return {"frames": [{
         "site_id": SITE,
         "frame_id": "load-v2",
+        "source_generation_id": "load-generation",
         "revision": 1,
         "payload_schema": "load_forecast.v1",
         "known_at": known_at.isoformat(),
+        "quality_status": "good",
         "quality": {"model_version": "load-profile-v2"},
         "points": [{"valid_at": start.isoformat(), "value": value, "unit": "W"} for start, value in points],
     }]}
@@ -77,6 +79,8 @@ def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
     )
     assert result["execution_eligible"] is False
     assert result["actuator_writes_enabled"] is False
+    assert result["layer"] == "baseline_forecast"
+    assert result["forecast_kind"] == "autonomous_behavior_baseline"
     battery = result["battery"]
     assert battery["schema"] == "battery_power_forecast.v1"
     assert battery["available"] is True
@@ -85,6 +89,7 @@ def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["sample_count"] == 3
     assert result["series"]["charging"]["forecast_points"][0]["provenance"]["context_level"] == "quarter_soc_net"
     assert battery["model_version"] == "battery-behavior-profile-v2"
+    assert result["series"]["consumption"]["layer"] == "baseline_forecast"
     assert result == build_power_forecast(
         SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
         {"this_hour_kwh": 0.6, "next_hour_kwh": None},
@@ -391,6 +396,39 @@ def test_battery_forecast_uses_only_active_source_generation():
     )
     assert result["battery"]["source_generation_ids"] == ["battery-new"]
     assert result["battery"]["forecast_points"][0]["value_w"] == 500
+
+
+def test_battery_context_uses_only_active_solar_generations():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    starts = [datetime(2026, 9, day, 18, 15, tzinfo=UTC) for day in (7, 14, 20)]
+    rows = []
+    for start in starts:
+        rows.extend([
+            _row("battery.power", start, 300, generation="battery-active"),
+            _row("house.consumption", start, 1000, generation="load-gen"),
+            _row("solar.production", start, 200, generation="solar-active"),
+            _row("solar.production", start, 900, generation="solar-closed"),
+        ])
+    future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", rows, _load_frame([(future, 1000)], known_at),
+        {"this_hour_kwh": 0.2}, {"entities": {"this_hour_kwh": "sensor.this"}}, known_at,
+        {"battery-active"}, active_solar_generation_ids={"solar-active"},
+    )
+    assert result["battery"]["forecast_points"][0]["value_w"] == 300
+
+
+def test_load_provenance_preserves_frame_generation_and_quality():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    future = datetime(2026, 9, 21, 18, 15, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", [], _load_frame([(future, 1000)], known_at),
+        {"this_hour_kwh": 0.3}, {"entities": {"this_hour_kwh": "sensor.this"}}, known_at,
+    )
+    provenance = result["series"]["consumption"]["forecast_points"][0]["provenance"]
+    assert provenance["source_generation_id"] == "load-generation"
+    assert provenance["quality_status"] == "good"
+    assert provenance["layer"] == "baseline_forecast"
 
 
 def test_load_forecast_requires_canonical_w_unit():

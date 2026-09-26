@@ -1413,6 +1413,11 @@ async def _async_power_forecast_state(
                 for target in identity.collection_targets()
                 if target.get("site_id") == str(site_id) and target.get("logical_role") == "battery.power"
             },
+            active_solar_generation_ids={
+                str(target.get("generation_id"))
+                for target in identity.collection_targets()
+                if target.get("site_id") == str(site_id) and target.get("logical_role") == "solar.production"
+            },
             open_meteo_targets=build_single_run_targets(getattr(identity, "collection_site_configs", lambda: {})()),
             solar_facts=solar_facts,
             target_date=target_date,
@@ -1449,6 +1454,7 @@ async def _build_power_forecast_state(
     binding,
     now,
     active_battery_generation_ids,
+    active_solar_generation_ids,
     open_meteo_targets,
     solar_facts,
     target_date,
@@ -1499,6 +1505,7 @@ async def _build_power_forecast_state(
     result = build_power_forecast(
         str(site_id), timezone_name, rows, load_forecast, solar_facts, binding, now,
         active_battery_generation_ids,
+        active_solar_generation_ids=active_solar_generation_ids,
         target_date=target_date,
         open_meteo_frames=open_meteo_frames,
         open_meteo_targets=open_meteo_targets,
@@ -1581,7 +1588,8 @@ async def _async_load_forecast_state_uncached(
             "site_id": frame["site_id"], "known_at": frame["known_at"].isoformat(),
             "valid_from": frame["valid_from"].isoformat() if frame.get("valid_from") else None,
             "valid_to": frame["valid_to"].isoformat() if frame.get("valid_to") else None,
-            "payload_schema": frame["payload_schema"], "quality_status": frame["quality_status"],
+            "payload_schema": frame["payload_schema"], "source_generation_id": frame.get("source_generation_id"),
+            "classification": frame.get("classification"), "quality_status": frame["quality_status"],
             "quality": frame["quality"], "provenance": frame["provenance"],
             "points": [{"point_id": point["point_id"], "point_key": point["point_key"],
                         "valid_at": point["valid_at"].isoformat(), "value": point["value"],

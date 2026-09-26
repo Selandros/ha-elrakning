@@ -15,6 +15,7 @@ from .solar_single_run import select_for_decision
 
 SCHEMA = "ella_power_forecast.v1"
 BATTERY_SCHEMA = "battery_power_forecast.v1"
+BASELINE_LAYER = "baseline_forecast"
 MODEL_VERSION = "battery-behavior-profile-v2"
 MODEL_KIND = "autonomous_behavior_baseline"
 MIN_BATTERY_SUPPORT = 3
@@ -125,26 +126,34 @@ def _point(value_w: float, start: datetime, end: datetime, *, provenance: dict[s
         "unit": "W",
         "forecast": True,
         "classification": "forecast",
+        "layer": BASELINE_LAYER,
         "source": source,
         "provenance": provenance,
     }
 
 
-def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, use_ratio_projection: bool = False, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
+def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, active_solar_generation_ids: set[str] | None = None, use_ratio_projection: bool = False, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     candidate_battery_rows = [row for row in rows if row.get("logical_role") == "battery.power" and _usable_row(row, site_id, known_at)]
     candidate_generations = {str(row.get("source_generation_id")) for row in candidate_battery_rows if row.get("source_generation_id")}
     if active_generation_ids is None and len(candidate_generations) > 1:
-        return {"schema": BATTERY_SCHEMA, "site_id": site_id, "model_version": MODEL_VERSION, "model_kind": MODEL_KIND, "method": "robust_context_median", "known_at": known_at.isoformat(), "minimum_support": MIN_BATTERY_SUPPORT, "source_generation_ids": sorted(candidate_generations), "forecast_points": [], "available": False, "reason": "ambiguous_battery_source_generations", "execution_eligible": False, "actuator_writes_enabled": False}
+        return {"schema": BATTERY_SCHEMA, "layer": BASELINE_LAYER, "site_id": site_id, "model_version": MODEL_VERSION, "model_kind": MODEL_KIND, "method": "robust_context_median", "known_at": known_at.isoformat(), "minimum_support": MIN_BATTERY_SUPPORT, "source_generation_ids": sorted(candidate_generations), "forecast_points": [], "available": False, "reason": "ambiguous_battery_source_generations", "execution_eligible": False, "actuator_writes_enabled": False}
     battery_rows = [row for row in candidate_battery_rows if active_generation_ids is None or str(row.get("source_generation_id")) in active_generation_ids]
     soc_rows = {row["interval_start"]: row for row in rows if row.get("logical_role") == "battery.soc" and _usable_soc_row(row, site_id, known_at)}
     load_rows = {row["interval_start"]: row for row in rows if row.get("logical_role") == "house.consumption" and _usable_row(row, site_id, known_at)}
     solar_rows: dict[str, list[dict[str, Any]]] = {}
     solar_generations = {
         str(row.get("source_generation_id")) for row in rows
-        if row.get("logical_role") == "solar.production" and row.get("source_generation_id")
+        if row.get("logical_role") == "solar.production"
+        and row.get("site_id") == site_id
+        and row.get("source_generation_id")
+        and (active_solar_generation_ids is None or str(row.get("source_generation_id")) in active_solar_generation_ids)
     }
     for row in rows:
-        if row.get("logical_role") == "solar.production" and _usable_row(row, site_id, known_at):
+        if (
+            row.get("logical_role") == "solar.production"
+            and _usable_row(row, site_id, known_at)
+            and (active_solar_generation_ids is None or str(row.get("source_generation_id")) in active_solar_generation_ids)
+        ):
             solar_rows.setdefault(row["interval_start"], []).append(row)
 
     by_quarter: dict[int, list[float]] = {}
@@ -277,6 +286,7 @@ def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, 
         }))
     return {
         "schema": BATTERY_SCHEMA,
+        "layer": BASELINE_LAYER,
         "site_id": site_id,
         "model_version": MODEL_VERSION,
         "model_kind": MODEL_KIND,
@@ -329,7 +339,7 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
             continue
         watts = sum((value / 1000.0) * float(target["peak_power_kwp"]) * 1000.0 for value, (target, _frame) in zip(section_values, selected))
         frame_ids = [str(frame.get("frame_id")) for _target, frame in selected]
-        generation_ids = [str(target.get("generation_id")) for target, _frame in selected]
+        generation_ids = [str(frame.get("source_generation_id") or target.get("generation_id")) for target, frame in selected]
         points.append(_point(watts, slot_start, slot_end, source="solar.slot_forecast.v1", provenance={
             "schema": "solar.slot_forecast.v1",
             "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power",
@@ -342,7 +352,7 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
             "run_initialization_at": [frame.get("provenance", {}).get("run_initialization_at") for _target, frame in selected],
             "confidence": "complete_section_hour",
         }))
-    return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "target_date": target_date.isoformat(), "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
+    return {"schema": "solar.slot_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "known_at": known_at.isoformat(), "target_date": target_date.isoformat(), "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
 
 
 def _forecast_solar_short(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime) -> dict[str, Any]:
@@ -378,7 +388,7 @@ def _forecast_solar_short(site_id: str, zone: ZoneInfo, facts: dict[str, Any], b
                 "confidence": "source_hour_average",
             }))
     points.sort(key=lambda item: item["valid_at"])
-    return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "method": "hour_energy_as_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
+    return {"schema": "solar.slot_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "known_at": known_at.isoformat(), "method": "hour_energy_as_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
 
 
 def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime, *, target_date: date, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -418,11 +428,24 @@ def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime
         start = _datetime(raw.get("valid_at"))
         value = _finite(raw.get("value"))
         if start and value is not None and raw.get("unit") == "W" and start >= max(known_at, horizon_start) and start < horizon_end:
-            result[start.isoformat()] = _point(value, start, start + timedelta(minutes=15), source="load_forecast.v1", provenance={"frame_id": frame.get("frame_id"), "revision": frame.get("revision"), "model_version": (frame.get("quality") or {}).get("model_version"), "known_at": frame.get("known_at"), "site_id": site_id})
+            result[start.isoformat()] = _point(value, start, start + timedelta(minutes=15), source="load_forecast.v1", provenance={
+                "schema": "load_forecast.v1",
+                "layer": BASELINE_LAYER,
+                "frame_id": frame.get("frame_id"),
+                "revision": frame.get("revision"),
+                "source_generation_id": frame.get("source_generation_id"),
+                "model_version": (frame.get("quality") or {}).get("model_version"),
+                "known_at": frame.get("known_at"),
+                "quality_status": frame.get("quality_status"),
+                "quality": frame.get("quality"),
+                "frame_provenance": frame.get("provenance"),
+                "point_quality_status": raw.get("quality_status"),
+                "site_id": site_id,
+            })
     return result
 
 
-def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, active_solar_generation_ids: set[str] | None = None, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build read-only forecast flows without changing execution or policy gates."""
     zone = ZoneInfo(timezone_name)
     local_day = target_date or known_at.astimezone(zone).date()
@@ -433,17 +456,18 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
     battery = _battery_forecast(
         rows, site_id, zone, slots, load, solar_by_slot, known_at,
         active_battery_generation_ids,
+        active_solar_generation_ids=active_solar_generation_ids,
         # Apply the same causal behavior projection to every future slot.
         use_ratio_projection=True,
         learning_calibration=learning_calibration,
     )
     series = {
-        "solar": solar,
-        "consumption": {"schema": "load_forecast.v1", "site_id": site_id, "available": bool(load), "forecast_points": list(load.values()), "execution_eligible": False, "actuator_writes_enabled": False},
-        "charging": {"schema": BATTERY_SCHEMA, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, -float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "negative_signed_power_to_charge", "display_sign_convention": "positive_charge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
-        "discharging": {"schema": BATTERY_SCHEMA, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "positive_signed_power_to_discharge", "display_sign_convention": "positive_discharge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
-        "import": {"schema": "grid_power_forecast.v1", "site_id": site_id, "available": False, "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False},
-        "export": {"schema": "grid_power_forecast.v1", "site_id": site_id, "available": False, "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False},
+        "solar": {**solar, "layer": BASELINE_LAYER},
+        "consumption": {"schema": "load_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "available": bool(load), "forecast_points": list(load.values()), "execution_eligible": False, "actuator_writes_enabled": False},
+        "charging": {"schema": BATTERY_SCHEMA, "layer": BASELINE_LAYER, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, -float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "negative_signed_power_to_charge", "display_sign_convention": "positive_charge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
+        "discharging": {"schema": BATTERY_SCHEMA, "layer": BASELINE_LAYER, "site_id": site_id, "available": battery["available"], "forecast_points": [_point(max(0.0, float(point["value_w"])), _datetime(point["valid_at"]), _datetime(point["end_at"]), source=BATTERY_SCHEMA, provenance={**point["provenance"], "split": "positive_signed_power_to_discharge", "display_sign_convention": "positive_discharge_magnitude"}) for point in battery["forecast_points"]], "execution_eligible": False, "actuator_writes_enabled": False},
+        "import": {"schema": "grid_power_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "available": False, "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False},
+        "export": {"schema": "grid_power_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "available": False, "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False},
     }
     battery_by_slot = {point["valid_at"]: point for point in battery["forecast_points"]}
     grid_import, grid_export = [], []
@@ -457,4 +481,4 @@ def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, 
         grid_export.append(_point(max(0.0, -balance_w), start, end, source="grid_power_forecast.v1", provenance=provenance))
     series["import"].update({"available": bool(grid_import), "forecast_points": grid_import})
     series["export"].update({"available": bool(grid_export), "forecast_points": grid_export})
-    return {"schema": SCHEMA, "site_id": site_id, "timezone": timezone_name, "known_at": known_at.isoformat(), "horizon": {"date": local_day.isoformat(), "start": slots[0][0].isoformat(), "end": slots[-1][1].isoformat()}, "battery": battery, "series": series, "available": any(item.get("available") for item in series.values()), "execution_eligible": False, "actuator_writes_enabled": False}
+    return {"schema": SCHEMA, "layer": BASELINE_LAYER, "forecast_kind": MODEL_KIND, "site_id": site_id, "timezone": timezone_name, "known_at": known_at.isoformat(), "horizon": {"date": local_day.isoformat(), "start": slots[0][0].isoformat(), "end": slots[-1][1].isoformat()}, "battery": battery, "series": series, "available": any(item.get("available") for item in series.values()), "execution_eligible": False, "actuator_writes_enabled": False}
