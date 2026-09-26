@@ -44,6 +44,7 @@ from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin
+from .economic_optimizer import build_economic_plan
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
@@ -115,6 +116,7 @@ ELLA_EXECUTION_STATE_COMMAND = f"{DOMAIN}/ella_execution/state"
 ELLA_EXECUTION_PERMISSION_SET_COMMAND = f"{DOMAIN}/ella_execution/permission_set"
 ELLA_EXECUTION_OVERRIDE_COMMAND = f"{DOMAIN}/ella_execution/manual_override"
 ELLA_EXECUTION_DISPATCH_COMMAND = f"{DOMAIN}/ella_execution/dispatch"
+ECONOMIC_OPTIMIZER_COMMAND = f"{DOMAIN}/economic_optimizer"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
 
@@ -185,6 +187,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ella_execution_permission_set)
     websocket_api.async_register_command(hass, websocket_ella_execution_override)
     websocket_api.async_register_command(hass, websocket_ella_execution_dispatch)
+    websocket_api.async_register_command(hass, websocket_economic_optimizer)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
     websocket_api.async_register_command(hass, websocket_solar_evidence_state)
     hass.data[f"{DOMAIN}_websocket_registered"] = True
@@ -268,6 +271,14 @@ def _sanitize_facility(facility: dict) -> dict:
         elif key in ("id", "name", "address") and isinstance(value, (str, int)):
             result[key] = str(value)
     return result
+
+
+@websocket_api.websocket_command({vol.Required("type"): ECONOMIC_OPTIMIZER_COMMAND})
+@websocket_api.async_response
+async def websocket_economic_optimizer(hass, connection, msg):
+    """Return a read-only deterministic Step 8 plan or an explicit unavailable result."""
+    result = build_economic_plan(msg.get("inputs"))
+    connection.send_result(msg["id"], result)
 
 
 def _safe_key_name(key: object) -> bool:

@@ -3,8 +3,9 @@
 ## Current roadmap checkpoint
 
 Masterplan v2 step 7 — ESS Digital Twin & Battery Health is complete on
-runtime baseline `0.0.765`; step 8 — Economics & deterministic optimizer is
-the next active main scope. `actual -> baseline_forecast -> ella_plan` remains
+runtime baseline `0.0.767`; step 8 — Economics & deterministic optimizer is
+the active main scope, with the read-only HiGHS core implemented but runtime
+eligibility still fail-closed. `actual -> baseline_forecast -> ella_plan` remains
 the layer contract, and physical control remains gated by step 14.
 
 ## Architecture memory

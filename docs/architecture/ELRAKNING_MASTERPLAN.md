@@ -181,7 +181,13 @@ Acceptance: economic inputs are decision-time valid; negative prices/export
 are represented; optimizer output is reproducible, constrained and separate
 from baseline forecast and execution.
 
-Status: not complete. The former Stage 3 planner does not equal this optimizer.
+Status: PARTIAL implementation on `0.0.767`; not runtime-eligible and not
+complete. A separate read-only HiGHS deterministic MIP core and websocket
+contract exist with causal 15-minute 24–36 hour validation, physical ESS
+constraints, import/export complementarity and deterministic provenance.
+Runtime closure still requires decision-time current grid/export economics and
+one unambiguous verified ESS resource contract. The former Stage 3 planner
+does not equal this optimizer.
 
 ### 9 — Replay, backtest, benchmarks & regret
 

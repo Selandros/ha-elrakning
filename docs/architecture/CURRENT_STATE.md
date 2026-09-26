@@ -10,9 +10,10 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.765` is stable after Masterplan v2 step 7 closure.
+- Runtime baseline `0.0.767` is stable after Masterplan v2 step 7 closure and
+  the Step 8 read-only optimizer implementation.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
-  Battery Health are COMPLETE; Step 8 is ACTIVE/NEXT;
+  Battery Health are COMPLETE; Step 8 is ACTIVE with a partial implementation;
   steps 0–5 are established foundation with remaining
   hardening, retention, and multi-site details tracked explicitly.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.
@@ -64,6 +65,24 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - RELEASE: `0.0.765` contains the Step 7 read-only twin and is the new runtime
   baseline; Step 8 is the next main scope. Deployment evidence is recorded in
   the release report for this version.
+
+## 0.0.767 Masterplan v2 Step 8 implementation checkpoint
+
+- IMPLEMENTED/TESTED: `economic_optimizer.py` exposes the separate
+  `ella_economic_optimizer.v1` read-only contract using pinned HiGHS 1.15.1.
+  It validates causal 15-minute 24–36 hour inputs, verified ESS state and
+  bounds, negative import prices, export value, efficiency and reserve
+  constraints, and mutually exclusive battery/grid directions. Outputs carry
+  deterministic input fingerprints, objective breakdown and constraint
+  provenance; no execution eligibility or write path is exposed.
+- RUNTIME-VERIFIED: Core ABI is CPython 3.14.6 on aarch64 Linux, and matching
+  highspy wheels are published for the target ABI. Vikarbodarna is not
+  optimizer-eligible at this checkpoint: the current E.ON economics snapshot
+  is not decision-time active and the live ESS roles do not form one verified
+  aggregate resource contract. The runtime command therefore remains
+  fail-closed until those existing site facts are valid.
+- STATUS: Step 8 is not complete. No economics or ESS facts were fabricated,
+  and no historical evidence was backfilled.
 
 ## Release and repository
 
