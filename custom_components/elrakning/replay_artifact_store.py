@@ -8,8 +8,10 @@ from copy import deepcopy
 from typing import Any
 
 try:
+    import voluptuous as vol
     from homeassistant.helpers.storage import Store
 except ModuleNotFoundError:  # pragma: no cover
+    vol = None  # type: ignore[assignment]
     class Store:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
@@ -20,6 +22,7 @@ STORE_KEY = "elrakning.replay_artifacts"
 STORE_VERSION = 1
 MAX_ARTIFACTS_PER_SITE = 128
 REQUIRED_HOLDOUTS = {"season", "site", "dst", "gap", "source_generation_change", "publication_cutoff"}
+PUBLISH_SERVICE = "replay_artifact_publish"
 
 
 def _canonical(value: Any) -> str:
@@ -119,3 +122,38 @@ class ReplayArtifactStore:
         await self.store.async_save(self.state)
         return True
 
+
+async def async_register_replay_artifact_service(hass: Any) -> None:
+    """Register the internal benchmark-to-store producer without execution access."""
+    if hass.services.has_service("elrakning", PUBLISH_SERVICE):
+        return
+
+    async def _publish(call: Any) -> None:
+        store = hass.data.get("elrakning", {}).get("replay_artifact_store")
+        if not isinstance(store, ReplayArtifactStore):
+            return
+        artifact = build_artifact(
+            call.data.get("run"),
+            dataset_identity=call.data.get("dataset_identity") or {},
+            parameter_identity=call.data.get("parameter_identity") or {},
+            holdouts=call.data.get("holdouts") or [],
+        )
+        if artifact is None:
+            return
+        accepted = await store.async_append(artifact)
+        if accepted:
+            records = store.state.get("sites", {}).get(artifact["site_id"], [])
+            hass.bus.async_fire(
+                "elrakning_replay_artifact_published",
+                {"schema": SCHEMA, "site_id": artifact["site_id"], "artifact_id": artifact["artifact_id"], "record_count": len(records)},
+            )
+
+    if vol is None:  # pragma: no cover
+        return
+    schema = vol.Schema({
+        vol.Required("run"): dict,
+        vol.Required("dataset_identity"): dict,
+        vol.Required("parameter_identity"): dict,
+        vol.Required("holdouts"): list,
+    })
+    hass.services.async_register("elrakning", PUBLISH_SERVICE, _publish, schema=schema)

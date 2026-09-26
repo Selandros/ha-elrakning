@@ -36,7 +36,7 @@ from .ella_stage6 import EllaStage6CalibrationStore
 from .ella_execution import EllaExecutionStore
 from .ella_ess_facts import EllaEssFactsStore
 from .ella_economic_policy import EllaEconomicPolicyStore
-from .replay_artifact_store import ReplayArtifactStore
+from .replay_artifact_store import ReplayArtifactStore, async_register_replay_artifact_service
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
@@ -269,6 +269,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     replay_artifact_store = ReplayArtifactStore(hass)
     await replay_artifact_store.async_load()
     hass.data.setdefault(DOMAIN, {})["replay_artifact_store"] = replay_artifact_store
+    await async_register_replay_artifact_service(hass)
     cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
     await cadence_audit_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager
@@ -415,6 +416,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await cadence_audit_manager.async_shutdown()
     if frontend_data.pop("greenely_proof_service_registered", False):
         hass.services.async_remove("elrakning", "greenely_proof_provision")
+    if hass.services.has_service(DOMAIN, "replay_artifact_publish"):
+        hass.services.async_remove(DOMAIN, "replay_artifact_publish")
     frontend_data.pop("config_entry", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()

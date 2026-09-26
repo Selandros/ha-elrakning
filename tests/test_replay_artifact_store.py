@@ -81,3 +81,15 @@ def test_store_is_site_scoped_bounded_and_schema_fail_closed():
         assert await restarted.async_append(_artifact()) is False
 
     asyncio.run(run())
+
+
+def test_internal_publish_builds_a_non_execution_artifact():
+    artifact = build_artifact(
+        _run(),
+        dataset_identity={"dataset": "d1"},
+        parameter_identity={"parameters": "p1"},
+        holdouts=[{"kind": kind, "run_fingerprint": f"fp-{kind}"} for kind in KINDS],
+    )
+    assert artifact is not None
+    assert artifact["provenance"]["hindsight_used_for_decision"] is False
+    assert "execution" not in artifact
