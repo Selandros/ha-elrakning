@@ -66,13 +66,14 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   baseline; Step 8 is the next main scope. Deployment evidence is recorded in
   the release report for this version.
 
-## 0.0.767 Masterplan v2 Step 8 implementation checkpoint
+## 0.0.768 Masterplan v2 Step 8 implementation checkpoint
 
 - IMPLEMENTED/TESTED: `economic_optimizer.py` exposes the separate
   `ella_economic_optimizer.v1` read-only contract using pinned HiGHS 1.15.1.
   It validates causal 15-minute 24–36 hour inputs, verified ESS state and
   bounds, negative import prices, export value, efficiency and reserve
-  constraints, and mutually exclusive battery/grid directions. Outputs carry
+  constraints, mutually exclusive battery/grid directions and explicit
+  replanning policy values. Outputs carry
   deterministic input fingerprints, objective breakdown and constraint
   provenance; no execution eligibility or write path is exposed.
 - RUNTIME-VERIFIED: Core ABI is CPython 3.14.6 on aarch64 Linux, and matching

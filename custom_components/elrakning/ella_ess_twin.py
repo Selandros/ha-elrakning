@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import math
 from statistics import median
 from typing import Any
@@ -12,6 +13,49 @@ SCHEMA = "ella_ess_digital_twin.v1"
 MODEL_VERSION = "ess-digital-twin-v1"
 QUALITY = {"good", "partial"}
 MIN_COVERAGE = 0.9
+ESS_ROLES = ("battery.power", "battery.soc", "battery.capacity")
+
+
+def resolve_shared_ess_resource(
+    site_id: str,
+    role_bindings: dict[str, dict[str, Any]],
+    active_generations: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
+    """Resolve one ESS only from matching strong registry identities."""
+    if not isinstance(site_id, str) or not site_id:
+        return {"available": False, "reason": "site_id_missing"}
+    candidates = []
+    for role in ESS_ROLES:
+        binding = role_bindings.get(role) if isinstance(role_bindings, dict) else None
+        identity = binding.get("source_identity") if isinstance(binding, dict) else None
+        generation = binding.get("generation_id") if isinstance(binding, dict) else None
+        if (
+            not isinstance(binding, dict) or binding.get("site_id") != site_id
+            or not isinstance(identity, dict) or identity.get("identity_strength") != "strong"
+            or not isinstance(identity.get("config_entry_id"), str) or not identity["config_entry_id"]
+            or not isinstance(identity.get("device_id"), str) or not identity["device_id"]
+            or not isinstance(generation, str) or not generation
+        ):
+            return {"available": False, "reason": "shared_identity_missing", "role": role}
+        active = (active_generations or {}).get(role)
+        if active is not None and active != {generation}:
+            return {"available": False, "reason": "active_generation_ambiguous", "role": role}
+        candidates.append((role, binding, identity, generation))
+    config_ids = {item[2]["config_entry_id"] for item in candidates}
+    device_ids = {item[2]["device_id"] for item in candidates}
+    if len(config_ids) != 1 or len(device_ids) != 1:
+        return {"available": False, "reason": "shared_identity_mismatch"}
+    seed = f"{site_id}|{next(iter(config_ids))}|{next(iter(device_ids))}"
+    resource_id = "ess-" + hashlib.sha256(seed.encode()).hexdigest()[:32]
+    return {
+        "available": True,
+        "resource_id": resource_id,
+        "site_id": site_id,
+        "config_entry_id": next(iter(config_ids)),
+        "device_id": next(iter(device_ids)),
+        "generation_ids": {role: generation for role, _binding, _identity, generation in candidates},
+        "method": "strong_registry_config_entry_and_device_identity",
+    }
 
 
 def _number(value: Any) -> float | None:
@@ -39,13 +83,13 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def _resource_id(row: dict[str, Any], bindings: dict[str, str]) -> str | None:
-    explicit = row.get("resource_id")
-    if isinstance(explicit, str) and explicit:
-        return explicit
     generation = row.get("source_generation_id")
     bound = bindings.get(str(generation)) if generation else None
     if isinstance(bound, str) and bound:
         return bound
+    explicit = row.get("resource_id")
+    if isinstance(explicit, str) and explicit:
+        return explicit
     provenance = row.get("provenance")
     if isinstance(provenance, dict):
         value = provenance.get("resource_id")

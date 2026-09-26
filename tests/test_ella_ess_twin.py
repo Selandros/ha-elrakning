@@ -5,11 +5,51 @@ from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 
-from custom_components.elrakning.ella_ess_twin import build_ess_digital_twin, build_ess_trajectory
+from custom_components.elrakning.ella_ess_twin import build_ess_digital_twin, build_ess_trajectory, resolve_shared_ess_resource
 
 
 UTC = timezone.utc
 SITE = "site-a"
+
+
+def _identity_target(role, generation, *, site=SITE, device="device-1", config="config-1", strength="strong"):
+    return {
+        "site_id": site,
+        "logical_role": role,
+        "generation_id": generation,
+        "source_identity": {
+            "identity_strength": strength,
+            "device_id": device,
+            "config_entry_id": config,
+        },
+    }
+
+
+def test_shared_ess_resource_requires_exact_strong_same_device_identity():
+    bindings = {
+        role: _identity_target(role, f"{role}-gen")
+        for role in ("battery.power", "battery.soc", "battery.capacity")
+    }
+    active = {role: {item["generation_id"]} for role, item in bindings.items()}
+    result = resolve_shared_ess_resource(SITE, bindings, active)
+    assert result["available"] is True
+    assert result["method"] == "strong_registry_config_entry_and_device_identity"
+    assert len(result["resource_id"]) == 36
+
+    different = {role: dict(item) for role, item in bindings.items()}
+    different["battery.soc"] = _identity_target("battery.soc", "battery.soc-gen", device="device-2")
+    assert resolve_shared_ess_resource(SITE, different, active)["reason"] == "shared_identity_mismatch"
+
+
+def test_shared_ess_resource_fails_closed_for_missing_identity_generation_or_site():
+    bindings = {role: _identity_target(role, f"{role}-gen") for role in ("battery.power", "battery.soc", "battery.capacity")}
+    active = {role: {item["generation_id"]} for role, item in bindings.items()}
+    missing = {role: dict(item) for role, item in bindings.items()}
+    missing["battery.power"] = {**missing["battery.power"], "source_identity": {"identity_strength": "strong"}}
+    assert resolve_shared_ess_resource(SITE, missing, active)["reason"] == "shared_identity_missing"
+    ambiguous = {role: dict(item) for role, item in bindings.items()}
+    assert resolve_shared_ess_resource(SITE, ambiguous, {**active, "battery.power": {"battery.power-gen", "other"}})["reason"] == "active_generation_ambiguous"
+    assert resolve_shared_ess_resource("site-b", bindings, active)["reason"] == "shared_identity_missing"
 
 
 def _row(role, value, start, generation, *, site=SITE, resource=None, unit=None, sign=None):

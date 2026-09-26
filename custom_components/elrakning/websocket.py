@@ -43,7 +43,7 @@ from .ella_capabilities import build_capability_inventory
 from .ella_site_state import build_site_state, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
-from .ella_ess_twin import build_ess_digital_twin
+from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
 from .economic_optimizer import build_economic_plan
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
@@ -1761,6 +1761,7 @@ async def websocket_ella_site_state(hass, connection, msg):
             ]
             active_generations = {}
             resource_bindings = {}
+            ess_bindings = {}
             for target in targets:
                 role = target.get("logical_role")
                 generation = target.get("generation_id")
@@ -1769,6 +1770,12 @@ async def websocket_ella_site_state(hass, connection, msg):
                 active_generations.setdefault(role, set()).add(str(generation))
                 if target.get("resource_id"):
                     resource_bindings[str(generation)] = str(target["resource_id"])
+                if role in {"battery.power", "battery.soc", "battery.capacity"}:
+                    ess_bindings[role] = target
+            shared_ess = resolve_shared_ess_resource(site_id, ess_bindings, active_generations)
+            if shared_ess.get("available"):
+                for generation in shared_ess["generation_ids"].values():
+                    resource_bindings[generation] = shared_ess["resource_id"]
             ess_digital_twin = build_ess_digital_twin(
                 site_id, actual_rows, decision_at,
                 active_generations=active_generations,

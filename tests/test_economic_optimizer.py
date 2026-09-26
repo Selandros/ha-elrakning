@@ -32,6 +32,12 @@ def _inputs(site_id="site-a", solar=0.0):
         "known_at": datetime(2026, 9, 27, 11, tzinfo=timezone.utc).isoformat(),
         "slots": slots,
         "ess": {
+            "resource_identity": {
+                "available": True,
+                "site_id": site_id,
+                "resource_id": "ess-shared-1",
+                "method": "strong_registry_config_entry_and_device_identity",
+            },
             "soc_fraction": 0.8,
             "capacity_kwh": 10.0,
             "reserve_soc_fraction": 0.2,
@@ -39,6 +45,13 @@ def _inputs(site_id="site-a", solar=0.0):
             "max_discharge_kw": 3.0,
             "charge_efficiency": 0.9,
             "discharge_efficiency": 0.9,
+        },
+        "replanning": {
+            "max_charge_ramp_kw": 3.0,
+            "max_discharge_ramp_kw": 3.0,
+            "hysteresis_kw": 0.0,
+            "previous_charge_kw": 0.0,
+            "previous_discharge_kw": 0.0,
         },
     }
 
@@ -50,6 +63,9 @@ def test_missing_economics_or_ess_facts_fail_closed():
     inputs = _inputs()
     del inputs["ess"]["capacity_kwh"]
     assert build_economic_plan(inputs)["reason"] == "verified_ess_bounds_missing"
+    inputs = _inputs()
+    del inputs["ess"]["resource_identity"]
+    assert build_economic_plan(inputs)["reason"] == "shared_ess_resource_identity_missing"
 
 
 def test_known_at_and_15_minute_causal_gate():
