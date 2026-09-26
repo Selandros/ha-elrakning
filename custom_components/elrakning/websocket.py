@@ -1308,7 +1308,9 @@ async def _power_flow_diagnostic(hass, level: str, event: str, details: dict) ->
         return
     identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     active_site_id = getattr(identity, "state", {}).get("active_site_id") if identity else None
-    payload = {"mono_ms": round(time.monotonic() * 1000, 3), "site_id": active_site_id, **details}
+    diagnostic_state = hass.data.setdefault(DOMAIN, {})
+    diagnostic_base = diagnostic_state.setdefault("power_flow_diagnostic_base", time.monotonic())
+    payload = {"relative_ms": round((time.monotonic() - diagnostic_base) * 1000, 3), "site_id": active_site_id, **details}
     await manager.async_diagnostic(level, "power_flow", event, json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str))
 
 

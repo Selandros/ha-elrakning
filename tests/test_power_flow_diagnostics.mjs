@@ -10,7 +10,7 @@ for (const event of [
   "enrichment_stale_rejected", "enrichment_merge",
 ]) assert.match(frontend, new RegExp(`\\"${event}\\"`));
 assert.match(frontend, /_recordPowerFlowDiagnostic\(event, details = \{\}\)/);
-assert.match(frontend, /mono_ms: roundDiagnosticMs\(performance\.now\(\)\)/);
+assert.match(frontend, /relative_ms: roundDiagnosticMs\(performance\.now\(\)\)/);
 assert.match(frontend, /site_context_generation: this\._siteContextGeneration/);
 
 for (const event of [
@@ -23,5 +23,7 @@ for (const event of [
 assert.match(backend, /power_flow_diagnostics/);
 assert.match(backend, /time\.monotonic\(\)/);
 assert.match(backend, /async def _power_flow_diagnostic\(/);
+assert.match(backend, /relative_ms/);
+assert.doesNotMatch(backend, /payload = \{"mono_ms"/);
 
 console.log("power flow day-switch diagnostics contract: ok");

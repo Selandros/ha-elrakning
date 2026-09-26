@@ -1412,6 +1412,42 @@ export function integratePowerHistoryKwh(points, dayStart, dayEnd, now = new Dat
   return energyKwh;
 }
 
+export function stockholmDayWindow(now = new Date()) {
+  const date = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date(now));
+  const [year, month, day] = date.split("-").map(Number);
+  const toBoundary = (yearValue, monthValue, dayValue) => {
+    const candidate = Date.UTC(yearValue, monthValue - 1, dayValue);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Stockholm",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(new Date(candidate));
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+    const displayedAsUtc = Date.UTC(values.year, values.month - 1, values.day, values.hour % 24, values.minute, values.second);
+    return new Date(candidate - (displayedAsUtc - candidate));
+  };
+  return { date, start: toBoundary(year, month, day), end: toBoundary(year, month, day + 1) };
+}
+
+export function integrateMeterHistoryKwh(points, field, dayStart, dayEnd, now = new Date(), slotMs = 5 * 60 * 1000) {
+  const canonical = buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs);
+  const nowMs = new Date(now).getTime();
+  const samples = canonical.filter((point) => point.raw_timestamp !== null && point.timestamp <= nowMs);
+  let energyKwh = 0;
+  let covered = false;
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    if (current.timestamp - previous.timestamp !== slotMs || current.gap_before) continue;
+    const previousValue = Number(previous[field]);
+    const currentValue = Number(current[field]);
+    if (!Number.isFinite(previousValue) || !Number.isFinite(currentValue)) continue;
+    energyKwh += ((previousValue + currentValue) / 2) * (slotMs / (60 * 60 * 1000));
+    covered = true;
+  }
+  return covered ? energyKwh : null;
+}
+
 export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixedFee = null, now = new Date(), historicalMeterPoints = []) {
   const current = new Date(now);
   const nowMs = current.getTime();
@@ -2698,7 +2734,7 @@ class ElrakningPanel {
     this._powerStateRequestGeneration = 0;
     this._powerStateMutationGeneration = 0;
     this._powerStateLifecycleGeneration = 0;
-    this._powerHistory = { date: null, series: {}, power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} }, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+    this._powerHistory = { date: null, series: {}, power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} }, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false }, solar_pvgis: { available: false, source: "jrc_pvgis" }, solar_open_meteo: { available: false, source: "open_meteo" } };
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._pricePlanContextKey = null;
@@ -2939,6 +2975,13 @@ class ElrakningPanel {
           </article>
         </div>
 
+        <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
+          <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
+          <div data-solar-evidence-summary></div>
+          <div data-solar-evidence-status></div>
+          <div class="solar-evidence-list" data-solar-evidence-list></div>
+        </section>
+
         <div class="daily-energy-row phase-history-row">
           <article class="card phase-history-card" data-phase-history-card hidden aria-labelledby="phase-history-title">
             <div class="phase-history-heading" aria-label="Faser">
@@ -3003,12 +3046,6 @@ class ElrakningPanel {
           <div class="invoice-diagnostic-grid" data-invoice-diagnostic-fields></div>
           <h3>PDF-textutdrag</h3>
           <pre data-invoice-debug-text></pre>
-        </section>
-        <section class="card solar-evidence-debug" data-solar-evidence-debug hidden aria-labelledby="solar-evidence-debug-title">
-          <div class="card-heading"><h2 id="solar-evidence-debug-title">Solar Evidence</h2></div>
-          <div data-solar-evidence-summary></div>
-          <div data-solar-evidence-status></div>
-          <div class="solar-evidence-list" data-solar-evidence-list></div>
         </section>
         <section class="card diagnostics-card" data-diagnostics-card hidden>
           <div class="card-heading"><h2>Diagnostik</h2><span class="status" data-diagnostics-status>OK</span></div>
@@ -3677,7 +3714,7 @@ class ElrakningPanel {
           fill-opacity: .32;
         }
 
-        .card.solar-evidence-debug {
+        .card.solar-evidence-card {
           background: var(--ha-card-background, var(--card-background-color));
           box-shadow: none;
           backdrop-filter: none;
@@ -7169,7 +7206,6 @@ class ElrakningPanel {
     const priceSource = this.host.querySelector('[data-card-source="price"]');
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
-    const solarEvidence = this.host.querySelector("[data-solar-evidence-debug]");
     const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
     const cardSources = this.host.querySelectorAll("[data-card-source]");
     if (source) source.hidden = !this._debugEnabled;
@@ -7178,7 +7214,6 @@ class ElrakningPanel {
     if (priceSource) priceSource.hidden = !this._debugEnabled;
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
-    if (solarEvidence) solarEvidence.hidden = !this._debugEnabled || !this._powerHistory?.solar_evidence?.available;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
     cardSources.forEach((button) => {
       const card = button.closest(".card");
@@ -7692,10 +7727,16 @@ class ElrakningPanel {
   _calculatePowerEnergy(seriesKey) {
     const points = this._powerHistory?.series?.[seriesKey]?.points;
     const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    return integratePowerHistoryKwh(points, dayStart, dayEnd, now);
+    const window = stockholmDayWindow(now);
+    return integratePowerHistoryKwh(points, window.start, window.end, now);
+  }
+
+  _calculateMeterEnergy(field) {
+    const points = this._meterPowerHistory?.points;
+    if (!Array.isArray(points) || points.length < 2) return null;
+    const now = new Date();
+    const window = stockholmDayWindow(now);
+    return integrateMeterHistoryKwh(points, field, window.start, window.end, now);
   }
 
   _refreshPowerEnergyState() {
@@ -7840,11 +7881,8 @@ class ElrakningPanel {
       && this._powerHistory.series[key].points.some((point) => Number.isFinite(new Date(point.timestamp).getTime()) && Number.isFinite(Number(point.value_kw)));
     const solarAvailable = solarConfigured && powerEnergyAvailable("solar") && Number.isFinite(power.solar_energy_kwh);
     const consumptionAvailable = consumptionConfigured && powerEnergyAvailable("consumption") && Number.isFinite(power.consumption_energy_kwh);
-    const energyValue = (entityKey, validKey, valueKey) => (
-      meter[entityKey] && meter[validKey] !== false && Number.isFinite(meter[valueKey]) ? meter[valueKey] : null
-    );
-    const exportKwh = energyValue("energy_export_entity", "energy_export_valid", "energy_export_kwh");
-    const importKwh = energyValue("energy_import_entity", "energy_import_valid", "energy_import_kwh");
+    const exportKwh = this._calculateMeterEnergy("export_kw");
+    const importKwh = this._calculateMeterEnergy("import_kw");
     const hasAnyPart = solarConfigured || consumptionConfigured;
     card.hidden = !hasAnyPart;
     if (!hasAnyPart) {
@@ -7919,8 +7957,8 @@ class ElrakningPanel {
       meter_export: meter.energy_export_entity || null,
     };
     if (cardSource === "energy") {
-      const exportKwh = meter.energy_export_valid !== false && Number.isFinite(meter.energy_export_kwh) ? meter.energy_export_kwh : null;
-      const importKwh = meter.energy_import_valid !== false && Number.isFinite(meter.energy_import_kwh) ? meter.energy_import_kwh : null;
+      const exportKwh = this._calculateMeterEnergy("export_kw");
+      const importKwh = this._calculateMeterEnergy("import_kw");
       const solarBalance = buildEnergyBalance(power.solar_energy_kwh, exportKwh);
       const consumptionBalance = buildEnergyBalance(power.consumption_energy_kwh, importKwh);
       return {
@@ -8188,14 +8226,14 @@ class ElrakningPanel {
   }
 
   _renderSolarEvidence() {
-    const card = this.host.querySelector("[data-solar-evidence-debug]");
+    const card = this.host.querySelector("[data-solar-evidence-card]");
     const summary = this.host.querySelector("[data-solar-evidence-summary]");
     const status = this.host.querySelector("[data-solar-evidence-status]");
     const list = this.host.querySelector("[data-solar-evidence-list]");
     const evidence = this._powerHistory?.solar_evidence;
     if (!card || !summary || !status || !list) return;
     const days = Array.isArray(evidence?.days) ? evidence.days : [];
-    card.hidden = !this._debugEnabled || !evidence?.available;
+    card.hidden = !evidence?.available;
     if (!evidence?.available) return;
     const progress = evidence.progress || {};
     const omComplete = Number.isFinite(Number(progress.open_meteo_complete)) ? Number(progress.open_meteo_complete) : 0;
@@ -8403,6 +8441,8 @@ class ElrakningPanel {
         solar_evidence: this._powerHistory?.solar_evidence || { available: false, days: [] },
         solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: { available: false },
+        solar_pvgis: { available: false, source: "jrc_pvgis" },
+        solar_open_meteo: { available: false, source: "open_meteo" },
       };
       this._loadForecast = { available: false, reason: "enrichment_pending", frames: [] };
       this._powerHistoryContextKey = `${siteContextGeneration}:${requestedDate || response?.date || ""}`;
@@ -8422,7 +8462,7 @@ class ElrakningPanel {
       });
     } catch {
       if (requestToken !== this._powerHistoryRequestToken) return;
-      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false } };
+      this._powerHistory = { date: null, series: {}, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false }, solar_pvgis: { available: false, source: "jrc_pvgis" }, solar_open_meteo: { available: false, source: "open_meteo" } };
       this._loadForecast = { available: false, reason: "history_unavailable", frames: [] };
       this._refreshPowerEnergyState();
     }
@@ -8456,6 +8496,8 @@ class ElrakningPanel {
         solar_shadow: response?.solar_shadow || { available: false, days: [] },
         solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
         solar_sun: response?.solar_sun || { available: false },
+        solar_pvgis: response?.solar_pvgis || this._powerHistory?.solar_pvgis || { available: false, source: "jrc_pvgis" },
+        solar_open_meteo: response?.solar_open_meteo || this._powerHistory?.solar_open_meteo || { available: false, source: "open_meteo" },
       };
       this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
       this._renderSolarEvidence();
@@ -8655,7 +8697,7 @@ class ElrakningPanel {
     const selectedDate = this._periodPickerState?.confirmed;
     const requestedDate = selectedDate instanceof Date && Number.isFinite(selectedDate.getTime()) ? localDateKey(selectedDate) : null;
     void this._recordDiagnostic("power_flow", "INFO", event, JSON.stringify({
-      mono_ms: roundDiagnosticMs(performance.now()),
+      relative_ms: roundDiagnosticMs(performance.now()),
       request_generation: this._powerHistoryRequestToken,
       site_context_generation: this._siteContextGeneration,
       site_id: siteId,
@@ -10899,6 +10941,7 @@ class ElrakningPanel {
       this._rebuildLivePowerMaxima();
       if (this._eonGridState?.configured === true) this._applyEonGridState(this._eonGridState);
       this._renderPhaseHistoryCard();
+      this._renderMergedMeterSummary();
       this._meterHistorySummary = response.history || {
         entity_id: response?.entity_id || entityId,
         success: true,
