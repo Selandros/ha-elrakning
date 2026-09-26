@@ -1464,6 +1464,21 @@ export function integrateMeterHistoryKwh(points, field, dayStart, dayEnd, now = 
   return covered ? energyKwh : null;
 }
 
+export function recomputeDailyEnergyState(powerState, powerHistory, meterPowerHistory, now = new Date()) {
+  if (!powerState) return null;
+  const window = stockholmDayWindow(now);
+  const seriesPoints = (key) => powerHistory?.series?.[key]?.points;
+  return {
+    ...powerState,
+    solar_energy_kwh: integratePowerHistoryKwh(seriesPoints("solar"), window.start, window.end, now),
+    consumption_energy_kwh: integratePowerHistoryKwh(seriesPoints("consumption"), window.start, window.end, now),
+    charging_energy_kwh: integratePowerHistoryKwh(seriesPoints("charging"), window.start, window.end, now),
+    discharging_energy_kwh: integratePowerHistoryKwh(seriesPoints("discharging"), window.start, window.end, now),
+    meter_import_energy_kwh: integrateMeterHistoryKwh(meterPowerHistory?.points, "import_kw", window.start, window.end, now),
+    meter_export_energy_kwh: integrateMeterHistoryKwh(meterPowerHistory?.points, "export_kw", window.start, window.end, now),
+  };
+}
+
 export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixedFee = null, now = new Date(), historicalMeterPoints = []) {
   const current = new Date(now);
   const nowMs = current.getTime();
@@ -1572,8 +1587,8 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     ? historicalDailyValues.reduce((sum, value) => sum + value, 0) / historicalDailyValues.length
     : null;
   const importedKwh = coveredEnergyPeriods > 0 ? coveredEnergyKwh : null;
-  const tradeVariableSek = rows.reduce((sum, row) => sum + row.trade_cost_sek, 0);
-  const gridVariableSek = rows.reduce((sum, row) => sum + row.grid_cost_sek, 0);
+  const tradeVariableSek = rows.length ? rows.reduce((sum, row) => sum + row.trade_cost_sek, 0) : null;
+  const gridVariableSek = rows.length && Number.isFinite(gridGross) ? rows.reduce((sum, row) => sum + row.grid_cost_sek, 0) : null;
   const coveredStart = rows.length ? Math.min(...rows.map((row) => new Date(row.start).getTime())) : null;
   const coveredEnd = rows.length ? Math.max(...rows.map((row) => Math.min(new Date(row.end).getTime(), nowMs))) : null;
   const elapsedMs = Math.max(0, nowMs - monthStart.getTime());
@@ -1601,7 +1616,7 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const gridFixed = Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
   const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
   const accruedTradeFixed = fixedTrade === null ? null : fixedTrade * Math.min(1, elapsedMs / monthMs);
-  const variableSoFarSek = tradeVariableSek + gridVariableSek;
+  const variableSoFarSek = tradeVariableSek === null || gridVariableSek === null ? null : tradeVariableSek + gridVariableSek;
   const fixedSoFarSek = (accruedTradeFixed || 0) + (accruedGridFixed || 0);
   const missingPastDays = missingPastMs / 86400000;
   const forecastMissingPastKwh = observedDailyImportKwh === null ? null : observedDailyImportKwh * missingPastDays;
@@ -1644,16 +1659,16 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     ? null : missingPastTradeSek + knownFutureTradeSek + unknownFutureTradeSek;
   const forecastGridRemainingSek = missingPastGridSek === null || unknownFutureGridSek === null
     ? null : missingPastGridSek + knownFutureGridSek + unknownFutureGridSek;
-  const forecastVariableSek = forecastTradeRemainingSek === null || forecastGridRemainingSek === null
+  const forecastVariableSek = variableSoFarSek === null || forecastTradeRemainingSek === null || forecastGridRemainingSek === null
     ? null : tradeVariableSek + gridVariableSek + forecastTradeRemainingSek + forecastGridRemainingSek;
   const forecastFixedSek = (fixedTrade || 0) + (gridFixed || 0);
-  const totalSoFarSek = variableSoFarSek + fixedSoFarSek;
+  const totalSoFarSek = variableSoFarSek === null ? null : variableSoFarSek + fixedSoFarSek;
   const estimatedMonthTotalSek = forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek;
   return {
     month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
     imported_kwh_so_far: importedKwh,
-    trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek + (accruedTradeFixed || 0) },
-    grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek + (accruedGridFixed || 0) },
+    trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek === null ? null : tradeVariableSek + (accruedTradeFixed || 0) },
+    grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek === null ? null : gridVariableSek + (accruedGridFixed || 0) },
     total_so_far_sek: totalSoFarSek,
     estimated_month_total_sek: estimatedMonthTotalSek,
     forecast_import_kwh: forecastImportKwh,
@@ -7662,13 +7677,7 @@ class ElrakningPanel {
   }
 
   _applyPowerState(state) {
-    this._powerState = state ? {
-      ...state,
-      solar_energy_kwh: this._calculatePowerEnergy("solar"),
-      consumption_energy_kwh: this._calculatePowerEnergy("consumption"),
-      charging_energy_kwh: this._calculatePowerEnergy("charging"),
-      discharging_energy_kwh: this._calculatePowerEnergy("discharging"),
-    } : null;
+    this._powerState = state ? recomputeDailyEnergyState(state, this._powerHistory, this._meterPowerHistory) : null;
     const solarConfigured = Array.isArray(this._powerState?.solar_entities) && this._powerState.solar_entities.length > 0;
     const batteryConfigured = Boolean(this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
     const batteryPowerConfigured = Boolean(this._powerState?.battery_power_entity);
@@ -7759,6 +7768,13 @@ class ElrakningPanel {
   _refreshPowerEnergyState() {
     if (!this._powerState) return;
     this._applyPowerState(this._powerState);
+  }
+
+  _refreshDailyEnergyStateFromAcceptedHistory() {
+    if (!this._powerState) return false;
+    this._powerState = recomputeDailyEnergyState(this._powerState, this._powerHistory, this._meterPowerHistory);
+    this._renderDailyEnergyCard();
+    return true;
   }
 
   _renderMergedMeterSummary() {
@@ -8491,6 +8507,7 @@ class ElrakningPanel {
       };
       this._loadForecast = { available: false, reason: "enrichment_pending", frames: [] };
       this._powerHistoryContextKey = `${siteContextGeneration}:${requestedDate || response?.date || ""}`;
+      this._refreshDailyEnergyStateFromAcceptedHistory();
       stage = "enrichment_start";
       this._recordPowerFlowDiagnostic("enrichment_request_start", { requested_date: requestedDate, active_enrichment_jobs: 1 });
       cycle.enrichment = this.loadPowerHistoryEnrichment({
@@ -11024,6 +11041,7 @@ class ElrakningPanel {
       this._meterPowerHistory.daily_max_fuse_utilization_percent = Number.isFinite(dailyMaxPhase) && Number.isFinite(fuseAmpere) && fuseAmpere > 0
         ? dailyMaxPhase / fuseAmpere * 100
         : null;
+      this._refreshDailyEnergyStateFromAcceptedHistory();
       this._rebuildLivePowerMaxima();
       if (this._eonGridState?.configured === true) this._applyEonGridState(this._eonGridState);
       this._renderPhaseHistoryCard();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -419,6 +419,30 @@ const meterPoints = Array.from({ length: 13 }, (_, index) => ({
 assert.ok(Math.abs(integrateMeterHistoryKwh(meterPoints, "import_kw", dayWindow.start, dayWindow.end, new Date("2026-09-23T23:00:00Z")) - 0.13) < 1e-12);
 assert.equal(integrateMeterHistoryKwh([], "import_kw", dayWindow.start, dayWindow.end), null);
 assert.equal(buildEnergyBalance(0.13, null).externalPercent, null);
+const acceptedHistoryNow = new Date("2026-09-24T00:10:00Z");
+const acceptedHistoryWindow = stockholmDayWindow(acceptedHistoryNow);
+const acceptedHistoryPoints = (value) => Array.from({ length: 3 }, (_, index) => ({
+  timestamp: new Date(acceptedHistoryWindow.start.getTime() + index * 5 * 60 * 1000).toISOString(),
+  value_kw: value,
+}));
+const acceptedDailyState = recomputeDailyEnergyState(
+  { solar_energy_kwh: null, consumption_energy_kwh: null },
+  { series: { solar: { points: acceptedHistoryPoints(1) }, consumption: { points: acceptedHistoryPoints(2) } } },
+  { points: acceptedHistoryPoints(1).map((point) => ({ ...point, import_kw: 1, export_kw: 0 })) },
+  acceptedHistoryNow,
+);
+assert.ok(Number.isFinite(acceptedDailyState.solar_energy_kwh));
+assert.ok(Number.isFinite(acceptedDailyState.consumption_energy_kwh));
+assert.ok(Number.isFinite(acceptedDailyState.meter_import_energy_kwh));
+assert.equal(buildEnergyBalance(acceptedDailyState.solar_energy_kwh, acceptedDailyState.meter_export_energy_kwh).externalPercent, 0);
+const missingMeterDailyState = recomputeDailyEnergyState(
+  { solar_energy_kwh: null, consumption_energy_kwh: null },
+  { series: { solar: { points: acceptedHistoryPoints(1) }, consumption: { points: acceptedHistoryPoints(2) } } },
+  { points: [] },
+  acceptedHistoryNow,
+);
+assert.equal(missingMeterDailyState.meter_import_energy_kwh, null);
+assert.equal(buildEnergyBalance(missingMeterDailyState.solar_energy_kwh, missingMeterDailyState.meter_import_energy_kwh).externalPercent, null);
 const invoiceEstimate = buildInvoiceEstimate(
   [
     { start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20, spot_price_ex_vat: 0.1, electricity_cost_ex_vat: 0.1, vat: 0.05 },
@@ -497,6 +521,17 @@ const incompleteInvoiceEstimate = buildInvoiceEstimate(
   new Date("2026-08-01T00:15:00Z"),
 );
 assert.equal(incompleteInvoiceEstimate.data_coverage.missing_price_periods, 1);
+const unavailableGridEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
+  null,
+  null,
+  new Date("2026-08-01T00:15:00Z"),
+);
+assert.equal(unavailableGridEstimate.grid.variable_cost_sek, null);
+assert.equal(unavailableGridEstimate.grid.total_so_far_sek, null);
+assert.equal(unavailableGridEstimate.total_so_far_sek, null);
+assert.equal(unavailableGridEstimate.estimated_month_total_sek, null);
 assert.equal(previousCalendarMonth("2026-08"), "2026-07");
 assert.equal(previousCalendarMonth("2027-01"), "2026-12");
 const previousActual = buildPreviousMonthActual({
@@ -1655,10 +1690,8 @@ assert.match(panelSource, /Nät just nu/);
 assert.match(panelSource, /displayPowerValue\(power\.consumption_kw\)/);
 assert.doesNotMatch(panelSource, /\["Producerat idag", this\._powerState\.solar_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /integratePowerHistoryKwh\(points, window\.start, window\.end, now\)/);
-assert.match(panelSource, /_calculatePowerEnergy\("solar"\)/);
-assert.match(panelSource, /_calculatePowerEnergy\("consumption"\)/);
-assert.match(panelSource, /_calculatePowerEnergy\("charging"\)/);
-assert.match(panelSource, /_calculatePowerEnergy\("discharging"\)/);
+assert.match(panelSource, /recomputeDailyEnergyState\(state, this\._powerHistory, this\._meterPowerHistory\)/);
+assert.match(panelSource, /_refreshDailyEnergyStateFromAcceptedHistory\(\)/);
 assert.match(panelSource, /_powerLivePoints = Object\.fromEntries\(\["solar", "consumption", "charging", "discharging", "soc"\]/);
 assert.doesNotMatch(panelSource, /\["Förbrukat idag", power\.consumption_energy_kwh, "kWh"\]/);
 assert.match(panelSource, /data-power-card="battery-history"/);

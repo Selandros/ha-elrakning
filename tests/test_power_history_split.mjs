@@ -23,6 +23,12 @@ const historyLoader = frontend.slice(
 );
 assert.match(historyLoader, /type: "elrakning\/power_history"/);
 assert.match(historyLoader, /this\._refreshPowerEnergyState\(\)/);
+assert.match(historyLoader, /this\._refreshDailyEnergyStateFromAcceptedHistory\(\)/);
+assert.ok(
+  historyLoader.indexOf("this._refreshDailyEnergyStateFromAcceptedHistory()")
+    < historyLoader.indexOf("cycle.enrichment = this.loadPowerHistoryEnrichment("),
+  "accepted history must refresh daily energy before enrichment starts",
+);
 assert.match(historyLoader, /cycle\.enrichment = this\.loadPowerHistoryEnrichment\(/);
 assert.ok(
   historyLoader.indexOf("this._powerHistoryContextKey =")
