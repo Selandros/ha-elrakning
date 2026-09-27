@@ -564,7 +564,7 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(Collector.instances[0].forecast_calls, 1)
             producer = Greenely.instances[0]
             self.assertEqual(producer.schedule_calls, 1)
-            self.assertEqual(len(tracked), 3)
+            self.assertEqual(len(tracked), 4)
             cadence_keys = {
                 (item["kwargs"]["hour"], tuple(item["kwargs"]["minute"])
                  if isinstance(item["kwargs"]["minute"], list) else item["kwargs"]["minute"],
@@ -573,7 +573,7 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
             }
             self.assertEqual(
                 cadence_keys,
-                {(0, 5, 0), (0, 0, 0), (None, (0, 15, 30, 45), 30)},
+                {(0, 5, 0), (0, 0, 0), (None, (0, 15, 30, 45), 30), (None, 5, 0)},
             )
             economics_schedule = next(item for item in tracked if item["kwargs"]["hour"] == 0 and item["kwargs"]["minute"] == 5)
             economics_schedule["callback"](None)
@@ -596,7 +596,7 @@ class TestC4C1Async(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(current_producer.schedule_calls, 1)
             self.assertNotEqual(first_handler, hass.services.handlers[("elrakning", SERVICE_PROVISION)])
             active_schedules = [item for item in tracked if item["active"]]
-            self.assertEqual(len(active_schedules), 3)
+            self.assertEqual(len(active_schedules), 4)
             economics_schedule["callback"](None)
             self.assertEqual(producer.schedule_calls, 2)
             current_schedule = next(

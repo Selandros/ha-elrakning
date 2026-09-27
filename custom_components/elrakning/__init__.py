@@ -32,6 +32,7 @@ from .load_forecast import build_site_load_forecast
 from .ella_load_registry import EllaLoadRegistry
 from .ella_debug_snapshot import EllaDebugSnapshotStore
 from .ella_learning import EllaLearningStore
+from .monthly_forecast_manager import MonthlyForecastManager
 from .ella_stage6 import EllaStage6CalibrationStore
 from .ella_execution import EllaExecutionStore
 from .ella_ess_facts import EllaEssFactsStore
@@ -146,11 +147,128 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
             continue
 
 
+async def _async_capture_monthly_forecast(hass) -> None:
+    """Build one bounded monthly forecast from existing runtime readers."""
+    data = hass.data.get(DOMAIN, {})
+    identity = data.get("site_identity_manager")
+    collector = data.get("canonical_collector")
+    manager = data.get("monthly_forecast_manager")
+    entry = data.get("config_entry")
+    if not identity or not collector or not manager or not entry:
+        return
+    site_id = getattr(identity, "state", {}).get("active_site_id")
+    if not isinstance(site_id, str) or not site_id:
+        return
+    config = (getattr(identity, "state", {}).get("site_configs", {}).get(site_id) or {})
+    timezone_name = ((config.get("location") or {}).get("timezone") if isinstance(config, dict) else None) or "UTC"
+    now = dt_util.now().astimezone(timezone.utc)
+    from zoneinfo import ZoneInfo
+    from .monthly_forecast import build_actual_priced_cost_to_date, build_month_end_slots, month_window
+    from .websocket import _async_power_forecast_state, _serialize_price_data
+    zone = ZoneInfo(timezone_name)
+    local_now = now.astimezone(zone)
+    target_month = local_now.strftime("%Y-%m")
+    window = month_window(target_month, timezone_name)
+    if window is None:
+        return
+    month_start, month_end = window
+    rows = await hass.async_add_executor_job(
+        collector.storage.read_site_energy_history, site_id, month_start, now
+    )
+    billing_points = [
+        {"timestamp": row["interval_start"].isoformat(), "import_kw": max(0.0, float(row["value"]) / 1000.0)}
+        for row in rows
+        if row.get("logical_role") == "grid.power/import" and row.get("unit") == "W"
+        and row.get("quality_status") in {"good", "partial"}
+    ]
+    coordinator = getattr(entry, "runtime_data", None)
+    price_periods = []
+    if coordinator is not None:
+        cursor = month_start.astimezone(zone).date()
+        last = (month_end - timedelta(seconds=1)).astimezone(zone).date()
+        while cursor <= last:
+            try:
+                price_data = await coordinator.async_get_price_data(cursor)
+                serialized = _serialize_price_data(hass, price_data)
+                price_periods.extend(serialized.get("periods") or [])
+            except Exception:
+                pass
+            cursor += timedelta(days=1)
+    grid_state = data.get("grid_manager").public_state() if data.get("grid_manager") else {}
+    grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else {}
+    trade_state = data.get("elhandel_manager").public_state() if data.get("elhandel_manager") else {}
+    trade_tariff = ((trade_state.get("summary") or {}).get("tariff") or {}) if isinstance(trade_state, dict) else {}
+    actual = build_actual_priced_cost_to_date(
+        points=billing_points,
+        price_periods=price_periods,
+        month_start=month_start,
+        now=now,
+        trade_fixed_fee_sek=trade_tariff.get("fixed_fee_incl_vat_per_month"),
+        grid_fixed_fee_sek=grid_price.get("fixed_monthly_sek") if isinstance(grid_price, dict) else None,
+    )
+    near_term = []
+    for offset in range(3):
+        try:
+            forecast = await _async_power_forecast_state(hass, requested_date=local_now.date() + timedelta(days=offset), requested_site_id=site_id)
+        except Exception:
+            forecast = {}
+        for point in ((forecast.get("series") or {}).get("import") or {}).get("forecast_points") or []:
+            near_term.append({
+                "valid_at": point.get("valid_at"), "end_at": point.get("end_at"),
+                "import_kw": float(point.get("value_w")) / 1000.0,
+                "known_at": forecast.get("known_at"), "provenance": point.get("provenance") or {},
+            })
+    slots = build_month_end_slots(
+        decision_at=now, month_end=month_end, near_term_points=near_term,
+        historical_rows=rows, timezone_name=timezone_name, known_price_periods=price_periods,
+    )
+    fixed_total = sum(value or 0.0 for value in (
+        trade_tariff.get("fixed_fee_incl_vat_per_month"),
+        grid_price.get("fixed_monthly_sek") if isinstance(grid_price, dict) else None,
+    ))
+    result = await manager.async_refresh(
+        site_id=site_id, timezone_name=timezone_name, decision_at=now,
+        target_month=target_month,
+        actual_cost_to_date_sek=actual.get("actual_cost_to_date_sek"),
+        actual_import_to_date_kwh=actual.get("actual_import_to_date_kwh"),
+        future_points=slots.get("slots") or [], price_periods=price_periods,
+        remaining_fixed_cost_sek=fixed_total * max(0.0, (month_end - now).total_seconds() / max(1.0, (month_end - month_start).total_seconds())),
+        source_generations=sorted({str(row.get("source_generation_id")) for row in rows if row.get("source_generation_id")}),
+        weather={"support_count": 0, "correction_enabled": False, "reason": "temperature_residual_support_missing"},
+    )
+    actual_by_day = {}
+    for row in rows:
+        if row.get("logical_role") != "grid.power/import" or row.get("unit") != "W":
+            continue
+        start = row.get("interval_start")
+        if not hasattr(start, "astimezone"):
+            continue
+        day = start.astimezone(zone).date().isoformat()
+        actual_by_day.setdefault(day, []).append(max(0.0, float(row.get("value") or 0.0)) / 1000.0 * float(row.get("resolution_seconds") or 900) / 3600.0)
+    await manager.async_evaluate_matured_days(
+        site_id, {day: sum(values) for day, values in actual_by_day.items()}
+    )
+    result["actual_priced_import_to_date_kwh"] = actual.get("priced_import_to_date_kwh")
+    result["missing_past_import_kwh"] = actual.get("missing_past_import_kwh")
+    result["month_end_coverage"] = {key: slots.get(key) for key in ("available", "slot_count", "expected_slot_count", "fallback_slot_count", "reason")}
+
+
 def _schedule_load_forecast_capture(hass, site_identity_manager, canonical_collector):
     """Schedule the cadence capture through Home Assistant's thread-safe API."""
     return hass.create_task(
         _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
     )
+
+
+def _schedule_monthly_forecast_capture(hass):
+    """Schedule a single bounded monthly forecast refresh."""
+    data = hass.data.setdefault(DOMAIN, {})
+    task = data.get("monthly_forecast_capture_task")
+    if task is not None and not task.done():
+        return task
+    task = hass.async_create_task(_async_capture_monthly_forecast(hass))
+    data["monthly_forecast_capture_task"] = task
+    return task
 
 
 async def _async_warm_history(power_manager, meter_manager) -> None:
@@ -255,6 +373,8 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ella_learning_store = EllaLearningStore(hass)
     await ella_learning_store.async_load()
     hass.data.setdefault(DOMAIN, {})["ella_learning_store"] = ella_learning_store
+    monthly_forecast_manager = MonthlyForecastManager(ella_learning_store)
+    hass.data.setdefault(DOMAIN, {})["monthly_forecast_manager"] = monthly_forecast_manager
     ella_stage6_store = EllaStage6CalibrationStore(hass)
     await ella_stage6_store.async_load()
     hass.data.setdefault(DOMAIN, {})["ella_stage6_store"] = ella_stage6_store
@@ -346,6 +466,12 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, lambda _now: _schedule_load_forecast_capture(
             hass, site_identity_manager, canonical_collector
         ), hour=None, minute=[0, 15, 30, 45], second=30
+    )
+    frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
+        _async_capture_monthly_forecast(hass)
+    )
+    frontend_data["monthly_forecast_cadence_unsub"] = async_track_time_change(
+        hass, lambda _now: _schedule_monthly_forecast_capture(hass), hour=None, minute=5, second=0
     )
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
@@ -441,6 +567,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, _schedule_replay_evidence),
         hass.bus.async_listen(EON_GRID_UPDATE_EVENT, _schedule_replay_evidence),
     ]
+    frontend_data["monthly_forecast_event_unsubs"] = [
+        hass.bus.async_listen("elrakning_load_forecast_update", lambda _event: _schedule_monthly_forecast_capture(hass)),
+        hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
+        hass.bus.async_listen(EON_GRID_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
+    ]
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True
@@ -469,6 +600,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "replay_artifact_generate")
     for unsubscribe in frontend_data.pop("replay_benchmark_event_unsubs", []):
         unsubscribe()
+    for unsubscribe in frontend_data.pop("monthly_forecast_event_unsubs", []):
+        unsubscribe()
+    if refresh_task := frontend_data.pop("monthly_forecast_capture_task", None):
+        refresh_task.cancel()
+    if startup_task := frontend_data.pop("monthly_forecast_startup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
     if refresh_task := frontend_data.pop("replay_benchmark_refresh_task", None):
         refresh_task.cancel()
     if startup_task := frontend_data.pop("replay_artifact_startup_task", None):
@@ -527,6 +668,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unsubscribe := frontend_data.pop("midnight_refresh_unsub", None):
         unsubscribe()
     if unsubscribe := frontend_data.pop("load_forecast_cadence_unsub", None):
+        unsubscribe()
+    if unsubscribe := frontend_data.pop("monthly_forecast_cadence_unsub", None):
         unsubscribe()
     if entry_coordinator is not None:
         entry_coordinator.cancel_midnight_recovery()

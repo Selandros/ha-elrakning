@@ -1333,6 +1333,9 @@ async def websocket_billing_history(hass, connection, msg):
         "price_periods": price_periods,
         "price_source": "nord_pool_historical_daily_periods",
         "invoice_estimate": {"today": invoice_today},
+        "monthly_forecast": hass.data.get(DOMAIN, {}).get("monthly_forecast_manager").public_state(
+            (hass.data.get(DOMAIN, {}).get("site_identity_manager").state or {}).get("active_site_id")
+        ) if hass.data.get(DOMAIN, {}).get("monthly_forecast_manager") and hass.data.get(DOMAIN, {}).get("site_identity_manager") else None,
         "price_coverage": {
             "period_count": len(price_periods),
             "missing_dates": missing_price_dates,

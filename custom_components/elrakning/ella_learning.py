@@ -23,6 +23,8 @@ POWER_EVIDENCE_SCHEMA = "ella_power_forecast_learning.v2"
 POWER_CALIBRATION_VERSION = "battery-behavior-profile-v2-error-calibration-v1"
 MAX_POWER_FORECASTS_PER_SITE = 256
 MAX_POWER_RECORDS_PER_SITE = 4096
+MAX_MONTHLY_FORECASTS_PER_SITE = 96
+MAX_MONTHLY_EVALUATIONS_PER_SITE = 512
 POWER_CALIBRATION_MIN_SUPPORT = 3
 POWER_CALIBRATION_MIN_PREDICTED_W = 100.0
 POWER_CALIBRATION_MIN_FACTOR = 0.8
@@ -72,6 +74,54 @@ class EllaLearningStore:
         site["records"] = records
         site["latest"] = {"evaluation": evaluation, "calibration": calibration or {}}
         await self.store.async_save(self.state)
+
+    async def async_record_monthly_forecast(self, site_id: str, forecast: dict[str, Any]) -> dict[str, Any]:
+        """Persist one immutable monthly forecast by deterministic fingerprint."""
+        if not isinstance(site_id, str) or not site_id.strip() or forecast.get("site_id") != site_id:
+            return {"written": False, "reason": "site_scope_invalid"}
+        fingerprint = forecast.get("fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint:
+            return {"written": False, "reason": "forecast_fingerprint_missing"}
+        site = self.state.setdefault("sites", {}).setdefault(site_id, {"records": [], "latest": {}})
+        snapshots = site.setdefault("monthly_forecasts", [])
+        if any(item.get("fingerprint") == fingerprint for item in snapshots if isinstance(item, dict)):
+            return {"written": False, "reason": "duplicate_fingerprint"}
+        snapshots.append(json.loads(json.dumps(forecast, sort_keys=True, default=str)))
+        snapshots[:] = sorted(snapshots, key=lambda item: (str(item.get("decision_at") or ""), str(item.get("fingerprint") or "")))[-MAX_MONTHLY_FORECASTS_PER_SITE:]
+        await self.store.async_save(self.state)
+        return {"written": True, "fingerprint": fingerprint}
+
+    async def async_record_monthly_evaluation(self, site_id: str, evaluation: dict[str, Any]) -> dict[str, Any]:
+        """Persist matured monthly cost evaluation without mutating forecasts."""
+        if not isinstance(site_id, str) or not site_id.strip() or evaluation.get("site_id") != site_id:
+            return {"written": False, "reason": "site_scope_invalid"}
+        key = (evaluation.get("forecast_fingerprint"), evaluation.get("actual_month"))
+        if not key[0] or not key[1]:
+            return {"written": False, "reason": "evaluation_identity_missing"}
+        site = self.state.setdefault("sites", {}).setdefault(site_id, {"records": [], "latest": {}})
+        evaluations = site.setdefault("monthly_evaluations", [])
+        if any((item.get("forecast_fingerprint"), item.get("actual_month")) == key for item in evaluations if isinstance(item, dict)):
+            return {"written": False, "reason": "duplicate_evaluation"}
+        evaluations.append(json.loads(json.dumps(evaluation, sort_keys=True, default=str)))
+        evaluations[:] = sorted(evaluations, key=lambda item: (str(item.get("actual_month") or ""), str(item.get("forecast_fingerprint") or "")))[-MAX_MONTHLY_EVALUATIONS_PER_SITE:]
+        await self.store.async_save(self.state)
+        return {"written": True, "evaluation_key": key}
+
+    def monthly_forecast_state(self, site_id: str) -> dict[str, Any]:
+        site = self.state.get("sites", {}).get(site_id)
+        if not isinstance(site, dict):
+            return {"schema": "ella_monthly_cost_forecast.v1", "site_id": site_id, "available": False, "reason": "no_monthly_forecast"}
+        snapshots = list(site.get("monthly_forecasts") or [])
+        evaluations = list(site.get("monthly_evaluations") or [])
+        return {
+            "schema": "ella_monthly_cost_forecast.v1",
+            "site_id": site_id,
+            "available": bool(snapshots),
+            "latest": snapshots[-1] if snapshots else None,
+            "forecast_count": len(snapshots),
+            "evaluation_count": len(evaluations),
+            "evaluations": evaluations,
+        }
 
     @staticmethod
     def _power_actual_qualified(row: dict[str, Any], site_id: str, now: datetime) -> bool:

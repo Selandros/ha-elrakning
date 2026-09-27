@@ -9981,7 +9981,7 @@ class ElrakningPanel {
     const today = this.host.querySelector("[data-invoice-estimate-today]");
     if (!card || !month || !total || !today) return;
     const billingHistory = this._billingHistory;
-    const estimate = buildInvoiceEstimate(
+    let estimate = buildInvoiceEstimate(
       billingHistory?.price_periods,
       billingHistory?.energy_points,
       this._eonGridPrice,
@@ -9989,6 +9989,20 @@ class ElrakningPanel {
       new Date(),
       billingHistory?.baseline_energy_points,
     );
+    const monthlyForecast = billingHistory?.monthly_forecast;
+    if (monthlyForecast?.available === true && Number.isFinite(Number(monthlyForecast.estimated_month_total_sek))) {
+      estimate = {
+        ...estimate,
+        estimated_month_total_sek: Number(monthlyForecast.estimated_month_total_sek),
+        total_so_far_sek: Number(monthlyForecast.actual_cost_to_date_sek),
+        forecast_remaining_total_sek: Number(monthlyForecast.expected_future_cost_sek),
+        imported_kwh_so_far: Number(monthlyForecast.actual_import_to_date_kwh),
+        forecast_import_kwh: Number(monthlyForecast.estimated_month_import_kwh),
+        forecast_remaining_kwh: Number(monthlyForecast.expected_future_import_kwh),
+        forecast_method: monthlyForecast.forecast_method,
+        forecast_provenance: monthlyForecast,
+      };
+    }
     const configured = this._meterState?.configured === true;
     card.hidden = !configured || !billingHistory;
     if (!configured || !billingHistory) {
