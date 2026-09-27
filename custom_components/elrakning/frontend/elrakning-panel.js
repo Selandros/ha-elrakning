@@ -3020,20 +3020,6 @@ class ElrakningPanel {
           </article>
         </div>
 
-        <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
-          <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
-          <div data-solar-evidence-summary></div>
-          <div data-solar-evidence-status></div>
-          <div class="solar-evidence-list" data-solar-evidence-list></div>
-        </section>
-
-        <section class="card solar-evidence-card" data-benchmark-evidence-card hidden aria-labelledby="benchmark-evidence-title">
-          <div class="card-heading"><h2 id="benchmark-evidence-title">Benchmark Evidence</h2></div>
-          <div data-benchmark-evidence-summary></div>
-          <div data-benchmark-evidence-status></div>
-          <div class="solar-evidence-list" data-benchmark-evidence-list></div>
-        </section>
-
         <div class="daily-energy-row phase-history-row">
           <article class="card phase-history-card" data-phase-history-card hidden aria-labelledby="phase-history-title">
             <div class="phase-history-heading" aria-label="Faser">
@@ -3107,6 +3093,19 @@ class ElrakningPanel {
           <div class="diagnostics-list" data-diagnostics-list></div>
         </section>
         </div>
+        <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
+          <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
+          <div data-solar-evidence-summary></div>
+          <div data-solar-evidence-status></div>
+          <div class="solar-evidence-list" data-solar-evidence-list></div>
+        </section>
+
+        <section class="card solar-evidence-card" data-benchmark-evidence-card hidden aria-labelledby="benchmark-evidence-title">
+          <div class="card-heading"><h2 id="benchmark-evidence-title">Benchmark Evidence</h2></div>
+          <div data-benchmark-evidence-summary></div>
+          <div data-benchmark-evidence-status></div>
+          <div class="solar-evidence-list" data-benchmark-evidence-list></div>
+        </section>
       </main>
       <div class="provider-source-dialog" data-provider-source-dialog hidden role="dialog" aria-modal="true" aria-labelledby="provider-source-dialog-title">
         <div class="provider-dialog-card">
