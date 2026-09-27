@@ -2104,6 +2104,10 @@ export function buildCostReferenceComparisons(monthHistory, selectedMonth, selec
   });
 }
 
+export function costHistoryDisplayOrder(monthHistory) {
+  return Array.isArray(monthHistory) ? [...monthHistory].reverse() : [];
+}
+
 export function buildInvoiceProvenance(estimate, billingHistory = {}) {
   if (!estimate) return null;
   const gridPrice = billingHistory.grid_price || {};
@@ -9925,6 +9929,7 @@ class ElrakningPanel {
     const selectedIndex = monthHistory.findIndex((item) => item.month === selectedMonth);
     const selectedRecord = selectedIndex >= 0 ? monthHistory[selectedIndex] : null;
     const adjacentPrevious = selectedIndex >= 0 ? monthHistory[selectedIndex + 1] : null;
+    const displayHistory = costHistoryDisplayOrder(monthHistory);
     card.hidden = !estimate;
     period.textContent = selectedMonth ? this._formatInvoiceMonth(selectedMonth) : "";
     if (selectedPeriod) selectedPeriod.textContent = period.textContent;
@@ -9937,7 +9942,7 @@ class ElrakningPanel {
     if (nextButton) nextButton.disabled = selectedIndex <= 0;
     if (historyPosition) historyPosition.textContent = monthHistory.length > 1 && selectedIndex >= 0 ? `${selectedIndex + 1} av ${monthHistory.length}` : "";
     if (historyList) {
-      historyList.replaceChildren(...monthHistory.map((item) => {
+      historyList.replaceChildren(...displayHistory.map((item) => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "cost-history-month";
@@ -9951,7 +9956,7 @@ class ElrakningPanel {
     if (historyChart) {
       const completeHistory = monthHistory.filter((item) => item.coverage === "complete" && Number.isFinite(Number(item.total_sek)));
       const maxHistoryValue = Math.max(1, ...completeHistory.map((item) => Number(item.total_sek)));
-      historyChart.replaceChildren(...monthHistory.map((item) => {
+      historyChart.replaceChildren(...displayHistory.map((item) => {
         const itemElement = document.createElement("div");
         itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${item.coverage !== "complete" ? " unavailable" : ""}`;
         const bar = document.createElement("div");

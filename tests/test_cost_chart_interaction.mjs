@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -33,6 +33,7 @@ assert.equal(references[0].difference_sek, 20);
 assert.equal(references[1].available, true);
 assert.equal(references[1].sample_count, 2);
 assert.equal(references[2].sample_count, 2);
+assert.deepEqual(costHistoryDisplayOrder([{ month: "2026-09" }, { month: "2026-08" }, { month: "2026-07" }]).map((item) => item.month), ["2026-07", "2026-08", "2026-09"]);
 
 const septemberGeometry = buildCostChartGeometry(960, { left: 48, right: 12 }, 30);
 assert.equal(septemberGeometry.x(1), 48);
@@ -108,6 +109,8 @@ assert.match(source, /\.cost-details \{[\s\S]*grid-template-columns: repeat\(3, 
 assert.match(source, /@container \(max-width: 600px\) \{[\s\S]*\.cost-details \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
 assert.match(source, /data-cost-history-list/);
 assert.match(source, /data-cost-history-chart/);
+assert.match(source, /const displayHistory = costHistoryDisplayOrder\(monthHistory\)/);
+assert.match(source, /historyChart\.replaceChildren\(\.\.\.displayHistory\.map/);
 assert.match(source, /data-cost-previous/);
 assert.match(source, /data-cost-next/);
 assert.match(source, /cost-main-grid/);
