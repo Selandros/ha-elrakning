@@ -123,19 +123,22 @@ def _causal_price_fallback(
 def _causal_trade_price_profile(
     periods: list[dict[str, Any]], moment: datetime, decision: datetime,
 ) -> tuple[float | None, dict[str, Any] | None]:
-    """Build a bounded trade-price profile from observed periods only."""
+    """Build a bounded trade/spot profile from observed periods only."""
     candidates = []
     for period in periods or []:
         start = _moment(period.get("start"))
         end = _moment(period.get("end"))
         known_at = _moment(period.get("price_known_at"))
         trade = _number(period.get("trade_customer_price_ore_per_kwh"))
+        spot = _number(period.get("spot_price_ore_per_kwh"))
+        value = trade if trade is not None else spot
+        basis = "trade_customer_gross" if trade is not None else "nord_pool_spot"
         if (
             not start or not end or end <= start or end > decision
-            or (known_at and known_at > decision) or trade is None or trade < 0
+            or (known_at and known_at > decision) or value is None or value < 0
         ):
             continue
-        candidates.append((start, end, trade, period))
+        candidates.append((start, end, value, basis, period))
     if not candidates:
         return None, None
     slot_key = moment.hour * 4 + moment.minute // 15
@@ -144,11 +147,16 @@ def _causal_trade_price_profile(
     selected = exact or broader
     if not selected:
         return None, None
+    available_bases = {item[3] for item in selected}
+    basis = "trade_customer_gross" if "trade_customer_gross" in available_bases else "nord_pool_spot"
+    selected = [item for item in selected if item[3] == basis]
     selected = sorted(selected, key=lambda item: (item[0], item[1], json.dumps(item[3], sort_keys=True, default=str)))[-28:]
-    latest = selected[-1][3]
+    latest = selected[-1][4]
+    basis_label = "trade_customer_gross_ex_grid" if basis == "trade_customer_gross" else "nord_pool_spot_ex_grid"
+    method_prefix = "trade" if basis == "trade_customer_gross" else "spot"
     return sum(item[2] for item in selected) / len(selected), {
-        "method": "causal_weekday_slot_trade_price_profile" if exact else "causal_weekday_hour_trade_price_profile",
-        "basis": "trade_customer_gross_ex_grid",
+        "method": f"causal_weekday_slot_{method_prefix}_price_profile" if exact else f"causal_weekday_hour_{method_prefix}_price_profile",
+        "basis": basis_label,
         "sample_support": len(selected),
         "historical_window_start": selected[0][0].isoformat(),
         "historical_window_end": selected[-1][1].isoformat(),
@@ -158,6 +166,47 @@ def _causal_trade_price_profile(
         "currency": latest.get("price_currency"),
         "fallback_reason": "provider_horizon_exhausted",
     }
+
+
+def canonical_spot_price_periods(
+    frames: list[dict[str, Any]], *, area: str | None, currency: str | None,
+) -> list[dict[str, Any]]:
+    """Flatten decision-time-visible canonical Nord Pool frames into spot periods."""
+    periods = []
+    for frame in frames or []:
+        provenance = frame.get("provenance") or {}
+        frame_area = provenance.get("area") or frame.get("area")
+        frame_currency = provenance.get("currency") or frame.get("currency")
+        if area and frame_area != area:
+            continue
+        if currency and frame_currency != currency:
+            continue
+        for point in frame.get("points") or []:
+            start = _moment(point.get("valid_at"))
+            content = point.get("point") or {}
+            end = _moment(content.get("end"))
+            value = _number(point.get("value"))
+            known_at = _moment(frame.get("known_at"))
+            if not start or not end or end <= start or value is None or value < 0 or not known_at:
+                continue
+            periods.append({
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "spot_price_ore_per_kwh": value * 100.0,
+                "price_known_at": known_at.isoformat(),
+                "price_source_generation_id": frame.get("source_generation_id"),
+                "price_area": frame_area,
+                "price_currency": frame_currency,
+                "price_provenance": {
+                    "method": "canonical_nord_pool_spot_history",
+                    "source_generation_id": frame.get("source_generation_id"),
+                    "frame_id": frame.get("frame_id"),
+                    "area": frame_area,
+                    "currency": frame_currency,
+                    "known_at": known_at.isoformat(),
+                },
+            })
+    return sorted(periods, key=lambda item: (item["start"], item["end"], item.get("price_source_generation_id") or ""))
 
 
 def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datetime) -> float:

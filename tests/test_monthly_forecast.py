@@ -5,7 +5,12 @@ from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 
-from custom_components.elrakning.monthly_forecast import build_actual_priced_cost_to_date, build_month_end_slots, build_monthly_cost_forecast
+from custom_components.elrakning.monthly_forecast import (
+    build_actual_priced_cost_to_date,
+    build_month_end_slots,
+    build_monthly_cost_forecast,
+    canonical_spot_price_periods,
+)
 from custom_components.elrakning.monthly_forecast_manager import MonthlyForecastManager
 
 
@@ -307,3 +312,32 @@ def test_unaligned_decision_uses_next_canonical_slot_without_partial_future_slot
     assert result["slot_count"] == 2
     assert result["method_counts"]["canonical_power_forecast"] == 1
     assert result["method_counts"]["causal_weekday_slot_profile"] == 1
+
+
+def test_canonical_spot_history_is_area_currency_scoped_and_causal():
+    decision = datetime(2026, 9, 27, 12, tzinfo=UTC)
+    frames = [{
+        "frame_id": "frame-se2",
+        "source_generation_id": "np-se2",
+        "known_at": datetime(2026, 9, 26, 12, tzinfo=UTC).isoformat(),
+        "provenance": {"area": "SE2", "currency": "SEK"},
+        "points": [{
+            "valid_at": datetime(2026, 9, 20, 12, tzinfo=UTC).isoformat(),
+            "value": 1.25,
+            "point": {"end": datetime(2026, 9, 20, 12, 15, tzinfo=UTC).isoformat()},
+        }],
+    }, {
+        "frame_id": "frame-se3",
+        "source_generation_id": "np-se3",
+        "known_at": datetime(2026, 9, 26, 12, tzinfo=UTC).isoformat(),
+        "provenance": {"area": "SE3", "currency": "SEK"},
+        "points": [{
+            "valid_at": datetime(2026, 9, 20, 12, tzinfo=UTC).isoformat(),
+            "value": 9.99,
+            "point": {"end": datetime(2026, 9, 20, 12, 15, tzinfo=UTC).isoformat()},
+        }],
+    }]
+    result = canonical_spot_price_periods(frames, area="SE2", currency="SEK")
+    assert len(result) == 1
+    assert result[0]["spot_price_ore_per_kwh"] == 125
+    assert result[0]["price_source_generation_id"] == "np-se2"

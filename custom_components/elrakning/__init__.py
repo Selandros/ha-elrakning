@@ -188,7 +188,12 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
     timezone_name = ((config.get("location") or {}).get("timezone") if isinstance(config, dict) else None) or "UTC"
     now = dt_util.now().astimezone(timezone.utc)
     from zoneinfo import ZoneInfo
-    from .monthly_forecast import build_actual_priced_cost_to_date, build_month_end_slots, month_window
+    from .monthly_forecast import (
+        build_actual_priced_cost_to_date,
+        build_month_end_slots,
+        canonical_spot_price_periods,
+        month_window,
+    )
     from .websocket import _async_power_forecast_state, _serialize_price_data
     zone = ZoneInfo(timezone_name)
     local_now = now.astimezone(zone)
@@ -219,6 +224,27 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
             except Exception:
                 pass
             cursor += timedelta(days=1)
+    price_binding = identity.global_binding("nord_pool") if hasattr(identity, "global_binding") else None
+    price_area = price_binding.get("area") if isinstance(price_binding, dict) else None
+    price_currency = (price_binding.get("currency") or "SEK") if isinstance(price_binding, dict) else "SEK"
+    try:
+        canonical_price_frames = await hass.async_add_executor_job(
+            partial(
+                collector.storage.read_external_input_frames,
+                now,
+                source_scope="global",
+                logical_role="market.price.energy",
+            )
+        )
+    except Exception:
+        canonical_price_frames = []
+    price_periods.extend(
+        canonical_spot_price_periods(
+            canonical_price_frames,
+            area=price_area,
+            currency=price_currency,
+        )
+    )
     grid_manager = data.get("grid_manager")
     grid_state = grid_manager.public_state() if grid_manager else {}
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else {}
