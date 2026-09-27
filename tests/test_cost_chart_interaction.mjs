@@ -13,8 +13,8 @@ const monthHistory = buildInvoiceMonthHistory({
   trade: { total_so_far_sek: 70 },
   grid: { total_so_far_sek: 50 },
 }, {
-  trade: [{ month: "Aug 2026", period_cost_before_credits_sek: 100 }],
-  grid: [{ month: "Aug 2026", period_cost_before_credits_sek: 60 }],
+  trade: [{ month: "Aug 2026", period_cost_before_credits_sek: 100, vat_included: true }],
+  grid: [{ month: "Aug 2026", period_cost_before_credits_sek: 60, vat_included: true }],
 });
 assert.deepEqual(monthHistory.map((item) => item.month), ["2026-09", "2026-08"]);
 assert.equal(monthHistory[1].coverage, "complete");
@@ -22,8 +22,8 @@ assert.equal(monthHistory[1].total_sek, 160);
 assert.equal(buildCostMonthComparison(monthHistory[1], monthHistory[0]).available, false);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 160 }, { month: "2026-07", coverage: "complete", total_sek: 200 }).difference_sek, -40);
 const zeroInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
-  trade: [{ month: "Aug 2026", amount_due_sek: 0, revision: 1, _invoice_key: "zero-trade" }],
-  grid: [{ month: "Aug 2026", amount_due_sek: 0, revision: 1, _invoice_key: "zero-grid" }],
+  trade: [{ month: "Aug 2026", amount_due_sek: 0, vat_included: true, revision: 1, _invoice_key: "zero-trade" }],
+  grid: [{ month: "Aug 2026", amount_due_sek: 0, vat_included: true, revision: 1, _invoice_key: "zero-grid" }],
 });
 assert.equal(zeroInvoice[1].coverage, "complete");
 assert.equal(zeroInvoice[1].total_sek, 0);
@@ -36,12 +36,42 @@ assert.deepEqual(missingAmount.map((item) => item.month), ["2026-09"]);
 const revisedInvoice = buildPreviousMonthActual({
   trade: [
     { month: "Aug 2026", amount_due_sek: 25, revision: 1, _invoice_key: "old" },
-    { month: "Aug 2026", amount_due_sek: 0, revision: 2, _invoice_key: "new" },
+    { month: "Aug 2026", amount_due_sek: 0, vat_included: true, revision: 2, _invoice_key: "new" },
   ],
-  grid: [{ month: "Aug 2026", amount_due_sek: 0, revision: 1 }],
+  grid: [{ month: "Aug 2026", amount_due_sek: 0, vat_included: true, revision: 1 }],
 }, "2026-09");
 assert.equal(revisedInvoice.trade.total_sek, 0);
 assert.equal(revisedInvoice.total_sek, 0);
+const tradeOnlyPartial = buildPreviousMonthActual({
+  trade: [{ month: "Aug 2026", amount_due_sek: 25, _invoice_key: "trade-only" }],
+  grid: [],
+}, "2026-09");
+assert.equal(tradeOnlyPartial.coverage, "partial");
+assert.equal(tradeOnlyPartial.known_amount_gross_sek, 25);
+assert.deepEqual(tradeOnlyPartial.sources_present, ["elhandel"]);
+assert.deepEqual(tradeOnlyPartial.sources_missing, ["elnät"]);
+const zeroTradePartial = buildPreviousMonthActual({
+  trade: [{ month: "Aug 2026", amount_due_sek: 0, _invoice_key: "zero-trade-only" }],
+  grid: [],
+}, "2026-09");
+assert.equal(zeroTradePartial.coverage, "partial");
+assert.equal(zeroTradePartial.known_amount_gross_sek, 0);
+const noInvoiceActual = buildPreviousMonthActual({ trade: [], grid: [] }, "2026-09");
+assert.equal(noInvoiceActual.coverage, "missing");
+assert.equal(noInvoiceActual.known_amount_gross_sek, null);
+const mixedTaxBasis = buildPreviousMonthActual({
+  trade: [{ month: "Aug 2026", amount_due_sek: 10 }],
+  grid: [{ month: "Aug 2026", net_amount_sek: 20, vat_rate_percent: 25 }],
+}, "2026-09");
+assert.equal(mixedTaxBasis.coverage, "partial");
+assert.equal(mixedTaxBasis.total_sek, null);
+assert.equal(mixedTaxBasis.tax_compatible, false);
+const upgraded = buildPreviousMonthActual({
+  trade: [{ month: "Aug 2026", amount_due_sek: 10, vat_included: true }],
+  grid: [{ month: "Aug 2026", amount_due_sek: 20, vat_included: true }],
+}, "2026-09");
+assert.equal(upgraded.coverage, "complete");
+assert.equal(upgraded.total_sek, 30);
 const multiMonthInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
   trade: [{ month: "Aug 2026-Sep 2026", amount_due_sek: 100 }],
   grid: [],
@@ -49,7 +79,7 @@ const multiMonthInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_
 assert.deepEqual(multiMonthInvoice.map((item) => item.month), ["2026-09"]);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 0 }, { month: "2026-07", coverage: "complete", total_sek: 50 }).difference_sek, -50);
 assert.equal(buildCostReferenceComparisons([{ month: "2026-09", coverage: "complete", total_sek: 25 }, { month: "2026-08", coverage: "complete", total_sek: 0 }], "2026-09", 25)[0].available, true);
-const twelveMonths = Array.from({ length: 13 }, (_, index) => ({ month: `202${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, period_cost_before_credits_sek: 100 + index }));
+const twelveMonths = Array.from({ length: 13 }, (_, index) => ({ month: `202${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, period_cost_before_credits_sek: 100 + index, vat_included: true }));
 assert.equal(buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, { trade: twelveMonths, grid: [] }).length, 12);
 const references = buildCostReferenceComparisons([
   { month: "2026-09", coverage: "partial", total_sek: 100 },
@@ -61,6 +91,15 @@ assert.equal(references[0].difference_sek, 20);
 assert.equal(references[1].available, true);
 assert.equal(references[1].sample_count, 2);
 assert.equal(references[2].sample_count, 2);
+const comparablePartialReferences = buildCostReferenceComparisons([
+  { month: "2026-09", coverage: "partial", known_amount_gross_sek: 100, source_signature: "SEK:gross_invoice_total", tax_compatible: true },
+  { month: "2026-08", coverage: "partial", known_amount_gross_sek: 80, source_signature: "SEK:gross_invoice_total", tax_compatible: true },
+  { month: "2026-07", coverage: "complete", total_sek: 120, source_signature: "SEK:gross_invoice_total", tax_compatible: true },
+  { month: "2026-06", coverage: "complete", total_sek: 200, source_signature: "SEK:gross_normalized_from_net_plus_vat", tax_compatible: true },
+], "2026-09", 100);
+assert.equal(comparablePartialReferences[0].available, true);
+assert.equal(comparablePartialReferences[1].sample_count, 2);
+assert.equal(comparablePartialReferences[2].sample_count, 2);
 assert.deepEqual(costHistoryDisplayOrder([{ month: "2026-09" }, { month: "2026-08" }, { month: "2026-07" }]).map((item) => item.month), ["2026-07", "2026-08", "2026-09"]);
 
 const septemberGeometry = buildCostChartGeometry(960, { left: 48, right: 12 }, 30);

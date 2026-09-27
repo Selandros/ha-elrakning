@@ -1945,6 +1945,25 @@ export function normalizeInvoiceMonth(value) {
 export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
   const month = previousCalendarMonth(selectedMonth);
   const finiteInvoiceNumber = (value) => value == null || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+  const normalizeInvoiceAmount = (invoice) => {
+    const currency = invoice.currency || invoice.currency_code || "SEK";
+    const periodCost = finiteInvoiceNumber(invoice.period_cost_before_credits_sek);
+    const creditsApplied = finiteInvoiceNumber(invoice.credits_applied_sek);
+    if (periodCost !== null && creditsApplied !== null) return { amount_sek: periodCost, tax_basis: invoice.vat_included === true ? "gross_invoice_total" : "gross_period_total_unverified_vat", currency };
+    const explicitGross = finiteInvoiceNumber(invoice.gross_amount_sek);
+    if (explicitGross !== null) return { amount_sek: explicitGross, tax_basis: "gross_invoice_total", currency };
+    const gross = finiteInvoiceNumber(invoice.amount_due_sek);
+    if (gross !== null) return { amount_sek: gross, tax_basis: invoice.vat_included === true ? "gross_invoice_total" : "gross_settlement_unverified_vat", currency };
+    const ore = finiteInvoiceNumber(invoice.amount_due_ore);
+    if (ore !== null) return { amount_sek: ore / 100, tax_basis: invoice.vat_included === true ? "gross_invoice_total" : "gross_settlement_unverified_vat", currency };
+    const net = finiteInvoiceNumber(invoice.net_amount_sek ?? invoice.amount_ex_vat_sek);
+    const vatAmount = finiteInvoiceNumber(invoice.vat_amount_sek ?? invoice.vat_sek);
+    const vatRate = finiteInvoiceNumber(invoice.vat_rate_percent ?? invoice.vat_percent);
+    if (net !== null && vatAmount !== null) return { amount_sek: net + vatAmount, tax_basis: "gross_normalized_from_net_plus_vat", currency };
+    if (net !== null && vatRate !== null) return { amount_sek: net * (1 + vatRate / 100), tax_basis: "gross_normalized_from_net_plus_vat_rate", currency };
+    if (periodCost !== null && invoice.vat_included === true) return { amount_sek: periodCost, tax_basis: "gross_invoice_total", currency };
+    return null;
+  };
   const statusRank = (invoice) => ({ CURRENT: 3, FUTURE: 2, ENDED: 1 }[String(invoice?._contract_status || invoice?.contract_status || "").toUpperCase()] || 0);
   const selectCanonicalInvoice = (items) => [...items].sort((left, right) => {
     const revisionDelta = finiteInvoiceNumber(right.revision) - finiteInvoiceNumber(left.revision);
@@ -1962,7 +1981,8 @@ export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
     const normalized = selected ? [selected].map((invoice) => {
       const periodCost = finiteInvoiceNumber(invoice.period_cost_before_credits_sek);
       const amountDue = finiteInvoiceNumber(invoice.amount_due_sek);
-      const comparisonValue = periodCost ?? amountDue;
+      const normalizedAmount = normalizeInvoiceAmount(invoice);
+      const comparisonValue = normalizedAmount?.amount_sek ?? null;
       return {
         invoice_exists: true,
         billing_period: invoice.billing_period || invoice.month,
@@ -1971,6 +1991,10 @@ export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
         credits_applied_sek: finiteInvoiceNumber(invoice.credits_applied_sek),
         amount_due_sek: amountDue,
         comparison_value_sek: comparisonValue,
+        amount_gross_sek: normalizedAmount?.amount_sek ?? null,
+        tax_basis: normalizedAmount?.tax_basis ?? null,
+        currency: normalizedAmount?.currency ?? null,
+        invoice_key: invoice._invoice_key || invoice.invoice_key || null,
         source: invoice.source || null,
       };
     }) : [];
@@ -2011,16 +2035,32 @@ export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
     reason: "no_previous_invoice",
   };
   const coverage = trade.available && grid.available ? "complete" : trade.available || grid.available ? "partial" : "missing";
+  const sourcesPresent = [trade.available ? "elhandel" : null, grid.available ? "elnät" : null].filter(Boolean);
+  const sourcesMissing = [trade.available ? null : "elhandel", grid.available ? null : "elnät"].filter(Boolean);
+  const sourceSignatures = [trade, grid].filter((item) => item.available).map((item) => `${item.invoices[0]?.currency || "SEK"}:${item.invoices[0]?.tax_basis || "unknown"}`);
+  const comparableBasis = new Set(sourceSignatures).size <= 1;
+  const combinableBasis = comparableBasis && sourceSignatures.every((signature) => !signature.includes("unverified_vat"));
+  const knownAmounts = [trade, grid].filter((item) => item.available && item.invoices[0]?.currency === "SEK" && item.invoices[0]?.tax_basis);
+  const knownAmountGrossSek = knownAmounts.length
+    ? knownAmounts.reduce((sum, item) => sum + Number(item.total_sek), 0)
+    : null;
+  const complete = coverage === "complete" && combinableBasis;
   return {
     month,
     trade,
     grid,
-    coverage,
-    total_sek: coverage === "complete" && Number.isFinite(trade.total_sek) && Number.isFinite(grid.total_sek) ? trade.total_sek + grid.total_sek : null,
+    coverage: complete ? "complete" : coverage === "missing" ? "missing" : "partial",
+    total_sek: complete && Number.isFinite(trade.total_sek) && Number.isFinite(grid.total_sek) ? trade.total_sek + grid.total_sek : null,
+    known_amount_gross_sek: Number.isFinite(knownAmountGrossSek) ? knownAmountGrossSek : null,
+    sources_present: sourcesPresent,
+    sources_missing: sourcesMissing,
+    source_signature: sourceSignatures.join("+") || null,
+    tax_compatible: comparableBasis,
+    tax_combinable: combinableBasis,
     comparison: {
-      available: coverage === "complete" && Number.isFinite(trade.total_sek) && Number.isFinite(grid.total_sek),
-      coverage,
-      reason: coverage === "partial" && !grid.available ? "previous_grid_invoice_missing" : null,
+      available: complete && Number.isFinite(trade.total_sek) && Number.isFinite(grid.total_sek),
+      coverage: complete ? "complete" : coverage,
+      reason: !combinableBasis && coverage === "complete" ? "incompatible_tax_basis" : coverage === "partial" && !grid.available ? "previous_grid_invoice_missing" : null,
     },
   };
 }
@@ -2066,9 +2106,16 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
   for (const invoices of [invoiceSources.trade, invoiceSources.grid]) {
     for (const invoice of Array.isArray(invoices) ? invoices : []) {
       const normalizedMonth = normalizeInvoiceMonth(invoice?.month);
-      const periodCost = invoice?.period_cost_before_credits_sek == null || invoice.period_cost_before_credits_sek === "" ? null : Number(invoice.period_cost_before_credits_sek);
       const amountDue = invoice?.amount_due_sek == null || invoice.amount_due_sek === "" ? null : Number(invoice.amount_due_sek);
-      if (normalizedMonth && (Number.isFinite(periodCost) || Number.isFinite(amountDue))) months.add(normalizedMonth);
+      const gross = invoice?.gross_amount_sek == null || invoice.gross_amount_sek === "" ? null : Number(invoice.gross_amount_sek);
+      const ore = invoice?.amount_due_ore == null || invoice.amount_due_ore === "" ? null : Number(invoice.amount_due_ore);
+      const periodCost = invoice?.period_cost_before_credits_sek == null || invoice.period_cost_before_credits_sek === "" ? null : Number(invoice.period_cost_before_credits_sek);
+      const hasGross = [amountDue, gross, ore].some(Number.isFinite);
+      const hasExplicitGrossPeriod = Number.isFinite(periodCost) && invoice?.vat_included === true;
+      const hasCreditedPeriod = Number.isFinite(periodCost) && Number.isFinite(Number(invoice?.credits_applied_sek));
+      const hasNetWithVat = Number.isFinite(Number(invoice?.net_amount_sek ?? invoice?.amount_ex_vat_sek))
+        && (Number.isFinite(Number(invoice?.vat_amount_sek ?? invoice?.vat_sek)) || Number.isFinite(Number(invoice?.vat_rate_percent ?? invoice?.vat_percent)));
+      if (normalizedMonth && (hasGross || hasExplicitGrossPeriod || hasCreditedPeriod || hasNetWithVat)) months.add(normalizedMonth);
     }
   }
   return [...months].sort().reverse().slice(0, 12).map((month) => {
@@ -2084,7 +2131,21 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
       };
     }
     const actual = buildPreviousMonthActual(invoiceSources, nextCalendarMonth(month));
-    return { month, current: false, coverage: actual.coverage, total_sek: actual.total_sek, estimated_total_sek: null, trade_sek: Number.isFinite(Number(actual.trade?.total_sek)) ? Number(actual.trade.total_sek) : null, grid_sek: Number.isFinite(Number(actual.grid?.total_sek)) ? Number(actual.grid.total_sek) : null };
+    return {
+      month,
+      current: false,
+      coverage: actual.coverage,
+      total_sek: actual.total_sek,
+      known_amount_gross_sek: actual.known_amount_gross_sek,
+      estimated_total_sek: null,
+      trade_sek: Number.isFinite(Number(actual.trade?.total_sek)) ? Number(actual.trade.total_sek) : null,
+      grid_sek: Number.isFinite(Number(actual.grid?.total_sek)) ? Number(actual.grid.total_sek) : null,
+      sources_present: actual.sources_present,
+      sources_missing: actual.sources_missing,
+      source_signature: actual.source_signature,
+      tax_compatible: actual.tax_compatible,
+      tax_combinable: actual.tax_combinable,
+    };
   });
 }
 
@@ -2101,21 +2162,31 @@ export function buildCostMonthComparison(selected, previous) {
 export function buildCostReferenceComparisons(monthHistory, selectedMonth, selectedValue) {
   const selectedIndex = (Array.isArray(monthHistory) ? monthHistory : []).findIndex((item) => item.month === selectedMonth);
   const history = selectedIndex >= 0 ? monthHistory.slice(selectedIndex + 1) : [];
-  const complete = history.filter((item) => item.coverage === "complete" && Number.isFinite(Number(item.total_sek)));
+  const selectedRecord = selectedIndex >= 0 ? monthHistory[selectedIndex] : null;
+  const selectedSignature = selectedRecord?.source_signature || null;
+  const comparable = (item) => {
+    if (!item || item.coverage === "missing") return false;
+    const value = item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek;
+    if (!Number.isFinite(Number(value))) return false;
+    if (!selectedSignature) return item.coverage === "complete" && Number.isFinite(Number(item.total_sek));
+    return item.source_signature === selectedSignature && item.tax_compatible !== false;
+  };
+  const valueOf = (item) => item?.coverage === "complete" ? Number(item.total_sek) : Number(item.known_amount_gross_sek);
+  const complete = history.filter(comparable);
   const reference = (count) => {
-    const values = complete.slice(0, count).map((item) => Number(item.total_sek));
+    const values = complete.slice(0, count).map(valueOf);
     return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   };
   return [
-    { key: "previous", label: "Mot förra månaden", value: complete[0]?.total_sek ?? null, sample_count: complete[0] ? 1 : 0 },
+    { key: "previous", label: "Mot förra månaden", value: complete[0] ? valueOf(complete[0]) : null, sample_count: complete[0] ? 1 : 0 },
     { key: "three_month_average", label: "Mot 3 månaders snitt", value: reference(3), sample_count: Math.min(3, complete.length) },
     { key: "twelve_month_average", label: "Mot 12 månaders snitt", value: reference(12), sample_count: Math.min(12, complete.length) },
   ].map((item) => {
     const current = selectedValue == null ? null : Number(selectedValue);
     const baseline = item.value == null ? null : Number(item.value);
-    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null };
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null, comparison_scope: selectedSignature ? "matching_source_signature" : "complete_only" };
     const difference = current - baseline;
-    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null };
+    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null, comparison_scope: selectedSignature ? "matching_source_signature" : "complete_only" };
   });
 }
 
@@ -4519,6 +4590,7 @@ class ElrakningPanel {
         .cost-history-bar-item { align-items: center; display: flex; flex: 1 0 34px; flex-direction: column; gap: 4px; height: 100%; justify-content: end; min-width: 34px; }
         .cost-history-bar { background: var(--primary-color); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
         .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
+        .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
         .cost-history-bar-item.unavailable .cost-history-bar { background: var(--divider-color); height: 3px !important; opacity: 1; }
         .cost-history-bar-label { color: var(--secondary-text-color); font-size: 10px; white-space: nowrap; }
 
@@ -9922,23 +9994,26 @@ class ElrakningPanel {
       }));
     }
     if (historyChart) {
-      const completeHistory = monthHistory.filter((item) => item.coverage === "complete" && Number.isFinite(Number(item.total_sek)));
-      const maxHistoryValue = Math.max(1, ...completeHistory.map((item) => Number(item.total_sek)));
+      const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek)));
+      const maxHistoryValue = Math.max(1, ...valuedHistory.map((item) => Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek)));
       historyChart.replaceChildren(...displayHistory.map((item) => {
         const itemElement = document.createElement("div");
-        itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${item.coverage !== "complete" ? " unavailable" : ""}`;
+        const partial = item.coverage === "partial";
+        itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${partial ? " partial" : item.coverage === "missing" ? " unavailable" : ""}`;
         const bar = document.createElement("div");
         bar.className = "cost-history-bar";
-        const value = Number(item.total_sek);
-        if (item.coverage === "complete" && Number.isFinite(value)) bar.style.height = `${Math.max(8, value / maxHistoryValue * 62)}px`;
-        bar.title = item.coverage === "complete" && Number.isFinite(value) ? this._formatSek(value) : "Delvis underlag";
+        const value = Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
+        if (item.coverage !== "missing" && Number.isFinite(value)) bar.style.height = `${Math.max(value === 0 ? 3 : 8, value / maxHistoryValue * 62)}px`;
+        const detail = `Elhandel: ${item.trade_sek == null ? "saknas" : this._formatSek(item.trade_sek)} · Elnät: ${item.grid_sek == null ? "saknas" : this._formatSek(item.grid_sek)} · Känd kostnad: ${Number.isFinite(value) ? this._formatSek(value) : "saknas"} · Status: ${item.coverage === "complete" ? "Komplett" : item.coverage === "partial" ? "Delvis underlag" : "Saknas"}`;
+        bar.title = detail;
+        itemElement.title = detail;
         const label = document.createElement("span");
         label.className = "cost-history-bar-label";
         label.textContent = this._formatInvoiceMonth(item.month).split(" ")[0];
         itemElement.append(bar, label);
         return itemElement;
       }));
-      if (historyStatus) historyStatus.textContent = completeHistory.length ? `${completeHistory.length} kompletta av ${monthHistory.length}` : "Ingen komplett månadsserie";
+      if (historyStatus) historyStatus.textContent = valuedHistory.length ? `${valuedHistory.length} månader med känd kostnad av ${monthHistory.length}` : "Ingen användbar månadsserie";
     }
     if (!estimate) {
       status.textContent = "";
@@ -9948,7 +10023,7 @@ class ElrakningPanel {
       summary.replaceChildren();
       return;
     }
-    const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.total_sek;
+    const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.coverage === "complete" ? selectedRecord.total_sek : selectedRecord?.known_amount_gross_sek;
     const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
     const currentRows = showingCurrent ? [
       ["Estimerad månad", estimate.estimated_month_total_sek],
@@ -9998,6 +10073,7 @@ class ElrakningPanel {
     ] : selectedRecord ? [
       ["Elhandel", selectedRecord.trade_sek, "Faktisk månadsdel"],
       ["Elnät", selectedRecord.grid_sek, "Faktisk månadsdel"],
+      ["Känd kostnad", selectedRecord.known_amount_gross_sek, selectedRecord.coverage === "complete" ? "Tax-kompatibla källor" : "Kända tax-kompatibla källor"],
       ["Total", selectedRecord.total_sek, "Faktisk månadskostnad"],
     ] : [];
     summary.replaceChildren(...rows.filter(([, value]) => value != null && (typeof value !== "number" || Number.isFinite(value))).map(([label, value, explanation]) => {

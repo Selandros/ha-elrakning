@@ -536,10 +536,10 @@ assert.equal(previousCalendarMonth("2026-08"), "2026-07");
 assert.equal(previousCalendarMonth("2027-01"), "2026-12");
 const previousActual = buildPreviousMonthActual({
   trade: [
-    { invoice_date: "2026-08-03", month: "2026-07", amount_due_sek: 127.31 },
-    { invoice_date: "2026-08-03", month: "2026-08", amount_due_sek: 99 },
+    { invoice_date: "2026-08-03", month: "2026-07", amount_due_sek: 127.31, vat_included: true },
+    { invoice_date: "2026-08-03", month: "2026-08", amount_due_sek: 99, vat_included: true },
   ],
-  grid: [{ invoice_date: "2026-08-14", month: "2026-07", amount_due_sek: 294.32 }],
+  grid: [{ invoice_date: "2026-08-14", month: "2026-07", amount_due_sek: 294.32, vat_included: true }],
 }, "2026-08");
 assert.equal(previousActual.month, "2026-07");
 assert.equal(previousActual.coverage, "complete");
