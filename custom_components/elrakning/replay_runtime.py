@@ -94,11 +94,11 @@ def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: dateti
     candidates: list[tuple[int, int]] = []
     for table, priority in (("energy_observations", 1), ("historical_energy_observations", 0)):
         result = storage._connection().execute(
-            f"SELECT known_at_us, revision FROM {table} WHERE site_id=? AND logical_role=? AND interval_start_us=? AND known_at_us IS NOT NULL",
+            f"SELECT known_at_us FROM {table} WHERE site_id=? AND logical_role=? AND interval_start_us=? AND known_at_us IS NOT NULL",
             (row.get("site_id"), role, start_us),
         ).fetchall()
         decision_us = int(decision_at.timestamp() * 1_000_000)
-        candidates.extend((int(item[0]), priority * 1_000_000 + int(item[1])) for item in result if int(item[0]) <= decision_us)
+        candidates.extend((int(item[0]), priority) for item in result if int(item[0]) <= decision_us)
     if not candidates:
         return None
     return datetime.fromtimestamp(max(candidates)[0] / 1_000_000, tz=UTC)
