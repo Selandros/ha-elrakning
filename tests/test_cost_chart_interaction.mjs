@@ -1,6 +1,24 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildInvoiceMonthHistory, nextCalendarMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+
+assert.equal(nextCalendarMonth("2026-12"), "2027-01");
+const monthHistory = buildInvoiceMonthHistory({
+  month: "2026-09",
+  total_so_far_sek: 120,
+  estimated_month_total_sek: 240,
+  forecast_confidence: "partial_data",
+  trade: { total_so_far_sek: 70 },
+  grid: { total_so_far_sek: 50 },
+}, {
+  trade: [{ month: "2026-08", period_cost_before_credits_sek: 100 }],
+  grid: [{ month: "2026-08", period_cost_before_credits_sek: 60 }],
+});
+assert.deepEqual(monthHistory.map((item) => item.month), ["2026-09", "2026-08"]);
+assert.equal(monthHistory[1].coverage, "complete");
+assert.equal(monthHistory[1].total_sek, 160);
+assert.equal(buildCostMonthComparison(monthHistory[1], monthHistory[0]).available, false);
+assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 160 }, { month: "2026-07", coverage: "complete", total_sek: 200 }).difference_sek, -40);
 
 const septemberGeometry = buildCostChartGeometry(960, { left: 48, right: 12 }, 30);
 assert.equal(septemberGeometry.x(1), 48);
@@ -74,5 +92,9 @@ assert.match(costRender, /chart\.innerHTML =/);
 assert.match(source, /\.cost-chart \{[\s\S]*min-height: 144px;/);
 assert.match(source, /\.cost-details \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
 assert.match(source, /@container \(max-width: 600px\) \{[\s\S]*\.cost-details \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
+assert.match(source, /data-cost-history-list/);
+assert.match(source, /buildInvoiceMonthHistory\(estimate/);
+assert.match(source, /buildCostMonthComparison\(selectedRecord, adjacentPrevious\)/);
+assert.match(source, /cost-history-month/);
 
 console.log("cost chart interaction and compact layout regression passed");

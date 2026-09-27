@@ -1922,6 +1922,15 @@ export function previousCalendarMonth(month) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+export function nextCalendarMonth(month) {
+  if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (monthNumber < 1 || monthNumber > 12) return null;
+  const date = new Date(Date.UTC(year, monthNumber - 1, 1));
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
   const month = previousCalendarMonth(selectedMonth);
   const normalizeProvider = (items) => {
@@ -2025,6 +2034,41 @@ export function buildInvoiceComparison(estimate, previousActual) {
     fill_percent: scaleMax > 0 ? current / scaleMax * 100 : 0,
     previous_marker_percent: scaleMax > 0 ? previous / scaleMax * 100 : 0,
   };
+}
+
+export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
+  const months = new Set();
+  if (estimate?.month) months.add(estimate.month);
+  for (const invoices of [invoiceSources.trade, invoiceSources.grid]) {
+    for (const invoice of Array.isArray(invoices) ? invoices : []) {
+      if (typeof invoice?.month === "string" && /^\d{4}-\d{2}$/.test(invoice.month)) months.add(invoice.month);
+    }
+  }
+  return [...months].sort().reverse().map((month) => {
+    if (month === estimate?.month) {
+      return {
+        month,
+        current: true,
+        coverage: estimate?.forecast_confidence === "complete_available_data" ? "complete" : "partial",
+        total_sek: Number.isFinite(Number(estimate?.total_so_far_sek)) ? Number(estimate.total_so_far_sek) : null,
+        estimated_total_sek: Number.isFinite(Number(estimate?.estimated_month_total_sek)) ? Number(estimate.estimated_month_total_sek) : null,
+        trade_sek: Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? Number(estimate.trade.total_so_far_sek) : null,
+        grid_sek: Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? Number(estimate.grid.total_so_far_sek) : null,
+      };
+    }
+    const actual = buildPreviousMonthActual(invoiceSources, nextCalendarMonth(month));
+    return { month, current: false, coverage: actual.coverage, total_sek: actual.total_sek, estimated_total_sek: null, trade_sek: Number.isFinite(Number(actual.trade?.total_sek)) ? Number(actual.trade.total_sek) : null, grid_sek: Number.isFinite(Number(actual.grid?.total_sek)) ? Number(actual.grid.total_sek) : null };
+  });
+}
+
+export function buildCostMonthComparison(selected, previous) {
+  const current = Number(selected?.total_sek);
+  const prior = Number(previous?.total_sek);
+  if (!Number.isFinite(current) || !Number.isFinite(prior) || selected?.coverage !== "complete" || previous?.coverage !== "complete") {
+    return { available: false, reason: "incomplete_month_data", difference_sek: null, difference_percent: null };
+  }
+  const difference = current - prior;
+  return { available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: prior > 0 ? difference / prior * 100 : null };
 }
 
 export function buildInvoiceProvenance(estimate, billingHistory = {}) {
@@ -3036,7 +3080,8 @@ class ElrakningPanel {
           </article>
           <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
             <div class="card-heading"><div><h2 id="cost-title">Kostnad</h2><span class="cost-period" data-cost-period></span></div><span class="status" data-cost-status></span></div>
-            <div class="cost-navigation" hidden aria-hidden="true"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><span data-cost-selected-period></span><button type="button" data-cost-next aria-label="Nästa månad">›</button></div>
+            <div class="cost-navigation" hidden aria-hidden="true"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><div class="cost-navigation-label"><span data-cost-selected-period></span><small data-cost-history-position></small></div><button type="button" data-cost-next aria-label="Nästa månad">›</button></div>
+            <div class="cost-history-list" data-cost-history-list role="tablist" aria-label="Månader"></div>
             <div class="cost-kpis" data-cost-kpis></div>
             <div class="cost-chart" data-cost-chart aria-live="polite"></div>
             <div class="cost-comparison" data-cost-comparison></div>
@@ -4412,6 +4457,32 @@ class ElrakningPanel {
           margin-top: 12px;
         }
 
+        .cost-history-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 10px;
+        }
+
+        .cost-history-list:empty { display: none; }
+
+        .cost-history-month {
+          background: transparent;
+          border: 1px solid var(--divider-color);
+          border-radius: 999px;
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          font: inherit;
+          font-size: var(--card-legend-size);
+          padding: 4px 9px;
+        }
+
+        .cost-history-month[aria-selected="true"] {
+          background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+          border-color: var(--primary-color);
+          color: var(--primary-text-color);
+        }
+
         .cost-kpi,
         .cost-detail {
           min-width: 0;
@@ -4562,6 +4633,9 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           font-size: 13px;
         }
+
+        .cost-navigation-label { align-items: center; display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: center; }
+        .cost-navigation-label small { color: var(--secondary-text-color); font-size: var(--card-legend-size); }
 
         .cost-summary span {
           color: var(--secondary-text-color);
@@ -9721,13 +9795,21 @@ class ElrakningPanel {
       },
       estimate.month,
     );
-    if (!this._costSelectedMonth || this._costSelectedMonth > estimate.month) this._costSelectedMonth = estimate.month;
+    const availableMonths = buildInvoiceMonthHistory(estimate, billingHistory.invoice_sources || {
+      trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
+      grid: billingHistory.grid_invoices,
+    });
+    if (!availableMonths.some((item) => item.month === this._costSelectedMonth)) this._costSelectedMonth = estimate.month;
     const comparison = buildInvoiceComparison(estimate, previousActual);
     const costAnalysis = buildCostAnalysisSeries(estimate, previousActual);
     this._invoiceEstimateRaw = {
       ...estimate,
       current_estimate: estimate,
       previous_month_actual: previousActual,
+      month_history: buildInvoiceMonthHistory(estimate, billingHistory.invoice_sources || {
+        trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
+        grid: billingHistory.grid_invoices,
+      }),
       comparison,
       cost_analysis: costAnalysis,
       provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: this._eonGridPrice || billingHistory.grid_price }),
@@ -9763,17 +9845,41 @@ class ElrakningPanel {
     const selectedPeriod = this.host.querySelector("[data-cost-selected-period]");
     const previousButton = this.host.querySelector("[data-cost-previous]");
     const nextButton = this.host.querySelector("[data-cost-next]");
+    const historyPosition = this.host.querySelector("[data-cost-history-position]");
+    const historyList = this.host.querySelector("[data-cost-history-list]");
     if (!card || !period || !status || !kpis || !chart || !comparisonElement || !summary) return;
     const estimate = this._invoiceEstimateRaw;
     const currentMonth = estimate?.month || null;
     const selectedMonth = this._costSelectedMonth || currentMonth;
     const previous = estimate?.previous_month_actual;
     const showingCurrent = selectedMonth === currentMonth;
+    const monthHistory = estimate?.month_history || [];
+    const selectedIndex = monthHistory.findIndex((item) => item.month === selectedMonth);
+    const selectedRecord = selectedIndex >= 0 ? monthHistory[selectedIndex] : null;
+    const adjacentPrevious = selectedIndex >= 0 ? monthHistory[selectedIndex + 1] : null;
     card.hidden = !estimate;
     period.textContent = selectedMonth ? this._formatInvoiceMonth(selectedMonth) : "";
     if (selectedPeriod) selectedPeriod.textContent = period.textContent;
-    if (previousButton) previousButton.disabled = !selectedMonth;
-    if (nextButton) nextButton.disabled = !selectedMonth || selectedMonth >= currentMonth;
+    const navigation = this.host.querySelector("[data-cost-previous]")?.parentElement;
+    if (navigation) {
+      navigation.hidden = monthHistory.length < 2;
+      navigation.setAttribute("aria-hidden", String(monthHistory.length < 2));
+    }
+    if (previousButton) previousButton.disabled = selectedIndex < 0 || selectedIndex >= monthHistory.length - 1;
+    if (nextButton) nextButton.disabled = selectedIndex <= 0;
+    if (historyPosition) historyPosition.textContent = monthHistory.length > 1 && selectedIndex >= 0 ? `${selectedIndex + 1} av ${monthHistory.length}` : "";
+    if (historyList) {
+      historyList.replaceChildren(...monthHistory.map((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "cost-history-month";
+        button.dataset.costMonth = item.month;
+        button.setAttribute("role", "tab");
+        button.setAttribute("aria-selected", String(item.month === selectedMonth));
+        button.textContent = this._formatInvoiceMonth(item.month);
+        return button;
+      }));
+    }
     if (!estimate) {
       status.textContent = "";
       kpis.replaceChildren();
@@ -9787,7 +9893,7 @@ class ElrakningPanel {
       ["Kostnad hittills", estimate.total_so_far_sek],
       ["Prognos återstående", estimate.forecast_remaining_total_sek],
     ] : [];
-    status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : previous?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
+    status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
     kpis.replaceChildren(...currentRows.map(([label, value]) => {
       const item = document.createElement("div");
       item.className = "cost-kpi";
@@ -9800,19 +9906,19 @@ class ElrakningPanel {
     }));
     const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
     this._renderCostChart(chart, series);
-    const comparison = showingCurrent ? buildInvoiceComparison(estimate, previous) : { available: false };
+    const comparison = showingCurrent ? buildInvoiceComparison(estimate, previous) : buildCostMonthComparison(selectedRecord, adjacentPrevious);
     comparisonElement.replaceChildren();
     if (comparison.available) {
       const label = document.createElement("span");
       label.className = "cost-comparison-label";
-      label.textContent = "Mot förra månaden";
+      label.textContent = `Mot ${this._formatInvoiceMonth(adjacentPrevious?.month || comparison.month || previous?.month || "")}`;
       const value = document.createElement("div");
       value.className = "cost-comparison-value";
-      const direction = comparison.difference_sek >= 0 ? "Högre" : "Lägre";
+      const direction = comparison.difference_sek > 0 ? "Högre" : comparison.difference_sek < 0 ? "Lägre" : "Oförändrad";
       const percent = comparison.difference_percent == null ? "" : ` · ${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
       value.textContent = `${direction} ${this._formatSek(Math.abs(comparison.difference_sek))}${percent}`;
       comparisonElement.append(label, value);
-    } else if (showingCurrent && previous?.coverage !== "complete") {
+    } else if ((showingCurrent && previous?.coverage !== "complete") || (!showingCurrent && selectedRecord && adjacentPrevious)) {
       const label = document.createElement("span");
       label.className = "cost-comparison-label";
       label.textContent = "Ingen jämförbar föregående period";
@@ -9826,10 +9932,10 @@ class ElrakningPanel {
       ["Importerad energi", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
       ["Prognostiserad import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
       ["Genomsnittligt totalpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
-    ] : previous?.month === selectedMonth ? [
-      ["Elhandel", previous.trade?.comparison_value_sek],
-      ["Elnät", previous.grid?.comparison_value_sek],
-      ["Total", previous.total_sek],
+    ] : selectedRecord ? [
+      ["Elhandel", selectedRecord.trade_sek],
+      ["Elnät", selectedRecord.grid_sek],
+      ["Total", selectedRecord.total_sek],
     ] : [];
     summary.replaceChildren(...rows.filter(([, value]) => value != null && (typeof value !== "number" || Number.isFinite(value))).map(([label, value]) => {
       const item = document.createElement("div");
@@ -9925,22 +10031,26 @@ class ElrakningPanel {
   _bindCostCard() {
     const previous = this.host.querySelector("[data-cost-previous]");
     const next = this.host.querySelector("[data-cost-next]");
+    const historyList = this.host.querySelector("[data-cost-history-list]");
+    if (historyList) historyList.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-cost-month]");
+      if (!button) return;
+      this._costSelectedMonth = button.dataset.costMonth || null;
+      this._renderCostCard();
+    });
     if (previous) previous.addEventListener("click", () => {
-      const current = this._costSelectedMonth || this._invoiceEstimateRaw?.month;
-      if (!current) return;
-      this._costSelectedMonth = previousCalendarMonth(current);
+      const months = this._invoiceEstimateRaw?.month_history || [];
+      const index = months.findIndex((item) => item.month === (this._costSelectedMonth || this._invoiceEstimateRaw?.month));
+      if (index < 0 || !months[index + 1]) return;
+      this._costSelectedMonth = months[index + 1].month;
       this._renderCostCard();
     });
     if (next) next.addEventListener("click", () => {
-      const current = this._costSelectedMonth || this._invoiceEstimateRaw?.month;
-      if (!current) return;
-      const [year, month] = current.split("-").map(Number);
-      const nextMonth = new Date(Date.UTC(year, month, 1));
-      const nextValue = `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, "0")}`;
-      if (nextValue <= (this._invoiceEstimateRaw?.month || nextValue)) {
-        this._costSelectedMonth = nextValue;
-        this._renderCostCard();
-      }
+      const months = this._invoiceEstimateRaw?.month_history || [];
+      const index = months.findIndex((item) => item.month === (this._costSelectedMonth || this._invoiceEstimateRaw?.month));
+      if (index <= 0) return;
+      this._costSelectedMonth = months[index - 1].month;
+      this._renderCostCard();
     });
   }
 
