@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 import json
@@ -227,7 +228,13 @@ def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: dateti
             (row.get("site_id"), role, start_us),
         ).fetchall()
         decision_us = int(decision_at.timestamp() * 1_000_000)
-        candidates.extend((int(item[0]), priority) for item in result if int(item[0]) <= decision_us)
+        for item in result:
+            try:
+                known_at_us = int(item[0])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if known_at_us <= decision_us:
+                candidates.append((known_at_us, priority))
     if not candidates:
         return None
     return datetime.fromtimestamp(max(candidates)[0] / 1_000_000, tz=UTC)
@@ -516,8 +523,11 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
         return economics
 
     now = datetime.now(UTC)
+    runtime_data = hass.data.setdefault("elrakning", {})
+    replay_lock = runtime_data.setdefault("replay_runtime_lock", asyncio.Lock())
     try:
-        readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics, ess_context)
+        async with replay_lock:
+            readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics, ess_context)
     except (AttributeError, KeyError, TypeError, ValueError):
         readiness = {
             "available": False, "site_id": site_id, "resource_id": None, "status": "blocked", "blocker": "readiness_unavailable",
@@ -528,7 +538,8 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
             "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
             "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
         }
-    run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics, ess_context)
+    async with replay_lock:
+        run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics, ess_context)
     if run is None:
         readiness["last_attempt"] = {"at": now.isoformat(), "accepted": False, "reason": evidence.get("reason", "replay_run_unavailable")}
         result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": {**readiness, "runner": evidence}}
