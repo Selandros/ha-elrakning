@@ -79,6 +79,17 @@ const multiMonthInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_
 assert.deepEqual(multiMonthInvoice.map((item) => item.month), ["2026-09"]);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 0 }, { month: "2026-07", coverage: "complete", total_sek: 50 }).difference_sek, -50);
 assert.equal(buildCostReferenceComparisons([{ month: "2026-09", coverage: "complete", total_sek: 25 }, { month: "2026-08", coverage: "complete", total_sek: 0 }], "2026-09", 25)[0].available, true);
+const estimatedCurrentComparisons = buildCostReferenceComparisons([
+  { month: "2026-09", current: true, coverage: "partial", estimated_total_sek: 240 },
+  { month: "2026-08", coverage: "complete", total_sek: 200 },
+  { month: "2026-07", coverage: "complete", total_sek: 220 },
+  { month: "2026-06", coverage: "complete", total_sek: 180 },
+], "2026-09", null);
+assert.equal(estimatedCurrentComparisons[0].available, true);
+assert.equal(estimatedCurrentComparisons[0].difference_sek, 40);
+assert.equal(estimatedCurrentComparisons[0].current_value_source, "estimated_month_total_sek");
+assert.equal(estimatedCurrentComparisons[1].available, true);
+assert.equal(estimatedCurrentComparisons[2].available, true);
 const twelveMonths = Array.from({ length: 13 }, (_, index) => ({ month: `202${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, period_cost_before_credits_sek: 100 + index, vat_included: true }));
 assert.equal(buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, { trade: twelveMonths, grid: [] }).length, 12);
 const references = buildCostReferenceComparisons([

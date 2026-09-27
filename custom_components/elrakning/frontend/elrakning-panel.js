@@ -2164,6 +2164,11 @@ export function buildCostReferenceComparisons(monthHistory, selectedMonth, selec
   const history = selectedIndex >= 0 ? monthHistory.slice(selectedIndex + 1) : [];
   const selectedRecord = selectedIndex >= 0 ? monthHistory[selectedIndex] : null;
   const selectedSignature = selectedRecord?.source_signature || null;
+  const selectedIsCurrentEstimate = selectedRecord?.current === true
+    && Number.isFinite(Number(selectedRecord.estimated_total_sek));
+  const resolvedSelectedValue = selectedValue != null && selectedValue !== "" && Number.isFinite(Number(selectedValue))
+    ? Number(selectedValue)
+    : selectedIsCurrentEstimate ? Number(selectedRecord.estimated_total_sek) : null;
   const comparable = (item) => {
     if (!item || item.coverage === "missing") return false;
     const value = item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek;
@@ -2182,11 +2187,14 @@ export function buildCostReferenceComparisons(monthHistory, selectedMonth, selec
     { key: "three_month_average", label: "Mot 3 månaders snitt", value: reference(3), sample_count: Math.min(3, complete.length) },
     { key: "twelve_month_average", label: "Mot 12 månaders snitt", value: reference(12), sample_count: Math.min(12, complete.length) },
   ].map((item) => {
-    const current = selectedValue == null ? null : Number(selectedValue);
+    const current = resolvedSelectedValue;
     const baseline = item.value == null ? null : Number(item.value);
-    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null, comparison_scope: selectedSignature ? "matching_source_signature" : "complete_only" };
+    const comparisonScope = selectedIsCurrentEstimate
+      ? "current_estimated_month_vs_complete_history"
+      : selectedSignature ? "matching_source_signature" : "complete_only";
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null, comparison_scope: comparisonScope, current_value_source: selectedIsCurrentEstimate ? "estimated_month_total_sek" : "selected_month_value" };
     const difference = current - baseline;
-    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null, comparison_scope: selectedSignature ? "matching_source_signature" : "complete_only" };
+    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null, comparison_scope: comparisonScope, current_value_source: selectedIsCurrentEstimate ? "estimated_month_total_sek" : "selected_month_value" };
   });
 }
 
