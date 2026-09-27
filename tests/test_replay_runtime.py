@@ -101,6 +101,74 @@ def test_runtime_initial_state_ignores_observations_known_after_decision():
     assert known_at == datetime.fromtimestamp(1, tz=timezone.utc)
 
 
+def test_initial_soc_resolves_generation_resource_id_via_strong_identity():
+    from datetime import datetime, timezone
+
+    class Result:
+        def fetchall(self):
+            return [(1_500_000,)]
+
+    class Connection:
+        def execute(self, *_args):
+            return Result()
+
+    class Storage:
+        def _connection(self):
+            return Connection()
+
+    decision = datetime.fromtimestamp(2, tz=timezone.utc)
+    facts = [
+        {"site_id": "site-a", "resource_id": "ess-resolved", "key": key, "value": value, "unit": unit}
+        for key, value, unit in (
+            ("capacity_kwh", 25, "kWh"),
+            ("reserve_soc_fraction", 0.05, "fraction"),
+            ("max_charge_kw", 10, "kW"),
+            ("max_discharge_kw", 10, "kW"),
+            ("planning_charge_efficiency", 0.85, "fraction"),
+            ("planning_discharge_efficiency", 0.85, "fraction"),
+        )
+    ]
+    row = {
+        "site_id": "site-a", "logical_role": "battery.soc", "source_generation_id": "soc-generation",
+        "interval_start": datetime.fromtimestamp(1, tz=timezone.utc), "known_at": datetime.fromtimestamp(1.8, tz=timezone.utc),
+        "value": 13, "quality_status": "good", "coverage_ratio": 1.0,
+        "provenance": {"entity_id": "sensor.soc", "source_identity": {
+            "identity_strength": "strong", "config_entry_id": "cfg-1", "device_id": "dev-1",
+        }},
+    }
+    ess, status = replay_runtime._ess_inputs(
+        facts, [row], "site-a", decision,
+        {"storage": Storage(), "shared": {"available": True, "resource_id": "ess-resolved", "config_entry_id": "cfg-1", "device_id": "dev-1"}, "active_generations": {"battery.soc": {"soc-generation"}}},
+    )
+    assert ess is not None
+    assert status["initial_soc"] == 13.0
+    assert status["initial_soc_source"] == "sensor.soc"
+    assert status["initial_soc_identity_strength"] == "strong"
+
+
+def test_initial_soc_rejects_weak_or_future_identity():
+    from datetime import datetime, timezone
+
+    class Storage:
+        def _connection(self):
+            class Connection:
+                def execute(self, *_args):
+                    class Result:
+                        def fetchall(self):
+                            return [(3_000_000,)]
+                    return Result()
+            return Connection()
+
+    facts = [
+        {"site_id": "site-a", "resource_id": "ess-resolved", "key": key, "value": value, "unit": unit}
+        for key, value, unit in (("capacity_kwh", 25, "kWh"), ("reserve_soc_fraction", 0.05, "fraction"), ("max_charge_kw", 10, "kW"), ("max_discharge_kw", 10, "kW"), ("planning_charge_efficiency", 0.85, "fraction"), ("planning_discharge_efficiency", 0.85, "fraction"))
+    ]
+    row = {"site_id": "site-a", "logical_role": "battery.soc", "source_generation_id": "soc-generation", "interval_start": datetime.fromtimestamp(1, tz=timezone.utc), "known_at": datetime.fromtimestamp(3, tz=timezone.utc), "value": 13, "quality_status": "good", "coverage_ratio": 1.0, "provenance": {"source_identity": {"identity_strength": "weak", "config_entry_id": "cfg-1", "device_id": "dev-1"}}}
+    ess, status = replay_runtime._ess_inputs(facts, [row], "site-a", datetime.fromtimestamp(2, tz=timezone.utc), {"storage": Storage(), "shared": {"available": True, "resource_id": "ess-resolved", "config_entry_id": "cfg-1", "device_id": "dev-1"}, "active_generations": {"battery.soc": {"soc-generation"}}})
+    assert ess is None
+    assert status["reason"] == "causal_initial_soc_missing"
+
+
 def test_runtime_runner_rejects_future_economics_without_causal_override():
     from datetime import datetime, timezone
 

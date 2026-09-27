@@ -9,6 +9,7 @@ from typing import Any
 
 from .replay_artifact_store import build_artifact, validate_holdout_matrix
 from .economic_optimizer import build_eon_economics
+from .ella_ess_twin import resolve_shared_ess_resource
 from .replay_benchmark import ESSReplayLimits, NoBatteryBaseline, SelfConsumptionBaseline, build_replay_run
 
 
@@ -103,6 +104,45 @@ def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: dateti
     return datetime.fromtimestamp(max(candidates)[0] / 1_000_000, tz=UTC)
 
 
+def _observation_observed_at(storage: Any, row: dict[str, Any], decision_at: datetime) -> datetime | None:
+    """Read the causal observation timestamp without using interval start as a substitute."""
+    site_id = row.get("site_id")
+    role = row.get("logical_role")
+    generation = row.get("source_generation_id")
+    start = row.get("interval_start")
+    if not all((isinstance(site_id, str), isinstance(role, str), isinstance(generation, str), isinstance(start, datetime))):
+        return None
+    start_us = int(start.timestamp() * 1_000_000)
+    decision_us = int(decision_at.timestamp() * 1_000_000)
+    values: list[int] = []
+    for table in ("energy_observations", "historical_energy_observations"):
+        rows = storage._connection().execute(
+            f"SELECT observed_at_us FROM {table} WHERE site_id=? AND logical_role=? AND source_generation_id=? AND interval_start_us=? AND known_at_us<=? AND observed_at_us IS NOT NULL",
+            (site_id, role, generation, start_us, decision_us),
+        ).fetchall()
+        values.extend(int(item[0]) for item in rows)
+    return datetime.fromtimestamp(max(values) / 1_000_000, tz=UTC) if values else None
+
+
+def _shared_ess_context(site_manager: Any, site_id: str) -> dict[str, Any]:
+    """Resolve the exact ESS identity from the existing strong registry bindings."""
+    targets = site_manager.collection_targets() if site_manager and hasattr(site_manager, "collection_targets") else []
+    role_bindings = {
+        str(target.get("logical_role")): target
+        for target in targets
+        if isinstance(target, dict)
+        and target.get("site_id") == site_id
+        and target.get("logical_role") in {"battery.power", "battery.soc", "battery.capacity"}
+    }
+    active_generations: dict[str, set[str]] = {}
+    for role, target in role_bindings.items():
+        generation = target.get("generation_id")
+        if isinstance(generation, str) and generation:
+            active_generations[role] = {generation}
+    shared = resolve_shared_ess_resource(site_id, role_bindings, active_generations)
+    return {"shared": shared, "active_generations": active_generations}
+
+
 def _frame_dict(row: tuple[Any, ...], site_id: str | None) -> dict[str, Any]:
     return {
         "frame_id": row[0], "schema_version": row[1], "dataset_version": row[2], "semantic_key": row[3],
@@ -113,7 +153,10 @@ def _frame_dict(row: tuple[Any, ...], site_id: str | None) -> dict[str, Any]:
     }
 
 
-def _ess_inputs(facts: list[dict[str, Any]], actual_rows: list[dict[str, Any]], site_id: str, decision_at: datetime) -> tuple[ESSReplayLimits | None, dict[str, Any]]:
+def _ess_inputs(
+    facts: list[dict[str, Any]], actual_rows: list[dict[str, Any]], site_id: str, decision_at: datetime,
+    ess_context: dict[str, Any] | None = None,
+) -> tuple[ESSReplayLimits | None, dict[str, Any]]:
     grouped: dict[str, dict[str, dict[str, Any]]] = {}
     for fact in facts:
         if fact.get("site_id") == site_id and isinstance(fact.get("resource_id"), str) and isinstance(fact.get("key"), str):
@@ -123,10 +166,34 @@ def _ess_inputs(facts: list[dict[str, Any]], actual_rows: list[dict[str, Any]], 
         return None, {"available": False, "reason": "ess_facts_not_single_complete_resource", "resource_count": len(candidates), "found_keys_by_resource": {key: sorted(value) for key, value in grouped.items()}}
     resource = candidates[0]
     values = grouped[resource]
-    soc = [row for row in actual_rows if row.get("logical_role") == "battery.soc" and row.get("known_at") and row["known_at"] <= decision_at and row.get("quality_status") in {"good", "valid", "complete"} and float(row.get("coverage_ratio") or 0) >= 0.9]
+    shared = (ess_context or {}).get("shared") or {}
+    if shared.get("available") is not True or shared.get("resource_id") != resource:
+        return None, {"available": False, "reason": shared.get("reason", "ess_identity_unavailable"), "resource_id": resource}
+    expected_generations = (ess_context or {}).get("active_generations", {}).get("battery.soc")
+    soc = []
+    for row in actual_rows:
+        if row.get("site_id") != site_id or row.get("logical_role") != "battery.soc":
+            continue
+        known_at = row.get("known_at")
+        observed_at = _observation_observed_at(ess_context.get("storage"), row, decision_at) if ess_context and ess_context.get("storage") else None
+        identity = (row.get("provenance") or {}).get("source_identity") if isinstance(row.get("provenance"), dict) else None
+        if (
+            not isinstance(known_at, datetime) or known_at > decision_at
+            or (observed_at is not None and observed_at > decision_at)
+            or row.get("quality_status") not in {"good", "valid", "complete"}
+            or float(row.get("coverage_ratio") or 0) < 0.9
+            or (expected_generations is not None and row.get("source_generation_id") not in expected_generations)
+            or not isinstance(identity, dict) or identity.get("identity_strength") != "strong"
+            or identity.get("config_entry_id") != shared.get("config_entry_id")
+            or identity.get("device_id") != shared.get("device_id")
+        ):
+            continue
+        row["observed_at"] = observed_at
+        soc.append(row)
     if not soc:
         return None, {"available": False, "reason": "causal_initial_soc_missing", "resource_id": resource}
     initial_soc = float(sorted(soc, key=lambda row: row["known_at"])[-1]["value"]) / 100.0
+    selected = sorted(soc, key=lambda row: (row["known_at"], row.get("observed_at") or datetime.min.replace(tzinfo=UTC), str(row.get("source_generation_id"))))[-1]
     try:
         ess = ESSReplayLimits(
             capacity_kwh=float(values["capacity_kwh"]["value"]),
@@ -139,10 +206,16 @@ def _ess_inputs(facts: list[dict[str, Any]], actual_rows: list[dict[str, Any]], 
         )
     except (KeyError, TypeError, ValueError):
         return None, {"available": False, "reason": "ess_fact_value_invalid", "resource_id": resource}
-    return ess, {"available": True, "resource_id": resource, "initial_soc_known_at": sorted(soc, key=lambda row: row["known_at"])[-1]["known_at"].isoformat()}
+    return ess, {
+        "available": True, "resource_id": resource, "initial_soc": float(selected["value"]),
+        "initial_soc_observed_at": selected.get("observed_at").isoformat() if selected.get("observed_at") else None,
+        "initial_soc_known_at": selected["known_at"].isoformat(),
+        "initial_soc_source": (selected.get("provenance") or {}).get("entity_id"),
+        "initial_soc_identity_strength": ((selected.get("provenance") or {}).get("source_identity") or {}).get("identity_strength"),
+    }
 
 
-def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime, economics_resolver=None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime, economics_resolver=None, ess_context: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     candidates = _frame_rows(storage, site_id, "load.forecast", int(now.timestamp() * 1_000_000))
     for load_row in candidates:
         decision_at = datetime.fromtimestamp(load_row[12] / 1_000_000, tz=UTC)
@@ -178,7 +251,7 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
         actual_rows = [row for row in history if row.get("site_id") == site_id]
         for row in actual_rows:
             row["known_at"] = _observation_known_at(storage, row, decision_at)
-        ess, ess_status = _ess_inputs(facts, actual_rows, site_id, decision_at)
+        ess, ess_status = _ess_inputs(facts, actual_rows, site_id, decision_at, {**(ess_context or {}), "storage": storage})
         frames = [_frame_dict(load_row, site_id), _frame_dict(solar_rows[0], site_id), _frame_dict(price_rows[0], None)]
         run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=(NoBatteryBaseline(), SelfConsumptionBaseline()), timezone_name="Europe/Stockholm")
         if not run["qualification"].get("qualified"):
@@ -188,7 +261,7 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
     return None, {"available": False, "reason": "no_mature_causal_96_slot_window"}
 
 
-def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime, economics_resolver=None) -> dict[str, Any]:
+def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime, economics_resolver=None, ess_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build bounded readiness evidence without weakening replay qualification."""
     candidates = _frame_rows(storage, site_id, "load.forecast", int(now.timestamp() * 1_000_000))
     evidence = {
@@ -260,11 +333,14 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
     slots.sort()
     slots = slots[:HORIZON_SLOTS]
     evidence["horizon"]["available_slots"] = len(slots)
-    history = []
+    read_history = getattr(storage, "read_site_energy_history", None)
+    history = read_history(site_id, decision_at - timedelta(days=2), decision_at + timedelta(minutes=15)) if callable(read_history) else []
+    for row in history:
+        row["known_at"] = _observation_known_at(storage, row, decision_at)
     if len(slots) == HORIZON_SLOTS:
         end_at = slots[-1] + timedelta(minutes=15)
         evidence["horizon"].update({"decision_at": decision_at.isoformat(), "end_at": end_at.isoformat(), "mature": end_at <= now})
-        history = storage.read_site_energy_history(site_id, decision_at - timedelta(days=2), end_at)
+        history = read_history(site_id, decision_at - timedelta(days=2), end_at) if callable(read_history) else []
         for row in history:
             row["known_at"] = _observation_known_at(storage, row, decision_at)
         slot_keys = {slot.isoformat() for slot in slots}
@@ -273,7 +349,7 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
         evidence["horizon"]["actual_coverage"] = f"{min(actual_count, HORIZON_SLOTS)}/{HORIZON_SLOTS}"
     else:
         evidence["horizon"]["decision_at"] = decision_at.isoformat()
-    _, ess_status = _ess_inputs(facts, history, site_id, decision_at)
+    _, ess_status = _ess_inputs(facts, history, site_id, decision_at, {**(ess_context or {}), "storage": storage})
     evidence["ess"] = ess_status
     resources = sorted({str(fact.get("resource_id")) for fact in facts if fact.get("site_id") == site_id and fact.get("resource_id")})
     if ess_status.get("resource_id"):
@@ -304,6 +380,7 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     facts_store = hass.data.get("elrakning", {}).get("ella_ess_facts_store")
     facts = facts_store.list_site(site_id) if facts_store else []
     site_manager = hass.data.get("elrakning", {}).get("site_identity_manager")
+    ess_context = _shared_ess_context(site_manager, site_id)
     grid_manager = hass.data.get("elrakning", {}).get("grid_manager")
     policy_store = hass.data.get("elrakning", {}).get("ella_economic_policy_store")
     binding = site_manager.active_binding("grid") if site_manager and hasattr(site_manager, "active_binding") else None
@@ -326,7 +403,7 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
 
     now = datetime.now(UTC)
     try:
-        readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics)
+        readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics, ess_context)
     except (AttributeError, KeyError, TypeError, ValueError):
         readiness = {
             "available": False, "site_id": site_id, "resource_id": None, "status": "blocked", "blocker": "readiness_unavailable",
@@ -337,7 +414,7 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
             "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
             "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
         }
-    run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics)
+    run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics, ess_context)
     if run is None:
         readiness["last_attempt"] = {"at": now.isoformat(), "accepted": False, "reason": evidence.get("reason", "replay_run_unavailable")}
         result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": {**readiness, "runner": evidence}}
