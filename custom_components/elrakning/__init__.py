@@ -627,8 +627,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ]
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
-    # Complete one deterministic startup capture after all source-event listeners are installed.
-    await _async_capture_monthly_forecast(hass)
+    # Run one deterministic startup capture after setup returns so bootstrap timeouts
+    # from unrelated replay work cannot cancel the persistence path.
+    frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
+        _async_capture_monthly_forecast(hass)
+    )
     return True
 
 
