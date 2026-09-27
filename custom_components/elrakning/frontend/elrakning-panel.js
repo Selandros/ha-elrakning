@@ -4700,8 +4700,8 @@ class ElrakningPanel {
           border-radius: var(--ha-card-border-radius, 8px);
           display: flex;
           flex-direction: column;
-          min-height: 86px;
-          padding: 9px 10px;
+          min-height: 64px;
+          padding: 7px 9px;
         }
 
         .cost-kpi span,
@@ -4716,7 +4716,14 @@ class ElrakningPanel {
           display: block;
           font-size: 1.2rem;
           font-weight: 600;
-          margin-top: 3px;
+          margin-top: 2px;
+        }
+
+        .cost-kpi-value-row {
+          align-items: baseline;
+          display: flex;
+          gap: 8px;
+          min-width: 0;
         }
 
         .cost-kpi-comparison {
@@ -4726,7 +4733,7 @@ class ElrakningPanel {
           color: var(--secondary-text-color);
           display: inline-flex;
           font-size: var(--card-legend-size);
-          margin-top: 6px;
+          margin-top: 0;
           max-width: max-content;
           padding: 3px 7px;
           white-space: nowrap;
@@ -10154,7 +10161,10 @@ class ElrakningPanel {
         bubble.textContent = "Ej jämförbart";
       }
       bubble.title = comparison.reason || "Jämförelse mot föregående månad";
-      item.append(name, output, bubble);
+      const valueRow = document.createElement("div");
+      valueRow.className = "cost-kpi-value-row";
+      valueRow.append(output, bubble);
+      item.append(name, valueRow);
       return item;
     }));
     const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };

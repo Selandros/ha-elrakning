@@ -289,8 +289,10 @@ assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, min
 assert.match(source, /\.cost-kpi \{[\s\S]*background: var\(--ha-card-background,[\s\S]*border: 1px solid var\(--divider-color\);[\s\S]*border-radius: var\(--ha-card-border-radius/);
 assert.match(source, /\.cost-kpis \{ gap: 8px; grid-template-columns: 1fr; \}/);
 assert.match(source, /cost-kpi-comparison/);
+assert.match(source, /\.cost-kpi-value-row \{[\s\S]*display: flex;[\s\S]*gap: 8px;/);
 assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
-assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*item\.append\(name, output, bubble\)/);
+assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*valueRow\.className = "cost-kpi-value-row"[\s\S]*valueRow\.append\(output, bubble\)[\s\S]*item\.append\(name, valueRow\)/);
+assert.doesNotMatch(costKpiRender, /item\.append\(name, output, bubble\)/);
 assert.match(costKpiRender, /const percent = Number\(comparison\.difference_percent\)/);
 assert.doesNotMatch(costKpiRender, /this\._formatSek\(Math\.abs\(comparison\.difference_sek\)\)/);
 assert.match(source, /\["Beräknad import hela månaden", Number\.isFinite\(Number\(estimate\.forecast_import_kwh\)\)/);
