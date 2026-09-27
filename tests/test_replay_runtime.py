@@ -1,0 +1,58 @@
+import asyncio
+
+from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
+
+install_homeassistant_stubs()
+install_elrakning_package_stub()
+
+from custom_components.elrakning.replay_artifact_store import ReplayArtifactStore
+from custom_components.elrakning import replay_runtime
+
+
+class _MemoryStore:
+    def __init__(self):
+        self.value = None
+
+    async def async_load(self):
+        return self.value
+
+    async def async_save(self, value):
+        self.value = value
+
+
+class _Hass:
+    def __init__(self, store):
+        self.data = {"elrakning": {
+            "canonical_collector": type("Collector", (), {"storage": object()})(),
+            "ella_ess_facts_store": type("Facts", (), {"list_site": lambda _self, _site: []})(),
+            "replay_artifact_store": store,
+        }}
+
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
+
+def test_internal_runner_builds_persists_and_reads_back_exact_site(monkeypatch):
+    run = {
+        "site_id": "site-a",
+        "decision_at": "2026-09-24T20:08:31+00:00",
+        "run_fingerprint": "run-a",
+        "qualification": {"qualified": True, "contaminated": False, "incomplete": False, "reasons": []},
+        "input_identity": {"model": {"version": "fixture"}},
+        "baselines": {"no_battery": {"points": [{"valid_at": "x"}]}},
+    }
+    monkeypatch.setattr(replay_runtime, "_build_run", lambda *_args: (run, {"source": "fixture"}))
+    store = ReplayArtifactStore(object())
+    store.store = _MemoryStore()
+
+    async def exercise():
+        hass = _Hass(store)
+        result = await replay_runtime.async_generate_artifact(hass, "site-a")
+        assert result["accepted"] is True
+        assert result["readback"] is True
+        assert result["site_id"] == "site-a"
+        assert len(store.state["sites"]["site-a"]) == 1
+        assert "site-b" not in store.state["sites"]
+        assert result["holdouts"]["qualified"] is True
+
+    asyncio.run(exercise())

@@ -37,6 +37,7 @@ from .ella_execution import EllaExecutionStore
 from .ella_ess_facts import EllaEssFactsStore
 from .ella_economic_policy import EllaEconomicPolicyStore
 from .replay_artifact_store import ReplayArtifactStore, async_register_replay_artifact_service
+from .replay_runtime import async_generate_artifact
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands
@@ -395,6 +396,20 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         second=0,
     )
     frontend_data["runtime_status"] = "ready"
+    async def _generate_replay_artifact(_call=None):
+        site_id = site_identity_manager.state.get("active_site_id")
+        if isinstance(site_id, str) and site_id:
+            result = await async_generate_artifact(hass, site_id)
+            if result.get("accepted"):
+                hass.bus.async_fire("elrakning_replay_artifact_published", {
+                    "schema": "ella_replay_artifact.v1",
+                    "site_id": site_id,
+                    "artifact_id": result.get("artifact_id"),
+                    "readback": result.get("readback") is True,
+                    "holdouts": result.get("holdouts"),
+                })
+    hass.services.async_register(DOMAIN, "replay_artifact_generate", _generate_replay_artifact)
+    frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True
 
@@ -418,6 +433,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove("elrakning", "greenely_proof_provision")
     if hass.services.has_service(DOMAIN, "replay_artifact_publish"):
         hass.services.async_remove(DOMAIN, "replay_artifact_publish")
+    if hass.services.has_service(DOMAIN, "replay_artifact_generate"):
+        hass.services.async_remove(DOMAIN, "replay_artifact_generate")
+    if startup_task := frontend_data.pop("replay_artifact_startup_task", None):
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
     frontend_data.pop("config_entry", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()

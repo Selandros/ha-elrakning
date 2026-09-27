@@ -6,7 +6,7 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.789`.
+- Stable runtime baseline: `0.0.790`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
@@ -216,9 +216,10 @@ covered by deterministic unit tests. The full benchmark suite is not complete;
 the historical Vikarbodarna foundation replay is runtime-verified, while the
 The persistent artifact/store contract, bounded retention, schema fail-closed
 handling and holdout matrix contract are now implemented and tested. An
-internal `replay_artifact_publish` service now builds and persists artifacts
-through the existing Store API without execution access; runtime publication,
-readback and live holdout evidence remain pending.
+internal canonical-storage runner now selects a mature causal 96-slot window,
+resolves exact-site ESS facts and timestamped initial state, builds an artifact
+through the existing Store API and emits bounded readback evidence; live
+deployment verification remains the closure gate.
 Evaluation scorecards now expose actual-outcome peak/tariff/throughput/EFC
 metrics with explicit unavailable degradation provenance, and plan evaluation
 is separate from causal decisions. No execution or actuator path is included.

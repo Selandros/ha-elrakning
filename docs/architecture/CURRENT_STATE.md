@@ -21,7 +21,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - Stage/Phase labels in the historical sections below describe former release
   milestones only and are not active roadmap instructions.
 
-## 0.0.789 Masterplan v2 Step 9 artifact checkpoint
+## 0.0.790 Masterplan v2 Step 9 artifact checkpoint
 
 - IMPLEMENTED/TESTED: `ella_replay_artifact.v1` is an immutable, exact-site
   artifact contract with run/dataset/source/model/calibration/parameter
@@ -33,9 +33,10 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 - IMPLEMENTED/TESTED: deterministic holdout qualification covers season, site,
   DST, gaps, source-generation changes and publication cutoffs. Contaminated
   or incomplete cases cannot qualify.
-- IMPLEMENTED/TESTED: an internal `elrakning.replay_artifact_publish` service
-  builds an artifact from an already-qualified replay run and persists it via
-  the existing Home Assistant Store API. It has no execution or actuator path.
+- IMPLEMENTED/TESTED: an internal canonical-storage runner selects a mature
+  causal 96-slot window, resolves exact-site ESS facts and timestamped initial
+  state, builds an artifact and persists it through the existing Home Assistant
+  Store API. It has no execution or actuator path.
 - OPEN RUNTIME GATE: no artifact has yet been published/read back through the
   deployed HA runtime, and live holdout evidence is not claimed without that
   verification. Step 9 remains ACTIVE/PARTIAL.
