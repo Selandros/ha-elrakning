@@ -84,7 +84,18 @@ def _frame_points(storage: Any, frame_id: str) -> list[dict[str, Any]]:
         "SELECT valid_at_us, value, unit, quality_status, point_json FROM external_input_points WHERE frame_id=? ORDER BY valid_at_us",
         (frame_id,),
     ).fetchall()
-    return [{"frame_id": frame_id, "valid_at": datetime.fromtimestamp(row[0] / 1_000_000, tz=UTC), "value": row[1], "unit": row[2], "quality_status": row[3], "point": json.loads(row[4])} for row in rows]
+    points = []
+    for row in rows:
+        if len(row) < 5 or row[0] is None or row[1] is None or not isinstance(row[3], str):
+            continue
+        try:
+            detail = json.loads(row[4]) if row[4] else {}
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(detail, dict):
+            continue
+        points.append({"frame_id": frame_id, "valid_at": datetime.fromtimestamp(row[0] / 1_000_000, tz=UTC), "value": row[1], "unit": row[2], "quality_status": row[3], "point": detail})
+    return points
 
 
 def _source_frame_rank(row: tuple[Any, ...], solar: bool) -> int:
@@ -128,7 +139,7 @@ def _resolve_causal_input_window(
                 point = by_time.get(slot.replace(minute=0, second=0, microsecond=0))
             if point is None or not _qualified_point(point, row):
                 continue
-            candidates_by_slot[slot].append({"frame": row, "point": point, "exact": exact})
+            candidates_by_slot[slot].append({"frame": row, "point": point, "value": point["value"], "exact": exact})
 
     selected: dict[datetime, dict[str, Any]] = {}
     ambiguous: list[str] = []

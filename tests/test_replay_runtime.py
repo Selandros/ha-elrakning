@@ -61,7 +61,11 @@ def test_internal_runner_builds_persists_and_reads_back_exact_site(monkeypatch):
 def test_runtime_frame_points_keep_frame_identity_for_slot_provenance():
     class Result:
         def fetchall(self):
-            return [(1_000_000, 2.5, "kW", "good", '{"source": "fixture"}')]
+            return [
+                (1_000_000, 2.5, "kW", "good", '{"source": "fixture"}'),
+                (2_000_000, 3.0, "kW", "good", None),
+                (3_000_000, None, "kW", "good", '{}'),
+            ]
 
     class Connection:
         def execute(self, *_args):
@@ -73,6 +77,8 @@ def test_runtime_frame_points_keep_frame_identity_for_slot_provenance():
 
     points = replay_runtime._frame_points(Storage(), "frame-solar")
     assert points[0]["frame_id"] == "frame-solar"
+    assert points[0]["value"] == 2.5
+    assert len(points) == 2
 
 
 def test_runtime_initial_state_ignores_observations_known_after_decision():
@@ -227,7 +233,7 @@ def test_causal_window_stitches_day_ahead_and_multiday_solar(monkeypatch):
     result = replay_runtime._resolve_causal_input_window(object(), [day, multiday], slots, solar=True, decision_us=int(decision.timestamp() * 1_000_000))
     assert result["available"] is True
     assert result["frame_ids"] == ["solar-day", "solar-multiday"]
-    assert [result["points"][slot]["point"]["value"] for slot in slots] == [10.0, 10.0, 20.0, 20.0]
+    assert [result["points"][slot]["value"] for slot in slots] == [10.0, 10.0, 20.0, 20.0]
 
 
 def test_causal_window_stitches_price_days_and_rejects_future_frames(monkeypatch):
@@ -250,7 +256,7 @@ def test_causal_window_stitches_price_days_and_rejects_future_frames(monkeypatch
     monkeypatch.setattr(replay_runtime, "_frame_points", lambda _storage, frame_id: points[frame_id])
     result = replay_runtime._resolve_causal_input_window(object(), [first, second, future], slots, solar=False, decision_us=int(decision.timestamp() * 1_000_000))
     assert result["available"] is True
-    assert [result["points"][slot]["point"]["value"] for slot in slots] == [1.0, 1.0, 2.0, 2.0]
+    assert [result["points"][slot]["value"] for slot in slots] == [1.0, 1.0, 2.0, 2.0]
     assert "price-future" not in result["frame_ids"]
 
 
