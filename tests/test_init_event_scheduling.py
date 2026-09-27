@@ -264,6 +264,16 @@ def test_monthly_forecast_startup_capture_is_scheduled_after_source_event_listen
     assert 'hass.bus.async_listen(EON_GRID_UPDATE_EVENT' in source[listeners:startup]
 
 
+def test_monthly_forecast_capture_persists_fail_closed_builder_errors():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    wrapper = source.index("async def _async_capture_monthly_forecast(hass)")
+    implementation = source.index("async def _async_capture_monthly_forecast_impl(hass)")
+    assert wrapper < implementation
+    assert 'reason="monthly_forecast_input_builder_failed"' in source[wrapper:implementation]
+    assert "manager.async_record_unavailable" in source[wrapper:implementation]
+
+
 def test_control_plane_state_handlers_have_safe_pre_ready_contract():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
     source = source_path.read_text(encoding="utf-8")

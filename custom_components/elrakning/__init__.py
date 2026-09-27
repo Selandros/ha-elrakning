@@ -5,6 +5,7 @@ import json
 from functools import partial
 from datetime import timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
@@ -148,6 +149,30 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
 
 
 async def _async_capture_monthly_forecast(hass) -> None:
+    """Run the producer and persist a fail-closed state if input assembly aborts."""
+    try:
+        await _async_capture_monthly_forecast_impl(hass)
+    except Exception:
+        data = hass.data.get(DOMAIN, {})
+        identity = data.get("site_identity_manager")
+        manager = data.get("monthly_forecast_manager")
+        state = getattr(identity, "state", {}) if identity else {}
+        site_id = state.get("active_site_id") if isinstance(state, dict) else None
+        if not manager or not isinstance(site_id, str) or not site_id:
+            return
+        config = (state.get("site_configs", {}).get(site_id) or {}) if isinstance(state, dict) else {}
+        timezone_name = ((config.get("location") or {}).get("timezone") if isinstance(config, dict) else None) or "UTC"
+        now = dt_util.now().astimezone(timezone.utc)
+        target_month = now.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m")
+        await manager.async_record_unavailable(
+            site_id=site_id,
+            decision_at=now,
+            target_month=target_month,
+            reason="monthly_forecast_input_builder_failed",
+        )
+
+
+async def _async_capture_monthly_forecast_impl(hass) -> None:
     """Build one bounded monthly forecast from existing runtime readers."""
     data = hass.data.get(DOMAIN, {})
     identity = data.get("site_identity_manager")

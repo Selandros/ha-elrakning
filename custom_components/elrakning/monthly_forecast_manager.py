@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -68,6 +70,40 @@ class MonthlyForecastManager:
         if fingerprint and fingerprint != self._last_fingerprint.get(site_id):
             await self.learning_store.async_record_monthly_forecast(site_id, result)
             self._last_fingerprint[site_id] = fingerprint
+        return result
+
+    async def async_record_unavailable(
+        self,
+        *,
+        site_id: str,
+        decision_at: datetime,
+        target_month: str,
+        reason: str,
+        source_generations: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a bounded fail-closed state when input assembly aborts."""
+        result = {
+            "schema": "ella_monthly_cost_forecast.v1",
+            "site_id": site_id,
+            "decision_at": decision_at.astimezone(timezone.utc).isoformat(),
+            "target_month": target_month,
+            "available": False,
+            "quality": "unavailable",
+            "forecast_method": "legacy_explicit_fallback_required",
+            "reasons": [reason],
+            "source_generations": sorted(str(item) for item in (source_generations or []) if item),
+            "execution_eligible": False,
+            "actuator_writes_enabled": False,
+        }
+        result["fingerprint"] = hashlib.sha256(
+            json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self._latest[site_id] = result
+        self._last_refresh[site_id] = decision_at.astimezone(timezone.utc)
+        self._last_sources[site_id] = tuple(result["source_generations"])
+        if result["fingerprint"] != self._last_fingerprint.get(site_id):
+            await self.learning_store.async_record_monthly_forecast(site_id, result)
+            self._last_fingerprint[site_id] = result["fingerprint"]
         return result
 
     def public_state(self, site_id: str) -> dict[str, Any]:

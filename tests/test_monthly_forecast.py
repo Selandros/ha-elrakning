@@ -113,6 +113,32 @@ def test_runtime_manager_deduplicates_snapshots_and_marks_legacy_fallback():
     assert store.writes == 1
 
 
+def test_runtime_manager_persists_fail_closed_input_builder_state():
+    class Store:
+        def __init__(self):
+            self.writes = []
+
+        async def async_record_monthly_forecast(self, site_id, forecast):
+            self.writes.append((site_id, forecast))
+            return {"written": True}
+
+        def monthly_forecast_state(self, site_id):
+            return {"evaluations": [], "latest": self.writes[-1][1] if self.writes else None}
+
+    import asyncio
+
+    store = Store()
+    manager = MonthlyForecastManager(store)
+    result = asyncio.run(manager.async_record_unavailable(
+        site_id="site-a", decision_at=datetime(2026, 9, 1, tzinfo=UTC),
+        target_month="2026-09", reason="monthly_forecast_input_builder_failed",
+    ))
+    assert result["available"] is False
+    assert result["reasons"] == ["monthly_forecast_input_builder_failed"]
+    assert store.writes[0][0] == "site-a"
+    assert store.writes[0][1]["fingerprint"] == result["fingerprint"]
+
+
 def test_actual_import_keeps_unpriced_energy_out_of_cost():
     start = datetime(2026, 9, 1, tzinfo=UTC)
     points = [
