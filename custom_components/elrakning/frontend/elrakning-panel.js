@@ -2101,6 +2101,22 @@ export function buildInvoiceComparison(estimate, previousActual) {
 }
 
 export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
+  const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+  const currentTradeEstimate = [
+    finite(estimate?.trade?.variable_cost_sek),
+    finite(estimate?.forecast_remaining_trade_variable_sek),
+    finite(estimate?.trade?.fixed_fee_sek),
+  ];
+  const currentTradeComponent = currentTradeEstimate.every((value) => value !== null)
+    ? {
+      value_sek: currentTradeEstimate.reduce((sum, value) => sum + value, 0),
+      basis_key: "elhandel_gross",
+      currency: "SEK",
+      tax_basis_class: "gross",
+      source_type: "current_cost_forecast",
+      estimated: true,
+    }
+    : null;
   const months = new Set();
   if (estimate?.month) months.add(estimate.month);
   for (const invoices of [invoiceSources.trade, invoiceSources.grid]) {
@@ -2128,9 +2144,21 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
         estimated_total_sek: Number.isFinite(Number(estimate?.estimated_month_total_sek)) ? Number(estimate.estimated_month_total_sek) : null,
         trade_sek: Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? Number(estimate.trade.total_so_far_sek) : null,
         grid_sek: Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? Number(estimate.grid.total_so_far_sek) : null,
+        comparison_components: currentTradeComponent ? { elhandel: currentTradeComponent } : {},
       };
     }
     const actual = buildPreviousMonthActual(invoiceSources, nextCalendarMonth(month));
+    const tradeInvoice = actual.trade?.invoices?.[0] || null;
+    const tradeComponent = actual.trade?.available && Number.isFinite(Number(actual.trade.total_sek)) && tradeInvoice
+      ? {
+        value_sek: Number(actual.trade.total_sek),
+        basis_key: "elhandel_gross",
+        currency: tradeInvoice.currency || "SEK",
+        tax_basis_class: String(tradeInvoice.tax_basis || "").startsWith("gross_") ? "gross" : null,
+        source_type: "invoice_history",
+        estimated: false,
+      }
+      : null;
     return {
       month,
       current: false,
@@ -2145,6 +2173,7 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
       source_signature: actual.source_signature,
       tax_compatible: actual.tax_compatible,
       tax_combinable: actual.tax_combinable,
+      comparison_components: tradeComponent?.tax_basis_class ? { elhandel: tradeComponent } : {},
     };
   });
 }
@@ -2178,23 +2207,40 @@ export function buildCostReferenceComparisons(monthHistory, selectedMonth, selec
   };
   const valueOf = (item) => item?.coverage === "complete" ? Number(item.total_sek) : Number(item.known_amount_gross_sek);
   const complete = history.filter(comparable);
+  const componentBasis = (() => {
+    const selectedComponent = selectedRecord?.comparison_components?.elhandel;
+    if (!selectedComponent || !Number.isFinite(Number(selectedComponent.value_sek))) return null;
+    const matching = history.filter((item) => {
+      const component = item?.comparison_components?.elhandel;
+      return component
+        && component.basis_key === selectedComponent.basis_key
+        && component.currency === selectedComponent.currency
+        && component.tax_basis_class === selectedComponent.tax_basis_class
+        && Number.isFinite(Number(component.value_sek));
+    });
+    return matching.length ? { key: "elhandel", label: "Elhandel", selected: Number(selectedComponent.value_sek), matching } : null;
+  })();
+  const useFullBasis = Number.isFinite(resolvedSelectedValue) && complete.length > 0;
+  const activeBasis = useFullBasis ? null : componentBasis;
+  const activeCurrentValue = useFullBasis ? resolvedSelectedValue : activeBasis?.selected ?? resolvedSelectedValue;
+  const baselineItems = useFullBasis ? complete : activeBasis?.matching || [];
   const reference = (count) => {
-    const values = complete.slice(0, count).map(valueOf);
+    const values = baselineItems.slice(0, count).map((item) => activeBasis ? Number(item.comparison_components.elhandel.value_sek) : valueOf(item));
     return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   };
   return [
-    { key: "previous", label: "Mot förra månaden", value: complete[0] ? valueOf(complete[0]) : null, sample_count: complete[0] ? 1 : 0 },
-    { key: "three_month_average", label: "Mot 3 månaders snitt", value: reference(3), sample_count: Math.min(3, complete.length) },
-    { key: "twelve_month_average", label: "Mot 12 månaders snitt", value: reference(12), sample_count: Math.min(12, complete.length) },
+    { key: "previous", label: "Mot förra månaden", value: baselineItems[0] ? (activeBasis ? Number(baselineItems[0].comparison_components.elhandel.value_sek) : valueOf(baselineItems[0])) : null, sample_count: baselineItems[0] ? 1 : 0 },
+    { key: "three_month_average", label: "Mot 3 månaders snitt", value: reference(3), sample_count: Math.min(3, baselineItems.length) },
+    { key: "twelve_month_average", label: "Mot 12 månaders snitt", value: reference(12), sample_count: Math.min(12, baselineItems.length) },
   ].map((item) => {
-    const current = resolvedSelectedValue;
+    const current = activeCurrentValue;
     const baseline = item.value == null ? null : Number(item.value);
     const comparisonScope = selectedIsCurrentEstimate
-      ? "current_estimated_month_vs_complete_history"
+      ? activeBasis ? "current_estimated_month_vs_elhandel_history" : "current_estimated_month_vs_complete_history"
       : selectedSignature ? "matching_source_signature" : "complete_only";
-    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null, comparison_scope: comparisonScope, current_value_source: selectedIsCurrentEstimate ? "estimated_month_total_sek" : "selected_month_value" };
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null, comparison_scope: comparisonScope, basis_label: activeBasis?.label || null, current_value_source: selectedIsCurrentEstimate ? "estimated_month_total_sek" : activeBasis ? "selected_component" : "selected_month_value" };
     const difference = current - baseline;
-    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null, comparison_scope: comparisonScope, current_value_source: selectedIsCurrentEstimate ? "estimated_month_total_sek" : "selected_month_value" };
+    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null, comparison_scope: comparisonScope, basis_label: activeBasis?.label || null, current_value_source: selectedIsCurrentEstimate ? "estimated_month_total_sek" : activeBasis ? "selected_component" : "selected_month_value" };
   });
 }
 
@@ -10038,7 +10084,7 @@ class ElrakningPanel {
       item.className = "cost-comparison-item";
       const label = document.createElement("span");
       label.className = "cost-comparison-label";
-      label.textContent = comparison.label;
+      label.textContent = comparison.basis_label ? `${comparison.label} · ${comparison.basis_label}` : comparison.label;
       const value = document.createElement("div");
       value.className = `cost-comparison-value${comparison.available ? ` ${comparison.direction}` : " unavailable"}`;
       if (comparison.available) {
