@@ -4590,6 +4590,7 @@ class ElrakningPanel {
         .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 3px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
         .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
+        .cost-history-bar-item.estimated .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
         .cost-history-bar { background: var(--primary-color); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
         .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
         .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
@@ -9959,8 +9960,11 @@ class ElrakningPanel {
     const displayHistory = costHistoryDisplayOrder(monthHistory);
     card.hidden = !estimate;
     if (historyChart) {
-      const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek)));
-      const maxHistoryValue = Math.max(1, ...valuedHistory.map((item) => Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek)));
+      const valueForItem = (item) => item.current
+        ? Number(item.estimated_total_sek)
+        : Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
+      const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(valueForItem(item)));
+      const maxHistoryValue = Math.max(1, ...valuedHistory.map(valueForItem));
       historyChart.replaceChildren(...displayHistory.map((item) => {
         const itemElement = document.createElement("button");
         itemElement.type = "button";
@@ -9968,13 +9972,16 @@ class ElrakningPanel {
         itemElement.setAttribute("role", "tab");
         itemElement.setAttribute("aria-selected", String(item.month === selectedMonth));
         const partial = item.coverage === "partial";
-        itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${partial ? " partial" : item.coverage === "missing" ? " unavailable" : ""}`;
+        const estimated = item.current && Number.isFinite(valueForItem(item));
+        itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${estimated ? " estimated" : partial ? " partial" : item.coverage === "missing" ? " unavailable" : ""}`;
         const bar = document.createElement("div");
         bar.className = "cost-history-bar";
-        const value = Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
+        const value = valueForItem(item);
         const hasValue = item.coverage !== "missing" && Number.isFinite(value);
         if (hasValue) bar.style.height = `${Math.max(value === 0 ? 3 : 8, value / maxHistoryValue * 62)}px`;
-        const detail = `Elhandel: ${item.trade_sek == null ? "saknas" : this._formatSek(item.trade_sek)} · Elnät: ${item.grid_sek == null ? "saknas" : this._formatSek(item.grid_sek)} · Känd kostnad: ${hasValue ? this._formatSek(value) : "saknas"} · Status: ${item.coverage === "complete" ? "Komplett" : item.coverage === "partial" ? "Delvis underlag" : "Saknas"}`;
+        const detail = estimated
+          ? `Beräknad månadskostnad: ${this._formatSek(value)} · Status: ${item.coverage === "partial" ? "Estimat · Delvis underlag" : "Estimat"}`
+          : `Elhandel: ${item.trade_sek == null ? "saknas" : this._formatSek(item.trade_sek)} · Elnät: ${item.grid_sek == null ? "saknas" : this._formatSek(item.grid_sek)} · Känd kostnad: ${hasValue ? this._formatSek(value) : "saknas"} · Status: ${item.coverage === "complete" ? "Komplett" : item.coverage === "partial" ? "Delvis underlag" : "Saknas"}`;
         bar.title = detail;
         itemElement.title = detail;
         const label = document.createElement("span");
