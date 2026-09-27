@@ -4631,14 +4631,6 @@ class ElrakningPanel {
           margin-top: 3px;
         }
 
-        .cost-detail-secondary {
-          color: var(--secondary-text-color);
-          display: block;
-          font-size: 10px;
-          line-height: 1.25;
-          margin-top: 2px;
-        }
-
         .cost-chart {
           min-height: 144px;
           margin-top: 12px;
@@ -10063,30 +10055,27 @@ class ElrakningPanel {
       return item;
     }));
     const rows = showingCurrent ? [
-      ["Elhandel", estimate.trade?.total_so_far_sek, "Kostnad hittills"],
-      ["Elnät", estimate.grid?.total_so_far_sek, "Kostnad hittills"],
-      ["Fast kostnad", Number.isFinite(Number(estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.accrued_fixed_fee_sek) || 0) : null, "Ackumulerad fast avgift"],
-      ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null, "Rörlig kostnad hittills"],
-      ["Importerad energi", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null, "Import hittills"],
-      ["Prognostiserad import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null, "Prognos hela månaden"],
-      ["Genomsnittligt totalpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null, "Snitt på import hittills"],
+      ["Elhandel", estimate.trade?.total_so_far_sek],
+      ["Elnät", estimate.grid?.total_so_far_sek],
+      ["Fast kostnad", Number.isFinite(Number(estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
+      ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
+      ["Import", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
+      ["Prognostiserad import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
+      ["Snittpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
     ] : selectedRecord ? [
-      ["Elhandel", selectedRecord.trade_sek, "Faktisk månadsdel"],
-      ["Elnät", selectedRecord.grid_sek, "Faktisk månadsdel"],
-      ["Känd kostnad", selectedRecord.known_amount_gross_sek, selectedRecord.coverage === "complete" ? "Tax-kompatibla källor" : "Kända tax-kompatibla källor"],
-      ["Total", selectedRecord.total_sek, "Faktisk månadskostnad"],
+      ["Elhandel", selectedRecord.trade_sek == null ? "Saknas" : selectedRecord.trade_sek],
+      ["Elnät", selectedRecord.grid_sek == null ? "Saknas" : selectedRecord.grid_sek],
+      ["Känd kostnad", selectedRecord.known_amount_gross_sek],
+      ["Total", selectedRecord.total_sek],
     ] : [];
-    summary.replaceChildren(...rows.filter(([, value]) => value != null && (typeof value !== "number" || Number.isFinite(value))).map(([label, value, explanation]) => {
+    summary.replaceChildren(...rows.filter(([, value]) => value != null && (typeof value !== "number" || Number.isFinite(value))).map(([label, value]) => {
       const item = document.createElement("div");
       item.className = "cost-detail";
       const name = document.createElement("span");
       name.textContent = label;
-      const detail = document.createElement("small");
-      detail.className = "cost-detail-secondary";
-      detail.textContent = explanation;
       const output = document.createElement("strong");
       output.textContent = typeof value === "string" ? value : this._formatSek(Number(value));
-      item.append(name, detail, output);
+      item.append(name, output);
       return item;
     }));
   }

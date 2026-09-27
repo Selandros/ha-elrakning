@@ -187,10 +187,12 @@ assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kost
 const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("status.textContent", source.indexOf("const currentRows =")));
 assert.equal((costKpiRender.match(/\["(?:Estimerad månad|Kostnad hittills|Prognos återstående)"/g) || []).length, 3);
 assert.doesNotMatch(costKpiRender, /Mot förra månaden/);
-assert.match(source, /cost-detail-secondary/);
-assert.match(source, /\["Elhandel", estimate\.trade\?\.total_so_far_sek, "Kostnad hittills"\]/);
-assert.match(source, /\["Prognostiserad import", Number\.isFinite\(Number\(estimate\.forecast_import_kwh\)\)[\s\S]*"Prognos hela månaden"\]/);
-assert.match(source, /\["Total", selectedRecord\.total_sek, "Faktisk månadskostnad"\]/);
+assert.doesNotMatch(source, /cost-detail-secondary/);
+assert.match(source, /\["Elhandel", estimate\.trade\?\.total_so_far_sek\]/);
+assert.match(source, /\["Import", Number\.isFinite\(Number\(estimate\.imported_kwh_so_far\)\)/);
+assert.match(source, /\["Snittpris", Number\.isFinite\(Number\(estimate\.total_weighted_average_ore_per_kwh\)\)/);
+assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);
+assert.match(source, /\["Total", selectedRecord\.total_sek\]/);
 assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
 assert.match(source, /Mot förra månaden/);
 assert.match(source, /Mot 3 månaders snitt/);
