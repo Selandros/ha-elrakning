@@ -4618,6 +4618,14 @@ class ElrakningPanel {
           margin-top: 3px;
         }
 
+        .cost-kpi-secondary {
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: 10px;
+          line-height: 1.25;
+          margin-top: 2px;
+        }
+
         .cost-chart {
           min-height: 144px;
           margin-top: 12px;
@@ -10006,20 +10014,23 @@ class ElrakningPanel {
     }
     const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.coverage === "complete" ? selectedRecord.total_sek : selectedRecord?.known_amount_gross_sek;
     const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
-    const currentRows = showingCurrent ? [
-      ["Estimerad månad", estimate.estimated_month_total_sek],
-      ["Kostnad hittills", estimate.total_so_far_sek],
-      ["Prognos återstående", estimate.forecast_remaining_total_sek],
-    ] : [];
+    const currentRows = [
+      ["Beräknad månadskostnad", estimate.estimated_month_total_sek, "Prognos för hela innevarande månaden"],
+      ["Kostnad hittills", estimate.total_so_far_sek, "Från månadens början till nu"],
+      ["Beräknat återstående", estimate.forecast_remaining_total_sek, "Prognos från nu till månadens slut"],
+    ];
     status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
-    kpis.replaceChildren(...currentRows.map(([label, value]) => {
+    kpis.replaceChildren(...currentRows.map(([label, value, explanation]) => {
       const item = document.createElement("div");
       item.className = "cost-kpi";
       const name = document.createElement("span");
       name.textContent = label;
+      const detail = document.createElement("small");
+      detail.className = "cost-kpi-secondary";
+      detail.textContent = explanation;
       const output = document.createElement("strong");
       output.textContent = typeof value === "string" ? value : Number.isFinite(Number(value)) ? this._formatSek(Number(value)) : "–";
-      item.append(name, output);
+      item.append(name, detail, output);
       return item;
     }));
     const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
