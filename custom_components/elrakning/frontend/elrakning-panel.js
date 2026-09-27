@@ -4498,7 +4498,7 @@ class ElrakningPanel {
         .cost-kpis {
           display: grid;
           gap: 8px;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           margin-top: 12px;
         }
 
@@ -9946,7 +9946,6 @@ class ElrakningPanel {
       ["Estimerad månad", estimate.estimated_month_total_sek],
       ["Kostnad hittills", estimate.total_so_far_sek],
       ["Prognos återstående", estimate.forecast_remaining_total_sek],
-      ["Mot förra månaden", comparisons[0]?.available ? `${comparisons[0].direction === "up" ? "↑" : comparisons[0].direction === "down" ? "↓" : "="} ${this._formatSek(Math.abs(comparisons[0].difference_sek))}` : "Ej tillgängligt"],
     ] : [];
     status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
     kpis.replaceChildren(...currentRows.map(([label, value]) => {
