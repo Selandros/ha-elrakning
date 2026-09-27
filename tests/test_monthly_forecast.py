@@ -237,3 +237,34 @@ def test_price_fallback_does_not_use_future_known_period_as_past_basis():
     )
     assert result["available"] is False
     assert result["price_missing_slot_count"] == 4
+
+
+def test_unaligned_decision_uses_next_canonical_slot_without_partial_future_slot():
+    decision = datetime(2026, 9, 1, 12, 7, 3, tzinfo=UTC)
+    aligned = datetime(2026, 9, 1, 12, 15, tzinfo=UTC)
+    rows = [{
+        "logical_role": "grid.power/import",
+        "interval_start": datetime(2026, 8, 25, 12, minute, tzinfo=UTC),
+        "value": 4000,
+    } for minute in (15, 30)]
+    result = build_month_end_slots(
+        decision_at=decision,
+        month_end=aligned + timedelta(minutes=30),
+        near_term_points=[{
+            "valid_at": aligned.isoformat(),
+            "end_at": (aligned + timedelta(minutes=15)).isoformat(),
+            "import_kw": 2,
+            "known_at": decision.isoformat(),
+            "provenance": {"source_generation_id": "power-1"},
+        }],
+        historical_rows=rows,
+        timezone_name="UTC",
+        known_price_periods=[{
+            "start": (aligned - timedelta(minutes=15)).isoformat(),
+            "end": aligned.isoformat(),
+            "total_customer_price_ore_per_kwh": 125,
+        }],
+    )
+    assert result["slot_count"] == 2
+    assert result["method_counts"]["canonical_power_forecast"] == 1
+    assert result["method_counts"]["causal_weekday_slot_profile"] == 1

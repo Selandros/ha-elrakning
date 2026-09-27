@@ -56,6 +56,14 @@ def month_window(target_month: str, timezone_name: str) -> tuple[datetime, datet
         return None
 
 
+def _next_slot_boundary(value: datetime) -> datetime:
+    """Start future replay at the next canonical 15-minute boundary."""
+    value = value.astimezone(timezone.utc)
+    epoch = int(value.timestamp())
+    boundary = ((epoch + SLOT_SECONDS - 1) // SLOT_SECONDS) * SLOT_SECONDS
+    return datetime.fromtimestamp(boundary, timezone.utc)
+
+
 def _price_at(periods: list[dict[str, Any]], moment: datetime) -> tuple[float | None, dict[str, Any] | None]:
     matches = []
     for period in periods:
@@ -220,7 +228,7 @@ def build_month_end_slots(
         profile.setdefault((local.weekday(), local.hour * 4 + local.minute // 15), []).append(value)
     fallback = {key: sum(values) / len(values) for key, values in profile.items() if values}
     slots = []
-    cursor = decision
+    cursor = _next_slot_boundary(decision)
     while cursor < end:
         point = by_slot.get(cursor)
         if point is None:
@@ -322,7 +330,7 @@ def build_monthly_cost_forecast(
     first_missing: dict[str, str] = {}
     method_counts: dict[str, int] = {}
     price_method_counts: dict[str, int] = {}
-    cursor = decision
+    cursor = _next_slot_boundary(decision)
     while cursor < end:
         point = points.get(cursor)
         if point is None:
