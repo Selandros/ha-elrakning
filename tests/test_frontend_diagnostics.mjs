@@ -443,6 +443,7 @@ const missingMeterDailyState = recomputeDailyEnergyState(
 );
 assert.equal(missingMeterDailyState.meter_import_energy_kwh, null);
 assert.equal(buildEnergyBalance(missingMeterDailyState.solar_energy_kwh, missingMeterDailyState.meter_import_energy_kwh).externalPercent, null);
+const activeGrid = (extra = {}) => ({ contract_source_status: "ACTIVE", ...extra });
 const invoiceEstimate = buildInvoiceEstimate(
   [
     { start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20, spot_price_ex_vat: 0.1, electricity_cost_ex_vat: 0.1, vat: 0.05 },
@@ -453,7 +454,7 @@ const invoiceEstimate = buildInvoiceEstimate(
     { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 },
     { timestamp: "2026-08-01T00:30:00Z", import_kw: 4 },
   ],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 }),
   null,
   new Date("2026-08-01T00:30:00Z"),
 );
@@ -480,7 +481,7 @@ const earlyMonthEstimate = buildInvoiceEstimate(
     { start: new Date(2026, 7, 1, 12, 0).toISOString(), end: new Date(2026, 7, 1, 18, 0).toISOString(), trade_customer_price_ore_per_kwh: 30 },
   ],
   constantPoints(new Date(2026, 7, 1, 0, 0).toISOString(), 12, 2),
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 100 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 100 }),
   50,
   new Date(2026, 7, 1, 12, 0),
   baselinePoints,
@@ -495,7 +496,7 @@ assert.ok(earlyMonthEstimate.estimated_month_total_sek > 0);
 const noBaselineEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 100 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 100 }),
   null,
   new Date("2026-08-01T00:15:00Z"),
   [],
@@ -508,7 +509,7 @@ const futurePriceEstimate = buildInvoiceEstimate(
     { start: "2026-08-01T00:15:00Z", end: "2026-08-01T00:30:00Z", trade_customer_price_ore_per_kwh: 200 },
   ],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 }),
   null,
   new Date("2026-08-01T00:15:00Z"),
   baselinePoints,
@@ -518,11 +519,21 @@ assert.equal(futurePriceEstimate.forecast_import_kwh > futurePriceEstimate.impor
 const incompleteInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z" }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 }),
   null,
   new Date("2026-08-01T00:15:00Z"),
 );
 assert.equal(incompleteInvoiceEstimate.data_coverage.missing_price_periods, 1);
+const futureGridEstimate = buildInvoiceEstimate(
+  [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
+  [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
+  { contract_source_status: "FUTURE", variable_total_ore_per_kwh_gross: 142, fixed_monthly_sek: 226.25 },
+  null,
+  new Date("2026-08-01T00:15:00Z"),
+);
+assert.equal(futureGridEstimate.grid.variable_cost_sek, null);
+assert.equal(futureGridEstimate.grid.fixed_fee_sek, null);
+assert.equal(futureGridEstimate.estimated_month_total_sek, null);
 const unavailableGridEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
@@ -625,7 +636,7 @@ assert.equal(invoiceProvenance.fixed_fees.trade.source, null);
 const fixedInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 2 }],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 }),
   39,
   new Date("2026-08-01T00:15:00Z"),
 );
@@ -635,7 +646,7 @@ assert.ok(Math.abs(fixedInvoiceProvenance.calculation.component_sum_sek - fixedI
 const coveredDurationEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-23T00:00:00Z", end: "2026-08-24T00:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
   Array.from({ length: 289 }, (_, index) => ({ timestamp: new Date(Date.parse("2026-08-23T00:00:00Z") + index * 5 * 60 * 1000).toISOString(), import_kw: 2 })),
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 }),
   null,
   new Date("2026-08-30T00:00:00Z"),
 );
@@ -649,7 +660,7 @@ assert.equal(coveredDurationEstimate.data_coverage.first_period, "2026-08-23T00:
 const gappedInvoiceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T01:00:00Z", trade_customer_price_ore_per_kwh: 20 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 2 }, { timestamp: "2026-08-01T01:00:00Z", import_kw: 2 }],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 226.25 }),
   null,
   new Date("2026-08-01T01:00:00Z"),
 );
@@ -669,7 +680,7 @@ assert.ok(Math.abs(parityAggregate[0].energy.import - integrateMeterEnergyByRang
 const partialPriceEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 100 }, { start: "2026-08-01T00:15:00Z", end: "2026-08-01T00:30:00Z" }],
   parityPoints,
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 }),
   null,
   new Date("2026-08-01T00:30:00Z"),
 );
@@ -678,7 +689,7 @@ assert.ok(partialPriceEstimate.priced_imported_kwh < partialPriceEstimate.actual
 const zeroImportEstimate = buildInvoiceEstimate(
   [{ start: "2026-08-01T00:00:00Z", end: "2026-08-01T00:15:00Z", trade_customer_price_ore_per_kwh: 100 }],
   [{ timestamp: "2026-08-01T00:00:00Z", import_kw: 0 }, { timestamp: "2026-08-01T00:15:00Z", import_kw: 0 }],
-  { variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 0 }),
   null,
   new Date("2026-08-01T00:15:00Z"),
 );

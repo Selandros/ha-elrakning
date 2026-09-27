@@ -1509,7 +1509,9 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   if (!Array.isArray(periods) || !periods.length || !Array.isArray(meterPoints)) return null;
   const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
   const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
-  const gridGross = Number(gridPrice?.variable_total_ore_per_kwh_gross);
+  const gridPriceApplicable = gridPrice?.contract_source_status === "ACTIVE"
+    || gridPrice?._effective_dated_applicable === true;
+  const gridGross = gridPriceApplicable ? Number(gridPrice?.variable_total_ore_per_kwh_gross) : NaN;
   const points = meterPoints
     .map((point) => ({ timestamp: new Date(point.timestamp).getTime(), importKw: Number(point.import_kw) }))
     .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.importKw))
@@ -1637,7 +1639,9 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     : null;
   const gridWeighted = pricedCostImportKwh > 0 ? gridGross : null;
   const fixedTrade = tradeFixedFee != null && Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
-  const gridFixed = Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
+  const gridFixed = gridPriceApplicable && Number.isFinite(Number(gridPrice?.fixed_monthly_sek))
+    ? Number(gridPrice.fixed_monthly_sek)
+    : null;
   const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
   const accruedTradeFixed = fixedTrade === null ? null : fixedTrade * Math.min(1, elapsedMs / monthMs);
   const variableSoFarSek = tradeVariableSek === null || gridVariableSek === null ? null : tradeVariableSek + gridVariableSek;
@@ -9981,10 +9985,11 @@ class ElrakningPanel {
     const today = this.host.querySelector("[data-invoice-estimate-today]");
     if (!card || !month || !total || !today) return;
     const billingHistory = this._billingHistory;
+    const applicableGridPrice = billingHistory?.grid_price || null;
     let estimate = buildInvoiceEstimate(
       billingHistory?.price_periods,
       billingHistory?.energy_points,
-      this._eonGridPrice,
+      applicableGridPrice,
       this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
       new Date(),
       billingHistory?.baseline_energy_points,
@@ -10053,7 +10058,7 @@ class ElrakningPanel {
       }),
       comparison,
       cost_analysis: costAnalysis,
-      provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: this._eonGridPrice || billingHistory.grid_price }),
+      provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: applicableGridPrice }),
     };
     card._livePowerRaw = this._invoiceEstimateRaw;
     this._renderInvoiceCardCosts();

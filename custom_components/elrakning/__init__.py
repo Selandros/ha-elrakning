@@ -219,8 +219,14 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
             except Exception:
                 pass
             cursor += timedelta(days=1)
-    grid_state = data.get("grid_manager").public_state() if data.get("grid_manager") else {}
+    grid_manager = data.get("grid_manager")
+    grid_state = grid_manager.public_state() if grid_manager else {}
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else {}
+    grid_provider = getattr(grid_manager, "provider", None)
+    resolve_grid_price = getattr(grid_provider, "resolve_grid_price_at", None)
+    applicable_grid_price = resolve_grid_price(now) if callable(resolve_grid_price) else None
+    if not isinstance(applicable_grid_price, dict):
+        applicable_grid_price = None
     trade_state = data.get("elhandel_manager").public_state() if data.get("elhandel_manager") else {}
     trade_tariff = ((trade_state.get("summary") or {}).get("tariff") or {}) if isinstance(trade_state, dict) else {}
     actual = build_actual_priced_cost_to_date(
@@ -229,7 +235,7 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
         month_start=month_start,
         now=now,
         trade_fixed_fee_sek=trade_tariff.get("fixed_fee_incl_vat_per_month"),
-        grid_fixed_fee_sek=grid_price.get("fixed_monthly_sek") if isinstance(grid_price, dict) else None,
+        grid_fixed_fee_sek=applicable_grid_price.get("fixed_monthly_sek") if applicable_grid_price else None,
     )
     near_term = []
     for offset in range(3):
@@ -276,7 +282,7 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
     )
     fixed_total = sum(value or 0.0 for value in (
         trade_tariff.get("fixed_fee_incl_vat_per_month"),
-        grid_price.get("fixed_monthly_sek") if isinstance(grid_price, dict) else None,
+        applicable_grid_price.get("fixed_monthly_sek") if applicable_grid_price else None,
     ))
     result = await manager.async_refresh(
         site_id=site_id, timezone_name=timezone_name, decision_at=now,

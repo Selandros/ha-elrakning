@@ -77,6 +77,9 @@ class GridManager:
             applied["consumption"] = {"status": "missing", "resolution": "Monthly"}
             applied["cost"] = None
         self.provider.state = applied
+        capture = getattr(self.provider, "_async_capture_tariff_fact", None)
+        if callable(capture):
+            await capture()
 
     async def async_refresh(self) -> dict[str, Any]:
         return await self.provider.async_refresh() if self.provider else {"configured": False}

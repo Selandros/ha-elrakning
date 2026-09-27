@@ -26,7 +26,7 @@ from .const import (
     SUPPORTED_ELECTRICITY_PROVIDERS,
 )
 from .coordinator import ElrakningCoordinator, PriceData
-from .customer_price import build_customer_price_data, grid_price_is_current, grid_variable_cost_ex_vat
+from .customer_price import build_customer_price_data, grid_price_is_applicable, grid_price_is_current, grid_variable_cost_ex_vat
 from .energy_history import async_build_energy_history
 from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
@@ -1310,6 +1310,10 @@ async def websocket_billing_history(hass, connection, msg):
         else:
             missing_price_dates += 1
         target += timedelta(days=1)
+    grid_manager = _grid_manager(hass)
+    grid_provider = getattr(grid_manager, "provider", None) if grid_manager else None
+    resolve_grid_price = getattr(grid_provider, "resolve_grid_price_at", None)
+    applicable_grid_price = resolve_grid_price(dt_util.now()) if callable(resolve_grid_price) else None
     invoice_today = build_today_variable_cost(
         billing.get("points", []),
         price_periods,
@@ -1331,6 +1335,11 @@ async def websocket_billing_history(hass, connection, msg):
         "energy_coverage": billing.get("coverage", {}),
         "baseline_energy_coverage": billing.get("baseline_coverage", {}),
         "price_periods": price_periods,
+        "grid_price": applicable_grid_price,
+        "grid_price_provenance": {
+            "method": "effective_dated_grid_tariff_timeline",
+            "available": applicable_grid_price is not None,
+        },
         "price_source": "nord_pool_historical_daily_periods",
         "invoice_estimate": {"today": invoice_today},
         "monthly_forecast": hass.data.get(DOMAIN, {}).get("monthly_forecast_manager").public_state(
@@ -2561,8 +2570,13 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
     customer_price_data = build_customer_price_data(data.periods, provider_data)
     grid_manager = _grid_manager(hass)
     grid_state = _active_grid_state(hass, grid_manager)
-    grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None
-    grid_contract_is_current = grid_price_is_current(grid_price)
+    raw_grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else None
+    grid_provider = getattr(grid_manager, "provider", None) if grid_manager else None
+    resolve_grid_price = getattr(grid_provider, "resolve_grid_price_at", None)
+    grid_price = resolve_grid_price(dt_util.now()) if callable(resolve_grid_price) else (
+        raw_grid_price if grid_price_is_current(raw_grid_price) else None
+    )
+    grid_contract_is_current = grid_price_is_applicable(grid_price)
     grid_cost_ex_vat = (
         grid_variable_cost_ex_vat(grid_price)
         if grid_contract_is_current
@@ -2608,16 +2622,16 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
                 "customer_price": period.customer_price,
                 "grid_cost_ex_vat": grid_cost_ex_vat,
                 "trade_customer_price_ore_per_kwh": period.customer_price * 100,
-                "grid_provider": "eon" if grid_price else None,
-                "grid_contract_source_status": grid_source_status,
-                "grid_contract_preview_applied": grid_preview_applied,
-                "grid_vat_included": grid_price.get("vat_included") if isinstance(grid_price, dict) else None,
-                "grid_transfer_ore_per_kwh": grid_price.get("transfer_ore_per_kwh_gross") if isinstance(grid_price, dict) else None,
-                "grid_energy_tax_ore_per_kwh": grid_price.get("energy_tax_ore_per_kwh_gross") if isinstance(grid_price, dict) else None,
-                "grid_variable_ore_per_kwh": grid_variable_gross,
+                "grid_provider": "eon" if (period_grid_price := (resolve_grid_price(period.start) if callable(resolve_grid_price) else (raw_grid_price if grid_price_is_current(raw_grid_price) else None))) else None,
+                "grid_contract_source_status": period_grid_price.get("contract_source_status") if isinstance(period_grid_price, dict) else None,
+                "grid_contract_preview_applied": period_grid_price.get("preview_applied") is True if isinstance(period_grid_price, dict) else False,
+                "grid_vat_included": period_grid_price.get("vat_included") if isinstance(period_grid_price, dict) else None,
+                "grid_transfer_ore_per_kwh": period_grid_price.get("transfer_ore_per_kwh_gross") if isinstance(period_grid_price, dict) else None,
+                "grid_energy_tax_ore_per_kwh": period_grid_price.get("energy_tax_ore_per_kwh_gross") if isinstance(period_grid_price, dict) else None,
+                "grid_variable_ore_per_kwh": period_grid_price.get("variable_total_ore_per_kwh_gross") if isinstance(period_grid_price, dict) and grid_price_is_applicable(period_grid_price) else None,
                 "total_customer_price_ore_per_kwh": (
-                    period.customer_price * 100 + grid_variable_gross
-                    if grid_variable_gross is not None
+                    period.customer_price * 100 + period_grid_price.get("variable_total_ore_per_kwh_gross")
+                    if isinstance(period_grid_price, dict) and grid_price_is_applicable(period_grid_price)
                     else None
                 ),
             }

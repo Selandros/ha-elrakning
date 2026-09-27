@@ -18,6 +18,13 @@ def grid_price_is_current(grid_price: dict[str, Any] | None) -> bool:
     return isinstance(grid_price, dict) and grid_price.get("contract_source_status") == "ACTIVE"
 
 
+def grid_price_is_applicable(grid_price: dict[str, Any] | None) -> bool:
+    """Allow a current contract or a future fact already effective for the slot."""
+    return grid_price_is_current(grid_price) or (
+        isinstance(grid_price, dict) and grid_price.get("_effective_dated_applicable") is True
+    )
+
+
 def grid_variable_cost_ex_vat(grid_price: dict[str, Any] | None) -> float | None:
     """Convert a verified gross grid variable rate to the price graph basis."""
     if not isinstance(grid_price, dict) or grid_price.get("vat_included") is not True:

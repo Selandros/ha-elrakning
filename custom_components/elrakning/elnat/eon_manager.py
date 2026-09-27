@@ -28,6 +28,11 @@ from .eon_models import (
     parse_monthly_transfer,
     pricing_tariff_for_agreement,
 )
+from ..grid_tariff_timeline import (
+    build_grid_tariff_record,
+    merge_grid_tariff_record,
+    resolve_grid_tariff,
+)
 
 
 class EonGridManager:
@@ -37,7 +42,9 @@ class EonGridManager:
         self.hass = hass
         self.entry = entry
         self.store = Store(hass, 1, f"{DOMAIN}.eon_grid_state")
+        self.tariff_timeline_store = Store(hass, 1, f"{DOMAIN}.eon_grid_tariff_timeline")
         self.state: dict[str, Any] = self._empty_state()
+        self.tariff_timeline: list[dict[str, Any]] = []
         self.facility_states: dict[str, dict[str, Any]] = {}
         self._refresh_unsub = None
         self._web_refresh_unsub = None
@@ -61,6 +68,9 @@ class EonGridManager:
 
     async def async_load(self) -> None:
         cached = await self.store.async_load()
+        timeline = await self.tariff_timeline_store.async_load()
+        if isinstance(timeline, dict) and isinstance(timeline.get("records"), list):
+            self.tariff_timeline = [item for item in timeline["records"] if isinstance(item, dict)]
         if isinstance(cached, dict):
             self.state.update(cached)
             cached_facilities = cached.get("facility_states")
@@ -73,6 +83,52 @@ class EonGridManager:
         if not self.configured:
             self.state = self._empty_state()
             self.facility_states = {}
+            self.tariff_timeline = []
+        await self._async_capture_tariff_fact()
+
+    def _active_site_id(self) -> str | None:
+        hass = getattr(self, "hass", None)
+        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager") if hass else None
+        state = getattr(site_manager, "state", {}) if site_manager else {}
+        site_id = state.get("active_site_id") if isinstance(state, dict) else None
+        return site_id if isinstance(site_id, str) and site_id else None
+
+    async def _async_capture_tariff_fact(self) -> None:
+        timeline_store = getattr(self, "tariff_timeline_store", None)
+        if timeline_store is None:
+            return
+        record = build_grid_tariff_record(
+            site_id=self._active_site_id(),
+            binding=getattr(self, "_active_binding", None),
+            state=getattr(self, "state", None),
+            captured_at=datetime.now(timezone.utc),
+        )
+        merged = merge_grid_tariff_record(getattr(self, "tariff_timeline", []), record)
+        if merged == getattr(self, "tariff_timeline", []):
+            return
+        self.tariff_timeline = merged
+        await timeline_store.async_save({"schema": "elrakning.grid_tariff_timeline.v1", "records": merged})
+
+    def resolve_grid_price_at(self, moment: datetime) -> dict[str, Any] | None:
+        site_id = self._active_site_id()
+        if not site_id:
+            return None
+        resolved = resolve_grid_tariff(
+            getattr(self, "tariff_timeline", []),
+            site_id=site_id,
+            at=moment,
+            decision_at=datetime.now(timezone.utc),
+        )
+        if not resolved:
+            return None
+        price = deepcopy(resolved.get("grid_price"))
+        if isinstance(price, dict):
+            price["_effective_dated_applicable"] = True
+        return price
+
+    def public_tariff_timeline(self) -> list[dict[str, Any]]:
+        site_id = self._active_site_id()
+        return [deepcopy(item) for item in getattr(self, "tariff_timeline", []) if item.get("site_id") == site_id]
 
     def async_start_refresh(self) -> None:
         if self._refresh_unsub is None:
@@ -266,6 +322,7 @@ class EonGridManager:
             state = next(iter(states.values()), self._empty_state())
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
+            await self._async_capture_tariff_fact()
             await self._async_reconcile_site_bindings()
             await self._persist_web_session(config, session)
             self._schedule_web_refresh(session)
@@ -290,6 +347,7 @@ class EonGridManager:
             state = self._state_for_active_binding(states) or self._build_app_state(sources, locations)
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
+            await self._async_capture_tariff_fact()
             await self._async_reconcile_site_bindings()
         except ValueError as err:
             self.state.update({"app_authenticated": True, "reauth_required": False, "error": str(err)})
@@ -544,6 +602,7 @@ class EonGridManager:
             "facility": public_facility or None,
             "tariff": self.state.get("tariff"),
             "grid_price": self.state.get("grid_price"),
+            "tariff_timeline": self.public_tariff_timeline(),
             "consumption": self.state.get("consumption"),
             "cost": self.state.get("cost"),
             "outage": self.state.get("outage"),
