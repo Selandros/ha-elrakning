@@ -185,6 +185,10 @@ assert.match(source, /itemElement.setAttribute\("aria-selected", String\(item.mo
 assert.match(source, /itemElement.dataset.costMonth = item.month/);
 assert.match(source, /document.createElement\("button"\)/);
 assert.match(source, /cost-history-bar-item\.selected/);
+assert.match(source, /cost-history-bar-value/);
+assert.match(source, /amount\.textContent = hasValue \? this\._formatSek\(value\) : "–"/);
+assert.match(source, /itemElement\.append\(label, bar, amount\)/);
+assert.match(source, /const hasValue = item\.coverage !== "missing" && Number\.isFinite\(value\)/);
 assert.match(source, /<div class="card-heading cost-card-heading"><h2 id="cost-title">Kostnad<\/h2><\/div>/);
 assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kostnad, prognos och fakturahistorik/);
 const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("status.textContent", source.indexOf("const currentRows =")));

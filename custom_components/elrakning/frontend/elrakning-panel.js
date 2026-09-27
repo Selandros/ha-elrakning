@@ -4587,7 +4587,7 @@ class ElrakningPanel {
         .cost-history-heading h3, .cost-side h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
         .cost-history-heading span { color: var(--secondary-text-color); font-size: var(--card-legend-size); }
         .cost-history-chart { align-items: end; display: flex; gap: 6px; height: 92px; margin-top: 12px; overflow-x: auto; padding: 4px 2px 20px; }
-        .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 4px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
+        .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 3px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
         .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
         .cost-history-bar { background: var(--primary-color); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
@@ -4595,6 +4595,7 @@ class ElrakningPanel {
         .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
         .cost-history-bar-item.unavailable .cost-history-bar { background: var(--divider-color); height: 3px !important; opacity: 1; }
         .cost-history-bar-label { color: var(--secondary-text-color); font-size: 10px; white-space: nowrap; }
+        .cost-history-bar-value { color: var(--primary-text-color); font-size: 10px; font-weight: 500; white-space: nowrap; }
 
         .cost-kpi,
         .cost-detail {
@@ -9971,15 +9972,19 @@ class ElrakningPanel {
         const bar = document.createElement("div");
         bar.className = "cost-history-bar";
         const value = Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
-        if (item.coverage !== "missing" && Number.isFinite(value)) bar.style.height = `${Math.max(value === 0 ? 3 : 8, value / maxHistoryValue * 62)}px`;
-        const detail = `Elhandel: ${item.trade_sek == null ? "saknas" : this._formatSek(item.trade_sek)} · Elnät: ${item.grid_sek == null ? "saknas" : this._formatSek(item.grid_sek)} · Känd kostnad: ${Number.isFinite(value) ? this._formatSek(value) : "saknas"} · Status: ${item.coverage === "complete" ? "Komplett" : item.coverage === "partial" ? "Delvis underlag" : "Saknas"}`;
+        const hasValue = item.coverage !== "missing" && Number.isFinite(value);
+        if (hasValue) bar.style.height = `${Math.max(value === 0 ? 3 : 8, value / maxHistoryValue * 62)}px`;
+        const detail = `Elhandel: ${item.trade_sek == null ? "saknas" : this._formatSek(item.trade_sek)} · Elnät: ${item.grid_sek == null ? "saknas" : this._formatSek(item.grid_sek)} · Känd kostnad: ${hasValue ? this._formatSek(value) : "saknas"} · Status: ${item.coverage === "complete" ? "Komplett" : item.coverage === "partial" ? "Delvis underlag" : "Saknas"}`;
         bar.title = detail;
         itemElement.title = detail;
-        itemElement.setAttribute("aria-label", `${this._formatInvoiceMonth(item.month)}: ${detail}`);
         const label = document.createElement("span");
         label.className = "cost-history-bar-label";
         label.textContent = this._formatInvoiceMonth(item.month).split(" ")[0];
-        itemElement.append(bar, label);
+        const amount = document.createElement("span");
+        amount.className = "cost-history-bar-value";
+        amount.textContent = hasValue ? this._formatSek(value) : "–";
+        itemElement.setAttribute("aria-label", `${this._formatInvoiceMonth(item.month)}: ${amount.textContent} · ${detail}`);
+        itemElement.append(label, bar, amount);
         return itemElement;
       }));
       if (historyStatus) historyStatus.textContent = valuedHistory.length ? `${valuedHistory.length} månader med känd kostnad av ${monthHistory.length}` : "Ingen användbar månadsserie";
