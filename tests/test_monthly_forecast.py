@@ -341,3 +341,38 @@ def test_canonical_spot_history_is_area_currency_scoped_and_causal():
     assert len(result) == 1
     assert result[0]["spot_price_ore_per_kwh"] == 125
     assert result[0]["price_source_generation_id"] == "np-se2"
+
+
+def test_spot_profile_uses_documented_daypart_fallback_with_support():
+    decision = datetime(2026, 9, 27, 12, tzinfo=UTC)
+    historical_days = [datetime(2026, 8, 23, 13, 0, tzinfo=UTC), datetime(2026, 8, 30, 13, 0, tzinfo=UTC)]
+    rows = [{
+        "logical_role": "grid.power/import",
+        "interval_start": start,
+        "value": 4000,
+    } for start in historical_days]
+    periods = [{
+        "start": start.isoformat(),
+        "end": (start + timedelta(minutes=15)).isoformat(),
+        "spot_price_ore_per_kwh": 100 + index * 10,
+        "price_known_at": datetime(2026, 8, 25, tzinfo=UTC).isoformat(),
+        "price_source_generation_id": "np-se2",
+        "price_area": "SE2",
+        "price_currency": "SEK",
+    } for index, start in enumerate(historical_days)]
+    result = build_month_end_slots(
+        decision_at=decision,
+        month_end=decision + timedelta(minutes=15),
+        near_term_points=[{
+            "valid_at": decision.isoformat(),
+            "end_at": (decision + timedelta(minutes=15)).isoformat(),
+            "import_kw": 2,
+            "known_at": decision.isoformat(),
+        }],
+        historical_rows=rows,
+        timezone_name="UTC",
+        known_price_periods=periods,
+    )
+    assert result["energy_price_method_counts"] == {"causal_weekday_daypart_spot_price_profile": 1}
+    assert result["slots"][0]["energy_price_provenance"]["fallback_level"] == "weekday_daypart"
+    assert result["slots"][0]["energy_price_provenance"]["sample_support"] == 2

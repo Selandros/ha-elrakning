@@ -144,7 +144,16 @@ def _causal_trade_price_profile(
     slot_key = moment.hour * 4 + moment.minute // 15
     exact = [item for item in candidates if item[0].weekday() == moment.weekday() and item[0].hour * 4 + item[0].minute // 15 == slot_key]
     broader = [item for item in candidates if item[0].weekday() == moment.weekday() and item[0].hour == moment.hour]
+    daypart = [item for item in candidates if item[0].weekday() == moment.weekday() and item[0].hour // 6 == moment.hour // 6]
+    area_recent = candidates
     selected = exact or broader
+    fallback_level = "exact_slot" if exact else "weekday_hour" if broader else None
+    if not selected and len(daypart) >= 2:
+        selected = daypart
+        fallback_level = "weekday_daypart"
+    if not selected and len(area_recent) >= 4:
+        selected = area_recent
+        fallback_level = "area_recent"
     if not selected:
         return None, None
     available_bases = {item[3] for item in selected}
@@ -154,9 +163,16 @@ def _causal_trade_price_profile(
     latest = selected[-1][4]
     basis_label = "trade_customer_gross_ex_grid" if basis == "trade_customer_gross" else "nord_pool_spot_ex_grid"
     method_prefix = "trade" if basis == "trade_customer_gross" else "spot"
+    method_name = {
+        "exact_slot": f"causal_weekday_slot_{method_prefix}_price_profile",
+        "weekday_hour": f"causal_weekday_hour_{method_prefix}_price_profile",
+        "weekday_daypart": f"causal_weekday_daypart_{method_prefix}_price_profile",
+        "area_recent": f"causal_area_recent_{method_prefix}_price_profile",
+    }[fallback_level]
     return sum(item[2] for item in selected) / len(selected), {
-        "method": f"causal_weekday_slot_{method_prefix}_price_profile" if exact else f"causal_weekday_hour_{method_prefix}_price_profile",
+        "method": method_name,
         "basis": basis_label,
+        "fallback_level": fallback_level,
         "sample_support": len(selected),
         "historical_window_start": selected[0][0].isoformat(),
         "historical_window_end": selected[-1][1].isoformat(),
