@@ -1,6 +1,6 @@
 # Elräkning – Current State
 
-Updated: 2026-09-26
+Updated: 2026-09-27
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
@@ -10,11 +10,15 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.784` is stable after Masterplan v2 step 8 closure and
-  the Step 8 read-only optimizer runtime verification.
+- Runtime baseline `0.0.805` is stable after the Step 9 cross-day causal frame
+  resolver and replay-runtime hardening.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health and Step 8 — Economics & deterministic optimizer are COMPLETE;
-  Step 9 — Replay, backtest, benchmarks & regret is ACTIVE/NEXT;
+  Step 9 — Replay, backtest, benchmarks & regret is ACTIVE/PARTIAL;
+  Step 10 — Shadow & advisory planning is PARTIAL/IMPLEMENTED for category A
+  read-only advisory plans, immutable snapshots, provenance and fail-closed UI;
+  category B shadow evaluation is explicitly gated by Step 9 qualified live
+  replay/artifact evidence.
   steps 0–5 are established foundation with remaining
   hardening, retention, and multi-site details tracked explicitly.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.

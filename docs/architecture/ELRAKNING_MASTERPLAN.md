@@ -6,12 +6,16 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.793`.
+- Stable runtime baseline: `0.0.805`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
 - Step 6 — Forecast and baseline behavior is complete.
 - **Active step: 9 — Replay, backtest, benchmarks and regret.**
+- Step 10 — Shadow and advisory planning is `PARTIAL/IMPLEMENTED`: category A
+  (read-only advisory plans, immutable snapshots, provenance and fail-closed
+  UI semantics) is verified; category B shadow evaluation remains gated by
+  Step 9 qualified live replay/artifact evidence.
 - Step 7 — ESS Digital Twin and Battery Health is complete on `0.0.765`.
 - Runtime/Operations/Hardening is cross-cutting, not a roadmap step.
 - No physical control is permitted before step 14 is accepted.
