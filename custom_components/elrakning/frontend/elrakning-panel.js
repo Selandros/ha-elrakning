@@ -4694,6 +4694,16 @@ class ElrakningPanel {
           min-width: 0;
         }
 
+        .cost-kpi {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: var(--ha-card-border-radius, 8px);
+          display: flex;
+          flex-direction: column;
+          min-height: 86px;
+          padding: 9px 10px;
+        }
+
         .cost-kpi span,
         .cost-comparison-label,
         .cost-detail span {
@@ -4856,7 +4866,7 @@ class ElrakningPanel {
         }
 
         @container (max-width: 600px) {
-          .cost-kpis { gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .cost-kpis { gap: 8px; grid-template-columns: 1fr; }
           .cost-kpi strong { font-size: 1rem; }
           .cost-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .cost-comparison { grid-template-columns: 1fr; }

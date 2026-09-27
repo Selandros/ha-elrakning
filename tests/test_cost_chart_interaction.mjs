@@ -286,8 +286,11 @@ assert.match(source, /\["Snittpris", Number\.isFinite\(Number\(estimate\.total_w
 assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);
 assert.match(source, /\["Total", selectedRecord\.total_sek\]/);
 assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+assert.match(source, /\.cost-kpi \{[\s\S]*background: var\(--ha-card-background,[\s\S]*border: 1px solid var\(--divider-color\);[\s\S]*border-radius: var\(--ha-card-border-radius/);
+assert.match(source, /\.cost-kpis \{ gap: 8px; grid-template-columns: 1fr; \}/);
 assert.match(source, /cost-kpi-comparison/);
 assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
+assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*item\.append\(name, output, bubble\)/);
 assert.match(costKpiRender, /const percent = Number\(comparison\.difference_percent\)/);
 assert.doesNotMatch(costKpiRender, /this\._formatSek\(Math\.abs\(comparison\.difference_sek\)\)/);
 assert.match(source, /\["Beräknad import hela månaden", Number\.isFinite\(Number\(estimate\.forecast_import_kwh\)\)/);
