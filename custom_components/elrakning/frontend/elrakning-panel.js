@@ -4700,7 +4700,6 @@ class ElrakningPanel {
           border-radius: var(--ha-card-border-radius, 8px);
           display: flex;
           flex-direction: column;
-          min-height: 64px;
           padding: 7px 9px;
         }
 
