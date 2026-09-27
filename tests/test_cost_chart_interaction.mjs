@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, nextCalendarMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
+assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
+assert.equal(normalizeInvoiceMonth("Okt 2025-nov 2025"), null);
 const monthHistory = buildInvoiceMonthHistory({
   month: "2026-09",
   total_so_far_sek: 120,
@@ -11,8 +13,8 @@ const monthHistory = buildInvoiceMonthHistory({
   trade: { total_so_far_sek: 70 },
   grid: { total_so_far_sek: 50 },
 }, {
-  trade: [{ month: "2026-08", period_cost_before_credits_sek: 100 }],
-  grid: [{ month: "2026-08", period_cost_before_credits_sek: 60 }],
+  trade: [{ month: "Aug 2026", period_cost_before_credits_sek: 100 }],
+  grid: [{ month: "Aug 2026", period_cost_before_credits_sek: 60 }],
 });
 assert.deepEqual(monthHistory.map((item) => item.month), ["2026-09", "2026-08"]);
 assert.equal(monthHistory[1].coverage, "complete");
@@ -105,6 +107,11 @@ assert.match(source, /\.cost-chart \{[\s\S]*min-height: 144px;/);
 assert.match(source, /\.cost-details \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
 assert.match(source, /@container \(max-width: 600px\) \{[\s\S]*\.cost-details \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
 assert.match(source, /data-cost-history-list/);
+assert.match(source, /data-cost-history-chart/);
+assert.match(source, /data-cost-previous/);
+assert.match(source, /data-cost-next/);
+assert.match(source, /cost-main-grid/);
+assert.match(source, /Ingen daglig serie tillgänglig för vald månad/);
 assert.match(source, /buildInvoiceMonthHistory\(estimate/);
 assert.match(source, /buildCostReferenceComparisons\(monthHistory, selectedMonth, selectedCost\)/);
 assert.match(source, /cost-history-month/);

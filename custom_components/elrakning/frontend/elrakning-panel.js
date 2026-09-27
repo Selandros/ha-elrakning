@@ -1931,10 +1931,21 @@ export function nextCalendarMonth(month) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+export function normalizeInvoiceMonth(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}$/.test(trimmed)) return trimmed;
+  if (/[–—-]/.test(trimmed.replace(/^\w{3,9} \d{4}/i, ""))) return null;
+  const match = trimmed.match(/^(jan|feb|mar|apr|maj|may|jun|jul|aug|sep|okt|oct|nov|dec)[a-z]*\s+(\d{4})$/i);
+  if (!match) return null;
+  const month = { jan: 1, feb: 2, mar: 3, apr: 4, maj: 5, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, dec: 12 }[match[1].slice(0, 3).toLowerCase()];
+  return month ? `${match[2]}-${String(month).padStart(2, "0")}` : null;
+}
+
 export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
   const month = previousCalendarMonth(selectedMonth);
   const normalizeProvider = (items) => {
-    const matches = (Array.isArray(items) ? items : []).filter((invoice) => invoice && invoice.month === month);
+    const matches = (Array.isArray(items) ? items : []).filter((invoice) => invoice && normalizeInvoiceMonth(invoice.month) === month);
     const normalized = matches.map((invoice) => {
       const periodCost = Number(invoice.period_cost_before_credits_sek);
       const amountDue = Number(invoice.amount_due_sek);
@@ -1971,7 +1982,7 @@ export function buildPreviousMonthActual(invoiceSources = {}, selectedMonth) {
     };
   };
   const trade = normalizeProvider(invoiceSources.trade);
-  const gridMatches = Array.isArray(invoiceSources.grid) ? invoiceSources.grid.filter((invoice) => invoice && invoice.month === month) : [];
+  const gridMatches = Array.isArray(invoiceSources.grid) ? invoiceSources.grid.filter((invoice) => invoice && normalizeInvoiceMonth(invoice.month) === month) : [];
   const grid = gridMatches.length ? normalizeProvider(gridMatches) : {
     available: false,
     invoice_exists: false,
@@ -2041,7 +2052,8 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
   if (estimate?.month) months.add(estimate.month);
   for (const invoices of [invoiceSources.trade, invoiceSources.grid]) {
     for (const invoice of Array.isArray(invoices) ? invoices : []) {
-      if (typeof invoice?.month === "string" && /^\d{4}-\d{2}$/.test(invoice.month)) months.add(invoice.month);
+      const normalizedMonth = normalizeInvoiceMonth(invoice?.month);
+      if (normalizedMonth) months.add(normalizedMonth);
     }
   }
   return [...months].sort().reverse().slice(0, 12).map((month) => {
@@ -3100,13 +3112,11 @@ class ElrakningPanel {
             <button type="button" data-phase-history-copy hidden>Visa data</button>
           </article>
           <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
-            <div class="card-heading"><div><h2 id="cost-title">Kostnad</h2><span class="cost-period" data-cost-period></span></div><span class="status" data-cost-status></span></div>
-            <div class="cost-navigation" hidden aria-hidden="true"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><div class="cost-navigation-label"><span data-cost-selected-period></span><small data-cost-history-position></small></div><button type="button" data-cost-next aria-label="Nästa månad">›</button></div>
-            <div class="cost-history-list" data-cost-history-list role="tablist" aria-label="Månader"></div>
+            <div class="card-heading cost-card-heading"><div><h2 id="cost-title">Kostnad</h2><span class="cost-period" data-cost-period></span><span class="cost-subtitle">Översikt över kostnad, prognos och fakturahistorik</span></div><div class="cost-header-controls"><span class="status" data-cost-status></span><div class="cost-navigation" hidden aria-hidden="true"><button type="button" data-cost-previous aria-label="Föregående månad">‹</button><div class="cost-navigation-label"><span data-cost-selected-period></span><small data-cost-history-position></small></div><button type="button" data-cost-next aria-label="Nästa månad">›</button></div></div></div>
             <div class="cost-kpis" data-cost-kpis></div>
-            <div class="cost-chart" data-cost-chart aria-live="polite"></div>
             <div class="cost-comparison" data-cost-comparison></div>
-            <div class="cost-details" data-cost-summary></div>
+            <div class="cost-main-grid"><div class="cost-chart" data-cost-chart aria-live="polite"></div><div class="cost-side"><h3>Nyckeltal</h3><div class="cost-details" data-cost-summary></div></div></div>
+            <section class="cost-history-section" aria-labelledby="cost-history-title"><div class="cost-history-heading"><h3 id="cost-history-title">Månadskostnad senaste 12 månaderna</h3><span data-cost-history-status></span></div><div class="cost-history-chart" data-cost-history-chart></div><div class="cost-history-list" data-cost-history-list role="tablist" aria-label="Månader"></div></section>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>
         </div>
@@ -4464,6 +4474,10 @@ class ElrakningPanel {
           text-align: right;
         }
 
+        .cost-card-heading { align-items: center; }
+        .cost-header-controls { align-items: center; display: flex; gap: 12px; }
+        .cost-subtitle { color: var(--secondary-text-color); display: block; font-size: var(--card-legend-size); margin-top: 5px; }
+
         .cost-period {
           color: var(--secondary-text-color);
           display: block;
@@ -4474,7 +4488,7 @@ class ElrakningPanel {
         .cost-kpis {
           display: grid;
           gap: 8px;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           margin-top: 12px;
         }
 
@@ -4486,6 +4500,17 @@ class ElrakningPanel {
         }
 
         .cost-history-list:empty { display: none; }
+
+        .cost-history-section { border-top: 1px solid var(--divider-color); margin-top: 16px; padding-top: 14px; }
+        .cost-history-heading { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+        .cost-history-heading h3, .cost-side h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+        .cost-history-heading span { color: var(--secondary-text-color); font-size: var(--card-legend-size); }
+        .cost-history-chart { align-items: end; display: flex; gap: 6px; height: 92px; margin-top: 12px; overflow-x: auto; padding: 4px 2px 20px; }
+        .cost-history-bar-item { align-items: center; display: flex; flex: 1 0 34px; flex-direction: column; gap: 4px; height: 100%; justify-content: end; min-width: 34px; }
+        .cost-history-bar { background: var(--primary-color); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
+        .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
+        .cost-history-bar-item.unavailable .cost-history-bar { background: var(--divider-color); height: 3px !important; opacity: 1; }
+        .cost-history-bar-label { color: var(--secondary-text-color); font-size: 10px; white-space: nowrap; }
 
         .cost-history-month {
           background: transparent;
@@ -4529,6 +4554,10 @@ class ElrakningPanel {
           margin-top: 12px;
           position: relative;
         }
+
+        .cost-main-grid { align-items: start; display: grid; gap: 18px; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); }
+        .cost-side { border-left: 1px solid var(--divider-color); min-width: 0; padding-left: 16px; }
+        .cost-chart-unavailable { align-items: center; border: 1px dashed var(--divider-color); color: var(--secondary-text-color); display: flex; min-height: 144px; justify-content: center; padding: 16px; text-align: center; }
 
         .cost-chart-svg {
           display: block;
@@ -4680,10 +4709,13 @@ class ElrakningPanel {
         }
 
         @container (max-width: 600px) {
-          .cost-kpis { gap: 8px; }
+          .cost-kpis { gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .cost-kpi strong { font-size: 1rem; }
           .cost-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .cost-comparison { grid-template-columns: 1fr; }
+          .cost-main-grid { grid-template-columns: 1fr; }
+          .cost-side { border-left: 0; border-top: 1px solid var(--divider-color); padding-left: 0; padding-top: 14px; }
+          .cost-header-controls { align-items: flex-end; flex-direction: column; gap: 6px; }
         }
 
         .card-source-action {
@@ -9881,6 +9913,8 @@ class ElrakningPanel {
     const nextButton = this.host.querySelector("[data-cost-next]");
     const historyPosition = this.host.querySelector("[data-cost-history-position]");
     const historyList = this.host.querySelector("[data-cost-history-list]");
+    const historyChart = this.host.querySelector("[data-cost-history-chart]");
+    const historyStatus = this.host.querySelector("[data-cost-history-status]");
     if (!card || !period || !status || !kpis || !chart || !comparisonElement || !summary) return;
     const estimate = this._invoiceEstimateRaw;
     const currentMonth = estimate?.month || null;
@@ -9914,6 +9948,25 @@ class ElrakningPanel {
         return button;
       }));
     }
+    if (historyChart) {
+      const completeHistory = monthHistory.filter((item) => item.coverage === "complete" && Number.isFinite(Number(item.total_sek)));
+      const maxHistoryValue = Math.max(1, ...completeHistory.map((item) => Number(item.total_sek)));
+      historyChart.replaceChildren(...monthHistory.map((item) => {
+        const itemElement = document.createElement("div");
+        itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${item.coverage !== "complete" ? " unavailable" : ""}`;
+        const bar = document.createElement("div");
+        bar.className = "cost-history-bar";
+        const value = Number(item.total_sek);
+        if (item.coverage === "complete" && Number.isFinite(value)) bar.style.height = `${Math.max(8, value / maxHistoryValue * 62)}px`;
+        bar.title = item.coverage === "complete" && Number.isFinite(value) ? this._formatSek(value) : "Delvis underlag";
+        const label = document.createElement("span");
+        label.className = "cost-history-bar-label";
+        label.textContent = this._formatInvoiceMonth(item.month).split(" ")[0];
+        itemElement.append(bar, label);
+        return itemElement;
+      }));
+      if (historyStatus) historyStatus.textContent = completeHistory.length ? `${completeHistory.length} kompletta av ${monthHistory.length}` : "Ingen komplett månadsserie";
+    }
     if (!estimate) {
       status.textContent = "";
       kpis.replaceChildren();
@@ -9922,10 +9975,13 @@ class ElrakningPanel {
       summary.replaceChildren();
       return;
     }
+    const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.total_sek;
+    const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
     const currentRows = showingCurrent ? [
       ["Estimerad månad", estimate.estimated_month_total_sek],
       ["Kostnad hittills", estimate.total_so_far_sek],
       ["Prognos återstående", estimate.forecast_remaining_total_sek],
+      ["Mot förra månaden", comparisons[0]?.available ? `${comparisons[0].direction === "up" ? "↑" : comparisons[0].direction === "down" ? "↓" : "="} ${this._formatSek(Math.abs(comparisons[0].difference_sek))}` : "Ej tillgängligt"],
     ] : [];
     status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
     kpis.replaceChildren(...currentRows.map(([label, value]) => {
@@ -9934,14 +9990,12 @@ class ElrakningPanel {
       const name = document.createElement("span");
       name.textContent = label;
       const output = document.createElement("strong");
-      output.textContent = Number.isFinite(Number(value)) ? this._formatSek(Number(value)) : "–";
+      output.textContent = typeof value === "string" ? value : Number.isFinite(Number(value)) ? this._formatSek(Number(value)) : "–";
       item.append(name, output);
       return item;
     }));
     const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
     this._renderCostChart(chart, series);
-    const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.total_sek;
-    const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
     comparisonElement.replaceChildren();
     comparisonElement.append(...comparisons.map((comparison) => {
       const item = document.createElement("div");
@@ -9989,7 +10043,7 @@ class ElrakningPanel {
   _renderCostChart(chart, series) {
     if (!chart) return;
     if (!series.actual_display?.length && !series.estimated_past?.length && !series.forecast_future?.length && !series.previous.length) {
-      chart.replaceChildren();
+      chart.innerHTML = '<div class="cost-chart-unavailable">Ingen daglig serie tillgänglig för vald månad</div>';
       return;
     }
     const width = 960;
