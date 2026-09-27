@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -21,6 +21,34 @@ assert.equal(monthHistory[1].coverage, "complete");
 assert.equal(monthHistory[1].total_sek, 160);
 assert.equal(buildCostMonthComparison(monthHistory[1], monthHistory[0]).available, false);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 160 }, { month: "2026-07", coverage: "complete", total_sek: 200 }).difference_sek, -40);
+const zeroInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
+  trade: [{ month: "Aug 2026", amount_due_sek: 0, revision: 1, _invoice_key: "zero-trade" }],
+  grid: [{ month: "Aug 2026", amount_due_sek: 0, revision: 1, _invoice_key: "zero-grid" }],
+});
+assert.equal(zeroInvoice[1].coverage, "complete");
+assert.equal(zeroInvoice[1].total_sek, 0);
+assert.deepEqual(costHistoryDisplayOrder(zeroInvoice).map((item) => item.month), ["2026-08", "2026-09"]);
+const missingAmount = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
+  trade: [{ month: "Aug 2026", amount_due_sek: null, period_cost_before_credits_sek: null }],
+  grid: [],
+});
+assert.deepEqual(missingAmount.map((item) => item.month), ["2026-09"]);
+const revisedInvoice = buildPreviousMonthActual({
+  trade: [
+    { month: "Aug 2026", amount_due_sek: 25, revision: 1, _invoice_key: "old" },
+    { month: "Aug 2026", amount_due_sek: 0, revision: 2, _invoice_key: "new" },
+  ],
+  grid: [{ month: "Aug 2026", amount_due_sek: 0, revision: 1 }],
+}, "2026-09");
+assert.equal(revisedInvoice.trade.total_sek, 0);
+assert.equal(revisedInvoice.total_sek, 0);
+const multiMonthInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
+  trade: [{ month: "Aug 2026-Sep 2026", amount_due_sek: 100 }],
+  grid: [],
+});
+assert.deepEqual(multiMonthInvoice.map((item) => item.month), ["2026-09"]);
+assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 0 }, { month: "2026-07", coverage: "complete", total_sek: 50 }).difference_sek, -50);
+assert.equal(buildCostReferenceComparisons([{ month: "2026-09", coverage: "complete", total_sek: 25 }, { month: "2026-08", coverage: "complete", total_sek: 0 }], "2026-09", 25)[0].available, true);
 const twelveMonths = Array.from({ length: 13 }, (_, index) => ({ month: `202${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, period_cost_before_credits_sek: 100 + index }));
 assert.equal(buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, { trade: twelveMonths, grid: [] }).length, 12);
 const references = buildCostReferenceComparisons([
@@ -111,8 +139,12 @@ assert.match(source, /data-cost-history-list/);
 assert.match(source, /data-cost-history-chart/);
 assert.match(source, /const displayHistory = costHistoryDisplayOrder\(monthHistory\)/);
 assert.match(source, /historyChart\.replaceChildren\(\.\.\.displayHistory\.map/);
-assert.match(source, /data-cost-previous/);
-assert.match(source, /data-cost-next/);
+assert.doesNotMatch(source, /data-cost-previous/);
+assert.doesNotMatch(source, /data-cost-next/);
+assert.match(source, /historyList.addEventListener\("click"/);
+assert.match(source, /button.setAttribute\("aria-selected", String\(item.month === selectedMonth\)\)/);
+assert.match(source, /<div class="card-heading cost-card-heading"><h2 id="cost-title">Kostnad<\/h2><\/div>/);
+assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kostnad, prognos och fakturahistorik/);
 assert.match(source, /cost-main-grid/);
 assert.match(source, /Ingen daglig serie tillgänglig för vald månad/);
 assert.match(source, /buildInvoiceMonthHistory\(estimate/);
