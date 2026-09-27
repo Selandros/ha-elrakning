@@ -123,4 +123,42 @@ def test_benchmark_evidence_is_site_scoped_and_bounded_readback():
         await restarted.async_load()
         assert restarted.public_evidence(SITE)["schema"] == "ella_replay_benchmark_evidence.v1"
 
+    import asyncio
     asyncio.run(run())
+
+
+def test_transient_no_load_snapshot_does_not_erase_known_site_metadata():
+    store = ReplayArtifactStore(object())
+    store.state["evidence"][SITE] = {
+        "schema": "ella_replay_benchmark_evidence.v1",
+        "site_id": SITE,
+        "status": "blocked",
+        "blocker": "no_good_frame",
+        "load_frame": {"frame_id": "frame-1", "quality_status": "partial"},
+        "resource_id": "ess-1",
+        "economics": {"causal": True},
+        "last_attempt": {"at": "old", "reason": "old_reason"},
+    }
+    incoming = {
+        "site_id": SITE,
+        "status": "blocked",
+        "blocker": "no_load_frame",
+        "load_frame": None,
+        "resource_id": None,
+        "economics": {"causal": False},
+        "last_attempt": {"at": "new", "reason": "no_mature_causal_96_slot_window"},
+        "runner": {"available": False},
+    }
+
+    async def save(_state):
+        return None
+
+    store.store.async_save = save
+    asyncio.run(store.async_record_evidence(SITE, incoming))
+
+    evidence = store.public_evidence(SITE)
+    assert evidence["blocker"] == "no_good_frame"
+    assert evidence["load_frame"]["frame_id"] == "frame-1"
+    assert evidence["resource_id"] == "ess-1"
+    assert evidence["economics"] == {"causal": True}
+    assert evidence["last_attempt"]["reason"] == "no_mature_causal_96_slot_window"

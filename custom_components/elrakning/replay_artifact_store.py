@@ -127,6 +127,21 @@ class ReplayArtifactStore:
         sites = self.state.setdefault("evidence", {})
         if site_id not in sites and len(sites) >= MAX_EVIDENCE_SITES:
             return False
+        previous = sites.get(site_id)
+        # A startup runner can observe the store before canonical frames have
+        # finished loading. Do not let that transient empty snapshot erase
+        # richer immutable metadata already observed for the same site.
+        if (
+            isinstance(previous, dict)
+            and bounded.get("blocker") == "no_load_frame"
+            and isinstance(previous.get("load_frame"), dict)
+        ):
+            preserved = deepcopy(previous)
+            preserved["last_attempt"] = bounded.get("last_attempt", preserved.get("last_attempt"))
+            preserved["runner"] = bounded.get("runner", preserved.get("runner"))
+            preserved["status"] = "blocked"
+            preserved["qualified"] = False
+            bounded = preserved
         sites[site_id] = bounded
         await self.store.async_save(self.state)
         return True
