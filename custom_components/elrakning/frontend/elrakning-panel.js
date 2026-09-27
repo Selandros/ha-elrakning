@@ -3219,9 +3219,9 @@ class ElrakningPanel {
           <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
             <div class="card-heading cost-card-heading"><h2 id="cost-title">Kostnad</h2></div>
             <div class="cost-kpis" data-cost-kpis></div>
-            <div class="cost-comparison" data-cost-comparison></div>
             <div class="cost-main-grid"><div class="cost-chart" data-cost-chart aria-live="polite"></div><div class="cost-side"><h3>Nyckeltal</h3><div class="cost-details" data-cost-summary></div></div></div>
             <section class="cost-history-section" aria-labelledby="cost-history-title"><div class="cost-history-heading"><h3 id="cost-history-title">Månadskostnad senaste 12 månaderna</h3><span class="status" data-cost-status></span><span data-cost-history-status></span></div><div class="cost-history-chart" data-cost-history-chart role="tablist" aria-label="Månader"></div></section>
+            <div class="cost-comparison" data-cost-comparison></div>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>
         </div>

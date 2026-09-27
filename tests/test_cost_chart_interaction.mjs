@@ -271,5 +271,7 @@ assert.match(source, /cost-main-grid/);
 assert.match(source, /Ingen daglig serie tillgänglig för vald månad/);
 assert.match(source, /buildInvoiceMonthHistory\(estimate/);
 assert.match(source, /buildCostReferenceComparisons\(monthHistory, selectedMonth, selectedCost\)/);
+const costHistoryMarkup = source.slice(source.indexOf('<section class="cost-history-section"'), source.indexOf('</article>', source.indexOf('<section class="cost-history-section"')));
+assert.ok(costHistoryMarkup.indexOf('data-cost-history-chart') < costHistoryMarkup.indexOf('data-cost-comparison'), "history bars must precede comparison cards");
 
 console.log("cost chart interaction and compact layout regression passed");
