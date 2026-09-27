@@ -600,6 +600,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
+    _schedule_monthly_forecast_capture(hass)
     return True
 
 

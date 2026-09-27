@@ -42,6 +42,9 @@ class FakeHass:
     def async_create_task(self, coroutine):
         return asyncio.create_task(coroutine)
 
+    def create_task(self, coroutine):
+        return asyncio.create_task(coroutine)
+
     async def async_add_executor_job(self, function, *args):
         self.executor_calls.append(function)
         return function(*args)

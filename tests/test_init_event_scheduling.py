@@ -274,6 +274,14 @@ def test_monthly_forecast_capture_persists_fail_closed_builder_errors():
     assert "manager.async_record_unavailable" in source[wrapper:implementation]
 
 
+def test_monthly_forecast_has_idempotent_post_ready_refresh_trigger():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    ready = source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
+    return_statement = source.index("    return True", ready)
+    assert "_schedule_monthly_forecast_capture(hass)" in source[ready:return_statement]
+
+
 def test_control_plane_state_handlers_have_safe_pre_ready_contract():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
     source = source_path.read_text(encoding="utf-8")
