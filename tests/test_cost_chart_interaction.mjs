@@ -50,6 +50,20 @@ assert.equal(tradeOnlyPartial.coverage, "partial");
 assert.equal(tradeOnlyPartial.known_amount_gross_sek, 25);
 assert.deepEqual(tradeOnlyPartial.sources_present, ["elhandel"]);
 assert.deepEqual(tradeOnlyPartial.sources_missing, ["elnät"]);
+const gridOnlyPartial = buildPreviousMonthActual({
+  trade: [],
+  grid: [{ month: "Aug 2026", amount_due_sek: 40, vat_included: true, _invoice_key: "grid-only" }],
+}, "2026-09");
+assert.equal(gridOnlyPartial.coverage, "partial");
+assert.equal(gridOnlyPartial.known_amount_gross_sek, 40);
+assert.deepEqual(gridOnlyPartial.sources_present, ["elnät"]);
+const partialTotalComparison = buildCostReferenceComparisons([
+  { month: "2026-09", current: true, coverage: "partial", estimated_total_sek: 240 },
+  { month: "2026-08", coverage: "partial", known_amount_gross_sek: 25, source_signature: "SEK:gross_invoice_total", tax_compatible: true },
+], "2026-09", null);
+assert.equal(partialTotalComparison[0].available, true);
+assert.equal(partialTotalComparison[0].difference_sek, 215);
+assert.equal(partialTotalComparison[0].partial_baseline, true);
 const zeroTradePartial = buildPreviousMonthActual({
   trade: [{ month: "Aug 2026", amount_due_sek: 0, _invoice_key: "zero-trade-only" }],
   grid: [],
@@ -90,24 +104,14 @@ assert.equal(estimatedCurrentComparisons[0].difference_sek, 40);
 assert.equal(estimatedCurrentComparisons[0].current_value_source, "estimated_month_total_sek");
 assert.equal(estimatedCurrentComparisons[1].available, true);
 assert.equal(estimatedCurrentComparisons[2].available, true);
-const componentFallbackComparisons = buildCostReferenceComparisons([
+const componentOnlyComparisons = buildCostReferenceComparisons([
   { month: "2026-09", current: true, coverage: "partial", estimated_total_sek: 240, comparison_components: { elhandel: { value_sek: 110, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
   { month: "2026-08", coverage: "partial", comparison_components: { elhandel: { value_sek: 80, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
   { month: "2026-07", coverage: "partial", comparison_components: { elhandel: { value_sek: 100, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
   { month: "2026-06", coverage: "partial", comparison_components: { elhandel: { value_sek: 60, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
 ], "2026-09", null);
-assert.equal(componentFallbackComparisons[0].available, true);
-assert.equal(componentFallbackComparisons[0].basis_label, "Elhandel");
-assert.equal(componentFallbackComparisons[0].difference_sek, 30);
-assert.equal(componentFallbackComparisons[1].difference_sek, 30);
-assert.equal(componentFallbackComparisons[2].difference_sek, 30);
-const componentZeroComparison = buildCostReferenceComparisons([
-  { month: "2026-09", current: true, coverage: "partial", estimated_total_sek: 0, comparison_components: { elhandel: { value_sek: 0, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
-  { month: "2026-08", coverage: "partial", comparison_components: { elhandel: { value_sek: 0, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
-], "2026-09", null);
-assert.equal(componentZeroComparison[0].available, true);
-assert.equal(componentZeroComparison[0].difference_sek, 0);
-assert.equal(componentZeroComparison[0].difference_percent, null);
+assert.equal(componentOnlyComparisons[0].available, false);
+assert.equal(componentOnlyComparisons[0].comparison_scope, "current_estimated_month_vs_invoice_total_history");
 const componentHistory = buildInvoiceMonthHistory({
   month: "2026-09",
   estimated_month_total_sek: 240,
@@ -118,13 +122,13 @@ const componentHistory = buildInvoiceMonthHistory({
   trade: [{ month: "Aug 2026", amount_due_sek: 80, vat_included: true, currency: "SEK" }],
   grid: [],
 });
-assert.equal(componentHistory[0].comparison_components.elhandel.value_sek, 110);
-assert.equal(componentHistory[1].comparison_components.elhandel.value_sek, 80);
-const incompatibleComponent = buildCostReferenceComparisons([
-  { month: "2026-09", current: true, coverage: "partial", estimated_total_sek: 240, comparison_components: { elhandel: { value_sek: 110, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
-  { month: "2026-08", coverage: "partial", comparison_components: { elhandel: { value_sek: 80, basis_key: "elhandel_gross", currency: "EUR", tax_basis_class: "gross" } } },
-], "2026-09", null);
-assert.equal(incompatibleComponent[0].available, false);
+assert.equal("comparison_components" in componentHistory[0], false);
+assert.equal("comparison_components" in componentHistory[1], false);
+const incompatibleTotal = buildCostReferenceComparisons([
+  { month: "2026-09", coverage: "complete", total_sek: 240, source_signature: "SEK:gross_invoice_total", tax_compatible: true },
+  { month: "2026-08", coverage: "complete", total_sek: 80, source_signature: "EUR:gross_invoice_total", tax_compatible: true },
+], "2026-09", 240);
+assert.equal(incompatibleTotal[0].available, false);
 const twelveMonths = Array.from({ length: 13 }, (_, index) => ({ month: `202${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, period_cost_before_credits_sek: 100 + index, vat_included: true }));
 assert.equal(buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, { trade: twelveMonths, grid: [] }).length, 12);
 const references = buildCostReferenceComparisons([
@@ -133,8 +137,8 @@ const references = buildCostReferenceComparisons([
   { month: "2026-07", coverage: "complete", total_sek: 120 },
   { month: "2026-06", coverage: "partial", total_sek: 200 },
 ], "2026-09", 100);
+assert.equal(references[0].available, true);
 assert.equal(references[0].difference_sek, 20);
-assert.equal(references[1].available, true);
 assert.equal(references[1].sample_count, 2);
 assert.equal(references[2].sample_count, 2);
 const comparablePartialReferences = buildCostReferenceComparisons([
@@ -261,8 +265,8 @@ assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, min
 assert.match(source, /Mot förra månaden/);
 assert.match(source, /Mot 3 månaders snitt/);
 assert.match(source, /Mot 12 månaders snitt/);
-assert.match(source, /comparison\.basis_label \? `\$\{comparison\.label\} · \$\{comparison\.basis_label\}`/);
-assert.match(source, /basis_key: "elhandel_gross"/);
+assert.doesNotMatch(source, /comparison\.basis_label/);
+assert.doesNotMatch(source, /basis_key: "elhandel_gross"/);
 assert.match(source, /cost-main-grid/);
 assert.match(source, /Ingen daglig serie tillgänglig för vald månad/);
 assert.match(source, /buildInvoiceMonthHistory\(estimate/);
