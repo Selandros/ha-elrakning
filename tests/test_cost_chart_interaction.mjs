@@ -290,6 +290,9 @@ assert.match(source, /\.cost-kpi \{[\s\S]*background: var\(--ha-card-background,
 assert.match(source, /\.cost-kpis \{ gap: 8px; grid-template-columns: 1fr; \}/);
 assert.match(source, /cost-kpi-comparison/);
 assert.match(source, /\.cost-kpi-value-row \{[\s\S]*display: flex;[\s\S]*gap: 8px;/);
+const costKpiComparisonCss = source.match(/\.cost-kpi-comparison \{[^}]*\}/)?.[0] || "";
+assert.match(costKpiComparisonCss, /font-size: 1\.2rem;[\s\S]*font-weight: 600;[\s\S]*padding: 0;/);
+assert.doesNotMatch(costKpiComparisonCss, /border: 1px solid/);
 assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
 assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*valueRow\.className = "cost-kpi-value-row"[\s\S]*valueRow\.append\(output, bubble\)[\s\S]*item\.append\(name, valueRow\)/);
 assert.doesNotMatch(costKpiRender, /item\.append\(name, output, bubble\)/);

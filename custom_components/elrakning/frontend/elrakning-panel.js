@@ -4728,14 +4728,13 @@ class ElrakningPanel {
 
         .cost-kpi-comparison {
           align-items: center;
-          border: 1px solid var(--divider-color);
-          border-radius: var(--ha-card-border-radius, 8px);
           color: var(--secondary-text-color);
           display: inline-flex;
-          font-size: var(--card-legend-size);
+          font-size: 1.2rem;
+          font-weight: 600;
           margin-top: 0;
           max-width: max-content;
-          padding: 3px 7px;
+          padding: 0;
           white-space: nowrap;
         }
 
