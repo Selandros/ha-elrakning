@@ -594,13 +594,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
         hass.bus.async_listen(EON_GRID_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
     ]
-    # Start only after all source-event listeners are installed so startup updates cannot be lost.
-    frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
-        _async_capture_monthly_forecast(hass)
-    )
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
-    _schedule_monthly_forecast_capture(hass)
+    # Complete one deterministic startup capture after all source-event listeners are installed.
+    await _async_capture_monthly_forecast(hass)
     return True
 
 
