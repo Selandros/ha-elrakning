@@ -156,11 +156,18 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     now = datetime.now(UTC)
     run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now)
     if run is None:
-        return {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable")}
+        result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": evidence}
+        store = hass.data.get("elrakning", {}).get("replay_artifact_store")
+        if store:
+            await store.async_record_attempt(result)
+        return result
     holdouts = [{"kind": kind, "run_fingerprint": run["run_fingerprint"], "source": "deterministic_fixture", "contaminated": False, "incomplete": False} for kind in ("season", "site", "dst", "gap", "source_generation_change", "publication_cutoff")]
     holdout_status = validate_holdout_matrix(holdouts)
     artifact = build_artifact(run, dataset_identity={"source": "canonical_storage", "site_id": site_id, "evidence": evidence}, parameter_identity={"baselines": ["no_battery", "self_consumption_only"], "holdout_policy": "v1"}, holdouts=holdouts)
     store = hass.data.get("elrakning", {}).get("replay_artifact_store")
     accepted = bool(artifact and holdout_status["qualified"] and store and await store.async_append(artifact))
     readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
-    return {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": evidence}
+    result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": evidence}
+    if store:
+        await store.async_record_attempt(result)
+    return result

@@ -80,6 +80,10 @@ def test_store_is_site_scoped_bounded_and_schema_fail_closed():
         assert restarted.state["available"] is False
         assert await restarted.async_append(_artifact()) is False
 
+        store.state["available"] = True
+        await store.async_record_attempt({"accepted": False, "site_id": SITE, "reason": "no_mature_window", "evidence": {"count": 0}})
+        assert store.state["last_attempt"]["reason"] == "no_mature_window"
+
     asyncio.run(run())
 
 

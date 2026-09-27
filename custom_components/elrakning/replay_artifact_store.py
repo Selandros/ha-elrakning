@@ -97,7 +97,7 @@ class ReplayArtifactStore:
 
     def __init__(self, hass: Any) -> None:
         self.store = Store(hass, STORE_VERSION, STORE_KEY)
-        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}, "available": True}
+        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}, "available": True, "last_attempt": None}
 
     async def async_load(self) -> None:
         cached = await self.store.async_load()
@@ -106,7 +106,12 @@ class ReplayArtifactStore:
         if not isinstance(cached, dict) or cached.get("schema") != SCHEMA or not isinstance(cached.get("sites"), dict):
             self.state = {"schema": SCHEMA, "version": 1, "sites": {}, "available": False, "reason": "artifact_schema_mismatch"}
             return
-        self.state = {"schema": SCHEMA, "version": 1, "sites": cached["sites"], "available": True}
+        self.state = {"schema": SCHEMA, "version": 1, "sites": cached["sites"], "available": True, "last_attempt": cached.get("last_attempt")}
+
+    async def async_record_attempt(self, result: dict[str, Any]) -> None:
+        """Persist one bounded producer outcome for runtime readback diagnostics."""
+        self.state["last_attempt"] = deepcopy({key: result.get(key) for key in ("accepted", "site_id", "reason", "artifact_id", "readback", "qualification", "holdouts", "evidence")})
+        await self.store.async_save(self.state)
 
     async def async_append(self, artifact: Any) -> bool:
         normalized = normalize_artifact(artifact)
