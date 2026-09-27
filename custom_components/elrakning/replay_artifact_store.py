@@ -60,7 +60,7 @@ def build_artifact(
         "schema": SCHEMA,
         "site_id": run["site_id"],
         "decision_at": run["decision_at"],
-        "horizon": {"slot_count": sum(len(item.get("points", [])) for item in (run.get("baselines") or {}).values() if isinstance(item, dict))},
+        "horizon": {"slot_count": max((len(item.get("points", [])) for item in (run.get("baselines") or {}).values() if isinstance(item, dict)), default=0)},
         "run_fingerprint": run.get("run_fingerprint"),
         "dataset_identity": deepcopy(dataset_identity),
         "input_identity": deepcopy(run.get("input_identity") or {}),

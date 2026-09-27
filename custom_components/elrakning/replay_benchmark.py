@@ -685,6 +685,8 @@ def build_replay_run(
         reasons.append("incomplete_slot_set")
     ess_reasons = _validate_ess(ess)
     actual_by_slot, _ = _actual_by_slot(actual_rows, site_id)
+    replay_slot_keys = {_iso(slot.get("valid_at")) for slot in normalized_slots}
+    actual_outcome_count = sum(key in replay_slot_keys for key in actual_by_slot)
     # Irrelevant future or other-site frames are safely excluded. Contamination
     # is reserved for data referenced by the replay that cannot be qualified.
     contamination = "slot_frame_provenance_missing" in reasons or "frame_quality_unqualified" in reasons
@@ -717,7 +719,7 @@ def build_replay_run(
             "reasons": sorted(set(all_reasons)),
             "contaminated": contamination,
             "incomplete": any(reason.startswith(("slot_", "incomplete_")) for reason in all_reasons),
-            "actual_outcome_count": len(actual_by_slot),
+            "actual_outcome_count": actual_outcome_count,
             "hindsight_used_for_decision": False,
         },
         "input_identity": {

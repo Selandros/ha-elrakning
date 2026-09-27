@@ -72,6 +72,18 @@ def test_replay_is_deterministic_and_site_scoped():
     assert first["baselines"]["self_consumption_only"]["scorecard"]["import_kwh"] == 0.0
 
 
+def test_actual_outcome_count_is_limited_to_replay_horizon():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    slots = _slots(decision + timedelta(minutes=15), count=2)
+    rows = [
+        {"site_id": SITE, "logical_role": "grid.power/import", "interval_start": slot["valid_at"], "value": 1000, "quality_status": "good", "coverage_ratio": 1.0}
+        for slot in slots
+    ]
+    rows.append({"site_id": SITE, "logical_role": "grid.power/import", "interval_start": "2026-09-03T12:00:00+00:00", "value": 1000, "quality_status": "good", "coverage_ratio": 1.0})
+    result = build_replay_run(site_id=SITE, decision_at=decision, frames=_frames(), slots=slots, actual_rows=rows, model_identity={"model": "fixture"}, ess=ESS)
+    assert result["qualification"]["actual_outcome_count"] == 2
+
+
 def test_gaps_stale_and_missing_frame_provenance_fail_closed():
     decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
     slots = _slots(datetime(2026, 9, 1, 12, 15, tzinfo=UTC))
