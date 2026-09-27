@@ -291,7 +291,15 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
         actual_import_to_date_kwh=actual.get("actual_import_to_date_kwh"),
         future_points=slots.get("slots") or [], price_periods=price_periods,
         remaining_fixed_cost_sek=fixed_total * max(0.0, (month_end - now).total_seconds() / max(1.0, (month_end - month_start).total_seconds())),
-        source_generations=sorted({str(row.get("source_generation_id")) for row in rows if row.get("source_generation_id")}),
+        source_generations=sorted({
+            str(row.get("source_generation_id"))
+            for row in rows
+            if row.get("source_generation_id")
+        } | {
+            str(period.get("price_source_generation_id"))
+            for period in price_periods
+            if period.get("price_source_generation_id")
+        }),
         weather={"support_count": 0, "correction_enabled": False, "reason": "temperature_residual_support_missing"},
     )
     actual_by_day = {}

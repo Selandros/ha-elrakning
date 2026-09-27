@@ -120,6 +120,46 @@ def _causal_price_fallback(
     }
 
 
+def _causal_trade_price_profile(
+    periods: list[dict[str, Any]], moment: datetime, decision: datetime,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """Build a bounded trade-price profile from observed periods only."""
+    candidates = []
+    for period in periods or []:
+        start = _moment(period.get("start"))
+        end = _moment(period.get("end"))
+        known_at = _moment(period.get("price_known_at"))
+        trade = _number(period.get("trade_customer_price_ore_per_kwh"))
+        if (
+            not start or not end or end <= start or end > decision
+            or (known_at and known_at > decision) or trade is None or trade < 0
+        ):
+            continue
+        candidates.append((start, end, trade, period))
+    if not candidates:
+        return None, None
+    slot_key = moment.hour * 4 + moment.minute // 15
+    exact = [item for item in candidates if item[0].weekday() == moment.weekday() and item[0].hour * 4 + item[0].minute // 15 == slot_key]
+    broader = [item for item in candidates if item[0].weekday() == moment.weekday() and item[0].hour == moment.hour]
+    selected = exact or broader
+    if not selected:
+        return None, None
+    selected = sorted(selected, key=lambda item: (item[0], item[1], json.dumps(item[3], sort_keys=True, default=str)))[-28:]
+    latest = selected[-1][3]
+    return sum(item[2] for item in selected) / len(selected), {
+        "method": "causal_weekday_slot_trade_price_profile" if exact else "causal_weekday_hour_trade_price_profile",
+        "basis": "trade_customer_gross_ex_grid",
+        "sample_support": len(selected),
+        "historical_window_start": selected[0][0].isoformat(),
+        "historical_window_end": selected[-1][1].isoformat(),
+        "known_at": decision.isoformat(),
+        "source_generation_id": latest.get("price_source_generation_id"),
+        "area": latest.get("price_area"),
+        "currency": latest.get("price_currency"),
+        "fallback_reason": "provider_horizon_exhausted",
+    }
+
+
 def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datetime) -> float:
     normalized = []
     for point in points or []:
@@ -239,10 +279,23 @@ def build_month_end_slots(
         if point is not None:
             price, source = _price_at(known_price_periods, cursor)
             price_method = "causal_known_price"
+            energy_price = None
+            energy_source = None
             if price is None:
                 price, source = _causal_price_fallback(known_price_periods, decision)
-                price_method = "causal_recent_known_price_fallback" if price is not None else "price_missing"
-            point = {**point, "price_ore_per_kwh_gross": price, "price_provenance": source or {"method": price_method}, "price_method": price_method}
+                if price is not None:
+                    price_method = "causal_recent_known_price_fallback"
+                else:
+                    energy_price, energy_source = _causal_trade_price_profile(known_price_periods, cursor, decision)
+                    price_method = energy_source.get("method") if energy_source else "price_missing"
+            point = {
+                **point,
+                "price_ore_per_kwh_gross": price,
+                "price_provenance": source or {"method": price_method},
+                "price_method": price_method,
+                "energy_price_ore_per_kwh_gross": energy_price,
+                "energy_price_provenance": energy_source or {},
+            }
             slots.append(point)
         cursor += timedelta(seconds=SLOT_SECONDS)
     expected = int((end - decision).total_seconds() / SLOT_SECONDS)
@@ -262,6 +315,10 @@ def build_month_end_slots(
         "fallback_slot_count": sum(item.get("method") != "canonical_power_forecast" for item in slots),
         "method_counts": method_counts,
         "price_method_counts": price_method_counts,
+        "energy_price_method_counts": {
+            method: sum(1 for slot in slots if slot.get("energy_price_provenance", {}).get("method") == method)
+            for method in sorted({slot.get("energy_price_provenance", {}).get("method") for slot in slots if slot.get("energy_price_provenance", {}).get("method")})
+        },
         "price_missing_slot_count": sum(item.get("price_ore_per_kwh_gross") is None for item in slots),
         "weather_corrected_slot_count": 0,
         "weather_support_count": 0,
@@ -316,6 +373,8 @@ def build_monthly_cost_forecast(
             "price_ore_per_kwh_gross": _number(raw.get("price_ore_per_kwh_gross")),
             "price_provenance": raw.get("price_provenance") or {},
             "price_method": raw.get("price_method", "unknown"),
+            "energy_price_ore_per_kwh_gross": _number(raw.get("energy_price_ore_per_kwh_gross")),
+            "energy_price_provenance": raw.get("energy_price_provenance") or {},
         }
         previous = points.get(valid_at)
         if previous is not None and json.dumps(previous, sort_keys=True, default=str) != json.dumps(candidate, sort_keys=True, default=str):
@@ -330,6 +389,8 @@ def build_monthly_cost_forecast(
     first_missing: dict[str, str] = {}
     method_counts: dict[str, int] = {}
     price_method_counts: dict[str, int] = {}
+    energy_price_method_counts: dict[str, int] = {}
+    grid_tariff_missing_count = 0
     cursor = _next_slot_boundary(decision)
     while cursor < end:
         point = points.get(cursor)
@@ -347,9 +408,18 @@ def build_monthly_cost_forecast(
             price_ore = _number(point.get("price_ore_per_kwh_gross"))
             price_source = point.get("price_provenance") if price_ore is not None else None
         if price_ore is None:
+            energy_price = _number(point.get("energy_price_ore_per_kwh_gross"))
+            energy_source = point.get("energy_price_provenance") or {}
+            if energy_price is not None:
+                method = str(energy_source.get("method") or "energy_price_available")
+                energy_price_method_counts[method] = energy_price_method_counts.get(method, 0) + 1
+                grid_tariff_missing_count += 1
+                missing_reasons["grid_tariff_missing"] = missing_reasons.get("grid_tariff_missing", 0) + 1
+                first_missing.setdefault("grid_tariff_missing", cursor.isoformat())
+            else:
+                missing_reasons["price_missing"] = missing_reasons.get("price_missing", 0) + 1
+                first_missing.setdefault("price_missing", cursor.isoformat())
             missing.append(cursor.isoformat())
-            missing_reasons["price_missing"] = missing_reasons.get("price_missing", 0) + 1
-            first_missing.setdefault("price_missing", cursor.isoformat())
             cursor += timedelta(seconds=SLOT_SECONDS)
             continue
         price_method = point.get("price_method") or "causal_point_price"
@@ -365,7 +435,11 @@ def build_monthly_cost_forecast(
         day["slot_count"] += 1
         cursor = point["end_at"]
     quality = "qualified" if not missing else "unavailable"
-    reasons = [] if not missing else ["causal_future_slot_or_price_missing"]
+    reasons = []
+    if missing_reasons.get("grid_tariff_missing"):
+        reasons.append("grid_tariff_missing")
+    if missing_reasons.get("price_missing") or missing_reasons.get("forecast_slot_missing"):
+        reasons.append("causal_future_slot_or_price_missing")
     remaining_fixed = _number(remaining_fixed_cost_sek)
     if remaining_fixed is None or remaining_fixed < 0:
         return _unavailable(site_id, target_month, "remaining_fixed_cost_missing")
@@ -390,6 +464,8 @@ def build_monthly_cost_forecast(
             "price_method": item.get("price_method"),
             "provenance": item["provenance"],
             "price_provenance": item.get("price_provenance") or {},
+            "energy_price_ore_per_kwh_gross": item.get("energy_price_ore_per_kwh_gross"),
+            "energy_price_provenance": item.get("energy_price_provenance") or {},
         } for item in ordered],
         "prices": price_periods,
     }
@@ -417,6 +493,8 @@ def build_monthly_cost_forecast(
         "first_missing_slot_by_reason": first_missing,
         "slot_method_counts": method_counts,
         "price_method_counts": price_method_counts,
+        "energy_price_method_counts": energy_price_method_counts,
+        "grid_tariff_missing_count": grid_tariff_missing_count,
         "source_generations": identity["source_generations"],
         "calibration": calibration or {},
         "weather": weather or {},

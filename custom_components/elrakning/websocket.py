@@ -2634,6 +2634,10 @@ def _serialize_price_data(hass: HomeAssistant, data: PriceData | None) -> dict:
                     if isinstance(period_grid_price, dict) and grid_price_is_applicable(period_grid_price)
                     else None
                 ),
+                "price_known_at": data.known_at.isoformat() if data.known_at else None,
+                "price_source_generation_id": data.source_generation_id,
+                "price_area": data.area,
+                "price_currency": data.currency,
             }
             for period in customer_price_data.periods
         ],

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import asyncio
+import hashlib
 import logging
 from typing import Any
 
@@ -38,6 +39,8 @@ class PriceData:
     date: date
     periods: tuple[PricePeriod, ...]
     error: str | None = None
+    known_at: datetime | None = None
+    source_generation_id: str | None = None
 
 
 class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
@@ -149,7 +152,11 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         periods = tuple(period for period in periods if period is not None)
         if not periods:
             return PriceData(area, currency, target_date, (), "data_unavailable")
-        data = PriceData(area, currency, target_date, periods)
+        known_at = dt_util.now().astimezone(timezone.utc)
+        source_generation_id = "np-" + hashlib.sha256(
+            f"nord_pool|{nord_pool_entry.entry_id}|{area}|{currency}".encode()
+        ).hexdigest()[:32]
+        data = PriceData(area, currency, target_date, periods, None, known_at, source_generation_id)
         collector = getattr(self.hass, "data", {}).get("elrakning", {}).get("canonical_collector")
         if collector is not None:
             try:

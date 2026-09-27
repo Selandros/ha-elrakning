@@ -195,6 +195,45 @@ def test_month_end_uses_causal_recent_known_price_fallback_with_provenance():
     assert all(item["price_provenance"]["method"] == "causal_recent_known_price_fallback" for item in result["slots"])
 
 
+def test_month_end_keeps_trade_profile_when_grid_tariff_is_missing():
+    decision = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    rows = [{
+        "logical_role": "grid.power/import",
+        "interval_start": datetime(2026, 8, 25, 12, minute, tzinfo=UTC),
+        "value": 4000,
+    } for minute in (0, 15, 30, 45)]
+    result = build_month_end_slots(
+        decision_at=decision,
+        month_end=decision + timedelta(hours=1),
+        near_term_points=[],
+        historical_rows=rows,
+        timezone_name="UTC",
+        known_price_periods=[{
+            "start": (start := datetime(2026, 8, 25, 12, minute, tzinfo=UTC)).isoformat(),
+            "end": (start + timedelta(minutes=15)).isoformat(),
+            "trade_customer_price_ore_per_kwh": 125,
+            "price_known_at": datetime(2026, 8, 25, 13, tzinfo=UTC).isoformat(),
+            "price_source_generation_id": "np-test",
+            "price_area": "SE2",
+            "price_currency": "SEK",
+        } for minute in (0, 15, 30, 45)],
+    )
+    assert result["available"] is False
+    assert result["energy_price_method_counts"] == {"causal_weekday_slot_trade_price_profile": 4}
+    assert all(item["price_ore_per_kwh_gross"] is None for item in result["slots"])
+    assert all(item["energy_price_ore_per_kwh_gross"] == 125 for item in result["slots"])
+    forecast = build_monthly_cost_forecast(
+        site_id="site-a", timezone_name="UTC", decision_at=decision,
+        target_month="2026-09", actual_cost_to_date_sek=10, actual_import_to_date_kwh=1,
+        future_points=result["slots"], price_periods=[],
+    )
+    assert forecast["available"] is False
+    assert forecast["grid_tariff_missing_count"] == 4
+    assert forecast["missing_reasons"]["grid_tariff_missing"] == 4
+    assert "price_missing" not in forecast["missing_reasons"]
+    assert forecast["price_method_counts"] == {}
+
+
 def test_serialized_total_customer_price_is_a_valid_causal_price_basis():
     decision = datetime(2026, 9, 1, tzinfo=UTC)
     result = build_monthly_cost_forecast(
