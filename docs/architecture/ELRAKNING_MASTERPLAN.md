@@ -6,7 +6,7 @@ are superseded; their commits remain available in Git history.
 
 ## Baseline and active scope
 
-- Stable runtime baseline: `0.0.805`.
+- Stable runtime baseline: `0.0.806`.
 - Steps 0–5: foundation established, with remaining retention, hardening and
   multi-site details tracked inside their contracts rather than treated as
   fully complete without evidence.
@@ -16,6 +16,10 @@ are superseded; their commits remain available in Git history.
   (read-only advisory plans, immutable snapshots, provenance and fail-closed
   UI semantics) is verified; category B shadow evaluation remains gated by
   Step 9 qualified live replay/artifact evidence.
+- Step 11 — Learning, calibration and drift is `PARTIAL/IMPLEMENTED` for the
+  site-scoped causal evidence, deterministic drift classification, candidate
+  identity and fail-closed promotion/rollback governance released in `0.0.806`;
+  live promotion remains gated by Step 9/10 evidence.
 - Step 7 — ESS Digital Twin and Battery Health is complete on `0.0.765`.
 - Runtime/Operations/Hardening is cross-cutting, not a roadmap step.
 - No physical control is permitted before step 14 is accepted.

@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.helpers.storage import Store
 
+from .ella_learning_governance import build_learning_governance
+
 
 SCHEMA = "ella_learning_state.v1"
 STORE_KEY = "elrakning.ella_learning"
@@ -382,10 +384,13 @@ class EllaLearningStore:
         previous_calibration = site.get("power_calibration") or {}
         changed = json.dumps(previous_calibration, sort_keys=True) != json.dumps(calibration, sort_keys=True)
         site["power_calibration"] = calibration
+        governance = build_learning_governance(site_id, records, calibration)
+        site["learning_governance"] = governance
         site["power_latest"] = {
             "schema": POWER_EVIDENCE_SCHEMA, "site_id": site_id, "available": bool(records),
             "forecast_count": len(snapshots), "evaluation_count": len(records),
             "metrics": self._power_metrics(records), "calibration": calibration,
+            "governance": governance,
         }
         await self.store.async_save(self.state)
         return {"written": new_snapshot, "evaluated": len(new_records), "calibration": calibration, "calibration_changed": changed, "forecast_id": forecast_id}
@@ -415,6 +420,7 @@ class EllaLearningStore:
         result.update({"schema": "ella_forecast_evaluation.v1", "site_id": site_id,
                        "available": bool(site.get("records")), "records": list(site.get("records") or []) if include_records else [],
                        "calibration": latest.get("calibration") or {},
+                       "learning_governance": site.get("learning_governance") or {"schema": "ella_learning_governance.v1", "available": False, "reason": "no_learning_evidence"},
                        "power_forecast": power_latest})
         return result
 

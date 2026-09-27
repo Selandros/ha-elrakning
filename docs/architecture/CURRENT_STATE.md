@@ -10,7 +10,7 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
 
 - The only active roadmap is `docs/architecture/ELRAKNING_MASTERPLAN.md`,
   Masterplan v2, steps 0–14.
-- Runtime baseline `0.0.805` is stable after the Step 9 cross-day causal frame
+- Runtime baseline `0.0.806` is stable after the Step 9 cross-day causal frame
   resolver and replay-runtime hardening.
   Step 6 — Forecast & baseline behavior and Step 7 — ESS Digital Twin &
   Battery Health and Step 8 — Economics & deterministic optimizer are COMPLETE;
@@ -19,6 +19,10 @@ architecture; `UNKNOWN` means not established by the permanent evidence.
   read-only advisory plans, immutable snapshots, provenance and fail-closed UI;
   category B shadow evaluation is explicitly gated by Step 9 qualified live
   replay/artifact evidence.
+  Step 11 — Learning, calibration & drift is PARTIAL/IMPLEMENTED for
+  site-scoped causal learning governance, deterministic drift status, candidate
+  identity and fail-closed promotion/rollback gates; live promotion remains
+  gated by Step 9/10 evidence.
   steps 0–5 are established foundation with remaining
   hardening, retention, and multi-site details tracked explicitly.
 - Runtime/Operations/Hardening is cross-cutting, not a separate stage.

@@ -106,6 +106,10 @@ def test_power_forecast_evidence_is_immutable_scored_and_calibrated_per_context(
         assert first["written"] is True
         assert first["evaluated"] == 3
         assert first["calibration"]["by_context"]["near_zero_discharge_coverage_ratio"]["factor"] < 1.0
+        governance = store.public_state("site-a")["learning_governance"]
+        assert governance["schema"] == "ella_learning_governance.v1"
+        assert governance["promotion"]["eligible"] is False
+        assert "benchmark_live_qualified" in governance["promotion"]["reasons"]
         assert len(store.state["sites"]["site-a"]["power_forecasts"]) == 1
         original = copy.deepcopy(store.state["sites"]["site-a"]["power_forecasts"][0])
         forecast["battery"]["forecast_points"][0]["value_w"] = 9999.0

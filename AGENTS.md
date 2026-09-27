@@ -3,12 +3,15 @@
 ## Current roadmap checkpoint
 
 Masterplan v2 step 8 — Economics & deterministic optimizer is complete on
-runtime baseline `0.0.805`; step 9 — Replay, backtest, benchmarks & regret is
+runtime baseline `0.0.806`; step 9 — Replay, backtest, benchmarks & regret is
 the active main scope with its causal replay foundation implemented but not
 closed. Step 10 — Shadow & advisory planning is PARTIAL/IMPLEMENTED for
 read-only advisory plans and immutable snapshots; deeper shadow evaluation is
 gated by qualified Step 9 live evidence. `actual -> baseline_forecast -> ella_plan` remains
 the layer contract, and physical control remains gated by step 14.
+Step 11 learning governance is PARTIAL/IMPLEMENTED for causal site-scoped
+evidence, drift classification and fail-closed promotion/rollback metadata;
+live promotion remains gated by Step 9/10 evidence.
 
 ## Architecture memory
 
