@@ -398,14 +398,19 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["runtime_status"] = "ready"
     def _replay_site_ids(event_site_id=None):
         state = site_identity_manager.state
-        configured = state.get("site_configs", {}) if isinstance(state, dict) else {}
-        site_ids = [site_id for site_id in configured if isinstance(site_id, str) and site_id]
+        registered: set[str] = set()
+        if isinstance(state, dict):
+            for source in (state.get("site_configs"), state.get("sites"), state.get("available_sites")):
+                if isinstance(source, dict):
+                    registered.update(str(site_id) for site_id in source if site_id)
+                elif isinstance(source, list):
+                    registered.update(str(item.get("site_id")) for item in source if isinstance(item, dict) and item.get("site_id"))
         active = state.get("active_site_id") or (state.get("site") or {}).get("site_id") if isinstance(state, dict) else None
-        if isinstance(active, str) and active and active not in site_ids:
-            site_ids.insert(0, active)
+        site_ids = [active] if isinstance(active, str) and active else []
+        site_ids.extend(site_id for site_id in sorted(registered) if site_id not in site_ids)
         if isinstance(event_site_id, str) and event_site_id:
-            return [event_site_id] if event_site_id in site_ids or event_site_id == active else []
-        return sorted(set(site_ids))
+            return [event_site_id] if event_site_id in site_ids else []
+        return site_ids
 
     async def _generate_replay_artifact(_call=None, event_site_id=None):
         for site_id in _replay_site_ids(event_site_id):
