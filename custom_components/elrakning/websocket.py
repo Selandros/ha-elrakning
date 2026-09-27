@@ -124,6 +124,7 @@ ESS_FACTS_LIST_COMMAND = f"{DOMAIN}/ess_facts/list"
 ESS_FACTS_IMPORT_COMMAND = f"{DOMAIN}/ess_facts/import"
 REPLAY_ARTIFACT_APPEND_COMMAND = f"{DOMAIN}/replay_artifact/append"
 REPLAY_ARTIFACT_LIST_COMMAND = f"{DOMAIN}/replay_artifact/list"
+REPLAY_BENCHMARK_EVIDENCE_COMMAND = f"{DOMAIN}/replay_benchmark_evidence"
 ECONOMIC_POLICY_IMPORT_COMMAND = f"{DOMAIN}/economic_policy/import"
 ECONOMIC_POLICY_STATE_COMMAND = f"{DOMAIN}/economic_policy/state"
 UPDATE_EVENT = "elrakning_price_update"
@@ -201,6 +202,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_ess_facts_import)
     websocket_api.async_register_command(hass, websocket_replay_artifact_append)
     websocket_api.async_register_command(hass, websocket_replay_artifact_list)
+    websocket_api.async_register_command(hass, websocket_replay_benchmark_evidence)
     websocket_api.async_register_command(hass, websocket_economic_policy_import)
     websocket_api.async_register_command(hass, websocket_economic_policy_state)
     websocket_api.async_register_command(hass, websocket_solar_forecast_state)
@@ -351,6 +353,17 @@ async def websocket_replay_artifact_list(hass, connection, msg):
     store = hass.data.get(DOMAIN, {}).get("replay_artifact_store")
     records = store.state.get("sites", {}).get(msg["site_id"], []) if isinstance(store, ReplayArtifactStore) else []
     connection.send_result(msg["id"], {"schema": "ella_replay_artifact.v1", "site_id": msg["site_id"], "artifacts": records})
+
+
+@websocket_api.websocket_command({vol.Required("type"): REPLAY_BENCHMARK_EVIDENCE_COMMAND, vol.Required("site_id"): str})
+@websocket_api.async_response
+async def websocket_replay_benchmark_evidence(hass, connection, msg):
+    """Return bounded readiness evidence for one exact site."""
+    store = hass.data.get(DOMAIN, {}).get("replay_artifact_store")
+    evidence = store.public_evidence(msg["site_id"]) if isinstance(store, ReplayArtifactStore) else {
+        "schema": "ella_replay_benchmark_evidence.v1", "site_id": msg["site_id"], "available": False, "status": "unavailable", "blocker": "store_unavailable",
+    }
+    connection.send_result(msg["id"], evidence)
 
 
 @websocket_api.websocket_command({vol.Required("type"): ESS_FACTS_IMPORT_COMMAND, vol.Required("facts"): list})

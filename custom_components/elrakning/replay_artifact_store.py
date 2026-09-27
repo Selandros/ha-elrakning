@@ -21,6 +21,7 @@ SCHEMA = "ella_replay_artifact.v1"
 STORE_KEY = "elrakning.replay_artifacts"
 STORE_VERSION = 1
 MAX_ARTIFACTS_PER_SITE = 128
+MAX_EVIDENCE_SITES = 64
 REQUIRED_HOLDOUTS = {"season", "site", "dst", "gap", "source_generation_change", "publication_cutoff"}
 PUBLISH_SERVICE = "replay_artifact_publish"
 
@@ -97,16 +98,45 @@ class ReplayArtifactStore:
 
     def __init__(self, hass: Any) -> None:
         self.store = Store(hass, STORE_VERSION, STORE_KEY)
-        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}, "available": True, "last_attempt": None}
+        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}, "evidence": {}, "available": True, "last_attempt": None}
 
     async def async_load(self) -> None:
         cached = await self.store.async_load()
         if cached is None:
             return
         if not isinstance(cached, dict) or cached.get("schema") != SCHEMA or not isinstance(cached.get("sites"), dict):
-            self.state = {"schema": SCHEMA, "version": 1, "sites": {}, "available": False, "reason": "artifact_schema_mismatch"}
+            self.state = {"schema": SCHEMA, "version": 1, "sites": {}, "evidence": {}, "available": False, "reason": "artifact_schema_mismatch"}
             return
-        self.state = {"schema": SCHEMA, "version": 1, "sites": cached["sites"], "available": True, "last_attempt": cached.get("last_attempt")}
+        evidence = cached.get("evidence")
+        self.state = {
+            "schema": SCHEMA,
+            "version": 1,
+            "sites": cached["sites"],
+            "evidence": evidence if isinstance(evidence, dict) else {},
+            "available": True,
+            "last_attempt": cached.get("last_attempt"),
+        }
+
+    async def async_record_evidence(self, site_id: str, evidence: dict[str, Any]) -> bool:
+        """Persist bounded, site-scoped benchmark readiness evidence."""
+        if self.state.get("available") is not True or not isinstance(site_id, str) or not isinstance(evidence, dict):
+            return False
+        bounded = deepcopy(evidence)
+        bounded["schema"] = "ella_replay_benchmark_evidence.v1"
+        bounded["site_id"] = site_id
+        sites = self.state.setdefault("evidence", {})
+        if site_id not in sites and len(sites) >= MAX_EVIDENCE_SITES:
+            return False
+        sites[site_id] = bounded
+        await self.store.async_save(self.state)
+        return True
+
+    def public_evidence(self, site_id: str) -> dict[str, Any]:
+        """Return only the current exact-site readiness snapshot."""
+        evidence = self.state.get("evidence", {}).get(site_id)
+        if not isinstance(evidence, dict):
+            return {"schema": "ella_replay_benchmark_evidence.v1", "site_id": site_id, "available": False, "status": "unavailable", "blocker": "no_evidence"}
+        return deepcopy(evidence)
 
     async def async_record_attempt(self, result: dict[str, Any]) -> None:
         """Persist one bounded producer outcome for runtime readback diagnostics."""

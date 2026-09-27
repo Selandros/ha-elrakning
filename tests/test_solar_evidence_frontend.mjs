@@ -6,6 +6,11 @@ const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/e
 const websocket = fs.readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
 
 assert.match(panel, /data-solar-evidence-card/);
+assert.match(panel, /data-benchmark-evidence-card/);
+assert.match(panel, /replay_benchmark_evidence/);
+assert.match(panel, /applySolarEvidenceVisibility\(benchmarkEvidenceCard, this\._debugEnabled, this\._benchmarkEvidence\?\.available\)/);
+assert.match(websocket, /REPLAY_BENCHMARK_EVIDENCE_COMMAND/);
+assert.match(websocket, /websocket_replay_benchmark_evidence/);
 assert.doesNotMatch(panel, /data-solar-evidence-debug/);
 assert.match(panel, /solar_evidence: powerHistory\.solar_evidence/);
 assert.match(panel, /solar_evidence: this\._powerHistory\?\.solar_evidence \|\| \{ available: false, days: \[\] \}/);

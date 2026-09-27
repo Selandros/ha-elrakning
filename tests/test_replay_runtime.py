@@ -121,3 +121,17 @@ def test_runtime_runner_rejects_future_economics_without_causal_override():
     }
     assert replay_runtime._economics_is_causal(economics, decision) is False
     assert replay_runtime._economics_is_causal(economics, datetime(2026, 9, 27, tzinfo=timezone.utc)) is True
+
+
+def test_benchmark_readiness_reports_unqualified_frame_without_relaxing_replay(monkeypatch):
+    from datetime import datetime, timezone
+
+    load_row = ("frame-load", 1, 1, "load", 1, "generation-load", "site", "site-a", "load.forecast", "forecast", 0, 0, 1_000_000, 0, 0, 2_000_000, "partial", "{}", "{}", "frame.v1")
+    monkeypatch.setattr(replay_runtime, "_frame_rows", lambda _storage, _site, role, _decision, global_scope=False: [load_row] if role == "load.forecast" else [])
+    monkeypatch.setattr(replay_runtime, "_frame_points", lambda _storage, _frame_id: [])
+    evidence = replay_runtime._benchmark_readiness(
+        object(), [], "site-a", datetime.fromtimestamp(3, tz=timezone.utc), lambda _decision: None
+    )
+    assert evidence["blocker"] == "no_good_frame"
+    assert evidence["qualified"] is False
+    assert evidence["frame_quality"]["load"] == "partial"

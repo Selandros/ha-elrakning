@@ -188,6 +188,98 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
     return None, {"available": False, "reason": "no_mature_causal_96_slot_window"}
 
 
+def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime, economics_resolver=None) -> dict[str, Any]:
+    """Build bounded readiness evidence without weakening replay qualification."""
+    candidates = _frame_rows(storage, site_id, "load.forecast", int(now.timestamp() * 1_000_000))
+    evidence = {
+        "available": True,
+        "status": "blocked",
+        "blocker": "no_load_frame",
+        "qualified": False,
+        "horizon": {"required_slots": HORIZON_SLOTS, "available_slots": 0, "actual_coverage": "0/96"},
+        "load_frame": None,
+        "source_generations": [],
+        "frame_quality": {},
+        "frame_provenance": {},
+        "economics": {"causal": False, "reason": "not_evaluated"},
+        "ess": {"available": False, "reason": "not_evaluated"},
+        "artifact": {"artifact_id": None, "readback": False},
+        "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
+        "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
+    }
+    if not candidates:
+        return evidence
+    load_row = candidates[0]
+    decision_at = datetime.fromtimestamp(load_row[12] / 1_000_000, tz=UTC)
+    evidence["load_frame"] = {
+        "frame_id": load_row[0], "known_at": _iso_us(load_row[12]),
+        "quality_status": load_row[16], "payload_schema": load_row[19],
+    }
+    evidence["frame_quality"] = {"load": load_row[16]}
+    evidence["frame_provenance"] = {"load": json.loads(load_row[18]) if load_row[18] else {}}
+    evidence["source_generations"] = [load_row[5]] if load_row[5] else []
+    solar_rows = _frame_rows(storage, site_id, "solar.irradiance.day_ahead_pv_forecast", load_row[12]) or _frame_rows(storage, site_id, "solar.irradiance.forecast", load_row[12])
+    price_rows = _frame_rows(storage, site_id, "market.price.energy", load_row[12], global_scope=True)
+    if solar_rows:
+        evidence["frame_quality"]["solar"] = solar_rows[0][16]
+        evidence["frame_provenance"]["solar"] = json.loads(solar_rows[0][18]) if solar_rows[0][18] else {}
+        if solar_rows[0][5]: evidence["source_generations"].append(solar_rows[0][5])
+    if price_rows:
+        evidence["frame_quality"]["price"] = price_rows[0][16]
+        evidence["frame_provenance"]["price"] = json.loads(price_rows[0][18]) if price_rows[0][18] else {}
+        if price_rows[0][5]: evidence["source_generations"].append(price_rows[0][5])
+    economics = economics_resolver(decision_at) if economics_resolver else None
+    economics_causal = isinstance(economics, dict) and _economics_is_causal(economics, decision_at)
+    evidence["economics"] = {"causal": economics_causal, "provider_reference": economics.get("provider_reference") if isinstance(economics, dict) else None, "reason": None if economics_causal else "economics_not_causal"}
+    load_points = _frame_points(storage, load_row[0])
+    solar_points = _frame_points(storage, solar_rows[0][0]) if solar_rows else []
+    price_points = _frame_points(storage, price_rows[0][0]) if price_rows else []
+    solar_by_time = {point["valid_at"]: point for point in solar_points}
+    price_by_time = {point["valid_at"]: point for point in price_points}
+    slots = []
+    for point in load_points:
+        start = point["valid_at"]
+        if start <= decision_at:
+            continue
+        if (solar_by_time.get(start) or solar_by_time.get(start.replace(minute=0, second=0, microsecond=0))) is None or price_by_time.get(start) is None:
+            continue
+        slots.append(start)
+    slots.sort()
+    slots = slots[:HORIZON_SLOTS]
+    evidence["horizon"]["available_slots"] = len(slots)
+    history = []
+    if len(slots) == HORIZON_SLOTS:
+        end_at = slots[-1] + timedelta(minutes=15)
+        evidence["horizon"].update({"decision_at": decision_at.isoformat(), "end_at": end_at.isoformat(), "mature": end_at <= now})
+        history = storage.read_site_energy_history(site_id, decision_at - timedelta(days=2), end_at)
+        for row in history:
+            row["known_at"] = _observation_known_at(storage, row, decision_at)
+        slot_keys = {slot.isoformat() for slot in slots}
+        actual_roles = {"grid.power/import", "battery.power", "battery.soc"}
+        actual_count = sum(1 for row in history if row.get("logical_role") in actual_roles and isinstance(row.get("interval_start"), datetime) and row["interval_start"].isoformat() in slot_keys and row.get("known_at") is not None)
+        evidence["horizon"]["actual_coverage"] = f"{min(actual_count, HORIZON_SLOTS)}/{HORIZON_SLOTS}"
+    else:
+        evidence["horizon"]["decision_at"] = decision_at.isoformat()
+    _, ess_status = _ess_inputs(facts, history, site_id, decision_at)
+    evidence["ess"] = ess_status
+    if load_row[16] not in {"good", "valid", "complete"}:
+        evidence["blocker"] = "no_good_frame"
+    elif not solar_rows or not price_rows:
+        evidence["blocker"] = "missing_causal_input_frame"
+    elif not economics_causal:
+        evidence["blocker"] = "economics_not_causal"
+    elif len(slots) < HORIZON_SLOTS:
+        evidence["blocker"] = "horizon_incomplete"
+    elif not evidence["horizon"].get("mature") or evidence["horizon"]["actual_coverage"] != "96/96":
+        evidence["blocker"] = "awaiting_outcomes"
+    elif not ess_status.get("available"):
+        evidence["blocker"] = ess_status.get("reason", "ess_unavailable")
+    else:
+        evidence["status"] = "ready"
+        evidence["blocker"] = None
+    return evidence
+
+
 async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     """Build, persist and read back one exact-site causal replay artifact."""
     storage = hass.data.get("elrakning", {}).get("canonical_collector").storage
@@ -215,12 +307,24 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
         return economics
 
     now = datetime.now(UTC)
+    try:
+        readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        readiness = {
+            "available": False, "status": "blocked", "blocker": "readiness_unavailable",
+            "qualified": False, "horizon": {"required_slots": HORIZON_SLOTS, "available_slots": 0, "actual_coverage": "0/96"},
+            "source_generations": [], "frame_quality": {}, "frame_provenance": {}, "economics": {"causal": False, "reason": "not_evaluated"},
+            "ess": {"available": False, "reason": "not_evaluated"}, "artifact": {"artifact_id": None, "readback": False},
+            "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
+            "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
+        }
     run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics)
     if run is None:
-        result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": evidence}
+        result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": {**readiness, "runner": evidence}}
         store = hass.data.get("elrakning", {}).get("replay_artifact_store")
         if store:
             await store.async_record_attempt(result)
+            await store.async_record_evidence(site_id, result["evidence"])
         return result
     holdouts = [{"kind": kind, "run_fingerprint": run["run_fingerprint"], "source": "deterministic_fixture", "contaminated": False, "incomplete": False} for kind in ("season", "site", "dst", "gap", "source_generation_change", "publication_cutoff")]
     holdout_status = validate_holdout_matrix(holdouts)
@@ -228,7 +332,8 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     store = hass.data.get("elrakning", {}).get("replay_artifact_store")
     accepted = bool(artifact and holdout_status["qualified"] and store and await store.async_append(artifact))
     readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
-    result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": evidence}
+    result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if accepted and readback is not None else "blocked", "blocker": None if accepted and readback is not None else "artifact_not_verified", "qualified": bool(run["qualification"].get("qualified")), "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint")}}
     if store:
         await store.async_record_attempt(result)
+        await store.async_record_evidence(site_id, result["evidence"])
     return result

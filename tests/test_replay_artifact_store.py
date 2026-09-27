@@ -97,3 +97,30 @@ def test_internal_publish_builds_a_non_execution_artifact():
     assert artifact is not None
     assert artifact["provenance"]["hindsight_used_for_decision"] is False
     assert "execution" not in artifact
+
+
+def test_benchmark_evidence_is_site_scoped_and_bounded_readback():
+    class MemoryStore:
+        def __init__(self, *_args, **_kwargs):
+            self.value = None
+
+        async def async_load(self):
+            return self.value
+
+        async def async_save(self, value):
+            self.value = value
+
+    store = ReplayArtifactStore(object())
+    store.store = MemoryStore()
+
+    async def run():
+        evidence = {"available": True, "status": "blocked", "blocker": "no_good_frame", "horizon": {"actual_coverage": "0/96"}}
+        assert await store.async_record_evidence(SITE, evidence) is True
+        assert store.public_evidence(SITE)["site_id"] == SITE
+        assert store.public_evidence("site-b")["blocker"] == "no_evidence"
+        restarted = ReplayArtifactStore(object())
+        restarted.store = store.store
+        await restarted.async_load()
+        assert restarted.public_evidence(SITE)["schema"] == "ella_replay_benchmark_evidence.v1"
+
+    asyncio.run(run())

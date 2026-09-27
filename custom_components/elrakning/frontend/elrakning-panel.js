@@ -2778,6 +2778,7 @@ class ElrakningPanel {
     this._powerStateMutationGeneration = 0;
     this._powerStateLifecycleGeneration = 0;
     this._powerHistory = { date: null, series: {}, power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} }, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false }, solar_pvgis: { available: false, source: "jrc_pvgis" }, solar_open_meteo: { available: false, source: "open_meteo" } };
+    this._benchmarkEvidence = { schema: "ella_replay_benchmark_evidence.v1", available: false, status: "unavailable", blocker: "not_loaded" };
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._pricePlanContextKey = null;
@@ -2791,6 +2792,7 @@ class ElrakningPanel {
     this._solarForecastEventUnsubscribePromise = null;
     this._loadForecastEventUnsubscribePromise = null;
     this._solarEvidenceEventUnsubscribePromise = null;
+    this._benchmarkEvidenceEventUnsubscribePromise = null;
     this._powerLivePoints = Object.fromEntries(["solar", "consumption", "charging", "discharging", "soc"].map((key) => [key, new Map()]));
     this._backendHydrationPromise = null;
     this._readyEventUnsubscribePromise = null;
@@ -3023,6 +3025,13 @@ class ElrakningPanel {
           <div data-solar-evidence-summary></div>
           <div data-solar-evidence-status></div>
           <div class="solar-evidence-list" data-solar-evidence-list></div>
+        </section>
+
+        <section class="card solar-evidence-card" data-benchmark-evidence-card hidden aria-labelledby="benchmark-evidence-title">
+          <div class="card-heading"><h2 id="benchmark-evidence-title">Benchmark Evidence</h2></div>
+          <div data-benchmark-evidence-summary></div>
+          <div data-benchmark-evidence-status></div>
+          <div class="solar-evidence-list" data-benchmark-evidence-list></div>
         </section>
 
         <div class="daily-energy-row phase-history-row">
@@ -7249,6 +7258,7 @@ class ElrakningPanel {
     const meterSource = this.host.querySelector("[data-meter-source]");
     const priceSource = this.host.querySelector('[data-card-source="price"]');
     const solarEvidenceCard = this.host.querySelector("[data-solar-evidence-card]");
+    const benchmarkEvidenceCard = this.host.querySelector("[data-benchmark-evidence-card]");
     const liveSources = this.host.querySelectorAll("[data-live-power-source]");
     const diagnostics = this.host.querySelector("[data-diagnostics-card]");
     const phaseCopy = this.host.querySelector("[data-phase-history-copy]");
@@ -7258,6 +7268,7 @@ class ElrakningPanel {
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (priceSource) priceSource.hidden = !this._debugEnabled;
     applySolarEvidenceVisibility(solarEvidenceCard, this._debugEnabled, this._powerHistory?.solar_evidence?.available);
+    applySolarEvidenceVisibility(benchmarkEvidenceCard, this._debugEnabled, this._benchmarkEvidence?.available);
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
@@ -8322,6 +8333,41 @@ class ElrakningPanel {
     }).join("");
   }
 
+  _renderBenchmarkEvidence() {
+    const card = this.host.querySelector("[data-benchmark-evidence-card]");
+    const summary = this.host.querySelector("[data-benchmark-evidence-summary]");
+    const status = this.host.querySelector("[data-benchmark-evidence-status]");
+    const list = this.host.querySelector("[data-benchmark-evidence-list]");
+    const evidence = this._benchmarkEvidence || {};
+    if (!card || !summary || !status || !list) return;
+    applySolarEvidenceVisibility(card, this._debugEnabled, evidence.available);
+    if (!evidence.available) return;
+    const horizon = evidence.horizon || {};
+    summary.textContent = `96 slots: ${horizon.actual_coverage || "0/96"} actual · ${horizon.available_slots || 0}/${horizon.required_slots || 96} causal slots`;
+    status.textContent = evidence.blocker ? `BLOCKER: ${evidence.blocker}` : (evidence.status || "UNKNOWN");
+    const rows = [
+      ["Load quality", evidence.frame_quality?.load || "—"],
+      ["Decision at", horizon.decision_at || "—"],
+      ["Horizon end", horizon.end_at || "—"],
+      ["Economics causal", evidence.economics?.causal === true ? "yes" : "no"],
+      ["ESS", evidence.ess?.available === true ? "available" : (evidence.ess?.reason || "unavailable")],
+      ["Source generations", Array.isArray(evidence.source_generations) ? evidence.source_generations.filter(Boolean).join(", ") || "—" : "—"],
+      ["Provenance", evidence.frame_provenance ? Object.keys(evidence.frame_provenance).map((key) => `${key}:${Object.keys(evidence.frame_provenance[key] || {}).join("/") || "recorded"}`).join(", ") || "—" : "—"],
+      ["Qualified", evidence.qualified === true ? "yes" : "no"],
+      ["Fingerprint", evidence.fingerprint || "—"],
+      ["Artifact readback", evidence.artifact?.readback === true ? (evidence.artifact.artifact_id || "verified") : "—"],
+      ["Holdouts", evidence.holdouts?.qualified === true ? "qualified" : (evidence.holdouts?.reasons || []).join(", ") || "—"],
+    ];
+    list.replaceChildren(...rows.map(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "solar-evidence-day";
+      const strong = document.createElement("strong");
+      strong.textContent = `${label}: `;
+      row.append(strong, document.createTextNode(String(value)));
+      return row;
+    }));
+  }
+
   _renderSocChart() {
     const card = this.host.querySelector("[data-soc-card]");
     const chart = this.host.querySelector("[data-soc-chart]");
@@ -8744,6 +8790,21 @@ class ElrakningPanel {
       this._renderSolarEvidence();
     } catch {
       // Evidence is optional and must not affect the other cards.
+    }
+  }
+
+  async loadBenchmarkEvidence() {
+    if (!this.hass?.callWS) return;
+    if (!this._siteState) await this._loadSiteIdentity();
+    const siteId = this._siteState?.current_site?.site_id || this._siteState?.site_id;
+    if (!siteId) return;
+    try {
+      const response = await this.hass.callWS({ type: "elrakning/replay_benchmark_evidence", site_id: siteId });
+      this._benchmarkEvidence = response || { available: false, status: "unavailable", blocker: "empty_response" };
+      this._renderBenchmarkEvidence();
+    } catch {
+      this._benchmarkEvidence = { available: false, status: "unavailable", blocker: "transport_unavailable" };
+      this._renderBenchmarkEvidence();
     }
   }
 
@@ -10149,6 +10210,7 @@ class ElrakningPanel {
           if (eventSiteId && (!activeSiteId || eventSiteId !== activeSiteId)) return;
           if (!eventSiteId && !activeSiteId) return;
           void Promise.allSettled([this.loadPowerHistory(), this.loadPricePlan()]);
+          void this.loadBenchmarkEvidence();
         },
         "elrakning_load_forecast_update",
       );
@@ -10159,6 +10221,10 @@ class ElrakningPanel {
       this._solarEvidenceEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this.loadSolarEvidence(),
         "elrakning_solar_evidence_update",
+      );
+      this._benchmarkEvidenceEventUnsubscribePromise = hass.connection.subscribeEvents(
+        () => this.loadBenchmarkEvidence(),
+        "elrakning_replay_benchmark_evidence_update",
       );
       this._diagnosticsEventUnsubscribePromise = hass.connection.subscribeEvents(
         () => this._loadDiagnosticsState?.(),
@@ -10236,6 +10302,11 @@ class ElrakningPanel {
         .then((unsubscribe) => unsubscribe?.())
         .catch(() => {});
     }
+    if (this._benchmarkEvidenceEventUnsubscribePromise) {
+      Promise.resolve(this._benchmarkEvidenceEventUnsubscribePromise)
+        .then((unsubscribe) => unsubscribe?.())
+        .catch(() => {});
+    }
     if (this._diagnosticsEventUnsubscribePromise) {
       Promise.resolve(this._diagnosticsEventUnsubscribePromise)
         .then((unsubscribe) => unsubscribe?.())
@@ -10295,6 +10366,7 @@ class ElrakningPanel {
       this.loadMeterState(loadHistory),
       this.loadPowerState(loadHistory),
       this.loadSolarEvidence(),
+      this.loadBenchmarkEvidence(),
       this._loadDebugPreference(),
       this._loadChartPreferences(),
     ]).finally(() => {

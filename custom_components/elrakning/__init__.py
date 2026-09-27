@@ -396,13 +396,21 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         second=0,
     )
     frontend_data["runtime_status"] = "ready"
-    async def _generate_replay_artifact(_call=None):
+    def _replay_site_ids(event_site_id=None):
         state = site_identity_manager.state
-        site_id = state.get("active_site_id") or (state.get("site") or {}).get("site_id")
-        if not site_id:
-            site_id = next(iter(state.get("site_configs", {}) or {}), None)
-        if isinstance(site_id, str) and site_id:
+        configured = state.get("site_configs", {}) if isinstance(state, dict) else {}
+        site_ids = [site_id for site_id in configured if isinstance(site_id, str) and site_id]
+        active = state.get("active_site_id") or (state.get("site") or {}).get("site_id") if isinstance(state, dict) else None
+        if isinstance(active, str) and active and active not in site_ids:
+            site_ids.insert(0, active)
+        if isinstance(event_site_id, str) and event_site_id:
+            return [event_site_id] if event_site_id in site_ids or event_site_id == active else []
+        return sorted(set(site_ids))
+
+    async def _generate_replay_artifact(_call=None, event_site_id=None):
+        for site_id in _replay_site_ids(event_site_id):
             result = await async_generate_artifact(hass, site_id)
+            hass.bus.async_fire("elrakning_replay_benchmark_evidence_update", {"site_id": site_id, "status": (result.get("evidence") or {}).get("status")})
             if result.get("accepted"):
                 hass.bus.async_fire("elrakning_replay_artifact_published", {
                     "schema": "ella_replay_artifact.v1",
@@ -411,7 +419,23 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "readback": result.get("readback") is True,
                     "holdouts": result.get("holdouts"),
                 })
+
+    replay_refresh_task = None
+
+    def _schedule_replay_evidence(event):
+        nonlocal replay_refresh_task
+        if replay_refresh_task is not None and not replay_refresh_task.done():
+            return
+        event_site_id = event.data.get("site_id") if getattr(event, "data", None) else None
+        replay_refresh_task = hass.async_create_task(_generate_replay_artifact(event_site_id=event_site_id))
+        frontend_data["replay_benchmark_refresh_task"] = replay_refresh_task
+
     hass.services.async_register(DOMAIN, "replay_artifact_generate", _generate_replay_artifact)
+    frontend_data["replay_benchmark_event_unsubs"] = [
+        hass.bus.async_listen("elrakning_load_forecast_update", _schedule_replay_evidence),
+        hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, _schedule_replay_evidence),
+        hass.bus.async_listen(EON_GRID_UPDATE_EVENT, _schedule_replay_evidence),
+    ]
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True
@@ -438,6 +462,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "replay_artifact_publish")
     if hass.services.has_service(DOMAIN, "replay_artifact_generate"):
         hass.services.async_remove(DOMAIN, "replay_artifact_generate")
+    for unsubscribe in frontend_data.pop("replay_benchmark_event_unsubs", []):
+        unsubscribe()
+    if refresh_task := frontend_data.pop("replay_benchmark_refresh_task", None):
+        refresh_task.cancel()
     if startup_task := frontend_data.pop("replay_artifact_startup_task", None):
         startup_task.cancel()
         try:
