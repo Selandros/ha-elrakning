@@ -206,3 +206,81 @@ def test_benchmark_readiness_reports_unqualified_frame_without_relaxing_replay(m
     assert evidence["site_id"] == "site-a"
     assert evidence["frame_known_at"] is not None
     assert "economics_applicability" in evidence
+
+
+def test_causal_window_stitches_day_ahead_and_multiday_solar(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    decision = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
+    slots = [decision + timedelta(minutes=15 * (index + 1)) for index in range(4)]
+
+    def frame(frame_id, role, generation, known_at, quality="good", revision=1):
+        return (frame_id, 1, 1, frame_id, revision, generation, "site", "site-a", role, "forecast", 0, 0, int(known_at.timestamp() * 1_000_000), 0, 0, 0, quality, "{}", "{}", "frame.v1")
+
+    day = frame("solar-day", "solar.irradiance.day_ahead_pv_forecast", "solar-day-gen", decision - timedelta(hours=1))
+    multiday = frame("solar-multiday", "solar.irradiance.forecast", "solar-multiday-gen", decision - timedelta(minutes=1), "partial")
+    points = {
+        "solar-day": [{"valid_at": slot, "value": 10.0, "quality_status": "good", "point": {}} for slot in slots[:2]],
+        "solar-multiday": [{"valid_at": slot, "value": 20.0, "quality_status": "good", "point": {}} for slot in slots],
+    }
+    monkeypatch.setattr(replay_runtime, "_frame_points", lambda _storage, frame_id: points[frame_id])
+    result = replay_runtime._resolve_causal_input_window(object(), [day, multiday], slots, solar=True, decision_us=int(decision.timestamp() * 1_000_000))
+    assert result["available"] is True
+    assert result["frame_ids"] == ["solar-day", "solar-multiday"]
+    assert [result["points"][slot]["point"]["value"] for slot in slots] == [10.0, 10.0, 20.0, 20.0]
+
+
+def test_causal_window_stitches_price_days_and_rejects_future_frames(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    decision = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
+    slots = [decision + timedelta(minutes=15 * (index + 1)) for index in range(4)]
+
+    def frame(frame_id, generation, known_at, revision=1):
+        return (frame_id, 1, 1, frame_id, revision, generation, "global", None, "market.price.energy", "forecast", 0, 0, int(known_at.timestamp() * 1_000_000), 0, 0, 0, "good", "{}", "{}", "price.v1")
+
+    first = frame("price-day-1", "price-gen-1", decision - timedelta(hours=1))
+    second = frame("price-day-2", "price-gen-2", decision - timedelta(minutes=1))
+    future = frame("price-future", "price-future-gen", decision + timedelta(minutes=1))
+    points = {
+        "price-day-1": [{"valid_at": slot, "value": 1.0, "quality_status": "good", "point": {}} for slot in slots[:2]],
+        "price-day-2": [{"valid_at": slot, "value": 2.0, "quality_status": "good", "point": {}} for slot in slots[2:]],
+        "price-future": [{"valid_at": slot, "value": 9.0, "quality_status": "good", "point": {}} for slot in slots],
+    }
+    monkeypatch.setattr(replay_runtime, "_frame_points", lambda _storage, frame_id: points[frame_id])
+    result = replay_runtime._resolve_causal_input_window(object(), [first, second, future], slots, solar=False, decision_us=int(decision.timestamp() * 1_000_000))
+    assert result["available"] is True
+    assert [result["points"][slot]["point"]["value"] for slot in slots] == [1.0, 1.0, 2.0, 2.0]
+    assert "price-future" not in result["frame_ids"]
+
+
+def test_causal_window_fails_closed_on_overlap_generation_ambiguity(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    decision = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
+    slot = decision + timedelta(minutes=15)
+
+    def frame(frame_id, generation):
+        return (frame_id, 1, 1, frame_id, 1, generation, "global", None, "market.price.energy", "forecast", 0, 0, int((decision - timedelta(minutes=1)).timestamp() * 1_000_000), 0, 0, 0, "good", "{}", "{}", "price.v1")
+
+    rows = [frame("price-a", "generation-a"), frame("price-b", "generation-b")]
+    monkeypatch.setattr(replay_runtime, "_frame_points", lambda _storage, frame_id: [{"valid_at": slot, "value": 1.0, "quality_status": "good", "point": {}}])
+    result = replay_runtime._resolve_causal_input_window(object(), rows, [slot], solar=False, decision_us=int(decision.timestamp() * 1_000_000))
+    assert result["available"] is False
+    assert result["reason"] == "ambiguous_source_generation"
+
+
+def test_causal_window_fails_closed_on_internal_gap_and_is_repeatable(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    decision = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
+    slots = [decision + timedelta(minutes=15 * (index + 1)) for index in range(3)]
+    row = ("solar", 1, 1, "solar", 1, "generation", "site", "site-a", "solar.irradiance.forecast", "forecast", 0, 0, int((decision - timedelta(minutes=1)).timestamp() * 1_000_000), 0, 0, 0, "partial", "{}", "{}", "solar.v1")
+    points = [{"valid_at": slots[0], "value": 1.0, "quality_status": "good", "point": {"quality_status": "good"}}, {"valid_at": slots[2], "value": 3.0, "quality_status": "good", "point": {"quality_status": "good"}}]
+    monkeypatch.setattr(replay_runtime, "_frame_points", lambda _storage, _frame_id: points)
+    first = replay_runtime._resolve_causal_input_window(object(), [row], slots, solar=True, decision_us=int(decision.timestamp() * 1_000_000))
+    second = replay_runtime._resolve_causal_input_window(object(), [row], slots, solar=True, decision_us=int(decision.timestamp() * 1_000_000))
+    assert first == second
+    assert first["available"] is False
+    assert first["reason"] == "missing_causal_slot"
+    assert first["missing_slots"] == [slots[1].isoformat()]

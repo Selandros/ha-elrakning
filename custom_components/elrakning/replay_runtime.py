@@ -15,6 +15,9 @@ from .replay_benchmark import ESSReplayLimits, NoBatteryBaseline, SelfConsumptio
 
 UTC = timezone.utc
 HORIZON_SLOTS = 96
+SOLAR_DAY_AHEAD_ROLE = "solar.irradiance.day_ahead_pv_forecast"
+SOLAR_FORECAST_ROLE = "solar.irradiance.forecast"
+PRICE_ROLE = "market.price.energy"
 REQUIRED_ESS_KEYS = {
     "capacity_kwh", "reserve_soc_fraction", "max_charge_kw", "max_discharge_kw",
     "planning_charge_efficiency", "planning_discharge_efficiency",
@@ -84,6 +87,121 @@ def _frame_points(storage: Any, frame_id: str) -> list[dict[str, Any]]:
     return [{"frame_id": frame_id, "valid_at": datetime.fromtimestamp(row[0] / 1_000_000, tz=UTC), "value": row[1], "unit": row[2], "quality_status": row[3], "point": json.loads(row[4])} for row in rows]
 
 
+def _source_frame_rank(row: tuple[Any, ...], solar: bool) -> int:
+    """Prefer the explicit day-ahead contract over the broader solar feed."""
+    if solar and row[8] == SOLAR_DAY_AHEAD_ROLE:
+        return 2
+    return 1
+
+
+def _qualified_point(point: dict[str, Any], frame: tuple[Any, ...]) -> bool:
+    """Allow window-scoped quality without weakening point-level fail-closed rules."""
+    if frame[16] in {"invalid", "unknown"}:
+        return False
+    if point.get("quality_status") not in {"good", "valid", "complete"}:
+        return False
+    detail = point.get("point")
+    if isinstance(detail, dict) and detail.get("quality_status") in {"partial", "invalid", "unknown"}:
+        return False
+    return True
+
+
+def _resolve_causal_input_window(
+    storage: Any,
+    rows: list[tuple[Any, ...]],
+    slots: list[datetime],
+    *,
+    solar: bool,
+    decision_us: int,
+) -> dict[str, Any]:
+    """Resolve one exact causal window from immutable frames without fabrication."""
+    candidates_by_slot: dict[datetime, list[dict[str, Any]]] = {slot: [] for slot in slots}
+    for row in rows:
+        if row[12] > decision_us or row[16] in {"invalid", "unknown"} or not row[19]:
+            continue
+        points = _frame_points(storage, row[0])
+        by_time = {point["valid_at"]: point for point in points}
+        for slot in slots:
+            point = by_time.get(slot)
+            exact = point is not None
+            if point is None and solar:
+                point = by_time.get(slot.replace(minute=0, second=0, microsecond=0))
+            if point is None or not _qualified_point(point, row):
+                continue
+            candidates_by_slot[slot].append({"frame": row, "point": point, "exact": exact})
+
+    selected: dict[datetime, dict[str, Any]] = {}
+    ambiguous: list[str] = []
+    for slot in slots:
+        candidates = candidates_by_slot[slot]
+        if not candidates:
+            continue
+        candidates.sort(key=lambda item: (
+            _source_frame_rank(item["frame"], solar),
+            1 if item["exact"] else 0,
+            1 if item["frame"][16] in {"good", "valid", "complete"} else 0,
+            item["frame"][12],
+            item["frame"][4],
+            str(item["frame"][5]),
+            str(item["frame"][0]),
+        ), reverse=True)
+        best = candidates[0]
+        best_rank = (
+            _source_frame_rank(best["frame"], solar),
+            1 if best["exact"] else 0,
+            1 if best["frame"][16] in {"good", "valid", "complete"} else 0,
+            best["frame"][12],
+            best["frame"][4],
+        )
+        tied_generations = {
+            str(item["frame"][5])
+            for item in candidates
+            if (
+                _source_frame_rank(item["frame"], solar),
+                1 if item["exact"] else 0,
+                1 if item["frame"][16] in {"good", "valid", "complete"} else 0,
+                item["frame"][12],
+                item["frame"][4],
+            ) == best_rank
+        }
+        if len(tied_generations) > 1:
+            ambiguous.append(slot.isoformat())
+            continue
+        selected[slot] = best
+
+    used_rows = {item["frame"][0]: item["frame"] for item in selected.values()}
+    frame_rows = sorted(used_rows.values(), key=lambda row: (row[8], row[12], row[4], row[0]))
+    metadata = {
+        "points": selected,
+        "frames": frame_rows,
+        "frame_ids": [row[0] for row in frame_rows],
+        "source_generations": sorted({str(row[5]) for row in frame_rows}),
+    }
+    if ambiguous:
+        return {"available": False, "reason": "ambiguous_source_generation", "ambiguous_slots": ambiguous, **metadata}
+    if len(selected) != len(slots):
+        return {
+            "available": False,
+            "reason": "missing_causal_slot",
+            "missing_slots": [slot.isoformat() for slot in slots if slot not in selected],
+            "available_slots": len(selected),
+            **metadata,
+        }
+    return {
+        "available": True,
+        **metadata,
+        "window_quality": "good",
+    }
+
+
+def _input_rows(storage: Any, site_id: str, decision_us: int, solar: bool) -> list[tuple[Any, ...]]:
+    roles = (SOLAR_DAY_AHEAD_ROLE, SOLAR_FORECAST_ROLE) if solar else (PRICE_ROLE,)
+    rows: list[tuple[Any, ...]] = []
+    for role in roles:
+        rows.extend(_frame_rows(storage, site_id, role, decision_us, global_scope=not solar))
+    return rows
+
+
 def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: datetime) -> datetime | None:
     """Read causal publication time separately; interval start is never a substitute."""
     start = row.get("interval_start")
@@ -146,7 +264,7 @@ def _shared_ess_context(site_manager: Any, site_id: str) -> dict[str, Any]:
 def _frame_dict(row: tuple[Any, ...], site_id: str | None) -> dict[str, Any]:
     return {
         "frame_id": row[0], "schema_version": row[1], "dataset_version": row[2], "semantic_key": row[3],
-        "revision": row[4], "source_generation_id": row[5], "source_scope": row[6], "site_id": site_id,
+        "revision": row[4], "source_generation_id": row[5], "source_scope": row[6], "site_id": site_id if site_id is not None else row[7],
         "logical_role": row[8], "classification": row[9], "known_at": _iso_us(row[12]),
         "quality_status": row[16], "quality": json.loads(row[17]) if row[17] else {},
         "provenance": json.loads(row[18]) if row[18] else {}, "payload_schema": row[19],
@@ -219,32 +337,25 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
     candidates = _frame_rows(storage, site_id, "load.forecast", int(now.timestamp() * 1_000_000))
     for load_row in candidates:
         decision_at = datetime.fromtimestamp(load_row[12] / 1_000_000, tz=UTC)
-        solar_rows = _frame_rows(storage, site_id, "solar.irradiance.day_ahead_pv_forecast", load_row[12]) or _frame_rows(storage, site_id, "solar.irradiance.forecast", load_row[12])
-        price_rows = _frame_rows(storage, site_id, "market.price.energy", load_row[12], global_scope=True)
-        if not solar_rows or not price_rows:
-            continue
         economics = economics_resolver(decision_at) if economics_resolver is not None else None
         if not isinstance(economics, dict) or not _economics_is_causal(economics, decision_at):
             continue
         load_points = _frame_points(storage, load_row[0])
-        solar_points = _frame_points(storage, solar_rows[0][0])
-        price_points = _frame_points(storage, price_rows[0][0])
-        solar_by_time = {point["valid_at"]: point for point in solar_points}
-        price_by_time = {point["valid_at"]: point for point in price_points}
-        slots = []
-        for load_point in load_points:
-            start = load_point["valid_at"]
-            if start <= decision_at:
-                continue
-            solar_point = solar_by_time.get(start) or solar_by_time.get(start.replace(minute=0, second=0, microsecond=0))
-            price_point = price_by_time.get(start)
-            if solar_point is None or price_point is None:
-                continue
-            slots.append({"valid_at": start.isoformat(), "end_at": (start + timedelta(minutes=15)).isoformat(), "load_kw": float(load_point["value"]) / 1000.0, "solar_kw": float(solar_point["value"]) / 1000.0, "import_price_sek_per_kwh": float(price_point["value"]), "export_value_sek_per_kwh": float(price_point["value"]) * 0.75, "frame_ids": [load_row[0], solar_point["frame_id"], price_point["frame_id"]]})
-        slots.sort(key=lambda item: item["valid_at"])
-        if len(slots) < HORIZON_SLOTS:
+        future_load = [point for point in load_points if point["valid_at"] > decision_at]
+        expected_times = [point["valid_at"] for point in future_load[:HORIZON_SLOTS]]
+        if len(expected_times) < HORIZON_SLOTS:
             continue
-        slots = slots[:HORIZON_SLOTS]
+        solar_window = _resolve_causal_input_window(storage, _input_rows(storage, site_id, load_row[12], True), expected_times, solar=True, decision_us=load_row[12])
+        price_window = _resolve_causal_input_window(storage, _input_rows(storage, site_id, load_row[12], False), expected_times, solar=False, decision_us=load_row[12])
+        if not solar_window.get("available") or not price_window.get("available"):
+            continue
+        slots = []
+        for load_point, start in zip(future_load[:HORIZON_SLOTS], expected_times):
+            solar_point = solar_window["points"][start]["point"]
+            price_point = price_window["points"][start]["point"]
+            solar_value = float(solar_window["points"][start]["value"])
+            price_value = float(price_window["points"][start]["value"])
+            slots.append({"valid_at": start.isoformat(), "end_at": (start + timedelta(minutes=15)).isoformat(), "load_kw": float(load_point["value"]) / 1000.0, "solar_kw": solar_value / 1000.0, "import_price_sek_per_kwh": price_value, "export_value_sek_per_kwh": price_value * 0.75, "frame_ids": [load_row[0], solar_window["points"][start]["frame"][0], price_window["points"][start]["frame"][0]]})
         if datetime.fromisoformat(slots[-1]["end_at"]) > now:
             continue
         history = storage.read_site_energy_history(site_id, decision_at - timedelta(days=2), datetime.fromisoformat(slots[-1]["end_at"]))
@@ -252,7 +363,9 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
         for row in actual_rows:
             row["known_at"] = _observation_known_at(storage, row, decision_at)
         ess, ess_status = _ess_inputs(facts, actual_rows, site_id, decision_at, {**(ess_context or {}), "storage": storage})
-        frames = [_frame_dict(load_row, site_id), _frame_dict(solar_rows[0], site_id), _frame_dict(price_rows[0], None)]
+        frames = [_frame_dict(load_row, site_id)]
+        frames.extend(_frame_dict(row, row[7]) for row in solar_window["frames"])
+        frames.extend(_frame_dict(row, row[7]) for row in price_window["frames"])
         run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=(NoBatteryBaseline(), SelfConsumptionBaseline()), timezone_name="Europe/Stockholm")
         if not run["qualification"].get("qualified"):
             continue
@@ -297,16 +410,6 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
     evidence["frame_quality"] = {"load": load_row[16]}
     evidence["frame_provenance"] = {"load": json.loads(load_row[18]) if load_row[18] else {}}
     evidence["source_generations"] = [load_row[5]] if load_row[5] else []
-    solar_rows = _frame_rows(storage, site_id, "solar.irradiance.day_ahead_pv_forecast", load_row[12]) or _frame_rows(storage, site_id, "solar.irradiance.forecast", load_row[12])
-    price_rows = _frame_rows(storage, site_id, "market.price.energy", load_row[12], global_scope=True)
-    if solar_rows:
-        evidence["frame_quality"]["solar"] = solar_rows[0][16]
-        evidence["frame_provenance"]["solar"] = json.loads(solar_rows[0][18]) if solar_rows[0][18] else {}
-        if solar_rows[0][5]: evidence["source_generations"].append(solar_rows[0][5])
-    if price_rows:
-        evidence["frame_quality"]["price"] = price_rows[0][16]
-        evidence["frame_provenance"]["price"] = json.loads(price_rows[0][18]) if price_rows[0][18] else {}
-        if price_rows[0][5]: evidence["source_generations"].append(price_rows[0][5])
     economics = economics_resolver(decision_at) if economics_resolver else None
     economics_causal = isinstance(economics, dict) and _economics_is_causal(economics, decision_at)
     evidence["economics"] = {"causal": economics_causal, "provider_reference": economics.get("provider_reference") if isinstance(economics, dict) else None, "reason": None if economics_causal else "economics_not_causal"}
@@ -318,21 +421,21 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
             "override_known_at": override.get("known_at"), "override_effective_from": override.get("effective_from"),
         }
     load_points = _frame_points(storage, load_row[0])
-    solar_points = _frame_points(storage, solar_rows[0][0]) if solar_rows else []
-    price_points = _frame_points(storage, price_rows[0][0]) if price_rows else []
-    solar_by_time = {point["valid_at"]: point for point in solar_points}
-    price_by_time = {point["valid_at"]: point for point in price_points}
-    slots = []
-    for point in load_points:
-        start = point["valid_at"]
-        if start <= decision_at:
-            continue
-        if (solar_by_time.get(start) or solar_by_time.get(start.replace(minute=0, second=0, microsecond=0))) is None or price_by_time.get(start) is None:
-            continue
-        slots.append(start)
-    slots.sort()
-    slots = slots[:HORIZON_SLOTS]
+    future_load = [point for point in load_points if point["valid_at"] > decision_at]
+    expected_slots = [point["valid_at"] for point in future_load[:HORIZON_SLOTS]]
+    solar_input_rows = _input_rows(storage, site_id, load_row[12], True)
+    price_input_rows = _input_rows(storage, site_id, load_row[12], False)
+    solar_window = _resolve_causal_input_window(storage, solar_input_rows, expected_slots, solar=True, decision_us=load_row[12]) if expected_slots else {"available": False, "reason": "missing_causal_slot", "available_slots": 0}
+    price_window = _resolve_causal_input_window(storage, price_input_rows, expected_slots, solar=False, decision_us=load_row[12]) if expected_slots else {"available": False, "reason": "missing_causal_slot", "available_slots": 0}
+    slots = sorted(set(solar_window.get("points", {})).intersection(price_window.get("points", {})))
     evidence["horizon"]["available_slots"] = len(slots)
+    evidence["frame_quality"]["solar"] = {"window": solar_window.get("window_quality", "partial"), "frame_ids": solar_window.get("frame_ids", [])}
+    evidence["frame_quality"]["price"] = {"window": price_window.get("window_quality", "partial"), "frame_ids": price_window.get("frame_ids", [])}
+    evidence["frame_provenance"]["solar"] = [{"frame_id": row[0], "source_generation_id": row[5], "quality_status": row[16], "provenance": json.loads(row[18]) if row[18] else {}} for row in solar_window.get("frames", [])]
+    evidence["frame_provenance"]["price"] = [{"frame_id": row[0], "source_generation_id": row[5], "quality_status": row[16], "provenance": json.loads(row[18]) if row[18] else {}} for row in price_window.get("frames", [])]
+    evidence["source_generations"].extend(solar_window.get("source_generations", []))
+    evidence["source_generations"].extend(price_window.get("source_generations", []))
+    evidence["source_generations"] = sorted(set(evidence["source_generations"]))
     read_history = getattr(storage, "read_site_energy_history", None)
     history = read_history(site_id, decision_at - timedelta(days=2), decision_at + timedelta(minutes=15)) if callable(read_history) else []
     for row in history:
@@ -358,11 +461,11 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
         evidence["resource_id"] = resources[0]
     if load_row[16] not in {"good", "valid", "complete"}:
         evidence["blocker"] = "no_good_frame"
-    elif not solar_rows or not price_rows:
+    elif not solar_input_rows or not price_input_rows:
         evidence["blocker"] = "missing_causal_input_frame"
     elif not economics_causal:
         evidence["blocker"] = "economics_not_causal"
-    elif len(slots) < HORIZON_SLOTS:
+    elif not solar_window.get("available") or not price_window.get("available") or len(slots) < HORIZON_SLOTS:
         evidence["blocker"] = "horizon_incomplete"
     elif not evidence["horizon"].get("mature") or evidence["horizon"]["actual_coverage"] != "96/96":
         evidence["blocker"] = "awaiting_outcomes"
