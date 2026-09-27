@@ -3219,7 +3219,7 @@ class ElrakningPanel {
           <article class="card cost-card" data-cost-card hidden aria-labelledby="cost-title">
             <div class="card-heading cost-card-heading"><h2 id="cost-title">Kostnad</h2></div>
             <div class="cost-kpis" data-cost-kpis></div>
-            <div class="cost-main-grid"><div class="cost-chart" data-cost-chart aria-live="polite"></div><div class="cost-side"><h3>Nyckeltal</h3><div class="cost-details" data-cost-summary></div></div></div>
+            <div class="cost-main-grid"><div class="cost-chart" data-cost-chart aria-live="polite"></div><div class="cost-side"><div class="cost-details" data-cost-summary></div></div></div>
             <section class="cost-history-section" aria-labelledby="cost-history-title"><div class="cost-history-heading"><h3 id="cost-history-title">Månadskostnad senaste 12 månaderna</h3><span class="status" data-cost-status></span><span data-cost-history-status></span></div><div class="cost-history-chart" data-cost-history-chart role="tablist" aria-label="Månader"></div></section>
             <div class="cost-comparison" data-cost-comparison></div>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
@@ -4601,7 +4601,7 @@ class ElrakningPanel {
         .cost-history-heading { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
         .cost-history-heading h3, .cost-side h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
         .cost-history-heading span { color: var(--secondary-text-color); font-size: var(--card-legend-size); }
-        .cost-history-chart { align-items: end; display: flex; gap: 6px; height: 92px; margin-top: 12px; overflow-x: auto; padding: 4px 2px 20px; }
+        .cost-history-chart { align-items: end; display: flex; gap: 6px; height: 92px; overflow-x: auto; }
         .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 3px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
         .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
