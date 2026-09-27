@@ -209,9 +209,11 @@ assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kost
 const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("status.textContent", source.indexOf("const currentRows =")));
 assert.equal((costKpiRender.match(/\["(?:Beräknad månadskostnad|Kostnad hittills|Beräknat återstående)"/g) || []).length, 3);
 assert.match(source, /const currentRows = \[/);
-assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek, "Prognos för hela innevarande månaden"\]/);
-assert.match(source, /\["Beräknat återstående", estimate\.forecast_remaining_total_sek, "Prognos från nu till månadens slut"\]/);
-assert.match(source, /cost-kpi-secondary/);
+assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek\]/);
+assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek\]/);
+assert.match(source, /\["Beräknat återstående", estimate\.forecast_remaining_total_sek\]/);
+assert.doesNotMatch(costKpiRender, /cost-kpi-secondary/);
+assert.doesNotMatch(source, /Prognos för hela innevarande månaden|Från månadens början till nu|Prognos från nu till månadens slut/);
 assert.match(source, /cost-history-bar-item\.estimated/);
 assert.doesNotMatch(costKpiRender, /Mot förra månaden/);
 assert.doesNotMatch(source, /cost-detail-secondary/);
