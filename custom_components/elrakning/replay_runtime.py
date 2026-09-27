@@ -20,6 +20,40 @@ REQUIRED_ESS_KEYS = {
 }
 
 
+def _economics_is_causal(economics: dict[str, Any], decision_at: datetime) -> bool:
+    """Require provider economics or its recorded applicability override at decision time."""
+    def moment(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone(UTC) if parsed.tzinfo else None
+
+    decision = decision_at.astimezone(UTC)
+    known_at = moment(economics.get("known_at"))
+    valid_from = moment(economics.get("valid_from"))
+    valid_to = moment(economics.get("valid_to")) if economics.get("valid_to") else None
+    if known_at is None or valid_from is None or known_at > decision or (valid_to is not None and valid_to <= decision):
+        return False
+    if valid_from <= decision:
+        return True
+    override = economics.get("planning_applicability_override")
+    if not isinstance(override, dict) or override.get("source_type") != "user_configured_planning_applicability_override":
+        return False
+    override_known = moment(override.get("known_at"))
+    override_effective = moment(override.get("effective_from"))
+    return (
+        override_known is not None
+        and override_effective is not None
+        and override_known <= decision
+        and override_effective <= decision
+        and override.get("provider_valid_from") == economics.get("provider_valid_from")
+        and override.get("provider_reference") == economics.get("provider_reference")
+    )
+
+
 def _iso_us(value: int) -> str:
     return datetime.fromtimestamp(value / 1_000_000, tz=UTC).isoformat()
 
@@ -117,7 +151,7 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
         if not solar_rows or not price_rows:
             continue
         economics = economics_resolver(decision_at) if economics_resolver is not None else None
-        if not isinstance(economics, dict):
+        if not isinstance(economics, dict) or not _economics_is_causal(economics, decision_at):
             continue
         load_points = _frame_points(storage, load_row[0])
         solar_points = _frame_points(storage, solar_rows[0][0])

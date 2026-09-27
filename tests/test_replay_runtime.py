@@ -99,3 +99,25 @@ def test_runtime_initial_state_ignores_observations_known_after_decision():
     decision = datetime.fromtimestamp(1.5, tz=timezone.utc)
     known_at = replay_runtime._observation_known_at(Storage(), row, decision)
     assert known_at == datetime.fromtimestamp(1, tz=timezone.utc)
+
+
+def test_runtime_runner_rejects_future_economics_without_causal_override():
+    from datetime import datetime, timezone
+
+    decision = datetime(2026, 9, 24, 20, tzinfo=timezone.utc)
+    economics = {
+        "known_at": decision.isoformat(),
+        "valid_from": "2026-10-01T00:00:00+00:00",
+        "provider_valid_from": "2026-10-01T00:00:00+00:00",
+        "provider_reference": "eon-agreement-test",
+    }
+    assert replay_runtime._economics_is_causal(economics, decision) is False
+    economics["planning_applicability_override"] = {
+        "source_type": "user_configured_planning_applicability_override",
+        "known_at": "2026-09-26T15:26:30+00:00",
+        "effective_from": "2026-09-26T15:26:30+00:00",
+        "provider_valid_from": economics["provider_valid_from"],
+        "provider_reference": economics["provider_reference"],
+    }
+    assert replay_runtime._economics_is_causal(economics, decision) is False
+    assert replay_runtime._economics_is_causal(economics, datetime(2026, 9, 27, tzinfo=timezone.utc)) is True
