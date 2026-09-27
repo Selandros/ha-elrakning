@@ -103,6 +103,12 @@ assert.equal(kpiComparisons[0].difference_percent, null);
 assert.equal(kpiComparisons[0].partial_baseline, true);
 assert.equal(kpiComparisons[1].available, false);
 assert.equal(kpiComparisons[2].available, false);
+const percentageKpiComparison = buildCostKpiComparisons(
+  { estimated_month_total_sek: 240, total_so_far_sek: 120, forecast_remaining_total_sek: 120 },
+  { month: "2026-08", coverage: "complete", total_sek: 200 },
+);
+assert.equal(percentageKpiComparison[0].difference_sek, 40);
+assert.equal(percentageKpiComparison[0].difference_percent, 20);
 const checkpointComparisons = buildCostKpiComparisons(
   { estimated_month_total_sek: 240, total_so_far_sek: 120, forecast_remaining_total_sek: 120 },
   { month: "2026-08", coverage: "complete", total_sek: 200 },
@@ -263,7 +269,7 @@ assert.match(source, /cost-history-bar-item\.estimated/);
 assert.match(source, /Beräknad månadskostnad/);
 assert.match(source, /<div class="card-heading cost-card-heading"><h2 id="cost-title">Kostnad<\/h2><\/div>/);
 assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kostnad, prognos och fakturahistorik/);
-const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("status.textContent", source.indexOf("const currentRows =")));
+const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("const series =", source.indexOf("const currentRows =")));
 assert.equal((costKpiRender.match(/\["(?:Beräknad månadskostnad|Kostnad hittills|Beräknat återstående)"/g) || []).length, 3);
 assert.match(source, /const currentRows = \[/);
 assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek\]/);
@@ -282,6 +288,9 @@ assert.match(source, /\["Total", selectedRecord\.total_sek\]/);
 assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
 assert.match(source, /cost-kpi-comparison/);
 assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
+assert.match(costKpiRender, /const percent = Number\(comparison\.difference_percent\)/);
+assert.doesNotMatch(costKpiRender, /this\._formatSek\(Math\.abs\(comparison\.difference_sek\)\)/);
+assert.match(source, /\["Beräknad import hela månaden", Number\.isFinite\(Number\(estimate\.forecast_import_kwh\)\)/);
 assert.match(source, /Mot förra månaden/);
 assert.match(source, /Mot 3 månaders snitt/);
 assert.match(source, /Mot 12 månaders snitt/);

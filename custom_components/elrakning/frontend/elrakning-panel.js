@@ -1464,6 +1464,30 @@ export function integrateMeterHistoryKwh(points, field, dayStart, dayEnd, now = 
   return covered ? energyKwh : null;
 }
 
+export function integrateMeterEnergyByRange(points, startMs, endMs) {
+  const sorted = (Array.isArray(points) ? points : []).map((point) => ({
+    timestamp: new Date(point.timestamp).getTime(),
+    value: Number(point.import_kw),
+  })).filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  let total = 0;
+  let covered = false;
+  for (let index = 1; index < sorted.length; index += 1) {
+    const left = sorted[index - 1];
+    const right = sorted[index];
+    if (right.timestamp <= left.timestamp || right.timestamp - left.timestamp > 30 * 60 * 1000) continue;
+    const from = Math.max(startMs, left.timestamp);
+    const to = Math.min(endMs, right.timestamp);
+    if (to <= from) continue;
+    const ratio = (timestamp) => (timestamp - left.timestamp) / (right.timestamp - left.timestamp);
+    const fromValue = left.value + (right.value - left.value) * ratio(from);
+    const toValue = left.value + (right.value - left.value) * ratio(to);
+    total += ((fromValue + toValue) / 2) * ((to - from) / 3600000);
+    covered = true;
+  }
+  return covered ? total : null;
+}
+
 export function recomputeDailyEnergyState(powerState, powerHistory, meterPowerHistory, now = new Date()) {
   if (!powerState) return null;
   const window = stockholmDayWindow(now);
@@ -1586,7 +1610,7 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const historicalBaselineDailyKwh = historicalDailyValues.length
     ? historicalDailyValues.reduce((sum, value) => sum + value, 0) / historicalDailyValues.length
     : null;
-  const importedKwh = coveredEnergyPeriods > 0 ? coveredEnergyKwh : null;
+  const actualImportedKwh = integrateMeterEnergyByRange(meterPoints, monthStart.getTime(), nowMs);
   const tradeVariableSek = rows.length ? rows.reduce((sum, row) => sum + row.trade_cost_sek, 0) : null;
   const gridVariableSek = rows.length && Number.isFinite(gridGross) ? rows.reduce((sum, row) => sum + row.grid_cost_sek, 0) : null;
   const coveredStart = rows.length ? Math.min(...rows.map((row) => new Date(row.start).getTime())) : null;
@@ -1606,12 +1630,12 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const elapsedDays = Math.max(1, elapsedMs / 86400000);
   const coveredDays = coveredDurationMs / 86400000;
   const remainingDays = Math.max(0, (nextMonth.getTime() - nowMs) / 86400000);
-  const pricedImportKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
-  const observedDailyImportKwh = importedKwh > 0 && coveredDays > 0 ? importedKwh / coveredDays : null;
-  const tradeWeighted = pricedImportKwh > 0
-    ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / pricedImportKwh
+  const pricedCostImportKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
+  const observedDailyImportKwh = actualImportedKwh !== null && actualImportedKwh >= 0 && coveredDays > 0 ? actualImportedKwh / coveredDays : null;
+  const tradeWeighted = pricedCostImportKwh > 0
+    ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / pricedCostImportKwh
     : null;
-  const gridWeighted = pricedImportKwh > 0 ? gridGross : null;
+  const gridWeighted = pricedCostImportKwh > 0 ? gridGross : null;
   const fixedTrade = tradeFixedFee != null && Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
   const gridFixed = Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
   const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
@@ -1652,33 +1676,43 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const missingPastGridSek = baselineMissingPastKwh === null || fallbackGridOre === null ? null : baselineMissingPastKwh * fallbackGridOre / 100;
   const unknownFutureTradeSek = unknownFutureKwh === null || fallbackTradeOre === null ? null : unknownFutureKwh * fallbackTradeOre / 100;
   const unknownFutureGridSek = unknownFutureKwh === null || fallbackGridOre === null ? null : unknownFutureKwh * fallbackGridOre / 100;
-  const forecastImportKwh = importedKwh !== null && baselineMissingPastKwh !== null && forecastFutureKwh !== null
-    ? importedKwh + baselineMissingPastKwh + forecastFutureKwh
+  const forecastImportKwh = actualImportedKwh !== null && forecastFutureKwh !== null
+    ? actualImportedKwh + forecastFutureKwh
     : null;
-  const forecastTradeRemainingSek = missingPastTradeSek === null || unknownFutureTradeSek === null
-    ? null : missingPastTradeSek + knownFutureTradeSek + unknownFutureTradeSek;
-  const forecastGridRemainingSek = missingPastGridSek === null || unknownFutureGridSek === null
-    ? null : missingPastGridSek + knownFutureGridSek + unknownFutureGridSek;
+  const forecastTradeRemainingSek = unknownFutureTradeSek === null
+    ? null : knownFutureTradeSek + unknownFutureTradeSek;
+  const forecastGridRemainingSek = unknownFutureGridSek === null
+    ? null : knownFutureGridSek + unknownFutureGridSek;
   const forecastVariableSek = variableSoFarSek === null || forecastTradeRemainingSek === null || forecastGridRemainingSek === null
     ? null : tradeVariableSek + gridVariableSek + forecastTradeRemainingSek + forecastGridRemainingSek;
-  const forecastFixedSek = (fixedTrade || 0) + (gridFixed || 0);
   const totalSoFarSek = variableSoFarSek === null ? null : variableSoFarSek + fixedSoFarSek;
-  const estimatedMonthTotalSek = forecastVariableSek === null ? null : forecastVariableSek + forecastFixedSek;
+  const forecastRemainingFixedSek = (fixedTrade === null && gridFixed === null)
+    ? 0
+    : (fixedTrade === null ? 0 : Math.max(0, fixedTrade - (accruedTradeFixed || 0)))
+      + (gridFixed === null ? 0 : Math.max(0, gridFixed - (accruedGridFixed || 0)));
+  const forecastRemainingTotalSek = forecastVariableSek === null || !Number.isFinite(forecastRemainingFixedSek)
+    ? null : forecastVariableSek - (tradeVariableSek || 0) - (gridVariableSek || 0) + forecastRemainingFixedSek;
+  const estimatedMonthTotalSek = totalSoFarSek === null || forecastRemainingTotalSek === null
+    ? null : totalSoFarSek + forecastRemainingTotalSek;
   return {
     month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
-    imported_kwh_so_far: importedKwh,
+    imported_kwh_so_far: actualImportedKwh,
+    actual_imported_kwh_display: actualImportedKwh,
+    priced_imported_kwh: rows.length ? pricedCostImportKwh : null,
     trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek === null ? null : tradeVariableSek + (accruedTradeFixed || 0) },
     grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek === null ? null : gridVariableSek + (accruedGridFixed || 0) },
     total_so_far_sek: totalSoFarSek,
     estimated_month_total_sek: estimatedMonthTotalSek,
     forecast_import_kwh: forecastImportKwh,
-    forecast_remaining_kwh: forecastImportKwh === null ? null : Math.max(0, forecastImportKwh - importedKwh),
+    forecast_remaining_kwh: forecastFutureKwh,
     forecast_missing_past_kwh: baselineMissingPastKwh,
     forecast_future_kwh: forecastFutureKwh,
     forecast_remaining_days: remainingDays,
     forecast_remaining_trade_variable_sek: forecastTradeRemainingSek,
     forecast_remaining_grid_variable_sek: forecastGridRemainingSek,
-    forecast_remaining_total_sek: estimatedMonthTotalSek === null ? null : estimatedMonthTotalSek - totalSoFarSek,
+    forecast_missing_past_trade_sek: missingPastTradeSek,
+    forecast_missing_past_grid_sek: missingPastGridSek,
+    forecast_remaining_total_sek: forecastRemainingTotalSek,
     missing_past_estimated_kwh: baselineMissingPastKwh,
     historical_baseline_daily_kwh: historicalBaselineDailyKwh,
     historical_baseline_day_count: historicalDailyValues.length,
@@ -1691,9 +1725,9 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     forecast_fallback: historicalBaselineDailyKwh === null ? "historical_baseline_unavailable" : null,
     actual_so_far_sek: totalSoFarSek,
     remaining_estimated_sek: estimatedMonthTotalSek === null ? null : estimatedMonthTotalSek - totalSoFarSek,
-    forecast_method: "actual imported energy; trailing complete-day historical baseline blended with current observations; known future prices used where available and recent observed prices used only beyond the known horizon",
+    forecast_method: "actual imported energy display uses all valid integrated segments; future remaining excludes missing past coverage; trailing complete-day historical baseline blended with current observations; known future prices used where available and recent observed prices used only beyond the known horizon",
     forecast_confidence: rows.length && missingPricePeriods === 0 && missingEnergyPeriods === 0 && coveredDurationMs >= elapsedMs - 1 ? "complete_available_data" : "partial_data",
-    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: elapsedMs ? coveredDurationMs / elapsedMs * 100 : 0, first_period: coveredStartMs ? new Date(coveredStartMs).toISOString() : null, last_period: coveredEndMs ? new Date(coveredEndMs).toISOString() : null, observed_duration_ms: coveredDurationMs, covered_duration_ms: coveredDurationMs, missing_past_duration_ms: missingPastMs, remaining_future_duration_ms: remainingDays * 86400000, elapsed_month_duration_ms: elapsedMs, periods: { observed_covered: { duration_ms: coveredDurationMs, kwh: importedKwh }, missing_past: { duration_ms: missingPastMs, estimated_kwh: baselineMissingPastKwh }, future_remaining: { duration_ms: remainingDays * 86400000, estimated_kwh: forecastFutureKwh } } },
+    data_coverage: { period_count: rows.length, observed_periods: observedPricePeriods, covered_energy_periods: coveredEnergyPeriods, missing_price_periods: missingPricePeriods, missing_energy_periods: missingEnergyPeriods, coverage_percent: elapsedMs ? coveredDurationMs / elapsedMs * 100 : 0, first_period: coveredStartMs ? new Date(coveredStartMs).toISOString() : null, last_period: coveredEndMs ? new Date(coveredEndMs).toISOString() : null, observed_duration_ms: coveredDurationMs, covered_duration_ms: coveredDurationMs, missing_past_duration_ms: missingPastMs, remaining_future_duration_ms: remainingDays * 86400000, elapsed_month_duration_ms: elapsedMs, periods: { observed_covered: { duration_ms: coveredDurationMs, kwh: actualImportedKwh }, priced_observed: { duration_ms: coveredDurationMs, kwh: rows.length ? pricedCostImportKwh : null }, missing_past: { duration_ms: missingPastMs, estimated_kwh: baselineMissingPastKwh }, future_remaining: { duration_ms: remainingDays * 86400000, estimated_kwh: forecastFutureKwh } } },
     trade_weighted_average_ore_per_kwh: tradeWeighted,
     grid_weighted_average_ore_per_kwh: gridWeighted,
     total_weighted_average_ore_per_kwh: tradeWeighted === null || gridWeighted === null ? null : tradeWeighted + gridWeighted,
@@ -1866,7 +1900,7 @@ export function aggregatePriceAndEnergyByPeriod(periods, meterPoints, powerSerie
       pricePeriodCount += 1;
     }
     const energy = {};
-    const meterImport = integrate(meter, "import_kw", bucket.startMs, bucket.endMs);
+    const meterImport = integrateMeterEnergyByRange(meter, bucket.startMs, bucket.endMs);
     const meterExport = integrate(meter, "export_kw", bucket.startMs, bucket.endMs);
     if (meterImport !== null) energy.import = meterImport;
     if (meterExport !== null) energy.export = meterExport;
@@ -2297,8 +2331,10 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       period_start_value: billingHistory.energy_source?.period_start_value ?? null,
       current_value: billingHistory.energy_source?.current_value ?? null,
       imported_kwh_so_far: estimate.imported_kwh_so_far,
+      actual_imported_kwh_display: estimate.actual_imported_kwh_display ?? estimate.imported_kwh_so_far,
+      priced_imported_kwh: estimate.priced_imported_kwh ?? null,
       integration_method: billingHistory.integration_method || "trapezoidal_power_integration",
-      result_kwh: estimate.imported_kwh_so_far,
+      result_kwh: estimate.actual_imported_kwh_display ?? estimate.imported_kwh_so_far,
     },
     trade_variable: {
       rows,
@@ -2331,8 +2367,11 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       days_remaining: billingHistory.days_remaining ?? null,
       forecast_import_kwh: estimate.forecast_import_kwh ?? null,
       forecast_remaining_kwh: estimate.forecast_remaining_kwh ?? null,
+      forecast_missing_past_kwh: estimate.forecast_missing_past_kwh ?? null,
       forecast_trade_variable_sek: estimate.forecast_remaining_trade_variable_sek ?? null,
       forecast_grid_variable_sek: estimate.forecast_remaining_grid_variable_sek ?? null,
+      forecast_missing_past_trade_sek: estimate.forecast_missing_past_trade_sek ?? null,
+      forecast_missing_past_grid_sek: estimate.forecast_missing_past_grid_sek ?? null,
       total_sek: estimate.forecast_remaining_total_sek ?? null,
       historical_baseline_daily_kwh: estimate.historical_baseline_daily_kwh ?? null,
       observed_current_daily_kwh: estimate.observed_current_daily_kwh ?? null,
@@ -4671,13 +4710,16 @@ class ElrakningPanel {
         }
 
         .cost-kpi-comparison {
+          align-items: center;
           border: 1px solid var(--divider-color);
           border-radius: var(--ha-card-border-radius, 8px);
           color: var(--secondary-text-color);
-          display: block;
+          display: inline-flex;
           font-size: var(--card-legend-size);
           margin-top: 6px;
-          padding: 4px 6px;
+          max-width: max-content;
+          padding: 3px 7px;
+          white-space: nowrap;
         }
 
         .cost-kpi-comparison.up { color: var(--error-color, var(--secondary-text-color)); }
@@ -10090,10 +10132,14 @@ class ElrakningPanel {
       const bubble = document.createElement("span");
       bubble.className = `cost-kpi-comparison${comparison.available ? ` ${comparison.direction}` : " unavailable"}`;
       if (comparison.available) {
-        const direction = comparison.direction === "up" ? "Högre" : comparison.direction === "down" ? "Lägre" : "Oförändrad";
-        const percent = comparison.difference_percent == null ? "" : ` · ${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
-        const partial = comparison.partial_baseline ? " · Delvis underlag" : "";
-        bubble.textContent = `${direction} ${this._formatSek(Math.abs(comparison.difference_sek))}${percent}${partial}`;
+        const percent = Number(comparison.difference_percent);
+        if (!Number.isFinite(percent)) {
+          bubble.textContent = "Ej jämförbart";
+          bubble.classList.add("unavailable");
+        } else {
+          const sign = percent > 0 ? "+" : percent < 0 ? "−" : "";
+          bubble.textContent = `${sign}${this._formatNumber(Math.abs(percent))} %`;
+        }
       } else {
         bubble.textContent = "Ej jämförbart";
       }
@@ -10129,7 +10175,7 @@ class ElrakningPanel {
       ["Fast kostnad", Number.isFinite(Number(estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
       ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
       ["Import", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
-      ["Prognostiserad import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
+      ["Beräknad import hela månaden", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
       ["Snittpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
     ] : selectedRecord ? [
       ["Elhandel", selectedRecord.trade_sek == null ? "Saknas" : selectedRecord.trade_sek],
