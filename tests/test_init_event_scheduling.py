@@ -282,6 +282,15 @@ def test_monthly_forecast_startup_capture_runs_after_ready_event():
     assert "await _async_capture_monthly_forecast(hass)" in source[ready:return_statement]
 
 
+def test_monthly_forecast_uses_persisted_power_snapshot_during_startup_race():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    capture = source.index("async def _async_capture_monthly_forecast_impl(hass)")
+    assert "site_state.get(\"power_forecasts\")" in source[capture:]
+    assert '"method": "persisted_power_forecast_fallback"' in source[capture:]
+    assert 'item.get("site_id") == site_id' in source[capture:]
+
+
 def test_control_plane_state_handlers_have_safe_pre_ready_contract():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
     source = source_path.read_text(encoding="utf-8")

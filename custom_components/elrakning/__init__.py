@@ -243,6 +243,34 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
                 "import_kw": float(point.get("value_w")) / 1000.0,
                 "known_at": forecast.get("known_at"), "provenance": point.get("provenance") or {},
             })
+    # Reuse the latest persisted, site-scoped power forecast when the live
+    # builder races the power snapshot update during startup.
+    if not near_term:
+        learning_store = data.get("ella_learning_store")
+        site_state = (getattr(learning_store, "state", {}).get("sites", {}).get(site_id, {})
+                      if learning_store else {})
+        persisted = sorted(
+            [item for item in (site_state.get("power_forecasts") or [])
+             if isinstance(item, dict) and item.get("site_id") == site_id],
+            key=lambda item: str(item.get("known_at") or ""),
+        )[-1:]
+        for snapshot in persisted:
+            snapshot_known_at = snapshot.get("known_at")
+            for valid_at, series in (snapshot.get("points") or {}).items():
+                import_point = series.get("import") if isinstance(series, dict) else None
+                if not isinstance(import_point, dict):
+                    continue
+                near_term.append({
+                    "valid_at": valid_at,
+                    "end_at": import_point.get("end_at"),
+                    "import_kw": float(import_point.get("predicted_w")) / 1000.0,
+                    "known_at": snapshot_known_at,
+                    "provenance": {
+                        **(import_point.get("provenance") or {}),
+                        "method": "persisted_power_forecast_fallback",
+                        "forecast_id": snapshot.get("forecast_id"),
+                    },
+                })
     slots = build_month_end_slots(
         decision_at=now, month_end=month_end, near_term_points=near_term,
         historical_rows=rows, timezone_name=timezone_name, known_price_periods=price_periods,
