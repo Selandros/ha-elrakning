@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { applyCanonicalMonthlyForecast, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
@@ -545,6 +546,31 @@ assert.equal(unavailableGridEstimate.grid.variable_cost_sek, null);
 assert.equal(unavailableGridEstimate.grid.total_so_far_sek, null);
 assert.equal(unavailableGridEstimate.total_so_far_sek, null);
 assert.equal(unavailableGridEstimate.estimated_month_total_sek, null);
+assert.equal(finiteCostNumber(null), null);
+assert.equal(finiteCostNumber(undefined), null);
+assert.equal(finiteCostNumber(Number.NaN), null);
+assert.equal(finiteCostNumber(0), 0);
+const canonicalUnavailableEstimate = applyCanonicalMonthlyForecast(
+  { estimated_month_total_sek: 999, total_so_far_sek: 888, forecast_remaining_total_sek: 111 },
+  {
+    available: false,
+    actual_cost_to_date_sek: 33.9651,
+    estimated_month_total_sek: null,
+    expected_future_cost_sek: null,
+    forecast_method: "legacy_explicit_fallback_required",
+    reasons: ["grid_tariff_missing"],
+  },
+);
+assert.equal(canonicalUnavailableEstimate.total_so_far_sek, 33.9651);
+assert.equal(canonicalUnavailableEstimate.estimated_month_total_sek, null);
+assert.equal(canonicalUnavailableEstimate.forecast_remaining_total_sek, null);
+const canonicalZeroEstimate = applyCanonicalMonthlyForecast(
+  { estimated_month_total_sek: 999, total_so_far_sek: 888, forecast_remaining_total_sek: 111 },
+  { available: false, actual_cost_to_date_sek: 0, estimated_month_total_sek: 0, expected_future_cost_sek: 0 },
+);
+assert.equal(canonicalZeroEstimate.total_so_far_sek, 0);
+assert.equal(canonicalZeroEstimate.estimated_month_total_sek, 0);
+assert.equal(canonicalZeroEstimate.forecast_remaining_total_sek, 0);
 assert.equal(previousCalendarMonth("2026-08"), "2026-07");
 assert.equal(previousCalendarMonth("2027-01"), "2026-12");
 const previousActual = buildPreviousMonthActual({

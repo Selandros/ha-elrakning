@@ -1742,6 +1742,36 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   };
 }
 
+export function finiteCostNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function applyCanonicalMonthlyForecast(estimate, monthlyForecast) {
+  if (!monthlyForecast || typeof monthlyForecast !== "object") return estimate;
+  const canonicalField = (name) => Object.prototype.hasOwnProperty.call(monthlyForecast, name)
+    ? finiteCostNumber(monthlyForecast[name])
+    : undefined;
+  const actualCostToDate = canonicalField("actual_cost_to_date_sek");
+  const estimatedMonthTotal = canonicalField("estimated_month_total_sek");
+  const expectedFutureCost = canonicalField("expected_future_cost_sek");
+  const actualImportToDate = canonicalField("actual_import_to_date_kwh");
+  const estimatedMonthImport = canonicalField("estimated_month_import_kwh");
+  const expectedFutureImport = canonicalField("expected_future_import_kwh");
+  return {
+    ...estimate,
+    ...(estimatedMonthTotal !== undefined ? { estimated_month_total_sek: estimatedMonthTotal } : {}),
+    ...(actualCostToDate !== undefined ? { total_so_far_sek: actualCostToDate } : {}),
+    ...(expectedFutureCost !== undefined ? { forecast_remaining_total_sek: expectedFutureCost } : {}),
+    ...(actualImportToDate !== undefined ? { imported_kwh_so_far: actualImportToDate } : {}),
+    ...(estimatedMonthImport !== undefined ? { forecast_import_kwh: estimatedMonthImport } : {}),
+    ...(expectedFutureImport !== undefined ? { forecast_remaining_kwh: expectedFutureImport } : {}),
+    forecast_method: monthlyForecast.forecast_method || estimate?.forecast_method,
+    forecast_provenance: monthlyForecast,
+  };
+}
+
 export function buildCostAnalysisSeries(estimate, previousActual = null, now = new Date()) {
   const current = new Date(now);
   const year = current.getFullYear();
@@ -9995,19 +10025,7 @@ class ElrakningPanel {
       billingHistory?.baseline_energy_points,
     );
     const monthlyForecast = billingHistory?.monthly_forecast;
-    if (monthlyForecast?.available === true && Number.isFinite(Number(monthlyForecast.estimated_month_total_sek))) {
-      estimate = {
-        ...estimate,
-        estimated_month_total_sek: Number(monthlyForecast.estimated_month_total_sek),
-        total_so_far_sek: Number(monthlyForecast.actual_cost_to_date_sek),
-        forecast_remaining_total_sek: Number(monthlyForecast.expected_future_cost_sek),
-        imported_kwh_so_far: Number(monthlyForecast.actual_import_to_date_kwh),
-        forecast_import_kwh: Number(monthlyForecast.estimated_month_import_kwh),
-        forecast_remaining_kwh: Number(monthlyForecast.expected_future_import_kwh),
-        forecast_method: monthlyForecast.forecast_method,
-        forecast_provenance: monthlyForecast,
-      };
-    }
+    estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
     const configured = this._meterState?.configured === true;
     card.hidden = !configured || !billingHistory;
     if (!configured || !billingHistory) {
@@ -10103,8 +10121,8 @@ class ElrakningPanel {
     card.hidden = !estimate;
     if (historyChart) {
       const valueForItem = (item) => item.current
-        ? Number(item.estimated_total_sek)
-        : Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
+        ? finiteCostNumber(item.estimated_total_sek)
+        : finiteCostNumber(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
       const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(valueForItem(item)));
       const maxHistoryValue = Math.max(1, ...valuedHistory.map(valueForItem));
       historyChart.replaceChildren(...displayHistory.map((item) => {
@@ -10161,7 +10179,8 @@ class ElrakningPanel {
       const name = document.createElement("span");
       name.textContent = label;
       const output = document.createElement("strong");
-      output.textContent = typeof value === "string" ? value : Number.isFinite(Number(value)) ? this._formatSek(Number(value)) : "–";
+      const numericValue = finiteCostNumber(value);
+      output.textContent = typeof value === "string" ? value : numericValue === null ? "–" : this._formatSek(numericValue);
       const comparison = kpiComparisons[index];
       const bubble = document.createElement("span");
       bubble.className = `cost-kpi-comparison${comparison.available ? ` ${comparison.direction}` : " unavailable"}`;
