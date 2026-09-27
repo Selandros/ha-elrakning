@@ -427,7 +427,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if replay_refresh_task is not None and not replay_refresh_task.done():
             return
         event_site_id = event.data.get("site_id") if getattr(event, "data", None) else None
-        replay_refresh_task = hass.async_create_task(_generate_replay_artifact(event_site_id=event_site_id))
+        replay_refresh_task = hass.create_task(_generate_replay_artifact(event_site_id=event_site_id))
         frontend_data["replay_benchmark_refresh_task"] = replay_refresh_task
 
     hass.services.async_register(DOMAIN, "replay_artifact_generate", _generate_replay_artifact)
