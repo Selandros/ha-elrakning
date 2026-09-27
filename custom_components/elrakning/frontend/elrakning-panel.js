@@ -3206,7 +3206,7 @@ class ElrakningPanel {
             <div class="cost-kpis" data-cost-kpis></div>
             <div class="cost-comparison" data-cost-comparison></div>
             <div class="cost-main-grid"><div class="cost-chart" data-cost-chart aria-live="polite"></div><div class="cost-side"><h3>Nyckeltal</h3><div class="cost-details" data-cost-summary></div></div></div>
-            <section class="cost-history-section" aria-labelledby="cost-history-title"><div class="cost-history-heading"><h3 id="cost-history-title">Månadskostnad senaste 12 månaderna</h3><span class="status" data-cost-status></span><span data-cost-history-status></span></div><div class="cost-history-chart" data-cost-history-chart></div><div class="cost-history-list" data-cost-history-list role="tablist" aria-label="Månader"></div></section>
+            <section class="cost-history-section" aria-labelledby="cost-history-title"><div class="cost-history-heading"><h3 id="cost-history-title">Månadskostnad senaste 12 månaderna</h3><span class="status" data-cost-status></span><span data-cost-history-status></span></div><div class="cost-history-chart" data-cost-history-chart role="tablist" aria-label="Månader"></div></section>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>
         </div>
@@ -4587,29 +4587,14 @@ class ElrakningPanel {
         .cost-history-heading h3, .cost-side h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
         .cost-history-heading span { color: var(--secondary-text-color); font-size: var(--card-legend-size); }
         .cost-history-chart { align-items: end; display: flex; gap: 6px; height: 92px; margin-top: 12px; overflow-x: auto; padding: 4px 2px 20px; }
-        .cost-history-bar-item { align-items: center; display: flex; flex: 1 0 34px; flex-direction: column; gap: 4px; height: 100%; justify-content: end; min-width: 34px; }
+        .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 4px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
+        .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
         .cost-history-bar { background: var(--primary-color); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
         .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
         .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
         .cost-history-bar-item.unavailable .cost-history-bar { background: var(--divider-color); height: 3px !important; opacity: 1; }
         .cost-history-bar-label { color: var(--secondary-text-color); font-size: 10px; white-space: nowrap; }
-
-        .cost-history-month {
-          background: transparent;
-          border: 1px solid var(--divider-color);
-          border-radius: 999px;
-          color: var(--secondary-text-color);
-          cursor: pointer;
-          font: inherit;
-          font-size: var(--card-legend-size);
-          padding: 4px 9px;
-        }
-
-        .cost-history-month[aria-selected="true"] {
-          background: color-mix(in srgb, var(--primary-color) 12%, transparent);
-          border-color: var(--primary-color);
-          color: var(--primary-text-color);
-        }
 
         .cost-kpi,
         .cost-detail {
@@ -9958,7 +9943,6 @@ class ElrakningPanel {
     const chart = this.host.querySelector("[data-cost-chart]");
     const comparisonElement = this.host.querySelector("[data-cost-comparison]");
     const summary = this.host.querySelector("[data-cost-summary]");
-    const historyList = this.host.querySelector("[data-cost-history-list]");
     const historyChart = this.host.querySelector("[data-cost-history-chart]");
     const historyStatus = this.host.querySelector("[data-cost-history-status]");
     if (!card || !status || !kpis || !chart || !comparisonElement || !summary) return;
@@ -9973,23 +9957,15 @@ class ElrakningPanel {
     const adjacentPrevious = selectedIndex >= 0 ? monthHistory[selectedIndex + 1] : null;
     const displayHistory = costHistoryDisplayOrder(monthHistory);
     card.hidden = !estimate;
-    if (historyList) {
-      historyList.replaceChildren(...displayHistory.map((item) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "cost-history-month";
-        button.dataset.costMonth = item.month;
-        button.setAttribute("role", "tab");
-        button.setAttribute("aria-selected", String(item.month === selectedMonth));
-        button.textContent = this._formatInvoiceMonth(item.month);
-        return button;
-      }));
-    }
     if (historyChart) {
       const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek)));
       const maxHistoryValue = Math.max(1, ...valuedHistory.map((item) => Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek)));
       historyChart.replaceChildren(...displayHistory.map((item) => {
-        const itemElement = document.createElement("div");
+        const itemElement = document.createElement("button");
+        itemElement.type = "button";
+        itemElement.dataset.costMonth = item.month;
+        itemElement.setAttribute("role", "tab");
+        itemElement.setAttribute("aria-selected", String(item.month === selectedMonth));
         const partial = item.coverage === "partial";
         itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${partial ? " partial" : item.coverage === "missing" ? " unavailable" : ""}`;
         const bar = document.createElement("div");
@@ -9999,6 +9975,7 @@ class ElrakningPanel {
         const detail = `Elhandel: ${item.trade_sek == null ? "saknas" : this._formatSek(item.trade_sek)} · Elnät: ${item.grid_sek == null ? "saknas" : this._formatSek(item.grid_sek)} · Känd kostnad: ${Number.isFinite(value) ? this._formatSek(value) : "saknas"} · Status: ${item.coverage === "complete" ? "Komplett" : item.coverage === "partial" ? "Delvis underlag" : "Saknas"}`;
         bar.title = detail;
         itemElement.title = detail;
+        itemElement.setAttribute("aria-label", `${this._formatInvoiceMonth(item.month)}: ${detail}`);
         const label = document.createElement("span");
         label.className = "cost-history-bar-label";
         label.textContent = this._formatInvoiceMonth(item.month).split(" ")[0];
@@ -10160,8 +10137,8 @@ class ElrakningPanel {
   }
 
   _bindCostCard() {
-    const historyList = this.host.querySelector("[data-cost-history-list]");
-    if (historyList) historyList.addEventListener("click", (event) => {
+    const historyChart = this.host.querySelector("[data-cost-history-chart]");
+    if (historyChart) historyChart.addEventListener("click", (event) => {
       const button = event.target.closest?.("[data-cost-month]");
       if (!button) return;
       this._costSelectedMonth = button.dataset.costMonth || null;
