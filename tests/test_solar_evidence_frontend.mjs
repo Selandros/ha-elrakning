@@ -8,6 +8,10 @@ const websocket = fs.readFileSync(new URL("../custom_components/elrakning/websoc
 assert.match(panel, /data-solar-evidence-card/);
 assert.match(panel, /data-benchmark-evidence-card/);
 assert.match(panel, /replay_benchmark_evidence/);
+assert.match(panel, /\["Site", evidence\.site_id/);
+assert.match(panel, /\["Frame known", evidence\.frame_known_at/);
+assert.match(panel, /\["Economics from", evidence\.economics_applicability/);
+assert.match(panel, /\["Last attempt", evidence\.last_attempt/);
 assert.match(panel, /applySolarEvidenceVisibility\(benchmarkEvidenceCard, this\._debugEnabled, this\._benchmarkEvidence\?\.available\)/);
 assert.match(websocket, /REPLAY_BENCHMARK_EVIDENCE_COMMAND/);
 assert.match(websocket, /websocket_replay_benchmark_evidence/);

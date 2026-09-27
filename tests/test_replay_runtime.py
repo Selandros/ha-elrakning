@@ -135,3 +135,6 @@ def test_benchmark_readiness_reports_unqualified_frame_without_relaxing_replay(m
     assert evidence["blocker"] == "no_good_frame"
     assert evidence["qualified"] is False
     assert evidence["frame_quality"]["load"] == "partial"
+    assert evidence["site_id"] == "site-a"
+    assert evidence["frame_known_at"] is not None
+    assert "economics_applicability" in evidence

@@ -8346,10 +8346,16 @@ class ElrakningPanel {
     summary.textContent = `96 slots: ${horizon.actual_coverage || "0/96"} actual · ${horizon.available_slots || 0}/${horizon.required_slots || 96} causal slots`;
     status.textContent = evidence.blocker ? `BLOCKER: ${evidence.blocker}` : (evidence.status || "UNKNOWN");
     const rows = [
+      ["Site", evidence.site_id || "—"],
+      ["Resource", evidence.resource_id || evidence.ess?.resource_id || "—"],
       ["Load quality", evidence.frame_quality?.load || "—"],
+      ["Load frame", evidence.load_frame?.frame_id || "—"],
+      ["Frame known", evidence.frame_known_at || evidence.load_frame?.known_at || "—"],
       ["Decision at", horizon.decision_at || "—"],
       ["Horizon end", horizon.end_at || "—"],
       ["Economics causal", evidence.economics?.causal === true ? "yes" : "no"],
+      ["Economics from", evidence.economics_applicability?.override_effective_from || evidence.economics_applicability?.valid_from || "—"],
+      ["Last attempt", evidence.last_attempt?.at ? `${evidence.last_attempt.at} · ${evidence.last_attempt.reason || (evidence.last_attempt.accepted ? "accepted" : "blocked")}` : "—"],
       ["ESS", evidence.ess?.available === true ? "available" : (evidence.ess?.reason || "unavailable")],
       ["Source generations", Array.isArray(evidence.source_generations) ? evidence.source_generations.filter(Boolean).join(", ") || "—" : "—"],
       ["Provenance", evidence.frame_provenance ? Object.keys(evidence.frame_provenance).map((key) => `${key}:${Object.keys(evidence.frame_provenance[key] || {}).join("/") || "recorded"}`).join(", ") || "—" : "—"],

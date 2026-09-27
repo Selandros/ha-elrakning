@@ -193,19 +193,24 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
     candidates = _frame_rows(storage, site_id, "load.forecast", int(now.timestamp() * 1_000_000))
     evidence = {
         "available": True,
+        "site_id": site_id,
+        "resource_id": None,
         "status": "blocked",
         "blocker": "no_load_frame",
         "qualified": False,
         "horizon": {"required_slots": HORIZON_SLOTS, "available_slots": 0, "actual_coverage": "0/96"},
         "load_frame": None,
+        "frame_known_at": None,
         "source_generations": [],
         "frame_quality": {},
         "frame_provenance": {},
         "economics": {"causal": False, "reason": "not_evaluated"},
+        "economics_applicability": {"known_at": None, "valid_from": None, "provider_valid_from": None},
         "ess": {"available": False, "reason": "not_evaluated"},
         "artifact": {"artifact_id": None, "readback": False},
         "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
         "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
+        "last_attempt": None,
     }
     if not candidates:
         return evidence
@@ -215,6 +220,7 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
         "frame_id": load_row[0], "known_at": _iso_us(load_row[12]),
         "quality_status": load_row[16], "payload_schema": load_row[19],
     }
+    evidence["frame_known_at"] = _iso_us(load_row[12])
     evidence["frame_quality"] = {"load": load_row[16]}
     evidence["frame_provenance"] = {"load": json.loads(load_row[18]) if load_row[18] else {}}
     evidence["source_generations"] = [load_row[5]] if load_row[5] else []
@@ -231,6 +237,13 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
     economics = economics_resolver(decision_at) if economics_resolver else None
     economics_causal = isinstance(economics, dict) and _economics_is_causal(economics, decision_at)
     evidence["economics"] = {"causal": economics_causal, "provider_reference": economics.get("provider_reference") if isinstance(economics, dict) else None, "reason": None if economics_causal else "economics_not_causal"}
+    if isinstance(economics, dict):
+        override = economics.get("planning_applicability_override") if isinstance(economics.get("planning_applicability_override"), dict) else {}
+        evidence["economics_applicability"] = {
+            "known_at": economics.get("known_at"), "valid_from": economics.get("valid_from"),
+            "provider_valid_from": economics.get("provider_valid_from"),
+            "override_known_at": override.get("known_at"), "override_effective_from": override.get("effective_from"),
+        }
     load_points = _frame_points(storage, load_row[0])
     solar_points = _frame_points(storage, solar_rows[0][0]) if solar_rows else []
     price_points = _frame_points(storage, price_rows[0][0]) if price_rows else []
@@ -262,6 +275,11 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
         evidence["horizon"]["decision_at"] = decision_at.isoformat()
     _, ess_status = _ess_inputs(facts, history, site_id, decision_at)
     evidence["ess"] = ess_status
+    resources = sorted({str(fact.get("resource_id")) for fact in facts if fact.get("site_id") == site_id and fact.get("resource_id")})
+    if ess_status.get("resource_id"):
+        evidence["resource_id"] = ess_status["resource_id"]
+    elif len(resources) == 1:
+        evidence["resource_id"] = resources[0]
     if load_row[16] not in {"good", "valid", "complete"}:
         evidence["blocker"] = "no_good_frame"
     elif not solar_rows or not price_rows:
@@ -311,7 +329,8 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
         readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics)
     except (AttributeError, KeyError, TypeError, ValueError):
         readiness = {
-            "available": False, "status": "blocked", "blocker": "readiness_unavailable",
+            "available": False, "site_id": site_id, "resource_id": None, "status": "blocked", "blocker": "readiness_unavailable",
+            "frame_known_at": None, "economics_applicability": {"known_at": None, "valid_from": None, "provider_valid_from": None}, "last_attempt": None,
             "qualified": False, "horizon": {"required_slots": HORIZON_SLOTS, "available_slots": 0, "actual_coverage": "0/96"},
             "source_generations": [], "frame_quality": {}, "frame_provenance": {}, "economics": {"causal": False, "reason": "not_evaluated"},
             "ess": {"available": False, "reason": "not_evaluated"}, "artifact": {"artifact_id": None, "readback": False},
@@ -320,6 +339,7 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
         }
     run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics)
     if run is None:
+        readiness["last_attempt"] = {"at": now.isoformat(), "accepted": False, "reason": evidence.get("reason", "replay_run_unavailable")}
         result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": {**readiness, "runner": evidence}}
         store = hass.data.get("elrakning", {}).get("replay_artifact_store")
         if store:
@@ -333,6 +353,7 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     accepted = bool(artifact and holdout_status["qualified"] and store and await store.async_append(artifact))
     readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
     result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if accepted and readback is not None else "blocked", "blocker": None if accepted and readback is not None else "artifact_not_verified", "qualified": bool(run["qualification"].get("qualified")), "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint")}}
+    result["evidence"]["last_attempt"] = {"at": now.isoformat(), "accepted": accepted, "reason": None if accepted else "artifact_not_verified", "artifact_id": result["artifact_id"]}
     if store:
         await store.async_record_attempt(result)
         await store.async_record_evidence(site_id, result["evidence"])
