@@ -467,9 +467,6 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, site_identity_manager, canonical_collector
         ), hour=None, minute=[0, 15, 30, 45], second=30
     )
-    frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
-        _async_capture_monthly_forecast(hass)
-    )
     frontend_data["monthly_forecast_cadence_unsub"] = async_track_time_change(
         hass, lambda _now: _schedule_monthly_forecast_capture(hass), hour=None, minute=5, second=0
     )
@@ -572,6 +569,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
         hass.bus.async_listen(EON_GRID_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
     ]
+    # Start only after all source-event listeners are installed so startup updates cannot be lost.
+    frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
+        _async_capture_monthly_forecast(hass)
+    )
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     return True

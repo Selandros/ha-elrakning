@@ -253,6 +253,17 @@ def test_open_meteo_startup_capture_is_scheduled_and_cancelled_with_unload():
     assert 'frontend_data.pop("open_meteo_startup_task", None)' in source
 
 
+def test_monthly_forecast_startup_capture_is_scheduled_after_source_event_listeners():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    listeners = source.index('frontend_data["monthly_forecast_event_unsubs"] = [')
+    startup = source.index('frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(')
+    assert listeners < startup
+    assert 'hass.bus.async_listen("elrakning_load_forecast_update"' in source[listeners:startup]
+    assert 'hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT' in source[listeners:startup]
+    assert 'hass.bus.async_listen(EON_GRID_UPDATE_EVENT' in source[listeners:startup]
+
+
 def test_control_plane_state_handlers_have_safe_pre_ready_contract():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "websocket.py"
     source = source_path.read_text(encoding="utf-8")
