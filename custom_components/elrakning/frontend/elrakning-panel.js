@@ -2044,7 +2044,7 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
       if (typeof invoice?.month === "string" && /^\d{4}-\d{2}$/.test(invoice.month)) months.add(invoice.month);
     }
   }
-  return [...months].sort().reverse().map((month) => {
+  return [...months].sort().reverse().slice(0, 12).map((month) => {
     if (month === estimate?.month) {
       return {
         month,
@@ -2069,6 +2069,27 @@ export function buildCostMonthComparison(selected, previous) {
   }
   const difference = current - prior;
   return { available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: prior > 0 ? difference / prior * 100 : null };
+}
+
+export function buildCostReferenceComparisons(monthHistory, selectedMonth, selectedValue) {
+  const selectedIndex = (Array.isArray(monthHistory) ? monthHistory : []).findIndex((item) => item.month === selectedMonth);
+  const history = selectedIndex >= 0 ? monthHistory.slice(selectedIndex + 1) : [];
+  const complete = history.filter((item) => item.coverage === "complete" && Number.isFinite(Number(item.total_sek)));
+  const reference = (count) => {
+    const values = complete.slice(0, count).map((item) => Number(item.total_sek));
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  };
+  return [
+    { key: "previous", label: "Mot förra månaden", value: complete[0]?.total_sek ?? null, sample_count: complete[0] ? 1 : 0 },
+    { key: "three_month_average", label: "Mot 3 månaders snitt", value: reference(3), sample_count: Math.min(3, complete.length) },
+    { key: "twelve_month_average", label: "Mot 12 månaders snitt", value: reference(12), sample_count: Math.min(12, complete.length) },
+  ].map((item) => {
+    const current = Number(selectedValue);
+    const baseline = Number(item.value);
+    if (!Number.isFinite(current) || !Number.isFinite(baseline) || item.sample_count === 0) return { ...item, available: false, difference_sek: null, difference_percent: null };
+    const difference = current - baseline;
+    return { ...item, available: true, direction: difference > 0 ? "up" : difference < 0 ? "down" : "same", difference_sek: difference, difference_percent: baseline > 0 ? difference / baseline * 100 : null };
+  });
 }
 
 export function buildInvoiceProvenance(estimate, billingHistory = {}) {
@@ -4584,12 +4605,24 @@ class ElrakningPanel {
         .cost-chart-legend-previous { background: var(--neutral-color, #8590A6) !important; opacity: .55; }
 
         .cost-comparison {
-          color: var(--primary-text-color);
-          margin-top: 6px;
-          min-height: 0;
+          display: grid;
+          gap: 8px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 14px;
         }
 
-        .cost-comparison-value { font-weight: 600; margin-top: 2px; }
+        .cost-comparison-item {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: 1px solid var(--divider-color);
+          border-radius: var(--ha-card-border-radius, 8px);
+          min-width: 0;
+          padding: 9px 10px;
+        }
+
+        .cost-comparison-value { color: var(--primary-text-color); font-weight: 600; margin-top: 4px; }
+        .cost-comparison-value.up { color: var(--error-color, var(--primary-text-color)); }
+        .cost-comparison-value.down { color: var(--success-color, var(--primary-text-color)); }
+        .cost-comparison-value.unavailable { color: var(--secondary-text-color); font-weight: 500; }
 
         .cost-details {
           display: grid;
@@ -4650,6 +4683,7 @@ class ElrakningPanel {
           .cost-kpis { gap: 8px; }
           .cost-kpi strong { font-size: 1rem; }
           .cost-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .cost-comparison { grid-template-columns: 1fr; }
         }
 
         .card-source-action {
@@ -9906,24 +9940,27 @@ class ElrakningPanel {
     }));
     const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
     this._renderCostChart(chart, series);
-    const comparison = showingCurrent ? buildInvoiceComparison(estimate, previous) : buildCostMonthComparison(selectedRecord, adjacentPrevious);
+    const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.total_sek;
+    const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
     comparisonElement.replaceChildren();
-    if (comparison.available) {
+    comparisonElement.append(...comparisons.map((comparison) => {
+      const item = document.createElement("div");
+      item.className = "cost-comparison-item";
       const label = document.createElement("span");
       label.className = "cost-comparison-label";
-      label.textContent = `Mot ${this._formatInvoiceMonth(adjacentPrevious?.month || comparison.month || previous?.month || "")}`;
+      label.textContent = comparison.label;
       const value = document.createElement("div");
-      value.className = "cost-comparison-value";
-      const direction = comparison.difference_sek > 0 ? "Högre" : comparison.difference_sek < 0 ? "Lägre" : "Oförändrad";
-      const percent = comparison.difference_percent == null ? "" : ` · ${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
-      value.textContent = `${direction} ${this._formatSek(Math.abs(comparison.difference_sek))}${percent}`;
-      comparisonElement.append(label, value);
-    } else if ((showingCurrent && previous?.coverage !== "complete") || (!showingCurrent && selectedRecord && adjacentPrevious)) {
-      const label = document.createElement("span");
-      label.className = "cost-comparison-label";
-      label.textContent = "Ingen jämförbar föregående period";
-      comparisonElement.append(label);
-    }
+      value.className = `cost-comparison-value${comparison.available ? ` ${comparison.direction}` : " unavailable"}`;
+      if (comparison.available) {
+        const direction = comparison.direction === "up" ? "Högre" : comparison.direction === "down" ? "Lägre" : "Oförändrad";
+        const percent = comparison.difference_percent == null ? "" : ` · ${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
+        value.textContent = `${direction} ${this._formatSek(Math.abs(comparison.difference_sek))}${percent}`;
+      } else {
+        value.textContent = "Ej tillgängligt";
+      }
+      item.append(label, value);
+      return item;
+    }));
     const rows = showingCurrent ? [
       ["Elhandel", estimate.trade?.total_so_far_sek],
       ["Elnät", estimate.grid?.total_so_far_sek],

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildInvoiceMonthHistory, nextCalendarMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, nextCalendarMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 const monthHistory = buildInvoiceMonthHistory({
@@ -19,6 +19,18 @@ assert.equal(monthHistory[1].coverage, "complete");
 assert.equal(monthHistory[1].total_sek, 160);
 assert.equal(buildCostMonthComparison(monthHistory[1], monthHistory[0]).available, false);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 160 }, { month: "2026-07", coverage: "complete", total_sek: 200 }).difference_sek, -40);
+const twelveMonths = Array.from({ length: 13 }, (_, index) => ({ month: `202${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`, period_cost_before_credits_sek: 100 + index }));
+assert.equal(buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, { trade: twelveMonths, grid: [] }).length, 12);
+const references = buildCostReferenceComparisons([
+  { month: "2026-09", coverage: "partial", total_sek: 100 },
+  { month: "2026-08", coverage: "complete", total_sek: 80 },
+  { month: "2026-07", coverage: "complete", total_sek: 120 },
+  { month: "2026-06", coverage: "partial", total_sek: 200 },
+], "2026-09", 100);
+assert.equal(references[0].difference_sek, 20);
+assert.equal(references[1].available, true);
+assert.equal(references[1].sample_count, 2);
+assert.equal(references[2].sample_count, 2);
 
 const septemberGeometry = buildCostChartGeometry(960, { left: 48, right: 12 }, 30);
 assert.equal(septemberGeometry.x(1), 48);
@@ -94,7 +106,7 @@ assert.match(source, /\.cost-details \{[\s\S]*grid-template-columns: repeat\(3, 
 assert.match(source, /@container \(max-width: 600px\) \{[\s\S]*\.cost-details \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
 assert.match(source, /data-cost-history-list/);
 assert.match(source, /buildInvoiceMonthHistory\(estimate/);
-assert.match(source, /buildCostMonthComparison\(selectedRecord, adjacentPrevious\)/);
+assert.match(source, /buildCostReferenceComparisons\(monthHistory, selectedMonth, selectedCost\)/);
 assert.match(source, /cost-history-month/);
 
 console.log("cost chart interaction and compact layout regression passed");
