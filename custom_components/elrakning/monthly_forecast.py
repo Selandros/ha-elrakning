@@ -61,7 +61,9 @@ def _price_at(periods: list[dict[str, Any]], moment: datetime) -> tuple[float | 
     for period in periods:
         start = _moment(period.get("start"))
         end = _moment(period.get("end"))
-        price = _number(period.get("total_ore_per_kwh_gross"))
+        price = _number(
+            period.get("total_ore_per_kwh_gross", period.get("total_customer_price_ore_per_kwh"))
+        )
         if price is None:
             trade = _number(period.get("trade_customer_price_ore_per_kwh"))
             grid = _number(period.get("grid_variable_ore_per_kwh"))
@@ -76,6 +78,38 @@ def _price_at(periods: list[dict[str, Any]], moment: datetime) -> tuple[float | 
     if any(item[0] != first[0] or item[1] != first[1] or item[2] != first[2] for item in matches[1:]):
         return None, None
     return first[2], first[3]
+
+
+def _causal_price_fallback(
+    periods: list[dict[str, Any]], decision: datetime,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """Reuse the latest complete price basis known at decision time."""
+    candidates = []
+    for period in periods or []:
+        start = _moment(period.get("start"))
+        end = _moment(period.get("end"))
+        if not start or not end or end <= start or start > decision:
+            continue
+        price = _number(
+            period.get("total_ore_per_kwh_gross", period.get("total_customer_price_ore_per_kwh"))
+        )
+        if price is None:
+            trade = _number(period.get("trade_customer_price_ore_per_kwh"))
+            grid = _number(period.get("grid_variable_ore_per_kwh"))
+            price = trade + grid if trade is not None and grid is not None else None
+        if price is not None and price >= 0:
+            candidates.append((start, end, price, period))
+    if not candidates:
+        return None, None
+    candidates.sort(key=lambda item: (item[0], item[1], json.dumps(item[3], sort_keys=True, default=str)))
+    start, end, price, source = candidates[-1]
+    return price, {
+        **source,
+        "method": "causal_recent_known_price_fallback",
+        "fallback_known_at": decision.isoformat(),
+        "fallback_basis_start": start.isoformat(),
+        "fallback_basis_end": end.isoformat(),
+    }
 
 
 def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datetime) -> float:
@@ -193,13 +227,38 @@ def build_month_end_slots(
             local = cursor.astimezone(zone)
             value = fallback.get((local.weekday(), local.hour * 4 + local.minute // 15))
             if value is not None:
-                point = {"valid_at": cursor, "end_at": min(end, cursor + timedelta(seconds=SLOT_SECONDS)), "import_kw": value, "known_at": decision, "method": "causal_weekday_slot_profile", "provenance": {"method": "historical_actual_profile", "sample_count": len(profile.get((local.weekday(), local.hour * 4 + local.minute // 15), [])), "weather_corrected": False}}
+                point = {"valid_at": cursor, "end_at": min(end, cursor + timedelta(seconds=SLOT_SECONDS)), "import_kw": value / 1000.0, "known_at": decision, "method": "causal_weekday_slot_profile", "provenance": {"method": "historical_actual_profile", "sample_count": len(profile.get((local.weekday(), local.hour * 4 + local.minute // 15), [])), "weather_corrected": False}}
         if point is not None:
             price, source = _price_at(known_price_periods, cursor)
-            point = {**point, "price_ore_per_kwh_gross": price, "price_provenance": source or {"method": "price_missing"}}
+            price_method = "causal_known_price"
+            if price is None:
+                price, source = _causal_price_fallback(known_price_periods, decision)
+                price_method = "causal_recent_known_price_fallback" if price is not None else "price_missing"
+            point = {**point, "price_ore_per_kwh_gross": price, "price_provenance": source or {"method": price_method}, "price_method": price_method}
             slots.append(point)
         cursor += timedelta(seconds=SLOT_SECONDS)
-    return {"available": len(slots) == int((end - decision).total_seconds() / SLOT_SECONDS), "slots": slots, "slot_count": len(slots), "expected_slot_count": int((end - decision).total_seconds() / SLOT_SECONDS), "fallback_slot_count": sum(item.get("method") != "canonical_power_forecast" for item in slots), "weather_corrected_slot_count": 0, "weather_support_count": 0, "reason": None if slots and len(slots) == int((end - decision).total_seconds() / SLOT_SECONDS) else "month_end_slot_support_missing"}
+    expected = int((end - decision).total_seconds() / SLOT_SECONDS)
+    method_counts = {}
+    price_method_counts = {}
+    for item in slots:
+        method = item.get("method", "unknown")
+        price_method = item.get("price_method", "unknown")
+        method_counts[method] = method_counts.get(method, 0) + 1
+        price_method_counts[price_method] = price_method_counts.get(price_method, 0) + 1
+    price_complete = all(item.get("price_ore_per_kwh_gross") is not None for item in slots)
+    return {
+        "available": len(slots) == expected and price_complete,
+        "slots": slots,
+        "slot_count": len(slots),
+        "expected_slot_count": expected,
+        "fallback_slot_count": sum(item.get("method") != "canonical_power_forecast" for item in slots),
+        "method_counts": method_counts,
+        "price_method_counts": price_method_counts,
+        "price_missing_slot_count": sum(item.get("price_ore_per_kwh_gross") is None for item in slots),
+        "weather_corrected_slot_count": 0,
+        "weather_support_count": 0,
+        "reason": None if len(slots) == expected and price_complete else "month_end_slot_support_missing",
+    }
 
 
 def build_monthly_cost_forecast(
@@ -239,7 +298,17 @@ def build_monthly_cost_forecast(
             continue
         if point_end <= valid_at:
             continue
-        candidate = {"valid_at": valid_at, "end_at": point_end, "import_kw": import_kw, "known_at": known_at, "provenance": raw.get("provenance") or {}}
+        candidate = {
+            "valid_at": valid_at,
+            "end_at": point_end,
+            "import_kw": import_kw,
+            "known_at": known_at,
+            "method": raw.get("method", "canonical_power_forecast"),
+            "provenance": raw.get("provenance") or {},
+            "price_ore_per_kwh_gross": _number(raw.get("price_ore_per_kwh_gross")),
+            "price_provenance": raw.get("price_provenance") or {},
+            "price_method": raw.get("price_method", "unknown"),
+        }
         previous = points.get(valid_at)
         if previous is not None and json.dumps(previous, sort_keys=True, default=str) != json.dumps(candidate, sort_keys=True, default=str):
             return _unavailable(site_id, target_month, "ambiguous_forecast_slot")
@@ -249,13 +318,21 @@ def build_monthly_cost_forecast(
     expected_future_import = 0.0
     days: dict[str, dict[str, float]] = {}
     missing = []
+    missing_reasons: dict[str, int] = {}
+    first_missing: dict[str, str] = {}
+    method_counts: dict[str, int] = {}
+    price_method_counts: dict[str, int] = {}
     cursor = decision
     while cursor < end:
         point = points.get(cursor)
         if point is None:
             missing.append(cursor.isoformat())
+            missing_reasons["forecast_slot_missing"] = missing_reasons.get("forecast_slot_missing", 0) + 1
+            first_missing.setdefault("forecast_slot_missing", cursor.isoformat())
             cursor += timedelta(seconds=SLOT_SECONDS)
             continue
+        method = point.get("method", "unknown")
+        method_counts[method] = method_counts.get(method, 0) + 1
         duration_hours = (point["end_at"] - point["valid_at"]).total_seconds() / 3600
         price_ore, price_source = _price_at(price_periods, point["valid_at"])
         if price_ore is None:
@@ -263,8 +340,12 @@ def build_monthly_cost_forecast(
             price_source = point.get("price_provenance") if price_ore is not None else None
         if price_ore is None:
             missing.append(cursor.isoformat())
+            missing_reasons["price_missing"] = missing_reasons.get("price_missing", 0) + 1
+            first_missing.setdefault("price_missing", cursor.isoformat())
             cursor += timedelta(seconds=SLOT_SECONDS)
             continue
+        price_method = point.get("price_method") or "causal_point_price"
+        price_method_counts[price_method] = price_method_counts.get(price_method, 0) + 1
         energy = point["import_kw"] * duration_hours
         cost = energy * price_ore / 100
         expected_future_import += energy
@@ -292,7 +373,16 @@ def build_monthly_cost_forecast(
         "source_generations": sorted({str(item) for item in (source_generations or []) if item}),
         "calibration": calibration or {},
         "weather": weather or {},
-        "points": [{"valid_at": item["valid_at"].isoformat(), "end_at": item["end_at"].isoformat(), "import_kw": item["import_kw"], "provenance": item["provenance"]} for item in ordered],
+        "points": [{
+            "valid_at": item["valid_at"].isoformat(),
+            "end_at": item["end_at"].isoformat(),
+            "import_kw": item["import_kw"],
+            "method": item.get("method"),
+            "price_ore_per_kwh_gross": item.get("price_ore_per_kwh_gross"),
+            "price_method": item.get("price_method"),
+            "provenance": item["provenance"],
+            "price_provenance": item.get("price_provenance") or {},
+        } for item in ordered],
         "prices": price_periods,
     }
     return {
@@ -315,6 +405,10 @@ def build_monthly_cost_forecast(
         "available": quality == "qualified",
         "reasons": reasons,
         "missing_slot_count": len(missing),
+        "missing_reasons": missing_reasons,
+        "first_missing_slot_by_reason": first_missing,
+        "slot_method_counts": method_counts,
+        "price_method_counts": price_method_counts,
         "source_generations": identity["source_generations"],
         "calibration": calibration or {},
         "weather": weather or {},

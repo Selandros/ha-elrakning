@@ -275,7 +275,11 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
     )
     result["actual_priced_import_to_date_kwh"] = actual.get("priced_import_to_date_kwh")
     result["missing_past_import_kwh"] = actual.get("missing_past_import_kwh")
-    result["month_end_coverage"] = {key: slots.get(key) for key in ("available", "slot_count", "expected_slot_count", "fallback_slot_count", "reason")}
+    result["month_end_coverage"] = {key: slots.get(key) for key in (
+        "available", "slot_count", "expected_slot_count", "fallback_slot_count",
+        "method_counts", "price_method_counts", "price_missing_slot_count",
+        "weather_corrected_slot_count", "weather_support_count", "reason",
+    )}
 
 
 def _schedule_load_forecast_capture(hass, site_identity_manager, canonical_collector):

@@ -167,3 +167,73 @@ def test_month_end_profile_is_not_blind_36h_repetition():
     assert result["slot_count"] == 4
     assert result["fallback_slot_count"] == 4
     assert all(item["method"] == "causal_weekday_slot_profile" for item in result["slots"])
+    assert all(item["import_kw"] == 0.004 for item in result["slots"])
+
+
+def test_month_end_uses_causal_recent_known_price_fallback_with_provenance():
+    decision = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    rows = [{
+        "logical_role": "grid.power/import",
+        "interval_start": datetime(2026, 8, 25, 12, minute, tzinfo=UTC),
+        "value": 4000,
+    } for minute in (0, 15, 30, 45)]
+    result = build_month_end_slots(
+        decision_at=decision,
+        month_end=decision + timedelta(hours=1),
+        near_term_points=[],
+        historical_rows=rows,
+        timezone_name="UTC",
+        known_price_periods=[{
+            "start": (decision - timedelta(hours=1)).isoformat(),
+            "end": decision.isoformat(),
+            "total_customer_price_ore_per_kwh": 125,
+        }],
+    )
+    assert result["available"] is True
+    assert result["price_method_counts"] == {"causal_recent_known_price_fallback": 4}
+    assert all(item["price_ore_per_kwh_gross"] == 125 for item in result["slots"])
+    assert all(item["price_provenance"]["method"] == "causal_recent_known_price_fallback" for item in result["slots"])
+
+
+def test_serialized_total_customer_price_is_a_valid_causal_price_basis():
+    decision = datetime(2026, 9, 1, tzinfo=UTC)
+    result = build_monthly_cost_forecast(
+        site_id="site-a",
+        timezone_name="UTC",
+        decision_at=decision,
+        target_month="2026-09",
+        actual_cost_to_date_sek=10,
+        actual_import_to_date_kwh=1,
+        future_points=_points(decision),
+        price_periods=[{
+            "start": decision.isoformat(),
+            "end": (decision + timedelta(hours=1)).isoformat(),
+            "total_customer_price_ore_per_kwh": 125,
+        }],
+    )
+    assert result["available"] is False
+    assert result["missing_reasons"]["forecast_slot_missing"] > 0
+    assert result["missing_reasons"].get("price_missing") is None
+
+
+def test_price_fallback_does_not_use_future_known_period_as_past_basis():
+    decision = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    rows = [{
+        "logical_role": "grid.power/import",
+        "interval_start": datetime(2026, 8, 25, 12, minute, tzinfo=UTC),
+        "value": 4000,
+    } for minute in (0, 15, 30, 45)]
+    result = build_month_end_slots(
+        decision_at=decision,
+        month_end=decision + timedelta(hours=1),
+        near_term_points=[],
+        historical_rows=rows,
+        timezone_name="UTC",
+        known_price_periods=[{
+            "start": (decision + timedelta(hours=1)).isoformat(),
+            "end": (decision + timedelta(hours=2)).isoformat(),
+            "total_customer_price_ore_per_kwh": 125,
+        }],
+    )
+    assert result["available"] is False
+    assert result["price_missing_slot_count"] == 4
