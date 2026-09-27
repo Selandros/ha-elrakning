@@ -30,8 +30,50 @@ from .eon_models import (
 )
 from ..grid_tariff_timeline import (
     build_grid_tariff_record,
+    build_user_confirmed_grid_tariff_record,
     merge_grid_tariff_record,
     resolve_grid_tariff,
+)
+
+
+USER_CONFIRMED_GRID_TARIFF_FACTS: tuple[dict[str, Any], ...] = (
+    {
+        "site_id": "76f92eea-5720-4c19-9b43-17028d19a0a4",
+        "provider": "eon",
+        "product_name": "16 A, upp till 8000 kWh/år. Elnätsområde Nord",
+        "source_status": "MANUALLY_VERIFIED",
+        "facility": {
+            "installation_identifier": "40093679",
+            "grid_area": "MEL",
+            "price_area": "SE 2",
+            "fuse_ampere": 16.0,
+        },
+        "agreement": {
+            "status": "MANUALLY_VERIFIED",
+            "source_status": "MANUALLY_VERIFIED",
+            "type": "ELECTRICITY_CONS_GRID",
+            "name": "16 A, upp till 8000 kWh/år. Elnätsområde Nord",
+            "start_date": "2026-09-01",
+            "end_date": "2026-10-01",
+        },
+        "grid_price": {
+            "vat_included": True,
+            "price_basis": "gross",
+            "source": "user_confirmed",
+            "fixed_monthly_sek": 226.25,
+            "transfer_ore_per_kwh_gross": 97.0,
+            "energy_tax_ore_per_kwh_gross": 45.0,
+            "variable_grid_ore_per_kwh_gross": 142.0,
+            "variable_total_ore_per_kwh_gross": 142.0,
+            "contract_source_status": "MANUALLY_VERIFIED",
+            "preview_applied": False,
+        },
+        "provenance": {
+            "verification_method": "user_confirmed_manual_fact",
+            "verification_scope": "exact_site_provider_product",
+            "provider_api_verified": False,
+        },
+    },
 )
 
 
@@ -104,6 +146,16 @@ class EonGridManager:
             captured_at=datetime.now(timezone.utc),
         )
         merged = merge_grid_tariff_record(getattr(self, "tariff_timeline", []), record)
+        captured_at = datetime.now(timezone.utc)
+        for fact in USER_CONFIRMED_GRID_TARIFF_FACTS:
+            manual_record = build_user_confirmed_grid_tariff_record(
+                site_id=self._active_site_id(),
+                binding=getattr(self, "_active_binding", None),
+                state=getattr(self, "state", None),
+                fact=fact,
+                captured_at=captured_at,
+            )
+            merged = merge_grid_tariff_record(merged, manual_record)
         if merged == getattr(self, "tariff_timeline", []):
             return
         self.tariff_timeline = merged

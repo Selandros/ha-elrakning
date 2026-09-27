@@ -101,6 +101,85 @@ def build_grid_tariff_record(
     }
 
 
+def build_user_confirmed_grid_tariff_record(
+    *,
+    site_id: str | None,
+    binding: dict[str, Any] | None,
+    state: dict[str, Any] | None,
+    fact: dict[str, Any] | None,
+    captured_at: datetime,
+) -> dict[str, Any] | None:
+    """Project one explicitly verified tariff fact into the same timeline contract."""
+    if not isinstance(fact, dict) or not isinstance(binding, dict):
+        return None
+    expected_site_id = fact.get("site_id")
+    if not isinstance(site_id, str) or site_id != expected_site_id:
+        return None
+    if fact.get("provider") != "eon" or fact.get("source_status") != "MANUALLY_VERIFIED":
+        return None
+    facility = fact.get("facility")
+    agreement = fact.get("agreement")
+    grid_price = fact.get("grid_price")
+    binding_facility = binding.get("facility")
+    runtime_agreement = state.get("agreement") if isinstance(state, dict) else None
+    runtime_facility = state.get("facility") if isinstance(state, dict) else None
+    if not isinstance(facility, dict) or not isinstance(agreement, dict) or not isinstance(grid_price, dict):
+        return None
+    if not isinstance(binding_facility, dict) or not isinstance(runtime_agreement, dict) or not isinstance(runtime_facility, dict):
+        return None
+    identity_fields = ("installation_identifier", "price_area", "grid_area", "fuse_ampere")
+    if any(
+        binding_facility.get(key) != facility.get(key)
+        or runtime_facility.get(key) != facility.get(key)
+        for key in identity_fields
+    ):
+        return None
+    if runtime_agreement.get("name") != fact.get("product_name"):
+        return None
+    valid_from = _date_boundary(agreement.get("start_date"))
+    valid_to = _date_boundary(agreement.get("end_date"))
+    captured = _moment(captured_at)
+    if not valid_from or not valid_to or not captured:
+        return None
+    payload = {
+        "site_id": site_id,
+        "provider": "eon",
+        "config_entry_id": binding.get("config_entry_id"),
+        "facility": facility,
+        "agreement": agreement,
+        "grid_price": grid_price,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "source_status": "MANUALLY_VERIFIED",
+        "provenance": fact.get("provenance"),
+    }
+    source_generation_id = "eon-manual-tariff-" + hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()[:32]
+    return {
+        "schema": SCHEMA,
+        "site_id": site_id,
+        "provider": "eon",
+        "source_generation_id": source_generation_id,
+        "known_at": captured.isoformat(),
+        "captured_at": captured.isoformat(),
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "source_status": "MANUALLY_VERIFIED",
+        "agreement": deepcopy(agreement),
+        "grid_price": deepcopy(grid_price),
+        "provenance": {
+            **deepcopy(fact.get("provenance") or {}),
+            "provider": "eon",
+            "config_entry_id": binding.get("config_entry_id"),
+            "facility": deepcopy(facility),
+            "identity_strength": "strong",
+            "origin": "user_confirmed",
+            "provider_api_verified": False,
+        },
+    }
+
+
 def merge_grid_tariff_record(records: list[dict[str, Any]] | None, record: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Append a changed fact while keeping identical generations idempotent."""
     existing = [item for item in records or [] if isinstance(item, dict)]
