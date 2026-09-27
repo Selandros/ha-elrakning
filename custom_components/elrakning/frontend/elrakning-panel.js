@@ -2100,6 +2100,43 @@ export function buildInvoiceComparison(estimate, previousActual) {
   };
 }
 
+export function buildCostKpiComparisons(estimate, previousActual, checkpoints = []) {
+  const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+  const currentEstimated = finite(estimate?.estimated_month_total_sek);
+  const previousInvoiceTotal = previousActual?.coverage !== "missing"
+    ? finite(previousActual?.total_sek ?? previousActual?.known_amount_gross_sek)
+    : null;
+  const previousPartial = previousActual?.coverage === "partial";
+  const sameTimeCheckpoint = Array.isArray(checkpoints)
+    ? checkpoints.find((checkpoint) => checkpoint?.kind === "previous_month_same_local_time" && finite(checkpoint.cost_to_date_sek) != null && checkpoint.causal === true)
+    : null;
+  const remainingBaseline = previousInvoiceTotal != null && sameTimeCheckpoint
+    ? previousInvoiceTotal - Number(sameTimeCheckpoint.cost_to_date_sek)
+    : null;
+  const comparison = (key, label, current, baseline, available, reason, partialBaseline = false) => {
+    const currentValue = finite(current);
+    const baselineValue = finite(baseline);
+    if (!available || currentValue == null || baselineValue == null || baselineValue < 0) {
+      return { key, label, available: false, reason, difference_sek: null, difference_percent: null, partial_baseline: partialBaseline };
+    }
+    const difference = currentValue - baselineValue;
+    return {
+      key,
+      label,
+      available: true,
+      direction: difference > 0 ? "up" : difference < 0 ? "down" : "same",
+      difference_sek: difference,
+      difference_percent: baselineValue > 0 ? difference / baselineValue * 100 : null,
+      partial_baseline: partialBaseline,
+    };
+  };
+  return [
+    comparison("estimated_month_total", "Mot förra månaden", currentEstimated, previousInvoiceTotal, previousInvoiceTotal != null, "previous_invoice_total_missing", previousPartial),
+    comparison("cost_to_date", "Mot samma tid förra månaden", estimate?.total_so_far_sek, sameTimeCheckpoint?.cost_to_date_sek, Boolean(sameTimeCheckpoint), "historical_same_time_checkpoint_missing"),
+    comparison("forecast_remaining", "Återstående mot förra månaden", estimate?.forecast_remaining_total_sek, remainingBaseline, remainingBaseline != null, "historical_same_time_checkpoint_missing", previousPartial),
+  ];
+}
+
 export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
   const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
   const months = new Set();
@@ -4632,6 +4669,20 @@ class ElrakningPanel {
           font-weight: 600;
           margin-top: 3px;
         }
+
+        .cost-kpi-comparison {
+          border: 1px solid var(--divider-color);
+          border-radius: var(--ha-card-border-radius, 8px);
+          color: var(--secondary-text-color);
+          display: block;
+          font-size: var(--card-legend-size);
+          margin-top: 6px;
+          padding: 4px 6px;
+        }
+
+        .cost-kpi-comparison.up { color: var(--error-color, var(--secondary-text-color)); }
+        .cost-kpi-comparison.down { color: var(--success-color, var(--secondary-text-color)); }
+        .cost-kpi-comparison.unavailable { color: var(--secondary-text-color); }
 
         .cost-chart {
           min-height: 144px;
@@ -10021,20 +10072,33 @@ class ElrakningPanel {
     }
     const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.coverage === "complete" ? selectedRecord.total_sek : selectedRecord?.known_amount_gross_sek;
     const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
+    const kpiComparisons = buildCostKpiComparisons(estimate, previous, estimate?.cost_comparison_checkpoints);
     const currentRows = [
       ["Beräknad månadskostnad", estimate.estimated_month_total_sek],
       ["Kostnad hittills", estimate.total_so_far_sek],
       ["Beräknat återstående", estimate.forecast_remaining_total_sek],
     ];
     status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
-    kpis.replaceChildren(...currentRows.map(([label, value]) => {
+    kpis.replaceChildren(...currentRows.map(([label, value], index) => {
       const item = document.createElement("div");
       item.className = "cost-kpi";
       const name = document.createElement("span");
       name.textContent = label;
       const output = document.createElement("strong");
       output.textContent = typeof value === "string" ? value : Number.isFinite(Number(value)) ? this._formatSek(Number(value)) : "–";
-      item.append(name, output);
+      const comparison = kpiComparisons[index];
+      const bubble = document.createElement("span");
+      bubble.className = `cost-kpi-comparison${comparison.available ? ` ${comparison.direction}` : " unavailable"}`;
+      if (comparison.available) {
+        const direction = comparison.direction === "up" ? "Högre" : comparison.direction === "down" ? "Lägre" : "Oförändrad";
+        const percent = comparison.difference_percent == null ? "" : ` · ${this._formatNumber(Math.abs(comparison.difference_percent))} %`;
+        const partial = comparison.partial_baseline ? " · Delvis underlag" : "";
+        bubble.textContent = `${direction} ${this._formatSek(Math.abs(comparison.difference_sek))}${percent}${partial}`;
+      } else {
+        bubble.textContent = "Ej jämförbart";
+      }
+      bubble.title = comparison.reason || "Jämförelse mot föregående månad";
+      item.append(name, output, bubble);
       return item;
     }));
     const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };

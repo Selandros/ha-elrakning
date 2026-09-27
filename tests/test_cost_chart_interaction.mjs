@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -93,6 +93,24 @@ const multiMonthInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_
 assert.deepEqual(multiMonthInvoice.map((item) => item.month), ["2026-09"]);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 0 }, { month: "2026-07", coverage: "complete", total_sek: 50 }).difference_sek, -50);
 assert.equal(buildCostReferenceComparisons([{ month: "2026-09", coverage: "complete", total_sek: 25 }, { month: "2026-08", coverage: "complete", total_sek: 0 }], "2026-09", 25)[0].available, true);
+const kpiComparisons = buildCostKpiComparisons(
+  { estimated_month_total_sek: 240, total_so_far_sek: 120, forecast_remaining_total_sek: 120 },
+  { month: "2026-08", coverage: "partial", known_amount_gross_sek: 0 },
+);
+assert.equal(kpiComparisons[0].available, true);
+assert.equal(kpiComparisons[0].difference_sek, 240);
+assert.equal(kpiComparisons[0].difference_percent, null);
+assert.equal(kpiComparisons[0].partial_baseline, true);
+assert.equal(kpiComparisons[1].available, false);
+assert.equal(kpiComparisons[2].available, false);
+const checkpointComparisons = buildCostKpiComparisons(
+  { estimated_month_total_sek: 240, total_so_far_sek: 120, forecast_remaining_total_sek: 120 },
+  { month: "2026-08", coverage: "complete", total_sek: 200 },
+  [{ kind: "previous_month_same_local_time", cost_to_date_sek: 80, causal: true }],
+);
+assert.equal(checkpointComparisons[1].available, true);
+assert.equal(checkpointComparisons[2].available, true);
+assert.equal(checkpointComparisons[2].difference_sek, 0);
 const estimatedCurrentComparisons = buildCostReferenceComparisons([
   { month: "2026-09", current: true, coverage: "partial", estimated_total_sek: 240, comparison_components: { elhandel: { value_sek: 110, basis_key: "elhandel_gross", currency: "SEK", tax_basis_class: "gross" } } },
   { month: "2026-08", coverage: "complete", total_sek: 200 },
@@ -262,6 +280,8 @@ assert.match(source, /\["Snittpris", Number\.isFinite\(Number\(estimate\.total_w
 assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);
 assert.match(source, /\["Total", selectedRecord\.total_sek\]/);
 assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+assert.match(source, /cost-kpi-comparison/);
+assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
 assert.match(source, /Mot förra månaden/);
 assert.match(source, /Mot 3 månaders snitt/);
 assert.match(source, /Mot 12 månaders snitt/);
