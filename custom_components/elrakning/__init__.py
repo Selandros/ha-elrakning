@@ -266,7 +266,7 @@ def _schedule_monthly_forecast_capture(hass):
     task = data.get("monthly_forecast_capture_task")
     if task is not None and not task.done():
         return task
-    task = hass.async_create_task(_async_capture_monthly_forecast(hass))
+    task = hass.create_task(_async_capture_monthly_forecast(hass))
     data["monthly_forecast_capture_task"] = task
     return task
 
