@@ -72,6 +72,28 @@ def test_replay_is_deterministic_and_site_scoped():
     assert first["baselines"]["self_consumption_only"]["scorecard"]["import_kwh"] == 0.0
 
 
+def test_replay_fingerprint_carries_causal_economics_identity():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    economics = {
+        "source_schema": "eon.grid_economic_active_snapshot.v1",
+        "provider_reference": "eon-agreement-test",
+        "known_at": decision.isoformat(),
+        "valid_from": decision.isoformat(),
+        "provider_valid_from": "2026-10-01T00:00:00+00:00",
+        "component_provenance": {"provider": "eon"},
+    }
+    result = build_replay_run(
+        site_id=SITE,
+        decision_at=decision,
+        frames=_frames(),
+        slots=_slots(decision + timedelta(minutes=15)),
+        model_identity={"model": "fixture"},
+        economics_identity=economics,
+        ess=ESS,
+    )
+    assert result["input_identity"]["economics"] == economics
+
+
 def test_actual_outcome_count_is_limited_to_replay_horizon():
     decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
     slots = _slots(decision + timedelta(minutes=15), count=2)

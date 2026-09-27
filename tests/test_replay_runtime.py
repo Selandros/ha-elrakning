@@ -56,3 +56,46 @@ def test_internal_runner_builds_persists_and_reads_back_exact_site(monkeypatch):
         assert result["holdouts"]["qualified"] is True
 
     asyncio.run(exercise())
+
+
+def test_runtime_frame_points_keep_frame_identity_for_slot_provenance():
+    class Result:
+        def fetchall(self):
+            return [(1_000_000, 2.5, "kW", "good", '{"source": "fixture"}')]
+
+    class Connection:
+        def execute(self, *_args):
+            return Result()
+
+    class Storage:
+        def _connection(self):
+            return Connection()
+
+    points = replay_runtime._frame_points(Storage(), "frame-solar")
+    assert points[0]["frame_id"] == "frame-solar"
+
+
+def test_runtime_initial_state_ignores_observations_known_after_decision():
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        def execute(self, query, _args):
+            if "energy_observations" in query:
+                return Result([(2_000_000, 1), (1_000_000, 2)])
+            return Result([])
+
+    class Storage:
+        def _connection(self):
+            return Connection()
+
+    from datetime import datetime, timezone
+
+    row = {"site_id": "site-a", "logical_role": "battery.soc", "interval_start": datetime.fromtimestamp(0, tz=timezone.utc)}
+    decision = datetime.fromtimestamp(1.5, tz=timezone.utc)
+    known_at = replay_runtime._observation_known_at(Storage(), row, decision)
+    assert known_at == datetime.fromtimestamp(1, tz=timezone.utc)

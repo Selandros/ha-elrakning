@@ -3996,6 +3996,7 @@ class ElrakningPanel {
         .price-plan-card {
           background: var(--ha-card-glass-tint, var(--ha-card-background, var(--card-background-color)));
           border: var(--ha-card-border-width, 1px) var(--ha-card-border-style, solid) var(--ha-card-border-color, var(--divider-color));
+          border-color: transparent;
           border-radius: var(--ha-card-border-radius, 12px);
           flex: 0 0 min(260px, 78vw);
           padding: 10px;

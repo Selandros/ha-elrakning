@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from copy import deepcopy
 import json
 from typing import Any
 
 from .replay_artifact_store import build_artifact, validate_holdout_matrix
+from .economic_optimizer import build_eon_economics
 from .replay_benchmark import ESSReplayLimits, NoBatteryBaseline, SelfConsumptionBaseline, build_replay_run
 
 
@@ -44,10 +46,10 @@ def _frame_points(storage: Any, frame_id: str) -> list[dict[str, Any]]:
         "SELECT valid_at_us, value, unit, quality_status, point_json FROM external_input_points WHERE frame_id=? ORDER BY valid_at_us",
         (frame_id,),
     ).fetchall()
-    return [{"valid_at": datetime.fromtimestamp(row[0] / 1_000_000, tz=UTC), "value": row[1], "unit": row[2], "quality_status": row[3], "point": json.loads(row[4])} for row in rows]
+    return [{"frame_id": frame_id, "valid_at": datetime.fromtimestamp(row[0] / 1_000_000, tz=UTC), "value": row[1], "unit": row[2], "quality_status": row[3], "point": json.loads(row[4])} for row in rows]
 
 
-def _observation_known_at(storage: Any, row: dict[str, Any]) -> datetime | None:
+def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: datetime) -> datetime | None:
     """Read causal publication time separately; interval start is never a substitute."""
     start = row.get("interval_start")
     role = row.get("logical_role")
@@ -60,7 +62,8 @@ def _observation_known_at(storage: Any, row: dict[str, Any]) -> datetime | None:
             f"SELECT known_at_us, revision FROM {table} WHERE site_id=? AND logical_role=? AND interval_start_us=? AND known_at_us IS NOT NULL",
             (row.get("site_id"), role, start_us),
         ).fetchall()
-        candidates.extend((int(item[0]), priority * 1_000_000 + int(item[1])) for item in result)
+        decision_us = int(decision_at.timestamp() * 1_000_000)
+        candidates.extend((int(item[0]), priority * 1_000_000 + int(item[1])) for item in result if int(item[0]) <= decision_us)
     if not candidates:
         return None
     return datetime.fromtimestamp(max(candidates)[0] / 1_000_000, tz=UTC)
@@ -105,13 +108,16 @@ def _ess_inputs(facts: list[dict[str, Any]], actual_rows: list[dict[str, Any]], 
     return ess, {"available": True, "resource_id": resource, "initial_soc_known_at": sorted(soc, key=lambda row: row["known_at"])[-1]["known_at"].isoformat()}
 
 
-def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: datetime, economics_resolver=None) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     candidates = _frame_rows(storage, site_id, "load.forecast", int(now.timestamp() * 1_000_000))
     for load_row in candidates:
         decision_at = datetime.fromtimestamp(load_row[12] / 1_000_000, tz=UTC)
         solar_rows = _frame_rows(storage, site_id, "solar.irradiance.day_ahead_pv_forecast", load_row[12]) or _frame_rows(storage, site_id, "solar.irradiance.forecast", load_row[12])
         price_rows = _frame_rows(storage, site_id, "market.price.energy", load_row[12], global_scope=True)
         if not solar_rows or not price_rows:
+            continue
+        economics = economics_resolver(decision_at) if economics_resolver is not None else None
+        if not isinstance(economics, dict):
             continue
         load_points = _frame_points(storage, load_row[0])
         solar_points = _frame_points(storage, solar_rows[0][0])
@@ -127,7 +133,7 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
             price_point = price_by_time.get(start)
             if solar_point is None or price_point is None:
                 continue
-            slots.append({"valid_at": start.isoformat(), "end_at": (start + timedelta(minutes=15)).isoformat(), "load_kw": float(load_point["value"]) / 1000.0, "solar_kw": float(solar_point["value"]) / 1000.0, "import_price_sek_per_kwh": float(price_point["value"]), "export_value_sek_per_kwh": float(price_point["value"]) * 0.75, "frame_ids": [load_row[0], solar_point.get("point", {}).get("frame_id", solar_rows[0][0]), price_rows[0][0]]})
+            slots.append({"valid_at": start.isoformat(), "end_at": (start + timedelta(minutes=15)).isoformat(), "load_kw": float(load_point["value"]) / 1000.0, "solar_kw": float(solar_point["value"]) / 1000.0, "import_price_sek_per_kwh": float(price_point["value"]), "export_value_sek_per_kwh": float(price_point["value"]) * 0.75, "frame_ids": [load_row[0], solar_point["frame_id"], price_point["frame_id"]]})
         slots.sort(key=lambda item: item["valid_at"])
         if len(slots) < HORIZON_SLOTS:
             continue
@@ -137,10 +143,10 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
         history = storage.read_site_energy_history(site_id, decision_at - timedelta(days=2), datetime.fromisoformat(slots[-1]["end_at"]))
         actual_rows = [row for row in history if row.get("site_id") == site_id]
         for row in actual_rows:
-            row["known_at"] = _observation_known_at(storage, row)
+            row["known_at"] = _observation_known_at(storage, row, decision_at)
         ess, ess_status = _ess_inputs(facts, actual_rows, site_id, decision_at)
         frames = [_frame_dict(load_row, site_id), _frame_dict(solar_rows[0], site_id), _frame_dict(price_rows[0], None)]
-        run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, ess=ess, baselines=(NoBatteryBaseline(), SelfConsumptionBaseline()), timezone_name="Europe/Stockholm")
+        run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=(NoBatteryBaseline(), SelfConsumptionBaseline()), timezone_name="Europe/Stockholm")
         if not run["qualification"].get("qualified"):
             continue
         run["runtime_ess_status"] = ess_status
@@ -153,8 +159,29 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     storage = hass.data.get("elrakning", {}).get("canonical_collector").storage
     facts_store = hass.data.get("elrakning", {}).get("ella_ess_facts_store")
     facts = facts_store.list_site(site_id) if facts_store else []
+    site_manager = hass.data.get("elrakning", {}).get("site_identity_manager")
+    grid_manager = hass.data.get("elrakning", {}).get("grid_manager")
+    policy_store = hass.data.get("elrakning", {}).get("ella_economic_policy_store")
+    binding = site_manager.active_binding("grid") if site_manager and hasattr(site_manager, "active_binding") else None
+    grid_state = grid_manager.public_state_for_binding(binding) if grid_manager and binding else None
+    override = deepcopy(policy_store.state.get("sites", {}).get(site_id, {}).get("planning_applicability_override")) if policy_store else None
+
+    def resolve_economics(decision_at: datetime) -> dict[str, Any] | None:
+        if not isinstance(grid_state, dict) or not binding:
+            return None
+        economics = build_eon_economics(grid_state, binding, decision_at) if isinstance(grid_state, dict) else None
+        if not isinstance(economics, dict):
+            return None
+        if isinstance(override, dict):
+            known_at = str(override.get("known_at", ""))
+            effective_from = str(override.get("effective_from", ""))
+            decision = decision_at.astimezone(UTC).isoformat()
+            if known_at and effective_from and known_at <= decision and effective_from <= decision:
+                economics = {**economics, "planning_applicability_override": override}
+        return economics
+
     now = datetime.now(UTC)
-    run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now)
+    run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics)
     if run is None:
         result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": evidence}
         store = hass.data.get("elrakning", {}).get("replay_artifact_store")
