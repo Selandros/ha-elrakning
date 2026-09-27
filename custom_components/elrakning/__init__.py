@@ -397,7 +397,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     frontend_data["runtime_status"] = "ready"
     async def _generate_replay_artifact(_call=None):
-        site_id = site_identity_manager.state.get("active_site_id")
+        state = site_identity_manager.state
+        site_id = state.get("active_site_id") or (state.get("site") or {}).get("site_id")
+        if not site_id:
+            site_id = next(iter(state.get("site_configs", {}) or {}), None)
         if isinstance(site_id, str) and site_id:
             result = await async_generate_artifact(hass, site_id)
             if result.get("accepted"):
