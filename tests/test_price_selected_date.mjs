@@ -94,7 +94,7 @@ assert.doesNotMatch(panelSource.slice(panelSource.indexOf("  async _refreshBacke
 assert.match(panelSource, /void this\.loadBillingHistory\(\);/);
 assert.match(panelSource, /rawMeterPoints\.length === 0 && historicalMeterPoints\.length > 0/);
 assert.match(panelSource, /const useHistoricalPower = rawPoints\.length === 0 && historicalPoints\.length > 0/);
-assert.match(panelSource, /const displaySource = useHistoricalPower[\s\S]*?energyIntervalsToCurvePoints/);
+assert.match(panelSource, /const historicalPowerDisplayPoints = energyIntervalsToCurvePoints[\s\S]*?const displaySource = useHistoricalPower/);
 assert.match(panelSource, /energyHistoryIntervalValueAt\(this\.priceSnapshot\?\.energy_history/);
 
 console.log("selected hourly price date regression passed");

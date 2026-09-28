@@ -8983,21 +8983,33 @@ class ElrakningPanel {
       });
       try {
         stage = "history_render";
+        const renderPhaseMs = {};
+        const renderPhaseStart = performance.now();
         substage = "rebuild_live_power_maxima";
         this._rebuildLivePowerMaxima();
+        renderPhaseMs.rebuild_live_power_maxima = roundDiagnosticMs(performance.now() - renderPhaseStart);
+        let phaseStart = performance.now();
         substage = "refresh_power_energy_state";
         this._refreshPowerEnergyState();
+        renderPhaseMs.refresh_power_energy_state = roundDiagnosticMs(performance.now() - phaseStart);
+        phaseStart = performance.now();
         substage = "render_solar_evidence";
         this._renderSolarEvidence();
+        renderPhaseMs.render_solar_evidence = roundDiagnosticMs(performance.now() - phaseStart);
+        phaseStart = performance.now();
         substage = "render_price_plan_cards";
         this._renderPricePlanCards();
+        renderPhaseMs.render_price_plan_cards = roundDiagnosticMs(performance.now() - phaseStart);
+        phaseStart = performance.now();
         if (this.host.querySelector(".price-chart")) {
           substage = "render_price_chart";
           this.renderPriceChart();
         }
+        renderPhaseMs.render_price_chart = roundDiagnosticMs(performance.now() - phaseStart);
         this._recordPowerFlowDiagnostic("history_render", {
           requested_date: requestedDate,
           duration_ms: roundDiagnosticMs(performance.now() - started),
+          render_phase_ms: renderPhaseMs,
           ...(this._lastPowerChartRenderStats || {}),
         });
       } catch (error) {
