@@ -827,12 +827,25 @@ class SolarEvidenceManager:
                 comparison.get("forecast_solar_common_eligible") is True
             )
             days.append(day)
+        dated_days = []
+        for item in days:
+            try:
+                dated_days.append((date.fromisoformat(str(item.get("date"))), item))
+            except (TypeError, ValueError):
+                continue
+        comparison_end = max((item_date for item_date, _item in dated_days), default=None)
+        open_meteo_start = comparison_end - timedelta(days=20) if comparison_end else None
+        forecast_solar_start = comparison_end - timedelta(days=13) if comparison_end else None
         om_complete = sum(
-            1 for item in days
-            if item.get("historical_comparison_evidence", {}).get("open_meteo_eligible") is True
+            1 for item_date, item in dated_days
+            if open_meteo_start is not None
+            and open_meteo_start <= item_date <= comparison_end
+            and item.get("historical_comparison_evidence", {}).get("open_meteo_eligible") is True
         )
         common = sum(
-            1 for item in days
+            1 for item_date, item in dated_days
+            if forecast_solar_start is not None
+            and forecast_solar_start <= item_date <= comparison_end
             if item.get("historical_comparison_evidence", {}).get("forecast_solar_common_eligible") is True
         )
-        return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14}, "capture_tasks": {source: dict(status) for source, status in self._capture_tasks.items()}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}
+        return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14, "open_meteo_window_start": open_meteo_start.isoformat() if open_meteo_start else None, "forecast_solar_window_start": forecast_solar_start.isoformat() if forecast_solar_start else None, "comparison_window_end": comparison_end.isoformat() if comparison_end else None}, "capture_tasks": {source: dict(status) for source, status in self._capture_tasks.items()}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}
