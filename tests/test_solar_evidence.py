@@ -19,6 +19,7 @@ from custom_components.elrakning.solar_evidence import (
     SolarEvidenceManager,
     assess_completeness,
     build_evidence_collection_targets,
+    count_invalid_states_in_target_day,
     integrate_actual,
     merge_pv_points,
     parse_previous_runs,
@@ -34,6 +35,40 @@ def _state(value, timestamp, unit="W"):
 
 
 class SolarEvidenceTests(unittest.TestCase):
+    def test_invalid_padding_states_do_not_exclude_target_day(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        history = {"pv.one": [
+            _state("unavailable", "2026-09-26T23:59:00+02:00"),
+            _state(1000, "2026-09-27T00:00:00+02:00"),
+            _state("unknown", "2026-09-28T00:01:00+02:00"),
+        ]}
+
+        self.assertEqual(count_invalid_states_in_target_day(history, ["pv.one"], start, end), (0, 2))
+
+    def test_invalid_state_inside_local_target_day_excludes_target_day(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        history = {"pv.one": [_state("unknown", "2026-09-27T12:00:00+02:00")]}
+
+        self.assertEqual(count_invalid_states_in_target_day(history, ["pv.one"], start, end), (1, 0))
+
+    def test_next_local_midnight_belongs_to_next_day(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        history = {"pv.one": [_state("unavailable", "2026-09-28T00:00:00+02:00")]}
+
+        self.assertEqual(count_invalid_states_in_target_day(history, ["pv.one"], start, end), (0, 1))
+
     def test_startup_catch_up_uses_yesterday_through_normal_audit(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
         calls = []

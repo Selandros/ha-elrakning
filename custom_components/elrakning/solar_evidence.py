@@ -128,6 +128,29 @@ def assess_completeness(points: list[dict[str, Any]], entity_starts: list[bool],
     return {"audit_complete": not reasons, "exclusion_reasons": reasons, "merged_points": len(day_points), "active_points": len(active), "max_internal_gap_minutes": max_gap}
 
 
+def count_invalid_states_in_target_day(
+    history_by_entity: dict[str, list[Any]],
+    entity_ids: list[str],
+    start: datetime,
+    end: datetime,
+) -> tuple[int, int]:
+    """Separate target-day invalid states from query-window padding states."""
+    in_day = 0
+    padding = 0
+    invalid_states = {"unknown", "unavailable"}
+    for entity in entity_ids:
+        for state in history_by_entity.get(entity, []):
+            if str(getattr(state, "state", "")).lower() not in invalid_states:
+                continue
+            timestamp = getattr(state, "last_updated", None)
+            if timestamp is None or start <= timestamp < end:
+                # Missing timestamps remain fail-closed rather than being treated as padding.
+                in_day += 1
+            else:
+                padding += 1
+    return in_day, padding
+
+
 def parse_previous_runs(payload: dict[str, Any], target_date: str) -> dict[str, Any]:
     hourly = payload.get("hourly") if isinstance(payload, dict) else None
     values = hourly.get("global_tilted_irradiance_previous_day1") if isinstance(hourly, dict) else None
@@ -366,9 +389,10 @@ class SolarEvidenceManager:
                 return await self._save_target_day(site_id, store, days, key, record)
             merged = merge_pv_points(history_by_entity, entities)
             entity_starts = []
-            unavailable = 0
+            unavailable, padding_unavailable = count_invalid_states_in_target_day(
+                history_by_entity, entities, start, end
+            )
             for entity in entities:
-                unavailable += sum(1 for state in history_by_entity.get(entity, []) if str(getattr(state, "state", "")).lower() in {"unknown", "unavailable"})
                 points = [point for state in history_by_entity.get(entity, []) if (point := _state_point(state))]
                 entity_starts.append(bool(points and abs((dt_util.parse_datetime(points[0]["timestamp"]) - start).total_seconds()) <= 2))
             actual, boundary_long, interior_long = integrate_actual(merged, start, end)
@@ -377,7 +401,7 @@ class SolarEvidenceManager:
                 quality["exclusion_reasons"].append("unavailable_or_unknown")
             if actual is None:
                 quality["exclusion_reasons"].append("actual_unavailable")
-            record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and unavailable == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
+            record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "in_day_unavailable_or_unknown": unavailable, "padding_unavailable_or_unknown": padding_unavailable, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and unavailable == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
             om = await self._fetch_open_meteo(target_date, power_state)
             record.update({
                 f"open_meteo_{key_name}": value
