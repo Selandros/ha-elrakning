@@ -3036,6 +3036,7 @@ class ElrakningPanel {
     this._configurationCardsVisible = true;
     this._siteState = null;
     this._siteContextGeneration = 0;
+    this._siteIdentityPromise = null;
     this._mainCards = {
       elhandel: false,
       elnet: false,
@@ -7268,15 +7269,27 @@ class ElrakningPanel {
 
   async _loadSiteIdentity() {
     if (!this.hass?.callWS) return null;
-    try {
-      const state = await this.hass.callWS({ type: "elrakning/site_identity" });
-      this._applySiteIdentityState(state);
-      return state;
-    } catch (error) {
-      const result = this.host.querySelector("[data-site-settings-result]");
-      if (result) result.textContent = "Installationer kunde inte hämtas.";
-      return null;
-    }
+    const knownSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (knownSiteId) return this._siteState;
+    if (this._siteIdentityPromise) return this._siteIdentityPromise;
+    const requestHass = this.hass;
+    const request = (async () => {
+      try {
+        const state = await requestHass.callWS({ type: "elrakning/site_identity" });
+        if (this.hass !== requestHass) return null;
+        this._applySiteIdentityState(state);
+        return state;
+      } catch (error) {
+        const result = this.host.querySelector("[data-site-settings-result]");
+        if (result) result.textContent = "Installationer kunde inte hämtas.";
+        return null;
+      }
+    })();
+    this._siteIdentityPromise = request;
+    request.finally(() => {
+      if (this._siteIdentityPromise === request) this._siteIdentityPromise = null;
+    }).catch(() => {});
+    return request;
   }
 
   _applySiteIdentityState(state) {
@@ -8837,23 +8850,29 @@ class ElrakningPanel {
 
   async loadPowerHistory(selectedDate = null) {
     if (!this.hass?.callWS) return;
+    const siteState = await this._loadSiteIdentity();
+    const siteId = siteState?.site_id || siteState?.current_site?.site_id
+      || this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (!siteId) return;
     const confirmedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed;
     const requestedDate = confirmedDate ? localDateKey(new Date(confirmedDate)) : null;
-    const cycleKey = `${this._siteContextGeneration}:${requestedDate || ""}`;
+    const siteContextGeneration = this._siteContextGeneration;
+    const cycleKey = `${siteId}:${siteContextGeneration}:${requestedDate || ""}`;
     const existing = this._powerHistoryInFlight.get(cycleKey);
     if (existing) {
-      this._recordPowerFlowDiagnostic("history_reused", { requested_date: requestedDate, active_history_jobs: this._powerHistoryInFlight.size });
+      this._recordPowerFlowDiagnostic("history_reused", { requested_date: requestedDate, site_id: siteId, active_history_jobs: this._powerHistoryInFlight.size });
       return existing.history;
     }
     const cycle = { history: null, enrichment: null };
     this._powerHistoryInFlight.set(cycleKey, cycle);
-    this._recordPowerFlowDiagnostic("history_request_start", { requested_date: requestedDate, active_history_jobs: this._powerHistoryInFlight.size });
-    cycle.history = this._loadPowerHistoryCycle({ requestedDate, cycle });
+    this._recordPowerFlowDiagnostic("history_request_start", { requested_date: requestedDate, site_id: siteId, site_context_generation: siteContextGeneration, active_history_jobs: this._powerHistoryInFlight.size });
+    cycle.history = this._loadPowerHistoryCycle({ requestedDate, cycle, siteId, siteContextGeneration });
     cycle.history.finally(() => {
       const cleanup = () => {
         if (this._powerHistoryInFlight.get(cycleKey) === cycle) this._powerHistoryInFlight.delete(cycleKey);
         this._recordPowerFlowDiagnostic("history_cycle_cleanup", {
           requested_date: requestedDate,
+          site_id: siteId,
           enrichment_started: Boolean(cycle.enrichment),
           active_history_jobs: this._powerHistoryInFlight.size,
         });
@@ -8864,11 +8883,10 @@ class ElrakningPanel {
     return cycle.history;
   }
 
-  async _loadPowerHistoryCycle({ requestedDate, cycle }) {
+  async _loadPowerHistoryCycle({ requestedDate, cycle, siteId, siteContextGeneration }) {
     const started = performance.now();
     const requestToken = ++this._powerHistoryRequestToken;
     const enrichmentToken = ++this._powerHistoryEnrichmentRequestToken;
-    const siteContextGeneration = this._siteContextGeneration;
     let stage = "request";
     let substage = "request";
     try {
@@ -8878,7 +8896,8 @@ class ElrakningPanel {
       stage = "response";
       this._recordPowerFlowDiagnostic("history_response_received", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
       if (response?.error === "power_unavailable") return;
-      if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration) {
+      const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
+      if (requestToken !== this._powerHistoryRequestToken || siteContextGeneration !== this._siteContextGeneration || siteId !== activeSiteId) {
         stage = "stale_guard";
         this._recordPowerFlowDiagnostic("history_stale_rejected", { requested_date: requestedDate, request_token: requestToken });
         return;
@@ -8906,7 +8925,7 @@ class ElrakningPanel {
         solar_open_meteo: { available: false, source: "open_meteo" },
       };
       this._loadForecast = { available: false, reason: "enrichment_pending", frames: [] };
-      this._powerHistoryContextKey = `${siteContextGeneration}:${requestedDate || response?.date || ""}`;
+      this._powerHistoryContextKey = `${siteId}:${siteContextGeneration}:${requestedDate || response?.date || ""}`;
       this._refreshDailyEnergyStateFromAcceptedHistory();
       stage = "enrichment_start";
       this._recordPowerFlowDiagnostic("enrichment_request_start", { requested_date: requestedDate, active_enrichment_jobs: 1 });
@@ -8914,6 +8933,7 @@ class ElrakningPanel {
         requestToken,
         enrichmentToken,
         siteContextGeneration,
+        siteId,
         contextKey: this._powerHistoryContextKey,
         requestedDate,
       });
@@ -8955,7 +8975,7 @@ class ElrakningPanel {
     }
   }
 
-  async loadPowerHistoryEnrichment({ requestToken, enrichmentToken, siteContextGeneration, contextKey, requestedDate }) {
+  async loadPowerHistoryEnrichment({ requestToken, enrichmentToken, siteContextGeneration, siteId, contextKey, requestedDate }) {
     if (!this.hass?.callWS) return;
     const started = performance.now();
     let substage = "request";
@@ -8968,6 +8988,8 @@ class ElrakningPanel {
       if (requestToken !== this._powerHistoryRequestToken) guardReasons.push("history_request_token");
       if (enrichmentToken !== this._powerHistoryEnrichmentRequestToken) guardReasons.push("enrichment_request_token");
       if (siteContextGeneration !== this._siteContextGeneration) guardReasons.push("site_context_generation");
+      const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
+      if (siteId !== activeSiteId) guardReasons.push("site_id");
       if (contextKey !== this._powerHistoryContextKey) guardReasons.push("history_context_key");
       if (guardReasons.length) {
         this._recordPowerFlowDiagnostic("enrichment_stale_rejected", { requested_date: requestedDate, reasons: guardReasons, duration_ms: roundDiagnosticMs(performance.now() - started) });
@@ -9107,6 +9129,10 @@ class ElrakningPanel {
 
   async loadSolarForecast() {
     if (!this.hass?.callWS) return;
+    const siteState = await this._loadSiteIdentity();
+    const siteId = siteState?.site_id || siteState?.current_site?.site_id
+      || this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (!siteId) return;
     try {
       const response = await this.hass.callWS({ type: "elrakning/solar_forecast_state" });
       if (response?.success === false) return;
@@ -9123,6 +9149,10 @@ class ElrakningPanel {
 
   async loadSolarEvidence() {
     if (!this.hass?.callWS) return;
+    const siteState = await this._loadSiteIdentity();
+    const siteId = siteState?.site_id || siteState?.current_site?.site_id
+      || this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (!siteId) return;
     try {
       const response = await this.hass.callWS({ type: "elrakning/solar_evidence_state" });
       if (response?.available === false) return;
@@ -10809,6 +10839,10 @@ class ElrakningPanel {
 
   async loadPricePlan(selectedDate = null) {
     if (!this.hass?.callWS) return;
+    const siteState = await this._loadSiteIdentity();
+    const requestedSiteId = siteState?.site_id || siteState?.current_site?.site_id
+      || this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (!requestedSiteId) return;
     const requestToken = ++this._pricePlanRequestToken;
     const siteContextGeneration = this._siteContextGeneration;
     const previousPlan = this._pricePlan;
@@ -10820,10 +10854,6 @@ class ElrakningPanel {
       const requestedDateKey = requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())
         ? `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`
         : previousPlan?.date || "";
-      const requestedSiteId = this._siteState?.site_id
-        || this._siteState?.current_site?.site_id
-        || previousPlan?.site_id
-        || null;
       const requestContextKey = ellaPlanContextKey(requestedSiteId, requestedDateKey);
       if (requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())) {
         request.date = requestedDateKey;
@@ -11168,6 +11198,10 @@ class ElrakningPanel {
 
   async loadBillingHistory() {
     if (!this.hass?.callWS) return;
+    const siteState = await this._loadSiteIdentity();
+    const siteId = siteState?.site_id || siteState?.current_site?.site_id
+      || this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (!siteId) return;
     try {
       const response = await this.hass.callWS({ type: "elrakning/billing_history" });
       this._billingHistory = response?.success === true ? response : null;

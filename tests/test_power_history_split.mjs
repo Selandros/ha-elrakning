@@ -40,7 +40,7 @@ assert.match(historyLoader, /this\._powerHistory = \{\s*\.\.\.this\._powerHistor
 assert.match(historyLoader, /requestToken !== this\._powerHistoryRequestToken/);
 assert.match(historyLoader, /enrichmentToken !== this\._powerHistoryEnrichmentRequestToken/);
 assert.match(historyLoader, /contextKey !== this\._powerHistoryContextKey/);
-assert.match(historyLoader, /const cycleKey = `\$\{this\._siteContextGeneration\}:\$\{requestedDate \|\| ""\}`/);
+assert.match(historyLoader, /const cycleKey = `\$\{siteId\}:\$\{siteContextGeneration\}:\$\{requestedDate \|\| ""\}`/);
 assert.match(historyLoader, /const existing = this\._powerHistoryInFlight\.get\(cycleKey\)/);
 assert.match(historyLoader, /if \(existing\) \{[\s\S]*return existing\.history/);
 assert.match(frontend, /this\.loadPowerHistory\(next\)/);
