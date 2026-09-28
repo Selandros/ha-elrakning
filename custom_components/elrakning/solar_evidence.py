@@ -29,6 +29,7 @@ PROVENANCE_STORE_KEY = "elrakning.solar_evidence_provenance"
 PROVENANCE_STORE_VERSION = 1
 PROTOCOL_VERSION = "evidence-v1"
 AUDIT_SEMANTICS_VERSION = "solar-evidence-audit-v3"
+COMPARISON_EVIDENCE_VERSION = "solar-comparison-evidence-v1"
 OPEN_METEO_ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 ACTIVE_THRESHOLD_KW = 0.05
 MAX_INTERNAL_GAP_MINUTES = 30
@@ -273,6 +274,55 @@ def should_reprocess_existing_day(existing: dict[str, Any] | None) -> bool:
     )
 
 
+def build_historical_comparison_evidence(
+    record: dict[str, Any] | None,
+    *,
+    site_id: str | None = None,
+    target_date: str | None = None,
+) -> dict[str, Any]:
+    """Derive comparison eligibility only from captured, persisted fields."""
+    item = record if isinstance(record, dict) else {}
+    actual_site = item.get("site_id")
+    actual_date = item.get("date")
+    site_match = isinstance(site_id, str) and actual_site == site_id if site_id is not None else isinstance(actual_site, str)
+    date_match = isinstance(target_date, str) and actual_date == target_date if target_date is not None else isinstance(actual_date, str)
+    captured_at = item.get("first_collected_at") or item.get("collected_at")
+    actual_valid = _number(item.get("actual_kwh")) is not None
+    open_meteo_valid = (
+        actual_valid
+        and item.get("open_meteo_status") == "complete"
+        and item.get("open_meteo_values") == 24
+        and item.get("open_meteo_missing") == 0
+        and _number(item.get("open_meteo_nominal_kwh")) is not None
+        and isinstance(captured_at, str)
+        and site_match
+        and date_match
+    )
+    forecast_solar_valid = open_meteo_valid and _number(item.get("forecast_solar_frozen_kwh")) is not None
+    reasons = []
+    if not site_match:
+        reasons.append("site_mismatch")
+    if not date_match:
+        reasons.append("date_mismatch")
+    if not captured_at:
+        reasons.append("capture_timestamp_missing")
+    if not actual_valid:
+        reasons.append("actual_missing")
+    if not open_meteo_valid:
+        reasons.append("open_meteo_evidence_incomplete")
+    if open_meteo_valid and not forecast_solar_valid:
+        reasons.append("forecast_solar_evidence_missing")
+    return {
+        "version": COMPARISON_EVIDENCE_VERSION,
+        "site_id": actual_site,
+        "date": actual_date,
+        "captured_at": captured_at,
+        "open_meteo_eligible": bool(open_meteo_valid),
+        "forecast_solar_common_eligible": bool(forecast_solar_valid),
+        "reasons": reasons,
+    }
+
+
 def _collection_failures(result: dict[str, dict[str, Any]]) -> set[str]:
     """Return failed site ids without retaining unbounded per-target diagnostics."""
     return {
@@ -382,6 +432,23 @@ class SolarEvidenceManager:
                 }
                 for day in self._days.values():
                     day.setdefault("site_id", self._site_id)
+            await self._migrate_historical_comparison_evidence()
+
+    async def _migrate_historical_comparison_evidence(self) -> None:
+        """Persist comparison eligibility once from existing captured fields only."""
+        changed = False
+        for key, day in self._days.items():
+            stored = day.get("historical_comparison_evidence")
+            if isinstance(stored, dict) and stored.get("version") == COMPARISON_EVIDENCE_VERSION:
+                continue
+            day["historical_comparison_evidence"] = build_historical_comparison_evidence(
+                day,
+                site_id=self._site_id,
+                target_date=key,
+            )
+            changed = True
+        if changed:
+            await self.store.async_save({"protocol_version": PROTOCOL_VERSION, "days": self._days})
 
     async def async_shutdown(self) -> None:
         if self._unsub:
@@ -727,6 +794,15 @@ class SolarEvidenceManager:
         for field in ("actual_kwh", "forecast_solar_frozen_kwh", "collected_at"):
             if old.get(field) is not None and not (field == "collected_at" and re_evaluated):
                 merged[field] = old[field]
+        old_comparison = old.get("historical_comparison_evidence")
+        if isinstance(old_comparison, dict) and old_comparison.get("version") == COMPARISON_EVIDENCE_VERSION:
+            merged["historical_comparison_evidence"] = deepcopy(old_comparison)
+        else:
+            merged["historical_comparison_evidence"] = build_historical_comparison_evidence(
+                merged,
+                site_id=site_id,
+                target_date=key,
+            )
         days[key] = merged
         await store.async_save({"protocol_version": PROTOCOL_VERSION, "days": days})
         if site_id == self._site_id:
@@ -743,17 +819,20 @@ class SolarEvidenceManager:
         days = []
         for key in sorted(self._days):
             day = dict(self._days[key])
+            comparison = day.get("historical_comparison_evidence")
+            if not isinstance(comparison, dict) or comparison.get("version") != COMPARISON_EVIDENCE_VERSION:
+                comparison = build_historical_comparison_evidence(day, site_id=self._site_id, target_date=key)
+            day["historical_comparison_evidence"] = comparison
             day["common_forecast_solar_day"] = (
-                day.get("audit_complete") is True
-                and day.get("open_meteo_status") == "complete"
-                and day.get("forecast_solar_frozen_kwh") is not None
+                comparison.get("forecast_solar_common_eligible") is True
             )
             days.append(day)
-        om_complete = sum(1 for item in days if item.get("audit_complete") and item.get("open_meteo_status") == "complete")
+        om_complete = sum(
+            1 for item in days
+            if item.get("historical_comparison_evidence", {}).get("open_meteo_eligible") is True
+        )
         common = sum(
             1 for item in days
-            if item.get("audit_complete") is True
-            and item.get("open_meteo_status") == "complete"
-            and item.get("forecast_solar_frozen_kwh") is not None
+            if item.get("historical_comparison_evidence", {}).get("forecast_solar_common_eligible") is True
         )
         return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14}, "capture_tasks": {source: dict(status) for source, status in self._capture_tasks.items()}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}

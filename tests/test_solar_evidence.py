@@ -17,9 +17,11 @@ import custom_components.elrakning.solar_evidence as solar_evidence
 
 from custom_components.elrakning.solar_evidence import (
     AUDIT_SEMANTICS_VERSION,
+    COMPARISON_EVIDENCE_VERSION,
     SolarEvidenceManager,
     assess_completeness,
     build_evidence_collection_targets,
+    build_historical_comparison_evidence,
     count_invalid_states_in_target_day,
     assess_invalid_intervals,
     integrate_actual,
@@ -256,19 +258,65 @@ class SolarEvidenceTests(unittest.TestCase):
         self.assertEqual(calls[0]["minute"], 5)
         self.assertEqual(calls[0]["second"], 0)
 
-    def test_common_progress_requires_open_meteo_eligibility(self):
+    def test_progress_uses_captured_comparison_evidence_not_current_audit(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
         manager._days = {
-            "2026-09-01": {"audit_complete": False, "open_meteo_status": "complete", "forecast_solar_frozen_kwh": 10},
-            "2026-09-02": {"audit_complete": True, "open_meteo_status": "invalid", "forecast_solar_frozen_kwh": 10},
-            "2026-09-03": {"audit_complete": True, "open_meteo_status": "complete", "forecast_solar_frozen_kwh": 10},
+            "2026-09-01": {
+                "site_id": "site-a", "date": "2026-09-01", "actual_kwh": 10,
+                "open_meteo_status": "complete", "open_meteo_values": 24,
+                "open_meteo_missing": 0, "open_meteo_nominal_kwh": 20,
+                "forecast_solar_frozen_kwh": 10, "first_collected_at": "2026-09-02T00:05:00+02:00",
+                "audit_complete": False,
+            },
+            "2026-09-02": {"site_id": "site-a", "date": "2026-09-02", "audit_complete": True, "open_meteo_status": "invalid"},
+            "2026-09-03": {
+                "site_id": "site-a", "date": "2026-09-03", "actual_kwh": 11,
+                "open_meteo_status": "complete", "open_meteo_values": 24,
+                "open_meteo_missing": 0, "open_meteo_nominal_kwh": 21,
+                "forecast_solar_frozen_kwh": 11, "first_collected_at": "2026-09-04T00:05:00+02:00",
+                "audit_complete": True,
+            },
         }
+        manager._site_id = "site-a"
         state = manager.public_state()
-        self.assertEqual(state["progress"]["open_meteo_complete"], 1)
-        self.assertEqual(state["progress"]["forecast_solar_common"], 1)
-        self.assertFalse(state["days"][0]["common_forecast_solar_day"])
+        self.assertEqual(state["progress"]["open_meteo_complete"], 2)
+        self.assertEqual(state["progress"]["forecast_solar_common"], 2)
+        self.assertTrue(state["days"][0]["common_forecast_solar_day"])
         self.assertFalse(state["days"][1]["common_forecast_solar_day"])
         self.assertTrue(state["days"][2]["common_forecast_solar_day"])
+
+    def test_historical_comparison_evidence_requires_exact_site_date_and_captured_fields(self):
+        record = {
+            "site_id": "site-a", "date": "2026-09-17", "actual_kwh": 22.0,
+            "open_meteo_status": "complete", "open_meteo_values": 24,
+            "open_meteo_missing": 0, "open_meteo_nominal_kwh": 43.98,
+            "forecast_solar_frozen_kwh": 32.56,
+            "first_collected_at": "2026-09-18T00:05:00+02:00",
+            "audit_complete": False,
+        }
+        evidence = build_historical_comparison_evidence(record, site_id="site-a", target_date="2026-09-17")
+        self.assertEqual(evidence["version"], COMPARISON_EVIDENCE_VERSION)
+        self.assertTrue(evidence["open_meteo_eligible"])
+        self.assertTrue(evidence["forecast_solar_common_eligible"])
+        self.assertFalse(build_historical_comparison_evidence(record, site_id="site-b", target_date="2026-09-17")["open_meteo_eligible"])
+        self.assertFalse(build_historical_comparison_evidence(record, site_id="site-a", target_date="2026-09-18")["open_meteo_eligible"])
+
+    def test_comparison_evidence_is_immutable_across_audit_re_evaluation(self):
+        class Store:
+            async def async_save(self, _data):
+                return None
+
+        manager = SolarEvidenceManager(SimpleNamespace(bus=SimpleNamespace(async_fire=lambda _event: None)), SimpleNamespace(), SimpleNamespace())
+        old_evidence = {
+            "version": COMPARISON_EVIDENCE_VERSION,
+            "site_id": "site-a", "date": "2026-09-17", "captured_at": "2026-09-18T00:05:00+02:00",
+            "open_meteo_eligible": True, "forecast_solar_common_eligible": True, "reasons": [],
+        }
+        old = {"site_id": "site-a", "date": "2026-09-17", "historical_comparison_evidence": old_evidence}
+        record = {"site_id": "site-a", "date": "2026-09-17", "audit_complete": False, "actual_kwh": None}
+        import asyncio
+        result = asyncio.run(manager._save_target_day("site-a", Store(), {"2026-09-17": old}, "2026-09-17", record))
+        self.assertEqual(result["historical_comparison_evidence"], old_evidence)
 
     def test_store_failure_does_not_escape_async_load(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
