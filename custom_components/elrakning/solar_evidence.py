@@ -213,6 +213,43 @@ class SolarEvidenceManager:
         self._unsub = None
         self._site_id: str | None = None
         self._site_context_enabled = False
+        self._capture_tasks: dict[str, dict[str, Any]] = {}
+
+    def mark_capture_scheduled(self, source: str, target_date: date | None = None) -> None:
+        """Record only the latest bounded capture-task lifecycle marker."""
+        self._capture_tasks[source] = {
+            "source": source,
+            "scheduled_at": dt_util.now().isoformat(),
+            "started_at": None,
+            "finished_at": None,
+            "target_date": target_date.isoformat() if target_date else None,
+            "target_site_ids": [],
+            "outcome": "scheduled",
+        }
+
+    def _capture_started(self, source: str, target_date: date | None = None) -> None:
+        status = self._capture_tasks.get(source)
+        if not status:
+            self.mark_capture_scheduled(source, target_date)
+            status = self._capture_tasks[source]
+        status.update({
+            "started_at": dt_util.now().isoformat(),
+            "outcome": "running",
+        })
+
+    def _capture_finished(self, source: str, outcome: str, target_site_ids: list[str] | None = None, error: BaseException | None = None) -> None:
+        status = self._capture_tasks.setdefault(source, {"source": source})
+        status.update({
+            "finished_at": dt_util.now().isoformat(),
+            "outcome": outcome,
+            "target_site_ids": sorted({site_id for site_id in (target_site_ids or []) if isinstance(site_id, str)}),
+        })
+        if error is not None:
+            status["error_type"] = type(error).__name__
+            status["error"] = str(error)[:160]
+        else:
+            status.pop("error_type", None)
+            status.pop("error", None)
 
     async def async_load(self) -> None:
         try:
@@ -271,38 +308,53 @@ class SolarEvidenceManager:
         return build_evidence_collection_targets(configs)
 
     async def _daily_update(self, _now) -> None:
+        target_date = dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
+        self.mark_capture_scheduled("daily", target_date)
+        self._capture_started("daily", target_date)
         try:
-            await self.async_collect_completed_day_for_targets(
-                dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
-            )
+            result = await self.async_collect_completed_day_for_targets(target_date)
+            self._capture_finished("daily", "success", list(result))
         except asyncio.CancelledError:
+            self._capture_finished("daily", "cancelled")
             raise
-        except Exception:
+        except Exception as error:
+            self._capture_finished("daily", "error", error=error)
             return
 
     async def async_backfill(self, days: int = 30) -> None:
+        self.mark_capture_scheduled("backfill")
+        self._capture_started("backfill")
+        target_site_ids: set[str] = set()
         try:
             today = dt_util.as_local(dt_util.now()).date()
             for offset in range(1, days + 1):
                 try:
-                    await self.async_collect_completed_day_for_targets(today - timedelta(days=offset))
+                    result = await self.async_collect_completed_day_for_targets(today - timedelta(days=offset))
+                    target_site_ids.update(result)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     continue
+            self._capture_finished("backfill", "success", list(target_site_ids))
         except asyncio.CancelledError:
+            self._capture_finished("backfill", "cancelled", list(target_site_ids))
             raise
-        except Exception:
+        except Exception as error:
+            self._capture_finished("backfill", "error", list(target_site_ids), error)
             return
 
     async def async_startup_catch_up(self) -> None:
         """Finalize yesterday through the same site-explicit evidence path as 00:05."""
         yesterday = dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
+        self._capture_started("startup", yesterday)
         try:
-            await self.async_collect_completed_day_for_targets(yesterday)
+            result = await self.async_collect_completed_day_for_targets(yesterday)
+            self._capture_finished("startup", "success", list(result))
         except asyncio.CancelledError:
+            self._capture_finished("startup", "cancelled")
             raise
-        except Exception:
+        except Exception as error:
+            self._capture_finished("startup", "error", error=error)
             return
 
     async def async_collect_completed_day_for_targets(self, target_date: date) -> dict[str, dict[str, Any]]:
@@ -591,4 +643,4 @@ class SolarEvidenceManager:
             and item.get("open_meteo_status") == "complete"
             and item.get("forecast_solar_frozen_kwh") is not None
         )
-        return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}
+        return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14}, "capture_tasks": {source: dict(status) for source, status in self._capture_tasks.items()}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}

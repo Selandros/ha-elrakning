@@ -81,6 +81,35 @@ class SolarEvidenceTests(unittest.TestCase):
         asyncio.run(manager.async_startup_catch_up())
 
         self.assertEqual(len(calls), 1)
+        self.assertEqual(manager.public_state()["capture_tasks"]["startup"]["outcome"], "success")
+
+    def test_startup_capture_exception_is_observable_without_changing_result_handling(self):
+        manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+
+        async def fail(_target_date):
+            raise RuntimeError("recorder unavailable")
+
+        manager.async_collect_completed_day_for_targets = fail
+        import asyncio
+        asyncio.run(manager.async_startup_catch_up())
+
+        status = manager.public_state()["capture_tasks"]["startup"]
+        self.assertEqual(status["outcome"], "error")
+        self.assertEqual(status["error_type"], "RuntimeError")
+        self.assertEqual(status["error"], "recorder unavailable")
+
+    def test_startup_capture_cancelled_is_observable_and_reraised(self):
+        manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+
+        async def cancel(_target_date):
+            raise asyncio.CancelledError
+
+        manager.async_collect_completed_day_for_targets = cancel
+        import asyncio
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(manager.async_startup_catch_up())
+
+        self.assertEqual(manager.public_state()["capture_tasks"]["startup"]["outcome"], "cancelled")
 
     def test_async_load_schedules_daily_finalization_after_local_midnight(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())

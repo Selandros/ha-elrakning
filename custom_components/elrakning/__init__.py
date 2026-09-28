@@ -581,9 +581,14 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     # Evidence catch-up is independent of panel readiness and may perform Recorder/HTTP work.
     # Keep it off the critical startup path so live state and history can hydrate immediately.
+    mark_capture_scheduled = getattr(solar_evidence_manager, "mark_capture_scheduled", None)
+    if callable(mark_capture_scheduled):
+        mark_capture_scheduled("startup")
     frontend_data["solar_evidence_startup_task"] = hass.async_create_task(
         solar_evidence_manager.async_startup_catch_up()
     )
+    if callable(mark_capture_scheduled):
+        mark_capture_scheduled("backfill")
     solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())
     async_register_eon_handoff_views(hass)
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
