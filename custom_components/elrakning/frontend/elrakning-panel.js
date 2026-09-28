@@ -2615,6 +2615,18 @@ export function solarEvidenceStatus(evidenceDays, date, today = localDateKey(new
   return date === today ? "–" : "❌";
 }
 
+export function summarizeSolarEvidenceHistory(evidenceDays) {
+  const dates = (Array.isArray(evidenceDays) ? evidenceDays : [])
+    .map((day) => day?.date)
+    .filter((date) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort();
+  return {
+    count: dates.length,
+    first_date: dates[0] || null,
+    last_date: dates[dates.length - 1] || null,
+  };
+}
+
 export function solarEvidenceCardHidden(debugEnabled, evidenceAvailable) {
   return !Boolean(debugEnabled) || !Boolean(evidenceAvailable);
 }
@@ -4139,7 +4151,7 @@ class ElrakningPanel {
         .solar-evidence-progress span { color: var(--secondary-text-color); font-size: 0.9rem; }
         .solar-evidence-progress meter { height: 6px; width: 100%; }
         .solar-evidence-protocol { color: var(--secondary-text-color); display: block; margin-top: 8px; }
-        .solar-evidence-list { display: grid; gap: 5px; margin-top: 8px; max-height: 58vh; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+        .solar-evidence-list { display: grid; gap: 5px; margin-top: 8px; min-height: 0; overflow: visible; }
         .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 6px 8px; }
         .solar-evidence-day-heading { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
         .solar-evidence-day-heading strong { color: var(--primary-text-color); }
@@ -8746,11 +8758,15 @@ class ElrakningPanel {
       return;
     }
     const progress = evidence.progress || {};
+    const history = summarizeSolarEvidenceHistory(days);
     const omComplete = Number.isFinite(Number(progress.open_meteo_complete)) ? Number(progress.open_meteo_complete) : 0;
     const omTarget = Number.isFinite(Number(progress.open_meteo_target)) ? Number(progress.open_meteo_target) : 21;
     const commonComplete = Number.isFinite(Number(progress.forecast_solar_common)) ? Number(progress.forecast_solar_common) : 0;
     const commonTarget = Number.isFinite(Number(progress.forecast_solar_target)) ? Number(progress.forecast_solar_target) : 14;
-    summary.innerHTML = `<div class="solar-evidence-progress"><div><strong>Open-Meteo</strong><span>${omComplete} / ${omTarget}</span><meter min="0" max="${omTarget}" value="${omComplete}"></meter></div><div><strong>Forecast.Solar common</strong><span>${commonComplete} / ${commonTarget}</span><meter min="0" max="${commonTarget}" value="${commonComplete}"></meter></div></div><small class="solar-evidence-protocol">${evidence.protocol_version || "evidence-v1"} · LOCKED</small>`;
+    const storedRange = history.count
+      ? `${history.first_date}–${history.last_date}`
+      : "inga datum";
+    summary.innerHTML = `<div class="solar-evidence-progress"><div><strong>Open-Meteo · kvalificerade dagar</strong><span>${omComplete} / ${omTarget}</span><meter min="0" max="${omTarget}" value="${omComplete}"></meter></div><div><strong>Forecast.Solar common · kvalificerade dagar</strong><span>${commonComplete} / ${commonTarget}</span><meter min="0" max="${commonTarget}" value="${commonComplete}"></meter></div></div><div class="solar-evidence-stored"><strong>Lagrad historik för vald site</strong><span>${history.count} datum · ${storedRange}</span></div><small class="solar-evidence-protocol">${evidence.protocol_version || "evidence-v1"} · LOCKED</small>`;
     status.textContent = evidence.status || "INSUFFICIENT – KEEP COLLECTING";
     list.innerHTML = [...days].sort((left, right) => String(right.date || "").localeCompare(String(left.date || ""))).map((day) => {
       const number = (value) => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null;
@@ -8760,7 +8776,9 @@ class ElrakningPanel {
       const display = (value) => value === null ? "—" : this._formatNumber(value);
       const omError = actualValue !== null && openMeteoValue !== null ? display(Math.abs(actualValue - openMeteoValue)) : "—";
       const forecastError = actualValue !== null && forecastValue !== null ? display(Math.abs(actualValue - forecastValue)) : "—";
-      const state = day.audit_complete ? "✅ GODKÄND" : "❌ EXKLUDERAD";
+      const state = !day.audit_semantics_version
+        ? "HISTORIK · LEGACY / EJ OMVÄRDERAD"
+        : day.audit_complete ? "✅ GODKÄND" : "❌ EXKLUDERAD";
       const reasons = Array.isArray(day.exclusion_reasons) && day.exclusion_reasons.length ? day.exclusion_reasons.join(", ") : "Ingen ytterligare orsak angiven";
       const common = day.common_forecast_solar_day ? " · Common" : "";
       return `<div class="solar-evidence-day"><div class="solar-evidence-day-heading"><strong>${day.date || "—"}</strong><span>${state}${common}</span></div><div class="solar-evidence-metrics"><span><b>Actual</b>${display(actualValue)} kWh</span><span><b>Open-Meteo</b>${display(openMeteoValue)} kWh</span><span><b>OM error</b>${omError} kWh</span><span><b>Forecast.Solar</b>${display(forecastValue)} kWh</span><span><b>FS error</b>${forecastError} kWh</span></div><small>${display(number(day.merged_points))} punkter · max gap ${display(number(day.max_internal_gap_minutes))} min · ${reasons}</small></div>`;

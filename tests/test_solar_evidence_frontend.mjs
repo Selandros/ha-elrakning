@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { applySolarEvidenceVisibility, formatSolarEvidenceCaptureTasks, solarEvidenceCardHidden, solarEvidenceStatus } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applySolarEvidenceVisibility, formatSolarEvidenceCaptureTasks, solarEvidenceCardHidden, solarEvidenceStatus, summarizeSolarEvidenceHistory } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const websocket = fs.readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
@@ -33,7 +33,7 @@ assert.match(panel, /evidenceDay\.audit_complete === true\) return "✅"/);
 assert.match(panel, /return date === today \? "–" : "❌"/);
 assert.match(panel, /solarEvidenceStatus\(evidenceDays, day\.date, today\)/);
 assert.match(panel, /solar_evidence: this\._powerHistory\?\.solar_evidence/);
-assert.match(panel, /solar-evidence-list \{[^}]*max-height: 58vh;[^}]*overflow-x: hidden;[^}]*overflow-y: auto;/);
+assert.match(panel, /solar-evidence-list \{[^}]*overflow: visible;/);
 assert.match(panel, /\.card\.solar-evidence-card \{[^}]*background: var\(--ha-card-background, var\(--card-background-color\)\);[^}]*box-shadow: none;[^}]*backdrop-filter: none;/);
 assert.match(panel, /solar-evidence-day \{[^}]*padding: 6px 8px;/);
 assert.match(panel, /solar-evidence-list \{[^}]*gap: 5px;/);
@@ -68,6 +68,11 @@ const unavailable = solarEvidenceAfterRender();
 applySolarEvidenceVisibility(unavailable, true, false);
 assert.equal(unavailable.hidden, true);
 assert.match(panel, /Forecast\.Solar common/);
+assert.match(panel, /Open-Meteo · kvalificerade dagar/);
+assert.match(panel, /Forecast\.Solar common · kvalificerade dagar/);
+assert.match(panel, /Lagrad historik för vald site/);
+assert.match(panel, /summarizeSolarEvidenceHistory\(days\)/);
+assert.match(panel, /HISTORIK · LEGACY \/ EJ OMVÄRDERAD/);
 assert.match(panel, /data-solar-evidence-capture-tasks/);
 assert.match(panel, /formatSolarEvidenceCaptureTasks\(evidence\?\.capture_tasks\)/);
 assert.match(panel, /outcome \|\| "outcome saknas"/);
@@ -97,4 +102,12 @@ assert.deepEqual(taskRows[0], {
 });
 assert.deepEqual(formatSolarEvidenceCaptureTasks({}), []);
 assert.equal(formatSolarEvidenceCaptureTasks({ startup: { source: "startup" } })[0].outcome, null);
+assert.deepEqual(summarizeSolarEvidenceHistory([
+  { date: "2026-09-27", audit_complete: true },
+  { date: "2026-08-04", audit_complete: false },
+  { date: "2026-08-28" },
+]), { count: 3, first_date: "2026-08-04", last_date: "2026-09-27" });
+assert.deepEqual(summarizeSolarEvidenceHistory(Array.from({ length: 55 }, (_, index) => ({
+  date: index < 30 ? `2026-08-${String(index + 1).padStart(2, "0")}` : `2026-09-${String(index - 29).padStart(2, "0")}`,
+}))), { count: 55, first_date: "2026-08-01", last_date: "2026-09-25" });
 console.log("solar evidence frontend endpoint/render regression passed");
