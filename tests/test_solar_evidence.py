@@ -21,6 +21,7 @@ from custom_components.elrakning.solar_evidence import (
     assess_completeness,
     build_evidence_collection_targets,
     count_invalid_states_in_target_day,
+    assess_invalid_intervals,
     integrate_actual,
     merge_pv_points,
     parse_previous_runs,
@@ -37,6 +38,71 @@ def _state(value, timestamp, unit="W"):
 
 
 class SolarEvidenceTests(unittest.TestCase):
+    def test_bounded_simultaneous_transient_is_tolerated_without_interpolation(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        history = {
+            "pv.one": [_state(1000, "2026-09-27T23:00:00+02:00"), _state("unavailable", "2026-09-27T23:02:53.907000+02:00"), _state(0, "2026-09-27T23:14:47.046000+02:00")],
+            "pv.two": [_state(1000, "2026-09-27T23:00:00+02:00"), _state("unavailable", "2026-09-27T23:02:53.907000+02:00"), _state(0, "2026-09-27T23:14:47.059000+02:00")],
+        }
+        result = assess_invalid_intervals(history, ["pv.one", "pv.two"], start, end)
+        self.assertEqual(result["raw_in_day_invalid_count"], 2)
+        self.assertEqual(result["tolerated_invalid_interval_count"], 2)
+        self.assertAlmostEqual(result["tolerated_invalid_duration_seconds"], 713.152, places=3)
+        self.assertEqual(result["untolerated_invalid_count"], 0)
+
+    def test_invalid_interval_over_limit_is_fail_closed(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        history = {"pv.one": [_state(1000, "2026-09-27T12:00:00+02:00"), _state("unknown", "2026-09-27T12:01:00+02:00"), _state(0, "2026-09-27T12:31:01+02:00")]}
+        result = assess_invalid_intervals(history, ["pv.one"], start, end)
+        self.assertEqual(result["untolerated_invalid_count"], 1)
+
+    def test_invalid_interval_requires_valid_bracketing(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        histories = (
+            {"pv.one": [_state("unavailable", "2026-09-27T12:00:00+02:00"), _state(0, "2026-09-27T12:01:00+02:00")]},
+            {"pv.one": [_state(0, "2026-09-27T11:59:00+02:00"), _state("unavailable", "2026-09-27T12:00:00+02:00")]},
+        )
+        for history in histories:
+            self.assertEqual(assess_invalid_intervals(history, ["pv.one"], start, end)["untolerated_invalid_count"], 1)
+
+    def test_invalid_without_timestamp_remains_fail_closed(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        state = SimpleNamespace(state="unavailable", last_updated=None, attributes={"unit_of_measurement": "W"})
+        result = assess_invalid_intervals({"pv.one": [state]}, ["pv.one"], start, end)
+        self.assertEqual(result["raw_in_day_invalid_count"], 1)
+        self.assertEqual(result["untolerated_invalid_count"], 1)
+        self.assertIsNone(result["untolerated_invalid_duration_seconds"])
+
+    def test_multiple_short_transients_are_bounded_by_union_duration(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 27, tzinfo=zone)
+        end = datetime(2026, 9, 28, tzinfo=zone)
+        history = {"pv.one": [
+            _state(0, "2026-09-27T10:00:00+02:00"), _state("unknown", "2026-09-27T10:01:00+02:00"), _state(0, "2026-09-27T10:11:00+02:00"),
+            _state("unavailable", "2026-09-27T10:12:00+02:00"), _state(0, "2026-09-27T10:32:01+02:00"),
+        ]}
+        result = assess_invalid_intervals(history, ["pv.one"], start, end)
+        self.assertEqual(result["tolerated_invalid_interval_count"], 2)
+        self.assertGreater(result["tolerated_invalid_duration_seconds"], 30 * 60)
+        self.assertEqual(result["untolerated_invalid_count"], 1)
     def test_invalid_padding_states_do_not_exclude_target_day(self):
         from zoneinfo import ZoneInfo
 

@@ -28,7 +28,7 @@ STORE_KEY = "elrakning.solar_evidence"
 PROVENANCE_STORE_KEY = "elrakning.solar_evidence_provenance"
 PROVENANCE_STORE_VERSION = 1
 PROTOCOL_VERSION = "evidence-v1"
-AUDIT_SEMANTICS_VERSION = "solar-evidence-audit-v2"
+AUDIT_SEMANTICS_VERSION = "solar-evidence-audit-v3"
 OPEN_METEO_ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 ACTIVE_THRESHOLD_KW = 0.05
 MAX_INTERNAL_GAP_MINUTES = 30
@@ -150,6 +150,74 @@ def count_invalid_states_in_target_day(
             else:
                 padding += 1
     return in_day, padding
+
+
+def assess_invalid_intervals(
+    history_by_entity: dict[str, list[Any]],
+    entity_ids: list[str],
+    start: datetime,
+    end: datetime,
+) -> dict[str, Any]:
+    """Classify bounded in-day invalid runs without changing raw history."""
+    raw_count = 0
+    tolerated_intervals = 0
+    untolerated_count = 0
+    untolerated_duration = 0.0
+    untolerated_duration_unknown = False
+    intervals: list[tuple[datetime, datetime]] = []
+    invalid_states = {"unknown", "unavailable"}
+
+    for entity in entity_ids:
+        states = sorted(history_by_entity.get(entity, []), key=lambda item: getattr(item, "last_updated", None) or start)
+        for index, state in enumerate(states):
+            timestamp = getattr(state, "last_updated", None)
+            if str(getattr(state, "state", "")).strip().lower() not in invalid_states:
+                continue
+            if timestamp is None:
+                raw_count += 1
+                untolerated_count += 1
+                untolerated_duration_unknown = True
+                continue
+            if not start <= timestamp < end:
+                continue
+            raw_count += 1
+            previous_valid = index > 0 and _state_point(states[index - 1]) is not None
+            next_index = index + 1
+            while next_index < len(states) and str(getattr(states[next_index], "state", "")).strip().lower() in invalid_states:
+                next_index += 1
+            next_state = states[next_index] if next_index < len(states) else None
+            next_timestamp = getattr(next_state, "last_updated", None) if next_state is not None else None
+            bounded = previous_valid and next_state is not None and next_timestamp is not None and _state_point(next_state) is not None
+            if not bounded:
+                untolerated_count += 1
+                untolerated_duration_unknown = True
+                continue
+            if index == 0 or str(getattr(states[index - 1], "state", "")).strip().lower() not in invalid_states:
+                duration = max(0.0, (next_timestamp - timestamp).total_seconds())
+                if duration <= MAX_INTERNAL_GAP_MINUTES * 60:
+                    tolerated_intervals += 1
+                    intervals.append((timestamp, next_timestamp))
+                else:
+                    untolerated_count += 1
+                    untolerated_duration += duration
+
+    merged_intervals: list[tuple[datetime, datetime]] = []
+    for interval_start, interval_end in sorted(intervals):
+        if merged_intervals and interval_start <= merged_intervals[-1][1]:
+            merged_intervals[-1] = (merged_intervals[-1][0], max(merged_intervals[-1][1], interval_end))
+        else:
+            merged_intervals.append((interval_start, interval_end))
+    union_duration = sum((right - left).total_seconds() for left, right in merged_intervals)
+    if union_duration > MAX_INTERNAL_GAP_MINUTES * 60 and intervals:
+        untolerated_count += 1
+        untolerated_duration += union_duration - MAX_INTERNAL_GAP_MINUTES * 60
+    return {
+        "raw_in_day_invalid_count": raw_count,
+        "tolerated_invalid_interval_count": tolerated_intervals,
+        "tolerated_invalid_duration_seconds": union_duration,
+        "untolerated_invalid_count": untolerated_count,
+        "untolerated_invalid_duration_seconds": None if untolerated_duration_unknown else untolerated_duration,
+    }
 
 
 def parse_previous_runs(payload: dict[str, Any], target_date: str) -> dict[str, Any]:
@@ -481,16 +549,17 @@ class SolarEvidenceManager:
             unavailable, padding_unavailable = count_invalid_states_in_target_day(
                 history_by_entity, entities, start, end
             )
+            invalid_quality = assess_invalid_intervals(history_by_entity, entities, start, end)
             for entity in entities:
                 points = [point for state in history_by_entity.get(entity, []) if (point := _state_point(state))]
                 entity_starts.append(bool(points and abs((dt_util.parse_datetime(points[0]["timestamp"]) - start).total_seconds()) <= 2))
             actual, boundary_long, interior_long = integrate_actual(merged, start, end)
             quality = assess_completeness(merged, entity_starts, start, end)
-            if unavailable:
+            if invalid_quality["untolerated_invalid_count"]:
                 quality["exclusion_reasons"].append("unavailable_or_unknown")
             if actual is None:
                 quality["exclusion_reasons"].append("actual_unavailable")
-            record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "in_day_unavailable_or_unknown": unavailable, "padding_unavailable_or_unknown": padding_unavailable, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and unavailable == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
+            record.update({"actual_kwh": actual, "merged_points": quality["merged_points"], "active_points": quality["active_points"], "max_internal_gap_minutes": quality["max_internal_gap_minutes"], "interior_long_gap_count": interior_long, "boundary_long_gap_count": boundary_long, "unavailable_or_unknown": unavailable, "in_day_unavailable_or_unknown": unavailable, "padding_unavailable_or_unknown": padding_unavailable, **invalid_quality, "start_state_available": all(entity_starts), "audit_complete": quality["audit_complete"] and interior_long == 0 and invalid_quality["untolerated_invalid_count"] == 0 and actual is not None, "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else [])})
             om = await self._fetch_open_meteo(target_date, power_state)
             record.update({
                 f"open_meteo_{key_name}": value
