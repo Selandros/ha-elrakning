@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { applySolarEvidenceVisibility, solarEvidenceCardHidden, solarEvidenceStatus } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applySolarEvidenceVisibility, formatSolarEvidenceCaptureTasks, solarEvidenceCardHidden, solarEvidenceStatus } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const websocket = fs.readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
@@ -68,4 +68,33 @@ const unavailable = solarEvidenceAfterRender();
 applySolarEvidenceVisibility(unavailable, true, false);
 assert.equal(unavailable.hidden, true);
 assert.match(panel, /Forecast\.Solar common/);
+assert.match(panel, /data-solar-evidence-capture-tasks/);
+assert.match(panel, /formatSolarEvidenceCaptureTasks\(evidence\?\.capture_tasks\)/);
+assert.match(panel, /outcome \|\| "outcome saknas"/);
+assert.match(panel, /target_site_ids/);
+assert.match(panel, /applySolarEvidenceVisibility\(card, this\._debugEnabled, evidence\?\.available, captureTasks\.length > 0\)/);
+const taskRows = formatSolarEvidenceCaptureTasks({
+  startup: {
+    source: "startup",
+    scheduled_at: "2026-09-28T17:00:00Z",
+    started_at: "2026-09-28T17:00:01Z",
+    finished_at: "2026-09-28T17:00:02Z",
+    target_date: "2026-09-27",
+    target_site_ids: ["site-a"],
+    outcome: "success",
+  },
+});
+assert.deepEqual(taskRows[0], {
+  source: "startup",
+  outcome: "success",
+  scheduled_at: "2026-09-28T17:00:00Z",
+  started_at: "2026-09-28T17:00:01Z",
+  finished_at: "2026-09-28T17:00:02Z",
+  target_date: "2026-09-27",
+  target_site_ids: ["site-a"],
+  error_type: null,
+  error: null,
+});
+assert.deepEqual(formatSolarEvidenceCaptureTasks({}), []);
+assert.equal(formatSolarEvidenceCaptureTasks({ startup: { source: "startup" } })[0].outcome, null);
 console.log("solar evidence frontend endpoint/render regression passed");

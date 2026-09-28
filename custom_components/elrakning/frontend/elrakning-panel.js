@@ -2619,9 +2619,27 @@ export function solarEvidenceCardHidden(debugEnabled, evidenceAvailable) {
   return !Boolean(debugEnabled) || !Boolean(evidenceAvailable);
 }
 
-export function applySolarEvidenceVisibility(element, debugEnabled, evidenceAvailable) {
+export function formatSolarEvidenceCaptureTasks(captureTasks) {
+  if (!captureTasks || typeof captureTasks !== "object" || Array.isArray(captureTasks)) return [];
+  return Object.entries(captureTasks)
+    .filter(([, task]) => task && typeof task === "object" && !Array.isArray(task))
+    .slice(0, 3)
+    .map(([key, task]) => ({
+      source: task.source || key,
+      outcome: Object.prototype.hasOwnProperty.call(task, "outcome") ? task.outcome : null,
+      scheduled_at: task.scheduled_at || null,
+      started_at: task.started_at || null,
+      finished_at: task.finished_at || null,
+      target_date: task.target_date || null,
+      target_site_ids: Array.isArray(task.target_site_ids) ? task.target_site_ids.slice(0, 8) : [],
+      error_type: task.error_type || null,
+      error: task.error || null,
+    }));
+}
+
+export function applySolarEvidenceVisibility(element, debugEnabled, evidenceAvailable, hasCaptureTasks = false) {
   if (!element) return;
-  const hidden = solarEvidenceCardHidden(debugEnabled, evidenceAvailable);
+  const hidden = !Boolean(debugEnabled) || (!Boolean(evidenceAvailable) && !Boolean(hasCaptureTasks));
   element.hidden = hidden;
   if (element.style) element.style.display = hidden ? "none" : "";
 }
@@ -3431,6 +3449,7 @@ class ElrakningPanel {
         </div>
         <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
           <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
+          <div class="solar-evidence-capture-tasks" data-solar-evidence-capture-tasks hidden></div>
           <div data-solar-evidence-summary></div>
           <div data-solar-evidence-status></div>
           <div class="solar-evidence-list" data-solar-evidence-list></div>
@@ -4109,6 +4128,11 @@ class ElrakningPanel {
         }
         .solar-evidence-summary, .solar-evidence-status { line-height: 1.45; }
         .solar-evidence-status { font-weight: 600; margin-top: 4px; }
+        .solar-evidence-capture-tasks { background: var(--secondary-background-color); border-radius: 8px; margin: 6px 0; padding: 6px 8px; }
+        .solar-evidence-capture-task { display: grid; gap: 2px; grid-template-columns: minmax(0, 1fr) auto; }
+        .solar-evidence-capture-task + .solar-evidence-capture-task { border-top: 1px solid var(--divider-color); margin-top: 5px; padding-top: 5px; }
+        .solar-evidence-capture-task small { color: var(--secondary-text-color); grid-column: 1 / -1; line-height: 1.3; }
+        .solar-evidence-capture-task strong { color: var(--primary-text-color); }
         .solar-evidence-progress { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 4px; }
         .solar-evidence-progress > div { display: grid; gap: 2px; }
         .solar-evidence-progress strong { font-size: 0.9rem; }
@@ -8694,14 +8718,33 @@ class ElrakningPanel {
 
   _renderSolarEvidence() {
     const card = this.host.querySelector("[data-solar-evidence-card]");
+    const tasks = this.host.querySelector("[data-solar-evidence-capture-tasks]");
     const summary = this.host.querySelector("[data-solar-evidence-summary]");
     const status = this.host.querySelector("[data-solar-evidence-status]");
     const list = this.host.querySelector("[data-solar-evidence-list]");
     const evidence = this._powerHistory?.solar_evidence;
     if (!card || !summary || !status || !list) return;
     const days = Array.isArray(evidence?.days) ? evidence.days : [];
-    applySolarEvidenceVisibility(card, this._debugEnabled, evidence?.available);
-    if (!evidence?.available) return;
+    const captureTasks = formatSolarEvidenceCaptureTasks(evidence?.capture_tasks);
+    const escape = (value) => String(value ?? "").replace(/[&<>\"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+    })[character]);
+    if (tasks) {
+      tasks.hidden = captureTasks.length === 0;
+      tasks.innerHTML = captureTasks.map((task) => {
+        const target = [task.target_date, task.target_site_ids.length ? `site ${task.target_site_ids.join(", ")}` : null].filter(Boolean).join(" · ");
+        const times = [task.scheduled_at, task.started_at, task.finished_at].filter(Boolean).join(" → ");
+        const error = task.error_type || task.error ? ` · ${task.error_type || "error"}${task.error ? `: ${task.error}` : ""}` : "";
+        return `<div class="solar-evidence-capture-task"><strong>${escape(task.source)}</strong><span>${escape(task.outcome || "outcome saknas")}</span><small>${escape([target, times].filter(Boolean).join(" · ") || "Ingen tids- eller målmetadata")}${escape(error)}</small></div>`;
+      }).join("");
+    }
+    applySolarEvidenceVisibility(card, this._debugEnabled, evidence?.available, captureTasks.length > 0);
+    if (!evidence?.available) {
+      summary.textContent = "Evidence-data saknas i payloaden.";
+      status.textContent = "Capture-task-status visas utan att skapa ett outcome.";
+      list.replaceChildren();
+      return;
+    }
     const progress = evidence.progress || {};
     const omComplete = Number.isFinite(Number(progress.open_meteo_complete)) ? Number(progress.open_meteo_complete) : 0;
     const omTarget = Number.isFinite(Number(progress.open_meteo_target)) ? Number(progress.open_meteo_target) : 21;
