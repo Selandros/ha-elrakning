@@ -351,6 +351,48 @@ export function nearestMeterPoint(points, timestamp, maxDistanceMs = 2.5 * 60 * 
   return nearest?.point || null;
 }
 
+/**
+ * Build a bounded display-only series while retaining extrema in each bucket.
+ * The source array and its point objects are never mutated.
+ */
+export function decimateDisplayPoints(points, {
+  targetPoints = 1024,
+  valueKeys = ["value_kw", "import_kw", "export_kw"],
+} = {}) {
+  const source = Array.isArray(points) ? points : [];
+  const budget = Math.max(2, Math.floor(Number(targetPoints) || 0));
+  if (source.length <= budget) return source.slice();
+  const bucketCount = Math.max(1, Math.floor(budget / 4));
+  const bucketSize = Math.ceil(source.length / bucketCount);
+  const output = [];
+  for (let start = 0; start < source.length; start += bucketSize) {
+    const end = Math.min(source.length, start + bucketSize);
+    const candidates = new Set([start, end - 1]);
+    for (const key of valueKeys) {
+      let minimumIndex = null;
+      let maximumIndex = null;
+      let minimum = Infinity;
+      let maximum = -Infinity;
+      for (let index = start; index < end; index += 1) {
+        const value = Number(source[index]?.[key]);
+        if (!Number.isFinite(value)) continue;
+        if (value < minimum) {
+          minimum = value;
+          minimumIndex = index;
+        }
+        if (value > maximum) {
+          maximum = value;
+          maximumIndex = index;
+        }
+      }
+      if (minimumIndex !== null) candidates.add(minimumIndex);
+      if (maximumIndex !== null) candidates.add(maximumIndex);
+    }
+    [...candidates].sort((left, right) => left - right).forEach((index) => output.push(source[index]));
+  }
+  return output;
+}
+
 export function normalizeMeterValue(value) {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
@@ -3081,6 +3123,8 @@ class ElrakningPanel {
     this._powerHistoryEnrichmentRequestToken = 0;
     this._powerHistoryContextKey = null;
     this._powerHistoryInFlight = new Map();
+    this._priceChartRenderCacheKey = null;
+    this._lastPowerChartRenderStats = null;
     this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._loadForecastEventUnsubscribePromise = null;
@@ -8951,7 +8995,11 @@ class ElrakningPanel {
           substage = "render_price_chart";
           this.renderPriceChart();
         }
-        this._recordPowerFlowDiagnostic("history_render", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started) });
+        this._recordPowerFlowDiagnostic("history_render", {
+          requested_date: requestedDate,
+          duration_ms: roundDiagnosticMs(performance.now() - started),
+          ...(this._lastPowerChartRenderStats || {}),
+        });
       } catch (error) {
         this._recordPowerFlowDiagnostic("history_render_failed", {
           requested_date: requestedDate,
@@ -11869,6 +11917,35 @@ class ElrakningPanel {
     });
   }
 
+  _getPriceChartRenderCacheKey() {
+    const pointSignature = (points) => {
+      const values = Array.isArray(points) ? points : [];
+      const first = values[0];
+      const last = values.at(-1);
+      const compact = (point) => point ? [point.timestamp || null, point.value_kw ?? point.value ?? null, point.import_kw ?? null, point.export_kw ?? null] : null;
+      return [values.length, compact(first), compact(last)];
+    };
+    const series = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [
+      key,
+      pointSignature(this._powerHistory?.series?.[key]?.points),
+    ]));
+    const forecast = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [
+      key,
+      pointSignature(this._powerHistory?.power_forecast?.series?.[key]?.forecast_points),
+    ]));
+    const widthBucket = Math.max(1, Math.round((this._priceChartRenderedWidth || 960) / 16) * 16);
+    return JSON.stringify({
+      site: this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
+      date: this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
+      mode: this._periodPickerState?.mode || null,
+      width: widthBucket,
+      periods: [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
+      layers: this._effectiveChartLayerState(),
+      series,
+      forecast,
+    });
+  }
+
   buildMeterDisplaySegments(points, key) {
     return this.buildThresholdClippedSegments(points, key);
   }
@@ -12132,6 +12209,11 @@ class ElrakningPanel {
     const chart = this.host.querySelector(".price-chart");
     if (!chart) return;
     const liveUpdate = options.liveUpdate === true;
+    const renderCacheKey = this._getPriceChartRenderCacheKey();
+    if (!liveUpdate && this._priceChartRenderCacheKey === renderCacheKey && chart.querySelector(".chart-svg")) {
+      this._lastPowerChartRenderStats = { ...(this._lastPowerChartRenderStats || {}), cache_hit: true };
+      return;
+    }
 
     if (!this.priceData.periods.length) {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
@@ -12227,11 +12309,20 @@ class ElrakningPanel {
         .filter((point) => point.raw_timestamp !== null)
         .map((point) => [point.timestamp, point]),
     );
+    const renderBudget = Math.min(1024, Math.max(128, Math.ceil(renderedWidth * 2)));
+    const meterRenderPoints = decimateDisplayPoints(meterPoints, {
+      targetPoints: renderBudget,
+      valueKeys: ["import_kw", "export_kw"],
+    });
+    const historicalMeterDisplayPoints = energyHistoryToMeterCurvePoints(energyHistory).filter((point) => (
+      point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+    ));
     const meterDisplayPoints = useHistoricalMeter
-      ? this.prepareMeterDisplayPoints(energyHistoryToMeterCurvePoints(energyHistory).filter((point) => (
-        point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
-      )))
-      : this.prepareMeterDisplayPoints(meterCanonicalPoints);
+      ? this.prepareMeterDisplayPoints(decimateDisplayPoints(historicalMeterDisplayPoints, {
+        targetPoints: renderBudget,
+        valueKeys: ["import_kw", "export_kw"],
+      }))
+      : this.prepareMeterDisplayPoints(this.buildCanonicalMeterPoints(meterRenderPoints, dayStart, dayEnd));
     const powerCanonicalPoints = {};
     const powerDisplayPoints = {};
     const powerDisplayGeometry = {};
@@ -12247,19 +12338,45 @@ class ElrakningPanel {
         point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
       ));
       const useHistoricalPower = rawPoints.length === 0 && historicalPoints.length > 0;
+      const renderRawPoints = decimateDisplayPoints(rawPoints, {
+        targetPoints: renderBudget,
+        valueKeys: ["value_kw"],
+      });
       powerCanonicalPoints[key] = useHistoricalPower
         ? historicalPoints
-        : this.buildCanonicalPowerPoints(rawPoints, dayStart, dayEnd);
+        : this.buildCanonicalPowerPoints(renderRawPoints, dayStart, dayEnd);
+      const historicalPowerDisplayPoints = energyIntervalsToCurvePoints(energyHistory?.series?.[key]).filter((point) => (
+        point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+      ));
       const displaySource = useHistoricalPower
-        ? energyIntervalsToCurvePoints(energyHistory?.series?.[key]).filter((point) => (
-          point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
-        ))
+        ? decimateDisplayPoints(historicalPowerDisplayPoints, {
+          targetPoints: renderBudget,
+          valueKeys: ["value_kw"],
+        })
         : powerCanonicalPoints[key];
       powerDisplayPoints[key] = displaySource.map((point) => ({
         ...point,
         value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
       }));
     }
+    this._lastPowerChartRenderStats = {
+      cache_hit: false,
+      render_budget: renderBudget,
+      raw_points: {
+        meter: meterPoints.length,
+        solar: this._powerHistory?.series?.solar?.points?.length || 0,
+        consumption: this._powerHistory?.series?.consumption?.points?.length || 0,
+        charging: this._powerHistory?.series?.charging?.points?.length || 0,
+        discharging: this._powerHistory?.series?.discharging?.points?.length || 0,
+      },
+      display_points: {
+        meter: meterDisplayPoints.length,
+        solar: powerDisplayPoints.solar.length,
+        consumption: powerDisplayPoints.consumption.length,
+        charging: powerDisplayPoints.charging.length,
+        discharging: powerDisplayPoints.discharging.length,
+      },
+    };
     const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || this._pricePlan?.site_id || null;
     const loadForecastPoints = selectLoadForecastPoints(this._loadForecast?.frames, {
       siteId: activeSiteId,
@@ -12454,6 +12571,7 @@ class ElrakningPanel {
       const overlay = chart.querySelector(".chart-axis-overlay");
       if (overlay) overlay.outerHTML = axisOverlayMarkup;
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
+      this._priceChartRenderCacheKey = renderCacheKey;
       return;
     }
     chart.innerHTML = `<svg class="chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
@@ -12467,6 +12585,7 @@ class ElrakningPanel {
     </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;
     this.bindChartTooltips();
     this._priceChartLiveSignature = this._getPriceChartLiveSignature();
+    this._priceChartRenderCacheKey = renderCacheKey;
     this.autoScrollToNow(chart, x(now), this.priceSnapshot?.date, currentPeriod);
   }
 

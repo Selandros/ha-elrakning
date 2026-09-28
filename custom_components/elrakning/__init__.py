@@ -42,7 +42,7 @@ from .replay_artifact_store import ReplayArtifactStore, async_register_replay_ar
 from .replay_runtime import async_generate_artifact
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .site_identity import SiteIdentityManager
-from .websocket import async_register_websocket_commands
+from .websocket import async_register_websocket_commands, clear_forecast_view_caches
 from .elhandel.providers.greenely_invoice_economics import GreenelyInvoiceEconomicsProducer, async_register_proof_service
 
 PANEL_PATH = DOMAIN
@@ -665,6 +665,24 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
         hass.bus.async_listen(EON_GRID_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
     ]
+    frontend_data["forecast_view_cache_unsubs"] = [
+        hass.bus.async_listen(
+            "elrakning_load_forecast_update",
+            lambda event: clear_forecast_view_caches(hass, (event.data or {}).get("site_id")),
+        ),
+        hass.bus.async_listen(
+            ELECTRICITY_PROVIDER_UPDATE_EVENT,
+            lambda _event: clear_forecast_view_caches(hass),
+        ),
+        hass.bus.async_listen(
+            EON_GRID_UPDATE_EVENT,
+            lambda _event: clear_forecast_view_caches(hass),
+        ),
+        hass.bus.async_listen(
+            SOLAR_WEATHER_UPDATE_EVENT,
+            lambda _event: clear_forecast_view_caches(hass),
+        ),
+    ]
     frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     # Run one deterministic startup capture after setup returns so bootstrap timeouts
@@ -699,6 +717,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for unsubscribe in frontend_data.pop("replay_benchmark_event_unsubs", []):
         unsubscribe()
     for unsubscribe in frontend_data.pop("monthly_forecast_event_unsubs", []):
+        unsubscribe()
+    for unsubscribe in frontend_data.pop("forecast_view_cache_unsubs", []):
         unsubscribe()
     if refresh_task := frontend_data.pop("monthly_forecast_capture_task", None):
         refresh_task.cancel()

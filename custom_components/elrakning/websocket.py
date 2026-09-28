@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import inspect
 import json
@@ -129,6 +130,21 @@ ECONOMIC_POLICY_IMPORT_COMMAND = f"{DOMAIN}/economic_policy/import"
 ECONOMIC_POLICY_STATE_COMMAND = f"{DOMAIN}/economic_policy/state"
 UPDATE_EVENT = "elrakning_price_update"
 _LOGGER = logging.getLogger(__name__)
+
+
+def clear_forecast_view_caches(hass: HomeAssistant, site_id: str | None = None) -> None:
+    """Invalidate only completed current-view forecast caches for changed sites."""
+    domain_data = hass.data.get(DOMAIN, {})
+    for cache_name in ("load_forecast_cache", "power_forecast_cache"):
+        cache = domain_data.get(cache_name)
+        if not isinstance(cache, dict):
+            continue
+        if site_id is None:
+            cache.clear()
+            continue
+        for key in list(cache):
+            if isinstance(key, tuple) and key and str(key[0]) == str(site_id):
+                cache.pop(key, None)
 
 
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
@@ -1530,7 +1546,6 @@ async def _async_power_forecast_state(
     bucket = int(now.timestamp()) // 900
     if load_forecast is None:
         load_forecast = await _async_load_forecast_state(hass, site_id)
-    load_frame_ids = tuple(sorted(str(frame.get("frame_id")) for frame in load_forecast.get("frames", []) if isinstance(frame, dict)))
     forecast_manager = _solar_forecast_manager(hass)
     solar_facts = forecast_manager.public_state() if forecast_manager and _site_is_configured(hass) else SolarForecastManager._unavailable_facts()
     binding = ((getattr(identity, "state", {}).get("site_configs", {}).get(site_id, {}) or {}).get("bindings", {}) or {}).get("forecast")
@@ -1545,14 +1560,18 @@ async def _async_power_forecast_state(
         str(site_id),
         target_date.isoformat(),
         bucket,
-        load_frame_ids,
+        str(load_forecast.get("semantic_fingerprint") or ""),
         str(binding_fingerprint or ""),
         tuple(sorted((key, str(value)) for key, value in solar_facts.items() if key != "baselines")),
         json.dumps(power_calibration, sort_keys=True, separators=(",", ":"), default=str),
     )
     counters = hass.data.setdefault(DOMAIN, {}).setdefault("power_flow_diagnostics", {"history_active": 0, "enrichment_active": 0, "forecast_active": 0})
     inflight = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_inflight", {})
+    completed_cache = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_cache", {})
     inflight_key = cache_key
+    cached = completed_cache.get(inflight_key)
+    if isinstance(cached, dict) and cached.get("expires_at", 0) > time.monotonic():
+        return cached["result"]
     task = inflight.get(inflight_key)
     if task is None:
         counters["forecast_active"] += 1
@@ -1600,6 +1619,7 @@ async def _async_power_forecast_state(
             "request_id": request_id, "date": target_date.isoformat(), "forecast_active": counters["forecast_active"],
         })
     result = await asyncio.shield(task)
+    completed_cache[inflight_key] = {"result": result, "expires_at": time.monotonic() + 900}
     return result
 
 
@@ -1846,7 +1866,12 @@ async def _async_load_forecast_state(
         return {"available": False, "reason": "site_unconfigured", "frames": []}
     domain_data = hass.data.setdefault(DOMAIN, {})
     inflight = domain_data.setdefault("load_forecast_inflight", {})
-    key = str(site_id)
+    bucket = int(dt_util.now().timestamp()) // 900
+    key = (str(site_id), bucket)
+    completed_cache = domain_data.setdefault("load_forecast_cache", {})
+    cached = completed_cache.get(key)
+    if isinstance(cached, dict) and cached.get("expires_at", 0) > time.monotonic():
+        return cached["result"]
     task = inflight.get(key)
     if task is None:
         task = asyncio.create_task(_async_load_forecast_state_uncached(hass, key, request_id))
@@ -1857,7 +1882,9 @@ async def _async_load_forecast_state(
                 inflight.pop(request_key, None)
 
         task.add_done_callback(clear)
-    return await asyncio.shield(task)
+    result = await asyncio.shield(task)
+    completed_cache[key] = {"result": result, "expires_at": time.monotonic() + 900}
+    return result
 
 
 async def _async_load_forecast_state_uncached(
@@ -1904,7 +1931,22 @@ async def _async_load_forecast_state_uncached(
                         "unit": point["unit"], "quality_status": point["quality_status"],
                         "point": point["point"]} for point in frame["points"]],
         })
-    return {"available": bool(serialized), "reason": None if serialized else "no_supported_history", "frames": serialized}
+    semantic_payload = [
+        {
+            key: frame.get(key)
+            for key in ("site_id", "known_at", "valid_from", "valid_to", "payload_schema", "source_generation_id", "classification", "quality_status", "quality", "provenance", "points")
+        }
+        for frame in serialized
+    ]
+    semantic_fingerprint = hashlib.sha256(
+        json.dumps(semantic_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    return {
+        "available": bool(serialized),
+        "reason": None if serialized else "no_supported_history",
+        "frames": serialized,
+        "semantic_fingerprint": semantic_fingerprint,
+    }
 
 
 def _ella_entity_available(hass, entity_id: str) -> bool:
