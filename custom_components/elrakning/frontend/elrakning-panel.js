@@ -10666,16 +10666,8 @@ class ElrakningPanel {
           if ([mapping.power_entity, mapping.energy_import_entity, mapping.energy_export_entity, ...phaseEntities].includes(entityId)) {
             this.loadMeterState();
           }
-          const powerMapping = this._powerState || {};
-          const powerEntities = [
-            ...(Array.isArray(powerMapping.solar_entities) ? powerMapping.solar_entities : []),
-            powerMapping.consumption_entity,
-            powerMapping.charging_entity,
-            powerMapping.discharging_entity,
-            powerMapping.battery_power_entity,
-            powerMapping.soc_entity,
-            powerMapping.capacity_entity,
-          ];
+          // PowerManager owns live power state through elrakning_power_update;
+          // generic state_changed must not reintroduce redundant power refreshes.
         },
         "state_changed",
       );

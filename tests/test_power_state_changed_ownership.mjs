@@ -5,12 +5,12 @@ const source = readFileSync(new URL("../custom_components/elrakning/frontend/elr
 const subscription = source.slice(source.indexOf('subscribeEvents(\n        (event) => {'), source.indexOf('"state_changed",') + '"state_changed",'.length);
 const power = readFileSync(new URL("../custom_components/elrakning/power.py", import.meta.url), "utf8");
 
-assert.match(subscription, /powerEntities = \[/);
-for (const field of ["solar_entities", "consumption_entity", "charging_entity", "discharging_entity", "battery_power_entity", "soc_entity", "capacity_entity"]) {
-  assert.match(subscription, new RegExp(field));
-}
 assert.match(subscription, /if \(\[mapping\.power_entity, mapping\.energy_import_entity, mapping\.energy_export_entity, \.\.\.phaseEntities\]\.includes\(entityId\)\) \{[\s\S]*loadMeterState\(\)/);
-assert.doesNotMatch(subscription, /loadPowerState\(\)/);
+for (const forbidden of ["loadPowerState", "loadPowerHistory", "loadPowerStateEnrichment", "loadPowerHistoryEnrichment"]) {
+  assert.doesNotMatch(subscription, new RegExp(forbidden));
+}
+assert.doesNotMatch(subscription, /powerEntities/);
+assert.match(subscription, /PowerManager owns live power state through elrakning_power_update/);
 
 assert.match(power, /self\._state_unsub = hass\.bus\.async_listen\(EVENT_STATE_CHANGED, self\._async_state_changed\)/);
 assert.match(power, /selected = set\(self\.mapping\.get\("solar_entities", \[\]\)\) \|/);
