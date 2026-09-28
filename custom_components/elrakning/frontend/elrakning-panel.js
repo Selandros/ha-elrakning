@@ -8767,6 +8767,8 @@ class ElrakningPanel {
       }).join("");
     }
     applySolarEvidenceVisibility(card, this._debugEnabled, evidence?.available, captureTasks.length > 0);
+    const sourceButton = card.querySelector('[data-card-source="solar-evidence"]');
+    if (sourceButton) sourceButton.hidden = !this._debugEnabled;
     if (!evidence?.available) {
       summary.textContent = "Evidence-data saknas i payloaden.";
       status.textContent = "Capture-task-status visas utan att skapa ett outcome.";
@@ -8809,6 +8811,8 @@ class ElrakningPanel {
     const evidence = this._benchmarkEvidence || {};
     if (!card || !summary || !status || !list) return;
     applySolarEvidenceVisibility(card, this._debugEnabled, evidence.available);
+    const sourceButton = card.querySelector('[data-card-source="benchmark-evidence"]');
+    if (sourceButton) sourceButton.hidden = !this._debugEnabled;
     if (!evidence.available) return;
     const horizon = evidence.horizon || {};
     summary.textContent = `96 slots: ${horizon.actual_coverage || "0/96"} actual · ${horizon.available_slots || 0}/${horizon.required_slots || 96} causal slots`;

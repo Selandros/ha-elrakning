@@ -38,6 +38,10 @@ assert.match(panel, /data-card-source="solar-evidence"[^>]*>Visa data<\/button>/
 assert.match(panel, /data-card-source="benchmark-evidence"[^>]*>Visa data<\/button>/);
 assert.match(panel, /cardSource === "solar-evidence"/);
 assert.match(panel, /cardSource === "benchmark-evidence"/);
+assert.match(panel, /powerHistory\.solar_evidence \|\| \{ available: false, days: \[\] \}/);
+assert.match(panel, /this\._benchmarkEvidence \|\| \{ available: false \}/);
+assert.match(panel, /data-card-source="solar-evidence"/);
+assert.match(panel, /data-card-source="benchmark-evidence"/);
 assert.match(panel, /\.card\.solar-evidence-card \{[^}]*background: var\(--ha-card-background, var\(--card-background-color\)\);[^}]*box-shadow: none;[^}]*backdrop-filter: none;/);
 assert.match(panel, /solar-evidence-day \{[^}]*padding: 6px 8px;/);
 assert.match(panel, /solar-evidence-list \{[^}]*gap: 5px;/);
