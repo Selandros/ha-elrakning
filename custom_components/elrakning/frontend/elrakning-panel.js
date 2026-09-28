@@ -3460,7 +3460,7 @@ class ElrakningPanel {
         </section>
         </div>
         <section class="card solar-evidence-card" data-solar-evidence-card hidden aria-labelledby="solar-evidence-title">
-          <div class="card-heading"><h2 id="solar-evidence-title">Solar Evidence</h2></div>
+          <div class="card-heading solar-evidence-heading"><h2 id="solar-evidence-title">Solar Evidence</h2><button type="button" class="card-source-action" data-card-source="solar-evidence" hidden>Visa data</button></div>
           <div class="solar-evidence-capture-tasks" data-solar-evidence-capture-tasks hidden></div>
           <div data-solar-evidence-summary></div>
           <div data-solar-evidence-status></div>
@@ -3468,7 +3468,7 @@ class ElrakningPanel {
         </section>
 
         <section class="card solar-evidence-card" data-benchmark-evidence-card hidden aria-labelledby="benchmark-evidence-title">
-          <div class="card-heading"><h2 id="benchmark-evidence-title">Benchmark Evidence</h2></div>
+          <div class="card-heading solar-evidence-heading"><h2 id="benchmark-evidence-title">Benchmark Evidence</h2><button type="button" class="card-source-action" data-card-source="benchmark-evidence" hidden>Visa data</button></div>
           <div data-benchmark-evidence-summary></div>
           <div data-benchmark-evidence-status></div>
           <div class="solar-evidence-list" data-benchmark-evidence-list></div>
@@ -4151,7 +4151,9 @@ class ElrakningPanel {
         .solar-evidence-progress span { color: var(--secondary-text-color); font-size: 0.9rem; }
         .solar-evidence-progress meter { height: 6px; width: 100%; }
         .solar-evidence-protocol { color: var(--secondary-text-color); display: block; margin-top: 8px; }
-        .solar-evidence-list { display: grid; gap: 5px; margin-top: 8px; min-height: 0; overflow: visible; }
+        .solar-evidence-heading { align-items: center; flex-direction: row; justify-content: space-between; }
+        .solar-evidence-heading .card-source-action { margin-top: 0; width: max-content; }
+        .solar-evidence-list { display: grid; gap: 5px; margin-top: 8px; max-height: 58vh; min-height: 0; overflow-x: hidden; overflow-y: auto; }
         .solar-evidence-day { background: var(--secondary-background-color); border-radius: 8px; padding: 6px 8px; }
         .solar-evidence-day-heading { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
         .solar-evidence-day-heading strong { color: var(--primary-text-color); }
@@ -8545,6 +8547,20 @@ class ElrakningPanel {
         normalized: { days },
         derived: { daily_buckets: days },
         provenance: { history_date: powerHistory.date, source: sourceEntities.solar.length ? "home_assistant" : null },
+      };
+    }
+    if (cardSource === "solar-evidence") {
+      return {
+        card: "solar-evidence",
+        site_id: this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
+        evidence: powerHistory.solar_evidence || { available: false, days: [] },
+      };
+    }
+    if (cardSource === "benchmark-evidence") {
+      return {
+        card: "benchmark-evidence",
+        site_id: this._benchmarkEvidence?.site_id || this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
+        evidence: this._benchmarkEvidence || { available: false },
       };
     }
     return null;
