@@ -28,6 +28,7 @@ STORE_KEY = "elrakning.solar_evidence"
 PROVENANCE_STORE_KEY = "elrakning.solar_evidence_provenance"
 PROVENANCE_STORE_VERSION = 1
 PROTOCOL_VERSION = "evidence-v1"
+AUDIT_SEMANTICS_VERSION = "solar-evidence-audit-v2"
 OPEN_METEO_ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 ACTIVE_THRESHOLD_KW = 0.05
 MAX_INTERNAL_GAP_MINUTES = 30
@@ -196,6 +197,24 @@ def build_evidence_collection_targets(site_configs: dict[str, dict[str, Any]]) -
     return targets
 
 
+def should_reprocess_existing_day(existing: dict[str, Any] | None) -> bool:
+    """Re-evaluate only records not produced with the current audit semantics."""
+    return not (
+        isinstance(existing, dict)
+        and existing.get("audit_semantics_version") == AUDIT_SEMANTICS_VERSION
+    )
+
+
+def _collection_failures(result: dict[str, dict[str, Any]]) -> set[str]:
+    """Return failed site ids without retaining unbounded per-target diagnostics."""
+    return {
+        site_id
+        for site_id, record in result.items()
+        if isinstance(record, dict)
+        and "collection_failed" in (record.get("exclusion_reasons") or [])
+    }
+
+
 class SolarEvidenceManager:
     """Collect frozen evidence without feeding any candidate/model path."""
 
@@ -313,7 +332,13 @@ class SolarEvidenceManager:
         self._capture_started("daily", target_date)
         try:
             result = await self.async_collect_completed_day_for_targets(target_date)
-            self._capture_finished("daily", "success", list(result))
+            failures = _collection_failures(result)
+            self._capture_finished(
+                "daily",
+                "error" if failures else "success",
+                list(result),
+                RuntimeError("collection_failed") if failures else None,
+            )
         except asyncio.CancelledError:
             self._capture_finished("daily", "cancelled")
             raise
@@ -325,17 +350,24 @@ class SolarEvidenceManager:
         self.mark_capture_scheduled("backfill")
         self._capture_started("backfill")
         target_site_ids: set[str] = set()
+        failed_site_ids: set[str] = set()
         try:
             today = dt_util.as_local(dt_util.now()).date()
             for offset in range(1, days + 1):
                 try:
                     result = await self.async_collect_completed_day_for_targets(today - timedelta(days=offset))
                     target_site_ids.update(result)
+                    failed_site_ids.update(_collection_failures(result))
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     continue
-            self._capture_finished("backfill", "success", list(target_site_ids))
+            self._capture_finished(
+                "backfill",
+                "error" if failed_site_ids else "success",
+                list(target_site_ids),
+                RuntimeError("collection_failed") if failed_site_ids else None,
+            )
         except asyncio.CancelledError:
             self._capture_finished("backfill", "cancelled", list(target_site_ids))
             raise
@@ -349,7 +381,13 @@ class SolarEvidenceManager:
         self._capture_started("startup", yesterday)
         try:
             result = await self.async_collect_completed_day_for_targets(yesterday)
-            self._capture_finished("startup", "success", list(result))
+            failures = _collection_failures(result)
+            self._capture_finished(
+                "startup",
+                "error" if failures else "success",
+                list(result),
+                RuntimeError("collection_failed") if failures else None,
+            )
         except asyncio.CancelledError:
             self._capture_finished("startup", "cancelled")
             raise
@@ -413,9 +451,7 @@ class SolarEvidenceManager:
             }
             key = target_date.isoformat()
             existing = days.get(key)
-            if (isinstance(existing, dict) and existing.get("audit_complete") is True
-                    and existing.get("open_meteo_status") == "complete"
-                    and "forecast_solar_frozen_kwh" in existing):
+            if not should_reprocess_existing_day(existing):
                 if site_id == self._site_id:
                     self._days = {day: dict(value) for day, value in days.items()}
                     self.store = store
@@ -426,6 +462,7 @@ class SolarEvidenceManager:
             query_end = end + timedelta(hours=12)
             record: dict[str, Any] = {
                 "site_id": site_id, "date": key, "protocol_version": PROTOCOL_VERSION,
+                "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
                 "collected_at": dt_util.now().isoformat(), "pv_entity_count": len(entities), "actual_kwh": None,
             }
             if not entities:
@@ -612,8 +649,14 @@ class SolarEvidenceManager:
     ) -> dict[str, Any]:
         old = days.get(key, {})
         merged = {**old, **record}
+        re_evaluated = (
+            record.get("audit_semantics_version") == AUDIT_SEMANTICS_VERSION
+            and old.get("audit_semantics_version") != AUDIT_SEMANTICS_VERSION
+        )
+        if re_evaluated and old.get("collected_at") is not None:
+            merged.setdefault("first_collected_at", old["collected_at"])
         for field in ("actual_kwh", "forecast_solar_frozen_kwh", "collected_at"):
-            if old.get(field) is not None:
+            if old.get(field) is not None and not (field == "collected_at" and re_evaluated):
                 merged[field] = old[field]
         days[key] = merged
         await store.async_save({"protocol_version": PROTOCOL_VERSION, "days": days})
@@ -622,6 +665,7 @@ class SolarEvidenceManager:
             self.store = store
             self.hass.bus.async_fire("elrakning_solar_evidence_update")
         return merged
+
 
     async def _save_day(self, key: str, record: dict[str, Any]) -> dict[str, Any]:
         return await self._save_target_day(self._site_id, self.store, self._days, key, record)

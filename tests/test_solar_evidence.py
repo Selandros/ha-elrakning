@@ -16,6 +16,7 @@ install_optional_dependency_stubs()
 import custom_components.elrakning.solar_evidence as solar_evidence
 
 from custom_components.elrakning.solar_evidence import (
+    AUDIT_SEMANTICS_VERSION,
     SolarEvidenceManager,
     assess_completeness,
     build_evidence_collection_targets,
@@ -23,6 +24,7 @@ from custom_components.elrakning.solar_evidence import (
     integrate_actual,
     merge_pv_points,
     parse_previous_runs,
+    should_reprocess_existing_day,
 )
 
 
@@ -110,6 +112,61 @@ class SolarEvidenceTests(unittest.TestCase):
             asyncio.run(manager.async_startup_catch_up())
 
         self.assertEqual(manager.public_state()["capture_tasks"]["startup"]["outcome"], "cancelled")
+
+    def test_stale_incomplete_record_is_reprocessed_once_for_current_semantics(self):
+        self.assertTrue(should_reprocess_existing_day({
+            "date": "2026-09-27",
+            "audit_complete": False,
+            "exclusion_reasons": ["unavailable_or_unknown"],
+        }))
+
+    def test_current_complete_or_fail_closed_record_is_idempotent(self):
+        complete = {"audit_semantics_version": AUDIT_SEMANTICS_VERSION, "audit_complete": True}
+        failed = {"audit_semantics_version": AUDIT_SEMANTICS_VERSION, "audit_complete": False}
+        self.assertFalse(should_reprocess_existing_day(complete))
+        self.assertFalse(should_reprocess_existing_day(failed))
+
+    def test_semantic_re_evaluation_updates_collection_time_once(self):
+        class Store:
+            async def async_save(self, _data):
+                return None
+
+        manager = SolarEvidenceManager(SimpleNamespace(bus=SimpleNamespace(async_fire=lambda _event: None)), SimpleNamespace(), SimpleNamespace())
+        old = {
+            "collected_at": "2026-09-28T00:02:50+02:00",
+            "audit_complete": False,
+            "audit_semantics_version": "solar-evidence-audit-v1",
+        }
+        record = {
+            "collected_at": "2026-09-28T19:59:00+02:00",
+            "audit_complete": True,
+            "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
+        }
+        import asyncio
+        result = asyncio.run(manager._save_target_day("site-vik", Store(), {"2026-09-27": old}, "2026-09-27", record))
+        self.assertEqual(result["collected_at"], "2026-09-28T19:59:00+02:00")
+        self.assertEqual(result["first_collected_at"], "2026-09-28T00:02:50+02:00")
+
+    def test_startup_reports_per_site_collection_failure_instead_of_success(self):
+        configs = {
+            "site-vik": {
+                "collection_enabled": True,
+                "bindings": {"evidence": {"source": "solar_evidence", "protocol_version": "evidence-v1"}},
+                "power": {"solar_entities": ["sensor.vik_pv"]},
+            }
+        }
+        manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), lambda: configs)
+
+        async def fail(_target, _target_date):
+            raise RuntimeError("recorder unavailable")
+
+        manager._async_collect_target_day = fail
+        import asyncio
+        asyncio.run(manager.async_startup_catch_up())
+
+        status = manager.public_state()["capture_tasks"]["startup"]
+        self.assertEqual(status["outcome"], "error")
+        self.assertEqual(status["error"], "collection_failed")
 
     def test_async_load_schedules_daily_finalization_after_local_midnight(self):
         manager = SolarEvidenceManager(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
