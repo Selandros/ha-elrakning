@@ -201,6 +201,20 @@ def test_site_independent_forecast_and_evidence_providers_are_wired():
     assert "solar_evidence_manager.async_startup_catch_up()" in source
 
 
+def test_replay_artifact_generation_is_background_work_outside_startup_barrier():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert "async_create_background_task" in source
+    assert "_create_replay_background_task" in source
+    assert '"elrakning_replay_artifact_startup"' in source
+    assert '"elrakning_replay_artifact_event"' in source
+    assert "_run_replay_artifact_background" in source
+    assert "Background work must not poison startup" in source
+    assert 'frontend_data["replay_artifact_startup_task"] = hass.async_create_task' not in source
+    assert "replay_refresh_task = hass.create_task(_generate_replay_artifact" not in source
+
+
 def test_baseline_capture_precedes_evidence_startup_catch_up():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")

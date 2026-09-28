@@ -367,6 +367,14 @@ def _schedule_monthly_forecast_capture(hass):
     return task
 
 
+def _create_replay_background_task(hass, coroutine, name):
+    """Use HA's untracked background-task API when available."""
+    create_background_task = getattr(hass, "async_create_background_task", None)
+    if callable(create_background_task):
+        return create_background_task(coroutine, name=name)
+    return hass.async_create_task(coroutine)
+
+
 async def _async_warm_history(power_manager, meter_manager) -> None:
     """Warm independent history caches without blocking integration startup."""
     jobs = []
@@ -649,6 +657,30 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "holdouts": result.get("holdouts"),
                 })
 
+    async def _run_replay_artifact_background(source, event_site_id=None):
+        """Run replay work off the startup task barrier and consume failures."""
+        status = {"source": source, "outcome": "running"}
+        frontend_data["replay_artifact_task_status"] = status
+        try:
+            result = await _generate_replay_artifact(event_site_id=event_site_id)
+        except asyncio.CancelledError:
+            frontend_data["replay_artifact_task_status"] = {
+                **status, "outcome": "cancelled"
+            }
+            raise
+        except Exception as err:  # Background work must not poison startup.
+            frontend_data["replay_artifact_task_status"] = {
+                **status,
+                "outcome": "error",
+                "error_type": type(err).__name__,
+                "error": str(err)[:200],
+            }
+            return None
+        frontend_data["replay_artifact_task_status"] = {
+            **status, "outcome": "success"
+        }
+        return result
+
     replay_refresh_task = None
 
     def _schedule_replay_evidence(event):
@@ -656,7 +688,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if replay_refresh_task is not None and not replay_refresh_task.done():
             return
         event_site_id = event.data.get("site_id") if getattr(event, "data", None) else None
-        replay_refresh_task = hass.create_task(_generate_replay_artifact(event_site_id=event_site_id))
+        replay_refresh_task = _create_replay_background_task(
+            hass,
+            _run_replay_artifact_background("event", event_site_id),
+            "elrakning_replay_artifact_event",
+        )
         frontend_data["replay_benchmark_refresh_task"] = replay_refresh_task
 
     hass.services.async_register(DOMAIN, "replay_artifact_generate", _generate_replay_artifact)
@@ -688,7 +724,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             lambda _event: clear_forecast_view_caches(hass),
         ),
     ]
-    frontend_data["replay_artifact_startup_task"] = hass.async_create_task(_generate_replay_artifact())
+    frontend_data["replay_artifact_startup_task"] = _create_replay_background_task(
+        hass,
+        _run_replay_artifact_background("startup"),
+        "elrakning_replay_artifact_startup",
+    )
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     # Run one deterministic startup capture after setup returns so bootstrap timeouts
     # from unrelated replay work cannot cancel the persistence path.
