@@ -372,6 +372,7 @@ class SolarEvidenceManager:
         self._site_id: str | None = None
         self._site_context_enabled = False
         self._capture_tasks: dict[str, dict[str, Any]] = {}
+        self._quality_recovery_task = None
         self._quality_recovery_status: dict[str, Any] = {
             "outcome": "not_run",
             "target_count": 0,
@@ -483,6 +484,8 @@ class SolarEvidenceManager:
             self._unsub()
         if self._task:
             self._task.cancel()
+        if self._quality_recovery_task:
+            self._quality_recovery_task.cancel()
 
     def _collection_targets(self) -> list[dict[str, Any]]:
         getter = self._collection_site_configs_getter
@@ -544,7 +547,7 @@ class SolarEvidenceManager:
         self._capture_started("startup", yesterday)
         try:
             result = await self.async_collect_completed_day_for_targets(yesterday)
-            await self.async_recover_stale_quality_for_targets()
+            self._schedule_quality_recovery()
             failures = _collection_failures(result)
             self._capture_finished(
                 "startup",
@@ -558,6 +561,21 @@ class SolarEvidenceManager:
         except Exception as error:
             self._capture_finished("startup", "error", error=error)
             return
+
+    def _schedule_quality_recovery(self) -> None:
+        """Schedule one delayed Recorder recovery after startup has settled."""
+        create_task = getattr(self.hass, "async_create_task", None)
+        if self._quality_recovery_task is None and callable(create_task):
+            self._quality_recovery_task = create_task(self._async_delayed_quality_recovery())
+
+    async def _async_delayed_quality_recovery(self) -> None:
+        try:
+            await asyncio.sleep(30)
+            await self.async_recover_stale_quality_for_targets()
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._quality_recovery_task = None
 
     async def async_recover_stale_quality_for_targets(self) -> dict[str, list[str]]:
         """Rebuild only current audit fields from Recorder for bounded stale records."""
@@ -635,7 +653,11 @@ class SolarEvidenceManager:
             )
         except Exception:
             return False
+        if not any(history_by_entity.get(entity) for entity in entities):
+            return False
         merged = merge_pv_points(history_by_entity, entities)
+        if not merged:
+            return False
         unavailable, padding_unavailable = count_invalid_states_in_target_day(
             history_by_entity, entities, start, end
         )
