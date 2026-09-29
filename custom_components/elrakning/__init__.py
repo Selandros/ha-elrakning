@@ -1,7 +1,9 @@
 """The Elräkning integration."""
 
 import asyncio
+import concurrent.futures
 import json
+import threading
 from functools import partial
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -367,12 +369,92 @@ def _schedule_monthly_forecast_capture(hass):
     return task
 
 
-def _create_replay_background_task(hass, coroutine, name):
-    """Use HA's untracked background-task API when available."""
-    create_background_task = getattr(hass, "async_create_background_task", None)
-    if callable(create_background_task):
-        return create_background_task(coroutine, name=name)
-    return hass.async_create_task(coroutine)
+class _ReplayTaskProxy:
+    """Bridge a task scheduled on HA's loop to a worker-thread caller."""
+
+    def __init__(self) -> None:
+        self._completion = concurrent.futures.Future()
+        self._lock = threading.Lock()
+        self._task = None
+        self._cancel_requested = False
+
+    def bind(self, task) -> None:
+        with self._lock:
+            self._task = task
+            cancel_requested = self._cancel_requested
+        task.add_done_callback(self._complete)
+        if cancel_requested:
+            task.cancel()
+
+    def _complete(self, task) -> None:
+        if self._completion.done():
+            return
+        if task.cancelled():
+            self._completion.cancel()
+            return
+        error = task.exception()
+        if error is not None:
+            self._completion.set_exception(error)
+        else:
+            self._completion.set_result(task.result())
+
+    def fail(self, error) -> None:
+        if not self._completion.done():
+            self._completion.set_exception(error)
+
+    def cancel(self) -> bool:
+        with self._lock:
+            self._cancel_requested = True
+            task = self._task
+        if task is None:
+            return self._completion.cancel()
+        return task.cancel()
+
+    def done(self) -> bool:
+        return self._completion.done()
+
+    def cancelled(self) -> bool:
+        return self._completion.cancelled()
+
+    def result(self, *args, **kwargs):
+        return self._completion.result(*args, **kwargs)
+
+    def exception(self, *args, **kwargs):
+        return self._completion.exception(*args, **kwargs)
+
+    def __await__(self):
+        return asyncio.wrap_future(self._completion).__await__()
+
+
+def _create_replay_background_task(hass, coroutine_factory, name):
+    """Create replay work on Home Assistant's active loop only."""
+    def create_on_loop():
+        coroutine = coroutine_factory()
+        create_background_task = getattr(hass, "async_create_background_task", None)
+        if callable(create_background_task):
+            return create_background_task(coroutine, name=name)
+        return hass.async_create_task(coroutine)
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    ha_loop = getattr(hass, "loop", None) or running_loop
+    if ha_loop is None or running_loop is ha_loop:
+        return create_on_loop()
+
+    proxy = _ReplayTaskProxy()
+
+    def schedule_on_loop():
+        if proxy.cancelled():
+            return
+        try:
+            proxy.bind(create_on_loop())
+        except Exception as error:
+            proxy.fail(error)
+
+    ha_loop.call_soon_threadsafe(schedule_on_loop)
+    return proxy
 
 
 async def _async_warm_history(power_manager, meter_manager) -> None:
@@ -690,7 +772,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         event_site_id = event.data.get("site_id") if getattr(event, "data", None) else None
         replay_refresh_task = _create_replay_background_task(
             hass,
-            _run_replay_artifact_background("event", event_site_id),
+            lambda: _run_replay_artifact_background("event", event_site_id),
             "elrakning_replay_artifact_event",
         )
         frontend_data["replay_benchmark_refresh_task"] = replay_refresh_task
@@ -726,7 +808,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ]
     frontend_data["replay_artifact_startup_task"] = _create_replay_background_task(
         hass,
-        _run_replay_artifact_background("startup"),
+        lambda: _run_replay_artifact_background("startup"),
         "elrakning_replay_artifact_startup",
     )
     hass.bus.async_fire(INTEGRATION_READY_EVENT)

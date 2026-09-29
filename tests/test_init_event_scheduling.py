@@ -1,6 +1,8 @@
 import ast
 import asyncio
+import concurrent.futures
 from pathlib import Path
+import threading
 
 
 def _load_schedule_price_update():
@@ -213,6 +215,104 @@ def test_replay_artifact_generation_is_background_work_outside_startup_barrier()
     assert "Background work must not poison startup" in source
     assert 'frontend_data["replay_artifact_startup_task"] = hass.async_create_task' not in source
     assert "replay_refresh_task = hass.create_task(_generate_replay_artifact" not in source
+
+
+def _load_replay_scheduler():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    nodes = [
+        node for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef))
+        and node.name in {"_ReplayTaskProxy", "_create_replay_background_task"}
+    ]
+    namespace = {
+        "asyncio": asyncio,
+        "concurrent": concurrent,
+        "threading": threading,
+    }
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["_create_replay_background_task"]
+
+
+class _ReplaySchedulerHass:
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.created = []
+
+    def async_create_background_task(self, coroutine, *, name):
+        assert asyncio.get_running_loop() is self.loop
+        task = asyncio.create_task(coroutine, name=name)
+        self.created.append(task)
+        return task
+
+    def async_create_task(self, coroutine):
+        assert asyncio.get_running_loop() is self.loop
+        task = asyncio.create_task(coroutine)
+        self.created.append(task)
+        return task
+
+
+def test_replay_scheduler_uses_background_api_on_active_loop():
+    scheduler = _load_replay_scheduler()
+
+    async def exercise():
+        hass = _ReplaySchedulerHass()
+        factory_calls = []
+
+        async def work():
+            factory_calls.append(asyncio.get_running_loop())
+            return "ok"
+
+        task = scheduler(hass, lambda: work(), "replay-test")
+        assert task is hass.created[0]
+        assert await task == "ok"
+        assert factory_calls == [hass.loop]
+
+    asyncio.run(exercise())
+
+
+def test_replay_scheduler_marshals_worker_thread_without_loop_mismatch():
+    scheduler = _load_replay_scheduler()
+
+    async def exercise():
+        hass = _ReplaySchedulerHass()
+        factory_calls = []
+        release = asyncio.Event()
+
+        async def work():
+            factory_calls.append(asyncio.get_running_loop())
+            await release.wait()
+            return "worker-ok"
+
+        task = await asyncio.to_thread(scheduler, hass, lambda: work(), "replay-worker-test")
+        assert not task.done()
+        release.set()
+        assert await task == "worker-ok"
+        assert factory_calls == [hass.loop]
+        assert len(hass.created) == 1
+
+    asyncio.run(exercise())
+
+
+def test_replay_scheduler_proxy_propagates_scheduling_error_without_orphan_task():
+    scheduler = _load_replay_scheduler()
+
+    async def exercise():
+        hass = _ReplaySchedulerHass()
+
+        def factory():
+            raise RuntimeError("scheduler-failed")
+
+        task = await asyncio.to_thread(scheduler, hass, factory, "replay-error-test")
+        try:
+            await task
+        except RuntimeError as error:
+            assert str(error) == "scheduler-failed"
+        else:
+            raise AssertionError("scheduler error was not propagated")
+        assert hass.created == []
+
+    asyncio.run(exercise())
 
 
 def test_baseline_capture_precedes_evidence_startup_catch_up():
