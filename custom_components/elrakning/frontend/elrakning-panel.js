@@ -9205,7 +9205,7 @@ class ElrakningPanel {
     };
     this.host.addEventListener("pointerdown", clearUnlessCard);
     this.host.addEventListener("click", (event) => {
-      if (event.target.closest?.(".price-plan-card")) return;
+      if (isPricePlanCardEvent(event)) return;
       this._clearPricePlanSelection();
     });
     this.host.addEventListener("wheel", clearUnlessCard, { passive: true });

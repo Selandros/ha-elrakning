@@ -81,6 +81,7 @@ assert.match(panel, /addEventListener\("touchmove", clearUnlessCard, \{ passive:
 assert.match(panel, /addEventListener\("scroll", clearUnlessCard, true\)/);
 assert.match(panel, /event\.type === "scroll" && this\._ellaSelection/);
 assert.match(panel, /event\.composedPath\?\.\(\)\.some/);
+assert.match(panel, /addEventListener\("click", \(event\) => \{\s*if \(isPricePlanCardEvent\(event\)\) return;/);
 assert.match(panel, /button\.addEventListener\("pointerdown", \(event\) => event\.stopPropagation\(\)\)/);
 assert.doesNotMatch(panel, /ELLA · Energiplan/);
 assert.doesNotMatch(panel, /Lärläge · Shadow · styrning avstängd/);
