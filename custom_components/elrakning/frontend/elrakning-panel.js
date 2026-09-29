@@ -9219,7 +9219,6 @@ class ElrakningPanel {
     const plan = this._pricePlan || {};
     const blocks = plan.available === true && Array.isArray(plan.plan_blocks) ? plan.plan_blocks : [];
     if (!blocks.length) {
-      if (this._ellaSelection) this._ellaSelection = null;
       this._pricePlanRailCenteredKey = null;
       rail.hidden = true;
       rail.replaceChildren();

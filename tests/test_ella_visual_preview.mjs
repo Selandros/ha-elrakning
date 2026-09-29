@@ -83,6 +83,7 @@ assert.match(panel, /event\.type === "scroll" && this\._ellaSelection/);
 assert.match(panel, /event\.composedPath\?\.\(\)\.some/);
 assert.match(panel, /addEventListener\("click", \(event\) => \{\s*if \(isPricePlanCardEvent\(event\)\) return;/);
 assert.match(panel, /button\.addEventListener\("pointerdown", \(event\) => event\.stopPropagation\(\)\)/);
+assert.doesNotMatch(panel, /if \(!blocks\.length\) \{\s*if \(this\._ellaSelection\) this\._ellaSelection = null;/);
 assert.doesNotMatch(panel, /ELLA · Energiplan/);
 assert.doesNotMatch(panel, /Lärläge · Shadow · styrning avstängd/);
 assert.doesNotMatch(panel, /data-ella-expand/);
