@@ -28,6 +28,7 @@ from custom_components.elrakning.solar_evidence import (
     merge_pv_points,
     parse_previous_runs,
     should_reprocess_existing_day,
+    should_recover_stale_quality,
 )
 
 
@@ -193,6 +194,51 @@ class SolarEvidenceTests(unittest.TestCase):
         failed = {"audit_semantics_version": AUDIT_SEMANTICS_VERSION, "audit_complete": False}
         self.assertFalse(should_reprocess_existing_day(complete))
         self.assertFalse(should_reprocess_existing_day(failed))
+
+    def test_stale_quality_recovery_requires_persisted_comparison_evidence(self):
+        self.assertTrue(should_recover_stale_quality({
+            "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
+            "audit_complete": False,
+            "merged_points": 0,
+            "historical_comparison_evidence": {"open_meteo_eligible": True},
+        }))
+        self.assertFalse(should_recover_stale_quality({
+            "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
+            "audit_complete": False,
+            "merged_points": 0,
+        }))
+
+    def test_quality_recovery_preserves_captured_result_fields(self):
+        class Store:
+            async def async_save(self, _data):
+                return None
+
+        manager = SolarEvidenceManager(SimpleNamespace(bus=SimpleNamespace(async_fire=lambda _event: None)), SimpleNamespace(), SimpleNamespace())
+        old = {
+            "site_id": "site-vik",
+            "date": "2026-09-17",
+            "first_collected_at": "2026-09-18T00:05:00+02:00",
+            "actual_kwh": 22.003248592589294,
+            "open_meteo_nominal_kwh": 43.98408,
+            "forecast_solar_frozen_kwh": 32.562,
+            "historical_comparison_evidence": {"version": COMPARISON_EVIDENCE_VERSION, "open_meteo_eligible": True},
+            "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
+            "audit_complete": False,
+            "merged_points": 0,
+        }
+        import asyncio
+        result = asyncio.run(manager._save_target_day("site-vik", Store(), {"2026-09-17": old}, "2026-09-17", {
+            "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
+            "collected_at": "2026-09-29T10:00:00+02:00",
+            "merged_points": 329,
+            "audit_complete": True,
+            "_quality_recovery": True,
+        }))
+        self.assertEqual(result["actual_kwh"], old["actual_kwh"])
+        self.assertEqual(result["open_meteo_nominal_kwh"], old["open_meteo_nominal_kwh"])
+        self.assertEqual(result["forecast_solar_frozen_kwh"], old["forecast_solar_frozen_kwh"])
+        self.assertEqual(result["first_collected_at"], old["first_collected_at"])
+        self.assertEqual(result["collected_at"], "2026-09-29T10:00:00+02:00")
 
     def test_semantic_re_evaluation_updates_collection_time_once(self):
         class Store:

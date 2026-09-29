@@ -33,6 +33,8 @@ COMPARISON_EVIDENCE_VERSION = "solar-comparison-evidence-v1"
 OPEN_METEO_ENDPOINT = "https://previous-runs-api.open-meteo.com/v1/forecast"
 ACTIVE_THRESHOLD_KW = 0.05
 MAX_INTERNAL_GAP_MINUTES = 30
+# Keep quality recovery bounded to the recent evidence window; never scan all history at startup.
+MAX_QUALITY_RECOVERY_DAYS = 60
 CAPACITY_KWP = 9.45
 PANEL_TILT = 30
 OPEN_METEO_AZIMUTH = 45
@@ -271,6 +273,25 @@ def should_reprocess_existing_day(existing: dict[str, Any] | None) -> bool:
     return not (
         isinstance(existing, dict)
         and existing.get("audit_semantics_version") == AUDIT_SEMANTICS_VERSION
+    )
+
+
+def should_recover_stale_quality(existing: dict[str, Any] | None) -> bool:
+    """Select persisted evidence whose current audit fields are visibly incomplete."""
+    if not isinstance(existing, dict) or existing.get("audit_complete") is True:
+        return False
+    comparison = existing.get("historical_comparison_evidence")
+    if not isinstance(comparison, dict):
+        return False
+    if not (comparison.get("open_meteo_eligible") or comparison.get("forecast_solar_common_eligible")):
+        return False
+    if existing.get("audit_semantics_version") != AUDIT_SEMANTICS_VERSION:
+        return True
+    return (
+        existing.get("merged_points") == 0
+        or existing.get("active_points") == 0
+        or existing.get("start_state_available") is False
+        or "actual_unavailable" in (existing.get("exclusion_reasons") or [])
     )
 
 
@@ -516,6 +537,7 @@ class SolarEvidenceManager:
         self._capture_started("startup", yesterday)
         try:
             result = await self.async_collect_completed_day_for_targets(yesterday)
+            await self.async_recover_stale_quality_for_targets()
             failures = _collection_failures(result)
             self._capture_finished(
                 "startup",
@@ -529,6 +551,105 @@ class SolarEvidenceManager:
         except Exception as error:
             self._capture_finished("startup", "error", error=error)
             return
+
+    async def async_recover_stale_quality_for_targets(self) -> dict[str, list[str]]:
+        """Rebuild only current audit fields from Recorder for bounded stale records."""
+        recovered: dict[str, list[str]] = {}
+        if not callable(self._collection_site_configs_getter):
+            return recovered
+        for target in self._collection_targets():
+            site_id = target["site_id"]
+            store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
+            days = {
+                key: dict(value)
+                for key, value in ((cached or {}).get("days", {}) or {}).items()
+                if isinstance(key, str) and isinstance(value, dict)
+            }
+            candidates = []
+            for key, existing in days.items():
+                try:
+                    target_date = date.fromisoformat(key)
+                except (TypeError, ValueError):
+                    continue
+                if should_recover_stale_quality(existing):
+                    candidates.append((target_date, key))
+            candidates = sorted(candidates)[-MAX_QUALITY_RECOVERY_DAYS:]
+            for target_date, key in candidates:
+                if await self._async_recover_target_day_quality(target, target_date, store, days):
+                    recovered.setdefault(site_id, []).append(key)
+        return recovered
+
+    async def _async_recover_target_day_quality(
+        self,
+        target: dict[str, Any],
+        target_date: date,
+        store,
+        days: dict[str, dict[str, Any]],
+    ) -> bool:
+        """Persist only Recorder-derived audit fields; captured provider facts stay immutable."""
+        site_id = target["site_id"]
+        entities = list((target.get("power") or {}).get("solar_entities", []))
+        if not entities:
+            return False
+        local_now = dt_util.as_local(dt_util.now())
+        start = dt_util.start_of_local_day(datetime.combine(target_date, datetime.min.time(), tzinfo=local_now.tzinfo))
+        end = dt_util.start_of_local_day(start + timedelta(days=1))
+        query_end = end + timedelta(hours=12)
+        try:
+            from homeassistant.components.recorder import get_instance, history
+            recorder = get_instance(self.hass)
+            history_by_entity = await recorder.async_add_executor_job(
+                partial(
+                    history.get_significant_states,
+                    self.hass,
+                    start,
+                    query_end,
+                    entity_ids=entities,
+                    include_start_time_state=True,
+                    significant_changes_only=False,
+                    minimal_response=False,
+                    no_attributes=False,
+                )
+            )
+        except Exception:
+            return False
+        merged = merge_pv_points(history_by_entity, entities)
+        unavailable, padding_unavailable = count_invalid_states_in_target_day(
+            history_by_entity, entities, start, end
+        )
+        invalid_quality = assess_invalid_intervals(history_by_entity, entities, start, end)
+        entity_starts = []
+        for entity in entities:
+            points = [point for state in history_by_entity.get(entity, []) if (point := _state_point(state))]
+            entity_starts.append(bool(points and abs((dt_util.parse_datetime(points[0]["timestamp"]) - start).total_seconds()) <= 2))
+        actual, boundary_long, interior_long = integrate_actual(merged, start, end)
+        quality = assess_completeness(merged, entity_starts, start, end)
+        if invalid_quality["untolerated_invalid_count"]:
+            quality["exclusion_reasons"].append("unavailable_or_unknown")
+        if actual is None:
+            quality["exclusion_reasons"].append("actual_unavailable")
+        record = {
+            "site_id": site_id,
+            "date": target_date.isoformat(),
+            "protocol_version": PROTOCOL_VERSION,
+            "audit_semantics_version": AUDIT_SEMANTICS_VERSION,
+            "collected_at": dt_util.now().isoformat(),
+            "merged_points": quality["merged_points"],
+            "active_points": quality["active_points"],
+            "max_internal_gap_minutes": quality["max_internal_gap_minutes"],
+            "interior_long_gap_count": interior_long,
+            "boundary_long_gap_count": boundary_long,
+            "unavailable_or_unknown": unavailable,
+            "in_day_unavailable_or_unknown": unavailable,
+            "padding_unavailable_or_unknown": padding_unavailable,
+            **invalid_quality,
+            "start_state_available": all(entity_starts),
+            "audit_complete": quality["audit_complete"] and interior_long == 0 and invalid_quality["untolerated_invalid_count"] == 0 and actual is not None,
+            "exclusion_reasons": quality["exclusion_reasons"] + (["interior_long_gap"] if interior_long else []),
+            "_quality_recovery": True,
+        }
+        await self._save_target_day(site_id, store, days, target_date.isoformat(), record)
+        return True
 
     async def async_collect_completed_day_for_targets(self, target_date: date) -> dict[str, dict[str, Any]]:
         """Collect one completed day for every eligible site, independent of active UI context."""
@@ -784,10 +905,11 @@ class SolarEvidenceManager:
         record: dict[str, Any],
     ) -> dict[str, Any]:
         old = days.get(key, {})
+        quality_recovery = bool(record.pop("_quality_recovery", False))
         merged = {**old, **record}
         re_evaluated = (
             record.get("audit_semantics_version") == AUDIT_SEMANTICS_VERSION
-            and old.get("audit_semantics_version") != AUDIT_SEMANTICS_VERSION
+            and (old.get("audit_semantics_version") != AUDIT_SEMANTICS_VERSION or quality_recovery)
         )
         if re_evaluated and old.get("collected_at") is not None:
             merged.setdefault("first_collected_at", old["collected_at"])
