@@ -3067,6 +3067,16 @@ export function togglePricePlanSelection(currentSelection, block, revision = nul
   };
 }
 
+export function isUserOriginPricePlanScroll(event, rail, userGestureActive = false) {
+  if (!event || !rail || event.isTrusted !== true) return false;
+  const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+  const targetRail = path.includes(rail)
+    || event.target?.closest?.("[data-price-plan-rail]") === rail;
+  if (!targetRail) return false;
+  if (event.type === "wheel" || event.type === "touchmove") return true;
+  return event.type === "scroll" && userGestureActive;
+}
+
 export function currentPricePlanBlock(blocks, nowMs = Date.now()) {
   if (!Array.isArray(blocks) || !Number.isFinite(nowMs)) return null;
   return blocks.find((block) => {
@@ -3154,6 +3164,7 @@ class ElrakningPanel {
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._pricePlanContextKey = null;
     this._ellaSelection = null;
+    this._pricePlanUserScrollGesture = false;
     this._ellaDebugRequestToken = 0;
     this._powerHistoryRequestToken = 0;
     this._powerHistoryEnrichmentRequestToken = 0;
@@ -9187,20 +9198,52 @@ class ElrakningPanel {
     return right > left ? `<rect class="ella-selection-band" x="${left}" y="${plot.top}" width="${right - left}" height="${plot.height || 340 - plot.top - plot.bottom}" />` : "";
   }
 
-  _clearPricePlanSelection() {
+  _clearPricePlanSelection({ recenterCurrent = false } = {}) {
     if (!this._ellaSelection) return;
     this._ellaSelection = null;
     this._renderPricePlanCards();
     this.renderPriceChart();
     this._renderSocChart();
+    if (recenterCurrent) {
+      const rail = this.host.querySelector("[data-price-plan-rail]");
+      const blocks = this._pricePlan?.available === true && Array.isArray(this._pricePlan.plan_blocks)
+        ? this._pricePlan.plan_blocks
+        : [];
+      centerCurrentPricePlanCard(rail, blocks);
+    }
   }
 
   _bindPricePlanSelectionEvents() {
     const isPricePlanCardEvent = (event) => event.composedPath?.().some((node) => node?.classList?.contains("price-plan-card"))
       || event.target.closest?.(".price-plan-card");
+    const railForEvent = (event) => event.composedPath?.().find((node) => node?.matches?.("[data-price-plan-rail]"))
+      || event.target.closest?.("[data-price-plan-rail]")
+      || null;
+    const markKeyboardScroll = (event) => {
+      const rail = railForEvent(event);
+      if (rail && event.isTrusted === true && ["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+        this._pricePlanUserScrollGesture = true;
+      }
+    };
+    const resetUserScrollGesture = () => {
+      this._pricePlanUserScrollGesture = false;
+    };
     const clearUnlessCard = (event) => {
-      if (event.type === "scroll" && this._ellaSelection) return;
       if ((event.type === "pointerdown" || event.type === "click") && isPricePlanCardEvent(event)) return;
+      const rail = railForEvent(event);
+      if (event.type === "pointerdown" && rail && !isPricePlanCardEvent(event)) {
+        this._pricePlanUserScrollGesture = event.isTrusted === true;
+        return;
+      }
+      if (event.type === "pointerup" || event.type === "pointercancel") {
+        this._pricePlanUserScrollGesture = false;
+      }
+      if ((event.type === "wheel" || event.type === "touchmove" || event.type === "scroll") && rail) {
+        if (this._ellaSelection && isUserOriginPricePlanScroll(event, rail, this._pricePlanUserScrollGesture)) {
+          this._clearPricePlanSelection({ recenterCurrent: true });
+        }
+        return;
+      }
       this._clearPricePlanSelection();
     };
     this.host.addEventListener("pointerdown", clearUnlessCard);
@@ -9211,6 +9254,10 @@ class ElrakningPanel {
     this.host.addEventListener("wheel", clearUnlessCard, { passive: true });
     this.host.addEventListener("touchmove", clearUnlessCard, { passive: true });
     this.host.addEventListener("scroll", clearUnlessCard, true);
+    this.host.addEventListener("pointerup", resetUserScrollGesture, true);
+    this.host.addEventListener("pointercancel", resetUserScrollGesture, true);
+    this.host.addEventListener("keydown", markKeyboardScroll, true);
+    this.host.addEventListener("keyup", resetUserScrollGesture, true);
   }
 
   _renderPricePlanCards() {

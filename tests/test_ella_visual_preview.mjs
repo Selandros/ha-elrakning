@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { centerCurrentPricePlanCard, currentPricePlanBlock, ellaPlanContextKey, reconcileEllaSiteState, shouldPreserveEllaPlanOnTransportError, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { centerCurrentPricePlanCard, currentPricePlanBlock, ellaPlanContextKey, isUserOriginPricePlanScroll, reconcileEllaSiteState, shouldPreserveEllaPlanOnTransportError, togglePricePlanSelection } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = fs.readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const priceTemplate = panel.slice(panel.indexOf('<div class="price-chart"'), panel.indexOf('<div class="daily-energy-row">'));
@@ -79,7 +79,16 @@ assert.match(panel, /addEventListener\("pointerdown", clearUnlessCard\)/);
 assert.match(panel, /addEventListener\("wheel", clearUnlessCard, \{ passive: true \}\)/);
 assert.match(panel, /addEventListener\("touchmove", clearUnlessCard, \{ passive: true \}\)/);
 assert.match(panel, /addEventListener\("scroll", clearUnlessCard, true\)/);
-assert.match(panel, /event\.type === "scroll" && this\._ellaSelection/);
+assert.match(panel, /isUserOriginPricePlanScroll\(event, rail, this\._pricePlanUserScrollGesture\)/);
+assert.match(panel, /this\._clearPricePlanSelection\(\{ recenterCurrent: true \}\)/);
+assert.match(panel, /centerCurrentPricePlanCard\(rail, blocks\)/);
+assert.match(panel, /addEventListener\("pointerup", resetUserScrollGesture, true\)/);
+assert.match(panel, /addEventListener\("pointercancel", resetUserScrollGesture, true\)/);
+assert.match(panel, /addEventListener\("keydown", markKeyboardScroll, true\)/);
+assert.match(panel, /addEventListener\("keyup", resetUserScrollGesture, true\)/);
+assert.match(panel, /event\.isTrusted === true/);
+const selectionBinding = panel.slice(panel.indexOf("  _bindPricePlanSelectionEvents()"), panel.indexOf("  _renderPricePlanCards()"));
+assert.doesNotMatch(selectionBinding, /setTimeout|setInterval|requestAnimationFrame/);
 assert.match(panel, /event\.composedPath\?\.\(\)\.some/);
 assert.match(panel, /addEventListener\("click", \(event\) => \{\s*if \(isPricePlanCardEvent\(event\)\) return;/);
 assert.match(panel, /button\.addEventListener\("pointerdown", \(event\) => event\.stopPropagation\(\)\)/);
@@ -155,5 +164,23 @@ const rail = {
 };
 assert.equal(centerCurrentPricePlanCard(rail, [blockNow], Date.parse("2026-09-20T12:00:00Z")), true);
 assert.equal(rail.scrollLeft, 310);
+
+const scrollRail = { matches: (selector) => selector === "[data-price-plan-rail]" };
+const scrollEvent = (type, trusted = true) => ({
+  type,
+  isTrusted: trusted,
+  target: { closest: (selector) => selector === "[data-price-plan-rail]" ? scrollRail : null },
+  composedPath: () => [scrollRail],
+});
+assert.equal(isUserOriginPricePlanScroll(scrollEvent("wheel"), scrollRail), true);
+assert.equal(isUserOriginPricePlanScroll(scrollEvent("touchmove"), scrollRail), true);
+assert.equal(isUserOriginPricePlanScroll(scrollEvent("scroll"), scrollRail, true), true);
+assert.equal(isUserOriginPricePlanScroll(scrollEvent("scroll"), scrollRail, false), false);
+assert.equal(isUserOriginPricePlanScroll(scrollEvent("scroll", false), scrollRail, true), false);
+assert.equal(isUserOriginPricePlanScroll({
+  ...scrollEvent("wheel"),
+  target: { closest: () => null },
+  composedPath: () => [],
+}, scrollRail), false);
 
 console.log("ELLA price-plan shell static/site-switch checks: PASS");
