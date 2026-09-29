@@ -9196,9 +9196,11 @@ class ElrakningPanel {
   }
 
   _bindPricePlanSelectionEvents() {
+    const isPricePlanCardEvent = (event) => event.composedPath?.().some((node) => node?.classList?.contains("price-plan-card"))
+      || event.target.closest?.(".price-plan-card");
     const clearUnlessCard = (event) => {
       if (event.type === "scroll" && this._ellaSelection) return;
-      if (event.type === "pointerdown" && event.target.closest?.(".price-plan-card")) return;
+      if ((event.type === "pointerdown" || event.type === "click") && isPricePlanCardEvent(event)) return;
       this._clearPricePlanSelection();
     };
     this.host.addEventListener("pointerdown", clearUnlessCard);
