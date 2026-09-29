@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { selectLoadForecastPoints } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { selectLoadForecastPoints, selectPowerForecastPoints } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panel = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.doesNotMatch(panel, /actualBeforeForecast|loadForecastPoints\.unshift/);
@@ -48,6 +48,32 @@ assert.ok(at2054.every((point) => point.timestamp >= new Date("2026-09-20T21:00:
 assert.deepEqual(selectLoadForecastPoints([oldV1, currentV2], {
   siteId, selectedDate: new Date("2026-09-19T12:00:00+02:00"), now: new Date("2026-09-20T20:41:00+02:00"),
 }), []);
+
+const solarFrame = {
+  site_id: siteId,
+  frame_id: "solar-day",
+  points: [
+    { valid_at: "2026-09-20T08:00:00+02:00", value_kw: 0.5, forecast: true },
+    { valid_at: "2026-09-20T12:00:00+02:00", value_kw: 2.0, forecast: true },
+    { valid_at: "2026-09-20T20:00:00+02:00", value_kw: 0.2, forecast: true },
+  ],
+};
+const solarWholeDay = selectPowerForecastPoints({ forecast_frames: [solarFrame] }, {
+  siteId,
+  selectedDate,
+  now: new Date("2026-09-20T15:00:00+02:00"),
+  includeElapsed: true,
+});
+assert.deepEqual(solarWholeDay.map((point) => point.timestamp), solarFrame.points.map((point) => new Date(point.valid_at).getTime()));
+
+const solarFutureOnly = selectPowerForecastPoints({ forecast_frames: [solarFrame] }, {
+  siteId,
+  selectedDate,
+  now: new Date("2026-09-20T15:00:00+02:00"),
+});
+assert.deepEqual(solarFutureOnly.map((point) => point.timestamp), [
+  new Date("2026-09-20T20:00:00+02:00").getTime(),
+]);
 
 const future = selectLoadForecastPoints([oldV1, currentV2], {
   siteId, selectedDate: new Date("2026-09-21T12:00:00+02:00"), now: new Date("2026-09-20T20:41:00+02:00"),

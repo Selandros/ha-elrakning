@@ -513,6 +513,7 @@ function selectForecastPointsFromFrames(frames, {
   selectedDate = new Date(),
   now = new Date(),
   logicalRole = null,
+  includeElapsed = false,
 } = {}) {
   const dayStart = localDayStart(selectedDate);
   const todayStart = localDayStart(now);
@@ -522,7 +523,7 @@ function selectForecastPointsFromFrames(frames, {
   const dayKey = localDateKey(dayStart);
   const todayKey = localDateKey(todayStart);
   if (dayKey < todayKey) return [];
-  const firstVisible = dayKey === todayKey ? nextForecastBoundary(now) : dayStart;
+  const firstVisible = !includeElapsed && dayKey === todayKey ? nextForecastBoundary(now) : dayStart;
   const candidates = (Array.isArray(frames) ? frames : [])
     .filter((frame) => (!logicalRole || frame?.logical_role === logicalRole)
       && (!siteId || !frame?.site_id || frame.site_id === siteId)
@@ -551,7 +552,12 @@ function selectForecastPointsFromFrames(frames, {
   return [...points.values()].sort((left, right) => left.timestamp - right.timestamp);
 }
 
-export function selectPowerForecastPoints(source, { siteId = null, selectedDate = new Date(), now = new Date() } = {}) {
+export function selectPowerForecastPoints(source, {
+  siteId = null,
+  selectedDate = new Date(),
+  now = new Date(),
+  includeElapsed = false,
+} = {}) {
   if (!source || typeof source !== "object") return [];
   const frames = [];
   for (const key of ["forecast_frames", "estimated_frames", "forecast", "estimate"]) {
@@ -566,7 +572,7 @@ export function selectPowerForecastPoints(source, { siteId = null, selectedDate 
     const marked = source.points.filter(forecastPointIsMarked);
     if (marked.length) frames.push({ points: marked });
   }
-  return selectForecastPointsFromFrames(frames, { siteId, selectedDate, now });
+  return selectForecastPointsFromFrames(frames, { siteId, selectedDate, now, includeElapsed });
 }
 
 export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
@@ -9191,6 +9197,7 @@ class ElrakningPanel {
 
   _bindPricePlanSelectionEvents() {
     const clearUnlessCard = (event) => {
+      if (event.type === "scroll" && this._ellaSelection) return;
       if (event.type === "pointerdown" && event.target.closest?.(".price-plan-card")) return;
       this._clearPricePlanSelection();
     };
@@ -12024,6 +12031,9 @@ class ElrakningPanel {
       date: this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
       mode: this._periodPickerState?.mode || null,
       width: widthBucket,
+      selection: this._ellaSelection
+        ? [this._ellaSelection.id, this._ellaSelection.start, this._ellaSelection.end, this._ellaSelection.revision]
+        : null,
       periods: [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
       layers: this._effectiveChartLayerState(),
       series,
@@ -12483,6 +12493,7 @@ class ElrakningPanel {
         siteId: activeSiteId,
         selectedDate: dayStart,
         now,
+        includeElapsed: key === "solar",
       })]),
     );
     if (loadForecastPoints.length) powerForecastPoints.consumption = loadForecastPoints;
