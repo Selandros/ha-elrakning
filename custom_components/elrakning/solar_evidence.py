@@ -372,6 +372,13 @@ class SolarEvidenceManager:
         self._site_id: str | None = None
         self._site_context_enabled = False
         self._capture_tasks: dict[str, dict[str, Any]] = {}
+        self._quality_recovery_status: dict[str, Any] = {
+            "outcome": "not_run",
+            "target_count": 0,
+            "candidate_count": 0,
+            "attempted": [],
+            "recovered": [],
+        }
 
     def mark_capture_scheduled(self, source: str, target_date: date | None = None) -> None:
         """Record only the latest bounded capture-task lifecycle marker."""
@@ -555,9 +562,20 @@ class SolarEvidenceManager:
     async def async_recover_stale_quality_for_targets(self) -> dict[str, list[str]]:
         """Rebuild only current audit fields from Recorder for bounded stale records."""
         recovered: dict[str, list[str]] = {}
+        status = {
+            "outcome": "running",
+            "target_count": 0,
+            "candidate_count": 0,
+            "attempted": [],
+            "recovered": [],
+        }
+        self._quality_recovery_status = status
         if not callable(self._collection_site_configs_getter):
+            status["outcome"] = "skipped_no_site_config_getter"
             return recovered
-        for target in self._collection_targets():
+        targets = self._collection_targets()
+        status["target_count"] = len(targets)
+        for target in targets:
             site_id = target["site_id"]
             store, cached = await async_load_site_store(self.hass, STORE_KEY, 1, site_id)
             days = {
@@ -574,9 +592,13 @@ class SolarEvidenceManager:
                 if should_recover_stale_quality(existing):
                     candidates.append((target_date, key))
             candidates = sorted(candidates)[-MAX_QUALITY_RECOVERY_DAYS:]
+            status["candidate_count"] += len(candidates)
             for target_date, key in candidates:
+                status["attempted"].append(f"{site_id}:{key}")
                 if await self._async_recover_target_day_quality(target, target_date, store, days):
                     recovered.setdefault(site_id, []).append(key)
+                    status["recovered"].append(f"{site_id}:{key}")
+        status["outcome"] = "success"
         return recovered
 
     async def _async_recover_target_day_quality(
@@ -970,4 +992,4 @@ class SolarEvidenceManager:
             and forecast_solar_start <= item_date <= comparison_end
             if item.get("historical_comparison_evidence", {}).get("forecast_solar_common_eligible") is True
         )
-        return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14, "open_meteo_window_start": open_meteo_start.isoformat() if open_meteo_start else None, "forecast_solar_window_start": forecast_solar_start.isoformat() if forecast_solar_start else None, "comparison_window_end": comparison_end.isoformat() if comparison_end else None}, "capture_tasks": {source: dict(status) for source, status in self._capture_tasks.items()}, "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}
+        return {"available": True, "protocol_version": PROTOCOL_VERSION, "days": days, "progress": {"open_meteo_complete": om_complete, "forecast_solar_common": common, "open_meteo_target": 21, "forecast_solar_target": 14, "open_meteo_window_start": open_meteo_start.isoformat() if open_meteo_start else None, "forecast_solar_window_start": forecast_solar_start.isoformat() if forecast_solar_start else None, "comparison_window_end": comparison_end.isoformat() if comparison_end else None}, "capture_tasks": {source: dict(status) for source, status in self._capture_tasks.items()}, "quality_recovery": deepcopy(self._quality_recovery_status), "status": "SUFFICIENT FOR BOUNDED MODEL EXPERIMENT" if om_complete >= 21 and common >= 14 else "INSUFFICIENT – KEEP COLLECTING"}
