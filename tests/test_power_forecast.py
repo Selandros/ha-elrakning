@@ -1,13 +1,14 @@
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zoneinfo import ZoneInfo
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
 
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 
-from custom_components.elrakning.power_forecast import build_power_forecast
+from custom_components.elrakning.power_forecast import _local_slots, build_power_forecast
 from custom_components.elrakning.canonical_storage import CanonicalStorage
 
 
@@ -281,7 +282,7 @@ def test_open_meteo_missing_hour_fails_closed_for_only_that_hour():
     assert not missing_hour
 
 
-def test_today_open_meteo_baseline_is_extended_by_short_forecast_solar_override():
+def test_today_causal_open_meteo_returns_full_day_without_short_override():
     known_at = datetime(2026, 9, 22, 5, 0, tzinfo=UTC)
     frame = _single_run_frame(target_date=date(2026, 9, 22))
     result = build_power_forecast(
@@ -292,13 +293,45 @@ def test_today_open_meteo_baseline_is_extended_by_short_forecast_solar_override(
         open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
     )
     points = result["series"]["solar"]["forecast_points"]
-    assert len(points) == 68
-    assert points[0]["valid_at"] == "2026-09-22T05:00:00+00:00"
-    assert points[0]["value_w"] == 500.0
-    assert points[0]["provenance"]["source"] == "forecast_solar"
-    assert points[8]["value_w"] == 945.0
-    assert points[8]["provenance"]["schema"] == "solar.slot_forecast.v1"
+    assert len(points) == 96
+    assert points[0]["valid_at"] == "2026-09-21T22:00:00+00:00"
+    assert points[-1]["valid_at"] == "2026-09-22T21:45:00+00:00"
+    assert points[0]["value_w"] == 945.0
+    assert result["series"]["solar"]["source"] == "open_meteo"
+    assert result["series"]["solar"]["method"] == "full_day_open_meteo_causal"
+    assert result["series"]["solar"]["causal_eligibility"] == "VERIFIED_PRE_DECISION"
+    assert result["series"]["solar"]["slot_count"] == 96
+    assert "2026-09-22T22:00:00+00:00" not in {point["valid_at"] for point in points}
     assert len({point["valid_at"] for point in points}) == len(points)
+
+
+def test_today_noncausal_full_day_falls_back_to_short_forecast_solar():
+    known_at = datetime(2026, 9, 22, 5, 0, tzinfo=UTC)
+    frame = _single_run_frame(target_date=date(2026, 9, 22))
+    frame["known_at"] = datetime(2026, 9, 22, 6, 0, tzinfo=UTC)
+    result = build_power_forecast(
+        SITE, "Europe/Stockholm", [], {"frames": []},
+        {"this_hour_kwh": 0.5, "next_hour_kwh": 0.7, "forecast_kwh": 99.0},
+        {"binding_fingerprint": "forecast-bind", "entities": {"this_hour_kwh": "sensor.this", "next_hour_kwh": "sensor.next"}},
+        known_at, target_date=date(2026, 9, 22), open_meteo_frames=[frame],
+        open_meteo_targets=[{"site_id": SITE, "generation_id": "target-generation", "timezone": "Europe/Stockholm", "peak_power_kwp": 9.45}],
+    )
+    solar = result["series"]["solar"]
+    assert len(solar["forecast_points"]) == 8
+    assert solar["source"] == "forecast_solar"
+    assert solar["method"] == "short_forecast_solar_fallback"
+    assert solar["fallback_reason"] == "open_meteo_section_unavailable"
+    assert solar["forecast_points"][0]["valid_at"] == "2026-09-22T05:00:00+00:00"
+    assert all(point["value_w"] in {500.0, 700.0} for point in solar["forecast_points"])
+
+
+def test_local_slots_use_local_midnight_and_exclusive_next_midnight_across_dst():
+    autumn = _local_slots(date(2026, 10, 25), ZoneInfo("Europe/Stockholm"))
+    spring = _local_slots(date(2026, 3, 29), ZoneInfo("Europe/Stockholm"))
+    assert len(autumn) == 100
+    assert len(spring) == 92
+    assert autumn[-1][1] == datetime(2026, 10, 25, 23, 0, tzinfo=UTC)
+    assert spring[-1][1] == datetime(2026, 3, 29, 22, 0, tzinfo=UTC)
 
 
 def test_near_zero_balance_uses_bounded_ratio_not_absolute_context_median():

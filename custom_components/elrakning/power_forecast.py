@@ -132,6 +132,17 @@ def _point(value_w: float, start: datetime, end: datetime, *, provenance: dict[s
     }
 
 
+def _with_slot_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    points = result.get("forecast_points") if isinstance(result, dict) else []
+    points = points if isinstance(points, list) else []
+    return {
+        **result,
+        "slot_count": len(points),
+        "first_valid_at": points[0].get("valid_at") if points else None,
+        "last_valid_at": points[-1].get("valid_at") if points else None,
+    }
+
+
 def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, active_solar_generation_ids: set[str] | None = None, use_ratio_projection: bool = False, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     candidate_battery_rows = [row for row in rows if row.get("logical_role") == "battery.power" and _usable_row(row, site_id, known_at)]
     candidate_generations = {str(row.get("source_generation_id")) for row in candidate_battery_rows if row.get("source_generation_id")}
@@ -320,17 +331,15 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
             decision_at=known_at,
         )
         if status != "VERIFIED_PRE_DECISION" or frame is None:
-            return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "available": False, "reason": "open_meteo_section_unavailable", "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False}
+            return _with_slot_metadata({"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "available": False, "source": "open_meteo", "method": "full_day_open_meteo_causal", "causal_eligibility": status, "reason": "open_meteo_section_unavailable", "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False})
         selected.append((target, frame))
     if not selected:
-        return {"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "available": False, "reason": "open_meteo_targets_unavailable", "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False}
+        return _with_slot_metadata({"schema": "solar.slot_forecast.v1", "site_id": site_id, "known_at": known_at.isoformat(), "available": False, "source": "open_meteo", "method": "full_day_open_meteo_causal", "causal_eligibility": "MISSING", "reason": "open_meteo_targets_unavailable", "forecast_points": [], "execution_eligible": False, "actuator_writes_enabled": False})
     by_target_hour: list[dict[datetime, dict[str, Any]]] = []
     for _target, frame in selected:
         by_target_hour.append({item["valid_at"] if isinstance(item.get("valid_at"), datetime) else _datetime(item.get("valid_at")): item for item in frame.get("points", []) if _datetime(item.get("valid_at")) is not None})
     points = []
     for slot_start, slot_end in slots:
-        if slot_start < known_at:
-            continue
         hour = slot_start.replace(minute=0, second=0, microsecond=0)
         if any(hour not in mapping for mapping in by_target_hour):
             continue
@@ -352,7 +361,7 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
             "run_initialization_at": [frame.get("provenance", {}).get("run_initialization_at") for _target, frame in selected],
             "confidence": "complete_section_hour",
         }))
-    return {"schema": "solar.slot_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "known_at": known_at.isoformat(), "target_date": target_date.isoformat(), "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
+    return _with_slot_metadata({"schema": "solar.slot_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "known_at": known_at.isoformat(), "target_date": target_date.isoformat(), "source": "open_meteo", "method": "full_day_open_meteo_causal", "causal_eligibility": "VERIFIED_PRE_DECISION", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False})
 
 
 def _forecast_solar_short(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime) -> dict[str, Any]:
@@ -388,33 +397,23 @@ def _forecast_solar_short(site_id: str, zone: ZoneInfo, facts: dict[str, Any], b
                 "confidence": "source_hour_average",
             }))
     points.sort(key=lambda item: item["valid_at"])
-    return {"schema": "solar.slot_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "known_at": known_at.isoformat(), "method": "hour_energy_as_four_equal_15m_average_power", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False}
+    return _with_slot_metadata({"schema": "solar.slot_forecast.v1", "layer": BASELINE_LAYER, "site_id": site_id, "known_at": known_at.isoformat(), "source": "forecast_solar", "method": "short_forecast_solar_fallback", "causal_eligibility": "runtime_facts_at_decision", "available": bool(points), "forecast_points": points, "execution_eligible": False, "actuator_writes_enabled": False})
 
 
 def _solar_forecast(site_id: str, zone: ZoneInfo, facts: dict[str, Any], binding: dict[str, Any] | None, slots: list[tuple[datetime, datetime]], known_at: datetime, *, target_date: date, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     today = known_at.astimezone(zone).date()
-    open_meteo = {"forecast_points": [], "available": False}
+    open_meteo = {"forecast_points": [], "available": False, "reason": "full_day_open_meteo_unavailable"}
     if open_meteo_frames and open_meteo_targets:
         open_meteo = _single_run_solar_forecast(site_id, zone, slots, known_at, target_date, open_meteo_frames, open_meteo_targets)
     if target_date != today:
         return open_meteo
+    if open_meteo.get("available") and open_meteo.get("forecast_points"):
+        return open_meteo
     short = _forecast_solar_short(site_id, zone, facts, binding, slots, known_at)
-    if not open_meteo.get("forecast_points"):
-        return short
-    baseline = {point["valid_at"]: point for point in open_meteo["forecast_points"]}
-    overrides = {point["valid_at"]: point for point in short["forecast_points"]}
-    merged = []
-    for start, _end in slots:
-        key = start.isoformat()
-        point = overrides.get(key) or baseline.get(key)
-        if point is not None and start >= known_at:
-            merged.append(point)
     return {
-        **open_meteo,
-        "method": "open_meteo_hourly_baseline_with_forecast_solar_short_horizon_override",
-        "forecast_points": merged,
-        "available": bool(merged),
-        "override_source": "forecast_solar.this_hour_kwh_next_hour_kwh",
+        **short,
+        "fallback_reason": open_meteo.get("reason", "full_day_open_meteo_unavailable"),
+        "full_day_causal_eligibility": open_meteo.get("causal_eligibility"),
     }
 
 
