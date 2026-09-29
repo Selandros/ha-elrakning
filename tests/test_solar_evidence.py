@@ -29,6 +29,7 @@ from custom_components.elrakning.solar_evidence import (
     parse_previous_runs,
     should_reprocess_existing_day,
     should_recover_stale_quality,
+    target_day_points,
 )
 
 
@@ -41,6 +42,21 @@ def _state(value, timestamp, unit="W"):
 
 
 class SolarEvidenceTests(unittest.TestCase):
+    def test_quality_recovery_requires_points_inside_target_day(self):
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo("Europe/Stockholm")
+        start = datetime(2026, 9, 17, tzinfo=zone)
+        end = datetime(2026, 9, 18, tzinfo=zone)
+        points = [
+            {"timestamp": "2026-09-16T23:59:00+02:00", "value_kw": 0.0},
+            {"timestamp": "2026-09-18T00:00:00+02:00", "value_kw": 0.0},
+        ]
+        self.assertEqual(target_day_points(points, start, end), [])
+
+        points.insert(1, {"timestamp": "2026-09-17T12:00:00+02:00", "value_kw": 1.0})
+        self.assertEqual(len(target_day_points(points, start, end)), 1)
+
     def test_bounded_simultaneous_transient_is_tolerated_without_interpolation(self):
         from zoneinfo import ZoneInfo
 

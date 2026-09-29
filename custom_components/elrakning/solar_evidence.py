@@ -85,6 +85,16 @@ def merge_pv_points(history_by_entity: dict[str, list[Any]], entity_ids: list[st
     return result
 
 
+def target_day_points(points: list[dict[str, Any]], start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Return only points inside the exact local evidence interval."""
+    return [
+        point
+        for point in points
+        if (timestamp := dt_util.parse_datetime(point.get("timestamp"))) is not None
+        and start <= timestamp < end
+    ]
+
+
 def integrate_actual(points: list[dict[str, Any]], start: datetime, end: datetime) -> tuple[float | None, int, int]:
     """Integrate finite segments, excluding segments longer than one hour."""
     total = 0.0
@@ -586,6 +596,7 @@ class SolarEvidenceManager:
             "candidate_count": 0,
             "attempted": [],
             "recovered": [],
+            "skipped": [],
         }
         self._quality_recovery_status = status
         if not callable(self._collection_site_configs_getter):
@@ -616,6 +627,8 @@ class SolarEvidenceManager:
                 if await self._async_recover_target_day_quality(target, target_date, store, days):
                     recovered.setdefault(site_id, []).append(key)
                     status["recovered"].append(f"{site_id}:{key}")
+                else:
+                    status["skipped"].append(f"{site_id}:{key}")
         status["outcome"] = "success"
         return recovered
 
@@ -656,7 +669,8 @@ class SolarEvidenceManager:
         if not any(history_by_entity.get(entity) for entity in entities):
             return False
         merged = merge_pv_points(history_by_entity, entities)
-        if not merged:
+        target_points = target_day_points(merged, start, end)
+        if not target_points:
             return False
         unavailable, padding_unavailable = count_invalid_states_in_target_day(
             history_by_entity, entities, start, end
