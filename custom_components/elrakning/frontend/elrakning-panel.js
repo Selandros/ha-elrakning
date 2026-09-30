@@ -1967,7 +1967,9 @@ export function buildDailyCostSeries(dailyBreakdown, month) {
 }
 
 export function buildDailyCostTooltipFields(day) {
-  const number = (value, suffix = " kr") => value == null || !Number.isFinite(Number(value)) ? "–" : `${Number(value)}${suffix}`;
+  const number = (value, suffix = " kr") => value == null || !Number.isFinite(Number(value))
+    ? "–"
+    : `${Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
   return [
     { label: "Import", value: number(day?.import_kwh, " kWh") },
     { label: "Elhandel", value: number(day?.elhandel_sek) },

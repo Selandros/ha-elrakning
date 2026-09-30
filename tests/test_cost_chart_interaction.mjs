@@ -243,6 +243,8 @@ assert.equal(dailyBars.days[3].total_variable_cost_sek, 6);
 assert.equal(dailyBars.days[4].status, "unavailable");
 assert.equal(dailyBars.days[0].average_price_ore_per_kwh, 150);
 assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.label), ["Import", "Elhandel", "Elnät rörlig", "Total rörlig kostnad", "Snittpris", "Status"]);
+assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.value), ["3,00 kWh", "0,50 kr", "1,00 kr", "4,50 kr", "150,00 öre/kWh", "Faktiskt + prognos"]);
+assert.deepEqual(buildDailyCostTooltipFields({ import_kwh: null, elhandel_sek: undefined, elnat_variable_sek: NaN, total_variable_cost_sek: null, average_price_ore_per_kwh: Infinity, status: "unavailable" }).map((field) => field.value), ["–", "–", "–", "–", "–", "Ej tillgängligt"]);
 const unavailableMonth = buildDailyCostSeries([], "2026-08");
 assert.equal(unavailableMonth.days.length, 31);
 assert.equal(unavailableMonth.days.every((day) => day.status === "unavailable" && !day.available), true);
