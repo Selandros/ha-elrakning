@@ -45,6 +45,21 @@ const at2054 = selectLoadForecastPoints([oldV1, currentV2], {
 assert.equal(at2054[0].timestamp, new Date("2026-09-20T21:00:00+02:00").getTime());
 assert.ok(at2054.every((point) => point.timestamp >= new Date("2026-09-20T21:00:00+02:00").getTime()));
 
+const serializedLoadFrame = {
+  site_id: siteId,
+  payload_schema: "load_forecast.v1",
+  frame_id: "serialized-v1",
+  known_at: "2026-09-20T19:00:00+02:00",
+  points: [
+    { valid_at: "2026-09-20T21:15:00+02:00", value: 1500 },
+    { valid_at: "2026-09-20T21:30:00+02:00", value: 1600 },
+  ],
+};
+const serializedPoints = selectLoadForecastPoints([serializedLoadFrame], {
+  siteId, selectedDate, now: new Date("2026-09-20T21:00:00+02:00"),
+});
+assert.deepEqual(serializedPoints.map((point) => point.value_kw), [1.5, 1.6], "serialized load frames must remain selectable without logical_role");
+
 assert.deepEqual(selectLoadForecastPoints([oldV1, currentV2], {
   siteId, selectedDate: new Date("2026-09-19T12:00:00+02:00"), now: new Date("2026-09-20T20:41:00+02:00"),
 }), []);

@@ -458,7 +458,7 @@ export function selectLoadForecastPoints(frames, { siteId = null, selectedDate =
   if (dayKey < todayKey) return [];
   const firstVisible = dayKey === todayKey ? nextForecastBoundary(now) : dayStart;
   const candidates = (Array.isArray(frames) ? frames : [])
-    .filter((frame) => frame?.logical_role === "load.forecast"
+    .filter((frame) => (frame?.logical_role === "load.forecast" || frame?.payload_schema === "load_forecast.v1")
       && (!siteId || frame.site_id === siteId)
       && Array.isArray(frame.points)
       && frame.points.some((point) => {
@@ -12156,7 +12156,7 @@ class ElrakningPanel {
       key,
       pointSignature(this._powerHistory?.series?.[key]?.points),
     ]));
-    const forecast = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [
+    const forecast = Object.fromEntries(["solar", "consumption", "charging", "discharging", "import", "export"].map((key) => [
       key,
       pointSignature(this._powerHistory?.power_forecast?.series?.[key]?.forecast_points),
     ]));
