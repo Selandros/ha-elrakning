@@ -5027,13 +5027,13 @@ class ElrakningPanel {
         .cost-chart-marker { fill: var(--primary-color); }
         .cost-chart-legend { color: var(--secondary-text-color); display: flex; flex-wrap: wrap; font-size: var(--card-legend-size); gap: 4px 12px; margin-bottom: 2px; }
         .cost-chart-legend span { align-items: center; display: inline-flex; gap: 4px; }
-        .cost-chart-legend i { background: var(--primary-color); display: inline-block; height: 2px; width: 14px; }
+        .cost-chart-legend i { background: var(--el-solar-color, #77C2A1); display: inline-block; height: 2px; width: 14px; }
         .cost-chart-legend-estimated { opacity: .58; }
         .cost-chart-legend-forecast { background: var(--secondary-text-color) !important; }
         .cost-chart-legend-previous { background: var(--neutral-color, #8590A6) !important; opacity: .55; }
-        .cost-chart-bar-actual { fill: var(--primary-color); opacity: .82; }
+        .cost-chart-bar-actual { fill: var(--el-solar-color, #77C2A1); opacity: .82; }
         .cost-chart-bar-forecast { fill: var(--secondary-text-color); opacity: .72; }
-        .cost-chart-bar-mixed { fill: var(--primary-color); opacity: .58; stroke: var(--secondary-text-color); stroke-dasharray: 3 2; stroke-width: 1.5; }
+        .cost-chart-bar-mixed { fill: var(--el-solar-color, #77C2A1); opacity: .58; stroke: var(--secondary-text-color); stroke-dasharray: 3 2; stroke-width: 1.5; }
         .cost-chart-bar-unavailable { fill: var(--divider-color); opacity: .8; }
 
         .cost-comparison {
@@ -10613,7 +10613,7 @@ class ElrakningPanel {
       renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "").split(" ")[0]}`, fields });
       tooltip.hidden = false;
       const markerValue = Number.isFinite(point.total_variable_cost_sek) ? point.total_variable_cost_sek : 0;
-      hover.innerHTML = `<rect class="chart-hover-marker" fill="${point.status === "forecast" ? "var(--secondary-text-color)" : "var(--primary-color)"}" x="${x(point.day) - barWidth / 2}" y="${height - plot.bottom - Math.max(2, height - plot.bottom - y(markerValue))}" width="${barWidth}" height="${Math.max(2, height - plot.bottom - y(markerValue))}" rx="2" />`;
+      hover.innerHTML = `<rect class="chart-hover-marker" fill="${point.status === "forecast" ? "var(--secondary-text-color)" : "var(--el-solar-color, #77C2A1)"}" x="${x(point.day) - barWidth / 2}" y="${height - plot.bottom - Math.max(2, height - plot.bottom - y(markerValue))}" width="${barWidth}" height="${Math.max(2, height - plot.bottom - y(markerValue))}" rx="2" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointerleave", clear);

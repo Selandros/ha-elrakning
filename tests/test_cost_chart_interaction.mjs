@@ -255,6 +255,10 @@ const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series
 assert.match(costRender, /buildDailyCostTooltipFields\(point\)/);
 assert.doesNotMatch(costRender, /!series\.days\.some\(\(day\) => day\.available\)/);
 assert.match(costRender, /cost-chart-bar-forecast/);
+assert.match(source, /\.cost-chart-bar-actual \{ fill: var\(--el-solar-color, #77C2A1\);/);
+assert.match(source, /\.cost-chart-bar-mixed \{ fill: var\(--el-solar-color, #77C2A1\);/);
+assert.match(source, /\.cost-chart-legend i \{ background: var\(--el-solar-color, #77C2A1\);/);
+assert.match(costRender, /var\(--el-solar-color, #77C2A1\)/);
 assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
 assert.match(costRender, /buildCostChartGeometry\(width, plot, series\.days_in_month\)/);
 assert.match(costRender, /getScreenCTM\?\.\(\)/);
