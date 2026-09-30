@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mergePowerHistoryRefreshState } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import {
+  mergePowerHistoryEnrichmentState,
+  mergePowerHistoryRefreshState,
+} from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(
   new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url),
@@ -127,5 +130,22 @@ const differentContextRefresh = mergePowerHistoryRefreshState({
 });
 assert.equal(differentContextRefresh.power_forecast.available, false, "site/date context change must not reuse forecast");
 assert.match(panelSource, /mergePowerHistoryRefreshState\(/, "history refresh must assemble actual and forecast state without replacement");
+
+const actualState = {
+  date: "2026-09-30",
+  series: { solar: { points: [{ timestamp: "2026-09-30T18:00:00Z", value_kw: 1 }] } },
+  power_forecast: forecastState,
+};
+const partialEnrichment = mergePowerHistoryEnrichmentState({ response: { solar_weather: { available: false } }, existingState: actualState });
+assert.equal(partialEnrichment.series.solar.points.length, 1, "partial enrichment must preserve actual series");
+assert.equal(partialEnrichment.power_forecast, forecastState, "partial enrichment must preserve forecast state");
+const enriched = mergePowerHistoryEnrichmentState({
+  response: { power_forecast: { ...forecastState, series: { solar: { available: true, forecast_points: [{ timestamp: "2026-09-30T20:00:00Z", value_kw: 2 }] } } } },
+  existingState: actualState,
+});
+assert.equal(enriched.series.solar.points.length, 1, "forecast update must preserve actual series");
+assert.equal(enriched.power_forecast.series.solar.forecast_points.length, 1, "forecast update must retain forecast points");
+assert.match(panelSource, /powerLinesFor\("solar", "chart-power-solar", visibleLayers\.solar\)/, "actual solar line must remain in chart assembly");
+assert.match(panelSource, /powerForecastLinesFor\("solar", "chart-power-solar", visibleLayers\.solar\)/, "forecast solar line must remain in chart assembly");
 
 console.log("price comparison behavior PASS");

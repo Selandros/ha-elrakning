@@ -594,6 +594,26 @@ export function mergePowerHistoryRefreshState({ response, series, existingState 
   };
 }
 
+export function mergePowerHistoryEnrichmentState({ response, existingState = {} } = {}) {
+  const unavailableForecast = { schema: "ella_power_forecast.v1", available: false, series: {} };
+  const responseForecast = response && typeof response === "object" ? response.power_forecast : undefined;
+  const powerForecast = responseForecast && typeof responseForecast === "object"
+    ? responseForecast
+    : existingState.power_forecast || unavailableForecast;
+  return {
+    ...existingState,
+    power_forecast: powerForecast,
+    solar_analysis: response?.solar_analysis || { available: false, days: [] },
+    solar_forecast: response?.solar_forecast || { available: false },
+    solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
+    solar_shadow: response?.solar_shadow || { available: false, days: [] },
+    solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
+    solar_sun: response?.solar_sun || { available: false },
+    solar_pvgis: response?.solar_pvgis || existingState.solar_pvgis || { available: false, source: "jrc_pvgis" },
+    solar_open_meteo: response?.solar_open_meteo || existingState.solar_open_meteo || { available: false, source: "open_meteo" },
+  };
+}
+
 export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
 
 export function isVisiblePowerValue(value) {
@@ -9227,18 +9247,10 @@ class ElrakningPanel {
       this._recordPowerFlowDiagnostic("enrichment_response_received", { requested_date: requestedDate, duration_ms: roundDiagnosticMs(performance.now() - started), accepted: true });
       const mergeStarted = performance.now();
       substage = "merge_state_apply";
-      this._powerHistory = {
-        ...this._powerHistory,
-        power_forecast: response?.power_forecast || { schema: "ella_power_forecast.v1", available: false, series: {} },
-        solar_analysis: response?.solar_analysis || { available: false, days: [] },
-        solar_forecast: response?.solar_forecast || { available: false },
-        solar_forecast_baselines: response?.solar_forecast_baselines || response?.solar_forecast?.baselines || {},
-        solar_shadow: response?.solar_shadow || { available: false, days: [] },
-        solar_weather: response?.solar_weather || { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
-        solar_sun: response?.solar_sun || { available: false },
-        solar_pvgis: response?.solar_pvgis || this._powerHistory?.solar_pvgis || { available: false, source: "jrc_pvgis" },
-        solar_open_meteo: response?.solar_open_meteo || this._powerHistory?.solar_open_meteo || { available: false, source: "open_meteo" },
-      };
+      this._powerHistory = mergePowerHistoryEnrichmentState({
+        response,
+        existingState: this._powerHistory,
+      });
       this._loadForecast = response?.load_forecast || { available: false, reason: "no_supported_history", frames: [] };
       substage = "render_solar_evidence";
       this._renderSolarEvidence();

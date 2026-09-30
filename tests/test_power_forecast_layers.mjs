@@ -43,7 +43,7 @@ for (const [key, className] of [
 for (const key of ["import", "export", "solar", "consumption", "charging", "discharging"]) {
   assert.match(panel, new RegExp(`forecastSource\\("${key}",`));
 }
-assert.match(panel, /power_forecast: response\?\.power_forecast/);
+assert.match(panel, /mergePowerHistoryEnrichmentState\(/);
 assert.match(panel, /schema: "ella_power_forecast\.v1"/);
 assert.match(panel, /chart-power-forecast\s*\{[\s\S]*?stroke-dasharray: 8 5;/);
 assert.match(panel, /return !forecastPointIsMarked\(point\)/);

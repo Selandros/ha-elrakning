@@ -36,7 +36,7 @@ assert.ok(
   "history state must be established before enrichment starts",
 );
 assert.match(historyLoader, /type: "elrakning\/power_history_enrichment"/);
-assert.match(historyLoader, /this\._powerHistory = \{\s*\.\.\.this\._powerHistory/);
+assert.match(frontend, /mergePowerHistoryEnrichmentState\(/);
 assert.match(historyLoader, /requestToken !== this\._powerHistoryRequestToken/);
 assert.match(historyLoader, /enrichmentToken !== this\._powerHistoryEnrichmentRequestToken/);
 assert.match(historyLoader, /contextKey !== this\._powerHistoryContextKey/);
