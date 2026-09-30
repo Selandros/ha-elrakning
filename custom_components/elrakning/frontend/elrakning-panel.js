@@ -4888,10 +4888,10 @@ class ElrakningPanel {
         .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 3px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
         .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
-        .cost-history-bar-item.estimated .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
-        .cost-history-bar { background: var(--primary-color); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
+        .cost-history-bar-item.estimated .cost-history-bar { border: 1px dashed var(--el-solar-color, #77C2A1); box-sizing: border-box; opacity: .82; }
+        .cost-history-bar { background: var(--el-solar-color, #77C2A1); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
         .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
-        .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--primary-color); box-sizing: border-box; opacity: .82; }
+        .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--el-solar-color, #77C2A1); box-sizing: border-box; opacity: .82; }
         .cost-history-bar-item.unavailable .cost-history-bar { background: var(--divider-color); height: 3px !important; opacity: 1; }
         .cost-history-bar-label { color: var(--secondary-text-color); font-size: 10px; white-space: nowrap; }
         .cost-history-bar-value { color: var(--primary-text-color); font-size: 10px; font-weight: 500; white-space: nowrap; }
