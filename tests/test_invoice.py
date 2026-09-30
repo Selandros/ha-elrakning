@@ -9,9 +9,49 @@ _SPEC = spec_from_file_location("elrakning_invoice", _PATH)
 _MODULE = module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 build_today_variable_cost = _MODULE.build_today_variable_cost
+build_daily_actual_cost = _MODULE.build_daily_actual_cost
 
 
 class InvoiceTodayCostTests(unittest.TestCase):
+    def test_daily_actual_cost_is_componentized_and_excludes_fixed_fee(self):
+        day_start = datetime.fromisoformat("2026-08-02T00:00:00+02:00")
+        day_end = datetime.fromisoformat("2026-08-02T01:00:00+02:00")
+        points = [
+            {"timestamp": "2026-08-02T00:00:00+02:00", "import_kw": 2},
+            {"timestamp": "2026-08-02T00:30:00+02:00", "import_kw": 2},
+            {"timestamp": "2026-08-02T01:00:00+02:00", "import_kw": 2},
+        ]
+        periods = [{
+            "start": "2026-08-02T00:00:00+02:00",
+            "end": "2026-08-02T01:00:00+02:00",
+            "trade_customer_price_ore_per_kwh": 100,
+            "grid_variable_ore_per_kwh": 200,
+            "fixed_fee_sek": 999,
+        }]
+        result = build_daily_actual_cost(points, periods, day_start, day_end)
+        self.assertEqual(result["import_kwh"], 2)
+        self.assertEqual(result["elhandel_sek"], 2)
+        self.assertEqual(result["elnat_variable_sek"], 4)
+        self.assertEqual(result["total_variable_cost_sek"], 6)
+        self.assertEqual(result["average_price_ore_per_kwh"], 300)
+        self.assertNotIn("fixed_fee_sek", result)
+
+    def test_daily_actual_cost_is_fail_closed_on_uncovered_gap(self):
+        day_start = datetime.fromisoformat("2026-08-02T00:00:00+02:00")
+        day_end = datetime.fromisoformat("2026-08-02T01:00:00+02:00")
+        points = [
+            {"timestamp": "2026-08-02T00:00:00+02:00", "import_kw": 2},
+            {"timestamp": "2026-08-02T00:15:00+02:00", "import_kw": 2},
+            {"timestamp": "2026-08-02T01:00:00+02:00", "import_kw": 2},
+        ]
+        periods = [{
+            "start": "2026-08-02T00:00:00+02:00",
+            "end": "2026-08-02T01:00:00+02:00",
+            "trade_customer_price_ore_per_kwh": 100,
+            "grid_variable_ore_per_kwh": 200,
+        }]
+        self.assertIsNone(build_daily_actual_cost(points, periods, day_start, day_end))
+
     def test_uses_only_observed_local_today_variable_costs(self):
         now = datetime.fromisoformat("2026-08-02T00:45:00+02:00")
         points = [

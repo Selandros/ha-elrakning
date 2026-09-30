@@ -1927,6 +1927,57 @@ export function buildCostChartTooltipFields({ estimated = null, actual = null, f
   return fields;
 }
 
+export function buildDailyCostSeries(dailyBreakdown, month) {
+  const normalizedMonth = typeof month === "string" && /^\d{4}-\d{2}$/.test(month) ? month : null;
+  if (!normalizedMonth) return { month: null, days_in_month: 0, days: [], available: false };
+  const [year, monthNumber] = normalizedMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const byDate = new Map((Array.isArray(dailyBreakdown) ? dailyBreakdown : []).map((item) => [item?.date, item]));
+  const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+  const sum = (left, right) => finite(left) === null || finite(right) === null ? null : finite(left) + finite(right);
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = `${normalizedMonth}-${String(index + 1).padStart(2, "0")}`;
+    const source = byDate.get(date) || {};
+    const actual = source.actual && typeof source.actual === "object" ? source.actual : null;
+    const forecast = source.forecast && typeof source.forecast === "object" ? source.forecast : null;
+    const actualImport = finite(actual?.import_kwh);
+    const forecastImport = finite(forecast?.import_kwh);
+    const importKwh = sum(actualImport, forecastImport) ?? actualImport ?? forecastImport;
+    const trade = sum(actual?.elhandel_sek, forecast?.elhandel_sek) ?? actual?.elhandel_sek ?? forecast?.elhandel_sek ?? null;
+    const grid = sum(actual?.elnat_variable_sek, forecast?.elnat_variable_sek) ?? actual?.elnat_variable_sek ?? forecast?.elnat_variable_sek ?? null;
+    const total = sum(actual?.total_variable_cost_sek, forecast?.total_variable_cost_sek) ?? actual?.total_variable_cost_sek ?? forecast?.total_variable_cost_sek ?? null;
+    const status = actual && forecast ? "actual_plus_forecast" : actual ? actual.status || "actual" : forecast ? "forecast" : "unavailable";
+    return {
+      date,
+      day: index + 1,
+      status,
+      available: total !== null || importKwh !== null,
+      import_kwh: importKwh,
+      elhandel_sek: trade,
+      elnat_variable_sek: grid,
+      total_variable_cost_sek: total,
+      average_price_ore_per_kwh: importKwh > 0 && total !== null ? total / importKwh * 100 : null,
+      actual,
+      forecast,
+      reason: source.reason || (status === "unavailable" ? "daily_actual_or_forecast_missing" : null),
+      provenance: { actual: actual?.source || null, forecast: forecast?.source || null, method: actual && forecast ? "actual_to_date_plus_causal_forecast_remainder" : actual?.method || forecast?.method || null },
+    };
+  });
+  return { month: normalizedMonth, days_in_month: daysInMonth, days, available: days.some((day) => day.available), method: "canonical_daily_billing_breakdown" };
+}
+
+export function buildDailyCostTooltipFields(day) {
+  const number = (value, suffix = " kr") => value == null || !Number.isFinite(Number(value)) ? "–" : `${Number(value)}${suffix}`;
+  return [
+    { label: "Import", value: number(day?.import_kwh, " kWh") },
+    { label: "Elhandel", value: number(day?.elhandel_sek) },
+    { label: "Elnät rörlig", value: number(day?.elnat_variable_sek) },
+    { label: "Total rörlig kostnad", value: number(day?.total_variable_cost_sek) },
+    { label: "Snittpris", value: number(day?.average_price_ore_per_kwh, " öre/kWh") },
+    { label: "Status", value: day?.status === "actual_plus_forecast" ? "Faktiskt + prognos" : day?.status === "actual" ? "Faktiskt" : day?.status === "actual_to_date" ? "Faktiskt hittills" : day?.status === "forecast" ? "Prognos" : "Ej tillgängligt" },
+  ];
+}
+
 export function buildCostChartGeometry(width, plot, daysInMonth) {
   const plotWidth = width - plot.left - plot.right;
   const daySpan = Math.max(1, daysInMonth - 1);
@@ -3218,6 +3269,7 @@ class ElrakningPanel {
     this._providerConfigured = false;
     this._electricityProviderState = null;
     this._billingHistory = null;
+    this._billingDailyByMonth = new Map();
     this._costSelectedMonth = null;
     const pickerNow = new Date();
     this._periodPickerState = {
@@ -4977,6 +5029,10 @@ class ElrakningPanel {
         .cost-chart-legend-estimated { opacity: .58; }
         .cost-chart-legend-forecast { background: var(--secondary-text-color) !important; }
         .cost-chart-legend-previous { background: var(--neutral-color, #8590A6) !important; opacity: .55; }
+        .cost-chart-bar-actual { fill: var(--primary-color); opacity: .82; }
+        .cost-chart-bar-forecast { fill: var(--secondary-text-color); opacity: .72; }
+        .cost-chart-bar-mixed { fill: var(--primary-color); opacity: .58; stroke: var(--secondary-text-color); stroke-dasharray: 3 2; stroke-width: 1.5; }
+        .cost-chart-bar-unavailable { fill: var(--divider-color); opacity: .8; }
 
         .cost-comparison {
           display: grid;
@@ -10308,6 +10364,7 @@ class ElrakningPanel {
     this._invoiceEstimateRaw = {
       ...estimate,
       current_estimate: estimate,
+      daily_breakdown_by_month: Object.fromEntries(this._billingDailyByMonth),
       previous_month_actual: previousActual,
       month_history: buildInvoiceMonthHistory(estimate, billingHistory.invoice_sources || {
         trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
@@ -10442,7 +10499,8 @@ class ElrakningPanel {
       item.append(name, valueRow);
       return item;
     }));
-    const series = showingCurrent ? (estimate.cost_analysis || buildCostAnalysisSeries(estimate, previous)) : { actual: [], actual_display: [], estimated_past: [], forecast_future: [], forecast: [], previous: [], days_in_month: 0, forecast_available: false, previous_available: false };
+    const dailyBreakdown = this._billingDailyByMonth.get(selectedMonth) || [];
+    const series = buildDailyCostSeries(dailyBreakdown, selectedMonth);
     this._renderCostChart(chart, series);
     comparisonElement.replaceChildren();
     comparisonElement.append(...comparisons.map((comparison) => {
@@ -10492,28 +10550,30 @@ class ElrakningPanel {
 
   _renderCostChart(chart, series) {
     if (!chart) return;
-    if (!series.actual_display?.length && !series.estimated_past?.length && !series.forecast_future?.length && !series.previous.length) {
+    if (!series?.days?.length || !series.days.some((day) => day.available)) {
       chart.innerHTML = '<div class="cost-chart-unavailable">Ingen daglig serie tillgänglig för vald månad</div>';
       return;
     }
     const width = 960;
     const height = 190;
     const plot = { left: 48, right: 12, top: 12, bottom: 28 };
-    const actual = series.actual_display || series.actual || [];
-    const estimated = series.estimated || series.estimated_past || [];
-    const estimatedPast = series.estimated_past || [];
-    const forecastFuture = series.forecast_future || series.forecast || [];
-    const all = [...actual, ...estimated, ...forecastFuture, ...series.previous].filter((point) => Number.isFinite(point.value));
-    const max = Math.max(1, ...all.map((point) => point.value));
+    const all = series.days.map((day) => day.total_variable_cost_sek).filter((value) => Number.isFinite(value));
+    const max = Math.max(1, ...all);
     const { x } = buildCostChartGeometry(width, plot, series.days_in_month);
     const y = (value) => plot.top + (1 - value / max) * (height - plot.top - plot.bottom);
-    const path = (points) => points.length < 2 ? "" : points.map((point, index) => `${index ? "L" : "M"} ${x(point.day)} ${y(point.value)}`).join(" ");
     const grid = [0, .5, 1].map((ratio) => {
       const value = max * ratio;
       return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" />`;
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-cost-axis-day="${day}">${day}</span>`).join("")}</div>`;
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-estimated"></i>Estimerat</span><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span>${series.previous.length ? "<span><i class=\"cost-chart-legend-previous\"></i>Förra månaden</span>" : ""}</div><div class="cost-chart-plot"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Kumulativ kostnad över månaden"><g>${grid}</g><path class="cost-chart-previous" d="${path(series.previous)}" /><path class="cost-chart-estimated" d="${path(estimated)}" /><path class="cost-chart-actual" d="${path(actual)}" /><path class="cost-chart-forecast" d="${path(forecastFuture)}" />${actual.at(-1) ? `<circle class="cost-chart-marker" cx="${x(actual.at(-1).day)}" cy="${y(actual.at(-1).value)}" r="4" />` : ""}<g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    const barWidth = Math.max(3, (width - plot.left - plot.right) / Math.max(1, series.days_in_month) - 3);
+    const bars = series.days.map((day) => {
+      const value = Number.isFinite(day.total_variable_cost_sek) ? day.total_variable_cost_sek : 0;
+      const barHeight = value > 0 ? Math.max(2, height - plot.bottom - y(value)) : 2;
+      const className = day.status === "forecast" ? "cost-chart-bar cost-chart-bar-forecast" : day.status === "actual_plus_forecast" ? "cost-chart-bar cost-chart-bar-mixed" : day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
+      return `<rect class="${className}" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plot.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
+    }).join("");
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span><span><i class="cost-chart-legend-estimated"></i>Faktiskt + prognos</span></div><div class="cost-chart-plot"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const axis = chart.querySelector(".chart-axis-overlay");
     const screenMatrix = svg.getScreenCTM?.();
@@ -10526,7 +10586,7 @@ class ElrakningPanel {
     }
     const tooltip = chart.querySelector(".soc-tooltip");
     const hover = chart.querySelector(".cost-chart-hover");
-    const nearest = (day) => [...actual, ...estimatedPast, ...forecastFuture, ...series.previous].reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
+    const nearest = (day) => series.days.reduce((best, point) => !best || Math.abs(point.day - day) < Math.abs(best.day - day) ? point : best, null);
     const clear = () => {
       tooltip.hidden = true;
       hover.replaceChildren();
@@ -10543,24 +10603,15 @@ class ElrakningPanel {
         clear();
         return;
       }
-      const actualPoint = actual.find((item) => item.day === point.day);
-      const estimated = estimatedPast.find((item) => item.day === point.day);
-      const forecast = forecastFuture.find((item) => item.day === point.day);
-      const previous = series.previous.find((item) => item.day === point.day);
-      const fields = buildCostChartTooltipFields({
-        estimated: estimated?.value,
-        actual: actualPoint?.value,
-        forecast: forecast?.value,
-        previous: previous?.value,
-      }).map((field) => ({ ...field, formatted: this._formatSek(field.value) }));
-      const activePoint = actualPoint || forecast || estimated || previous;
-      if (!activePoint || !fields.length) {
+      const fields = buildDailyCostTooltipFields(point).map((field) => ({ ...field, formatted: field.value }));
+      if (!point) {
         clear();
         return;
       }
       renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "").split(" ")[0]}`, fields });
       tooltip.hidden = false;
-      hover.innerHTML = `<circle class="chart-hover-marker" fill="${forecast && !actualPoint ? "var(--secondary-text-color)" : "var(--primary-color)"}" cx="${x(activePoint.day)}" cy="${y(activePoint.value)}" r="4" />`;
+      const markerValue = Number.isFinite(point.total_variable_cost_sek) ? point.total_variable_cost_sek : 0;
+      hover.innerHTML = `<rect class="chart-hover-marker" fill="${point.status === "forecast" ? "var(--secondary-text-color)" : "var(--primary-color)"}" x="${x(point.day) - barWidth / 2}" y="${height - plot.bottom - Math.max(2, height - plot.bottom - y(markerValue))}" width="${barWidth}" height="${Math.max(2, height - plot.bottom - y(markerValue))}" rx="2" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointerleave", clear);
@@ -10571,11 +10622,14 @@ class ElrakningPanel {
 
   _bindCostCard() {
     const historyChart = this.host.querySelector("[data-cost-history-chart]");
-    if (historyChart) historyChart.addEventListener("click", (event) => {
+    if (historyChart) historyChart.addEventListener("click", async (event) => {
       const button = event.target.closest?.("[data-cost-month]");
       if (!button) return;
       this._costSelectedMonth = button.dataset.costMonth || null;
       this._renderCostCard();
+      if (this._costSelectedMonth && !this._billingDailyByMonth.has(this._costSelectedMonth)) {
+        await this.loadBillingHistory(this._costSelectedMonth);
+      }
     });
   }
 
@@ -11397,15 +11451,21 @@ class ElrakningPanel {
     svg.addEventListener("pointerleave", clear);
   }
 
-  async loadBillingHistory() {
+  async loadBillingHistory(targetMonth = null) {
     if (!this.hass?.callWS) return;
     const siteState = await this._loadSiteIdentity();
     const siteId = siteState?.site_id || siteState?.current_site?.site_id
       || this._siteState?.site_id || this._siteState?.current_site?.site_id;
     if (!siteId) return;
     try {
-      const response = await this.hass.callWS({ type: "elrakning/billing_history" });
-      this._billingHistory = response?.success === true ? response : null;
+      const response = await this.hass.callWS({ type: "elrakning/billing_history", ...(targetMonth ? { month: targetMonth } : {}) });
+      if (response?.success === true && response.target_month && Array.isArray(response.daily_breakdown)) {
+        this._billingDailyByMonth.set(response.target_month, response.daily_breakdown);
+      }
+      if (!targetMonth) this._billingHistory = response?.success === true ? response : null;
+      if (response?.success === true && this._invoiceEstimateRaw) {
+        this._invoiceEstimateRaw.daily_breakdown_by_month = Object.fromEntries(this._billingDailyByMonth);
+      }
     } catch {
       this._billingHistory = null;
     }

@@ -511,23 +511,32 @@ class MeterManager:
             task.add_done_callback(clear_inflight)
         return await asyncio.shield(task)
 
-    async def async_billing_history(self) -> dict[str, Any]:
-        """Return imported power history from local month start through now."""
+    async def async_billing_history(self, target_month: str | None = None) -> dict[str, Any]:
+        """Return imported power history for one local month plus a bounded baseline."""
         entity_id = self.mapping.get("power_entity")
         now = dt_util.now()
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if target_month:
+            try:
+                year, month = (int(value) for value in target_month.split("-", 1))
+                start = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+            except (AttributeError, TypeError, ValueError):
+                start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end = min(now, next_month)
         if not entity_id:
             return {
                 "success": True,
                 "entity_id": None,
                 "start": start.isoformat(),
-                "end": now.isoformat(),
+                "end": end.isoformat(),
                 "points": [],
                 "baseline_points": [],
                 "coverage": {"energy_start": None, "energy_end": None, "point_count": 0, "baseline_start": None, "baseline_end": None, "baseline_point_count": 0},
                 "baseline_coverage": {"energy_start": None, "energy_end": None, "point_count": 0},
             }
-        return await self._async_billing_history_fetch(entity_id, start, now, bool(self.mapping.get(METER_INVERT_FIELD)))
+        return await self._async_billing_history_fetch(entity_id, start, end, bool(self.mapping.get(METER_INVERT_FIELD)))
 
     async def _async_billing_history_fetch(self, entity_id: str, start, end, invert_power: bool) -> dict[str, Any]:
         """Read the billing month and a bounded trailing baseline window."""

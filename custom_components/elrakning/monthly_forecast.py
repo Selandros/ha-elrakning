@@ -494,9 +494,22 @@ def build_monthly_cost_forecast(
         expected_future_import += energy
         expected_future_cost += cost
         local_day = point["valid_at"].astimezone(ZoneInfo(timezone_name)).date().isoformat()
-        day = days.setdefault(local_day, {"import_kwh": 0.0, "cost_sek": 0.0, "slot_count": 0})
+        day = days.setdefault(local_day, {
+            "import_kwh": 0.0,
+            "cost_sek": 0.0,
+            "elhandel_sek": 0.0,
+            "elnat_variable_sek": 0.0,
+            "average_price_ore_per_kwh": None,
+            "slot_count": 0,
+        })
         day["import_kwh"] += energy
         day["cost_sek"] += cost
+        trade_ore = _number((price_source or {}).get("trade_customer_price_ore_per_kwh"))
+        grid_ore = _number((price_source or {}).get("grid_variable_ore_per_kwh"))
+        if trade_ore is not None and grid_ore is not None:
+            day["elhandel_sek"] += energy * trade_ore / 100
+            day["elnat_variable_sek"] += energy * grid_ore / 100
+        day["average_price_ore_per_kwh"] = day["cost_sek"] / day["import_kwh"] * 100 if day["import_kwh"] > 0 else None
         day["slot_count"] += 1
         cursor = point["end_at"]
     quality = "qualified" if not missing else "unavailable"

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostReferenceComparisons, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -229,10 +229,27 @@ assert.ok(dailySeries.forecast.every((point, index, points) => index === 0 || po
 assert.deepEqual(dailySeries.estimated.map((point) => point.day), Array.from({ length: 30 }, (_, index) => index + 1));
 assert.equal(dailySeries.estimated.at(-1).value, 300);
 
+const dailyBars = buildDailyCostSeries([
+  { date: "2026-09-01", actual: { import_kwh: 2, elhandel_sek: 1, elnat_variable_sek: 2, total_variable_cost_sek: 3, status: "actual", source: "recorder" } },
+  { date: "2026-09-02", actual: { import_kwh: 1, elhandel_sek: 0.5, elnat_variable_sek: 1, total_variable_cost_sek: 1.5, status: "actual", source: "recorder" } },
+  { date: "2026-09-03", actual: { import_kwh: 1, elhandel_sek: 0.5, elnat_variable_sek: 1, total_variable_cost_sek: 1.5, status: "actual_to_date", source: "recorder" }, forecast: { import_kwh: 2, total_variable_cost_sek: 3, status: "forecast", source: "monthly_forecast.per_day" } },
+  { date: "2026-09-04", forecast: { import_kwh: 4, total_variable_cost_sek: 6, status: "forecast", source: "monthly_forecast.per_day" } },
+], "2026-09");
+assert.equal(dailyBars.days.length, 30);
+assert.deepEqual(dailyBars.days.slice(0, 4).map((day) => day.status), ["actual", "actual", "actual_plus_forecast", "forecast"]);
+assert.equal(dailyBars.days[2].import_kwh, 3);
+assert.equal(dailyBars.days[2].total_variable_cost_sek, 4.5);
+assert.equal(dailyBars.days[3].total_variable_cost_sek, 6);
+assert.equal(dailyBars.days[4].status, "unavailable");
+assert.equal(dailyBars.days[0].average_price_ore_per_kwh, 150);
+assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.label), ["Import", "Elhandel", "Elnät rörlig", "Total rörlig kostnad", "Snittpris", "Status"]);
+
 const source = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series)"), source.indexOf("  _bindCostCard()"));
 
-assert.match(costRender, /buildCostChartTooltipFields\(\{/);
+assert.match(costRender, /buildDailyCostTooltipFields\(point\)/);
+assert.match(costRender, /cost-chart-bar-forecast/);
+assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
 assert.match(costRender, /buildCostChartGeometry\(width, plot, series\.days_in_month\)/);
 assert.match(costRender, /getScreenCTM\?\.\(\)/);
 assert.match(costRender, /data-cost-axis-day/);

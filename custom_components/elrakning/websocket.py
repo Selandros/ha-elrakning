@@ -37,7 +37,7 @@ from .elhandel.providers.greenely_source import paginate_source
 from .elnat.manager import GridManager
 from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
-from .invoice import build_today_variable_cost
+from .invoice import build_daily_actual_cost, build_today_variable_cost
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
@@ -1290,7 +1290,10 @@ async def websocket_meter_power_history(hass, connection, msg):
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command({vol.Required("type"): BILLING_HISTORY_COMMAND})
+@websocket_api.websocket_command({
+    vol.Required("type"): BILLING_HISTORY_COMMAND,
+    vol.Optional("month"): str,
+})
 @websocket_api.async_response
 async def websocket_billing_history(hass, connection, msg):
     """Return canonical current-month meter and price history for billing."""
@@ -1298,7 +1301,8 @@ async def websocket_billing_history(hass, connection, msg):
         connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured", "points": []})
         return
     meter = _meter_manager(hass)
-    billing = await meter.async_billing_history() if meter else {
+    target_month = msg.get("month")
+    billing = await meter.async_billing_history(target_month) if meter else {
         "success": False,
         "points": [],
         "error": "meter_unavailable",
@@ -1335,6 +1339,47 @@ async def websocket_billing_history(hass, connection, msg):
         price_periods,
         dt_util.as_local(dt_util.now()),
     )
+    zone = ZoneInfo("Europe/Stockholm")
+    local_start = dt_util.as_local(datetime.fromisoformat(billing["start"]))
+    local_end = dt_util.as_local(datetime.fromisoformat(billing["end"]))
+    daily_breakdown = []
+    cursor = local_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    forecast_state = hass.data.get(DOMAIN, {}).get("monthly_forecast_manager").public_state(
+        (hass.data.get(DOMAIN, {}).get("site_identity_manager").state or {}).get("active_site_id")
+    ) if hass.data.get(DOMAIN, {}).get("monthly_forecast_manager") and hass.data.get(DOMAIN, {}).get("site_identity_manager") else None
+    current_local = dt_util.as_local(dt_util.now())
+    while cursor < local_end:
+        day_end = cursor + timedelta(days=1)
+        observed_end = min(current_local, day_end) if cursor.date() == current_local.date() else day_end if day_end <= current_local else None
+        actual = build_daily_actual_cost(
+            billing.get("points", []), price_periods, cursor, day_end, observed_end
+        ) if observed_end is not None else None
+        daily_breakdown.append({
+            "date": cursor.date().isoformat(),
+            "actual": actual,
+            "forecast": None,
+            "availability": "actual" if actual else "unavailable",
+            "provenance": {"timezone": str(zone), "source": "billing_history"},
+        })
+        cursor = day_end
+    if isinstance(forecast_state, dict) and forecast_state.get("target_month") == billing.get("start", "")[:7]:
+        for item in daily_breakdown:
+            future = (forecast_state.get("per_day") or {}).get(item["date"])
+            if not isinstance(future, dict):
+                continue
+            item["forecast"] = {
+                "import_kwh": future.get("import_kwh"),
+                "total_variable_cost_sek": future.get("cost_sek"),
+                "elhandel_sek": future.get("elhandel_sek"),
+                "elnat_variable_sek": future.get("elnat_variable_sek"),
+                "average_price_ore_per_kwh": future.get("average_price_ore_per_kwh"),
+                "status": "forecast",
+                "quality": forecast_state.get("quality"),
+                "method": forecast_state.get("forecast_method"),
+                "source": "monthly_forecast.per_day",
+                "reasons": forecast_state.get("reasons", []),
+            }
+            item["availability"] = "actual_plus_forecast" if item["actual"] else "forecast"
     connection.send_result(msg["id"], {
         "success": True,
         "start": billing["start"],
@@ -1361,6 +1406,8 @@ async def websocket_billing_history(hass, connection, msg):
         "monthly_forecast": hass.data.get(DOMAIN, {}).get("monthly_forecast_manager").public_state(
             (hass.data.get(DOMAIN, {}).get("site_identity_manager").state or {}).get("active_site_id")
         ) if hass.data.get(DOMAIN, {}).get("monthly_forecast_manager") and hass.data.get(DOMAIN, {}).get("site_identity_manager") else None,
+        "target_month": billing.get("start", "")[:7],
+        "daily_breakdown": daily_breakdown,
         "price_coverage": {
             "period_count": len(price_periods),
             "missing_dates": missing_price_dates,
