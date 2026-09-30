@@ -2465,7 +2465,7 @@ assert.match(panelSource, /chart-power-solar/);
 assert.match(panelSource, /chart-power-consumption/);
 assert.match(panelSource, /chart-power-charging/);
 assert.match(panelSource, /chart-power-discharging/);
-assert.match(panelSource, /powerForecastPoints\[key\]\?\.some\(\(point\) => isVisiblePowerValue\(point\.value_kw\)\)/);
+assert.match(panelSource, /powerForecastPoints\[key\]\?\.length > 1/);
 assert.match(panelSource, /this\._previewLayersVisible\[layer\] = !this\._previewLayersVisible\[layer\]/);
 assert.match(panelSource, /chart-legend-preview:not\(\.active\)/);
 assert.match(panelSource, /--solar-color: var\(--el-solar-color, #77C2A1\)/);

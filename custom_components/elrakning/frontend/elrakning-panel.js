@@ -12675,7 +12675,7 @@ class ElrakningPanel {
         ? this.buildMeterDisplayMarkup(powerDisplayPoints[key], "value_kw", className, x, meterY)
         : "";
     };
-    const powerForecastLinesFor = (key, className, visible) => visible && powerForecastPoints[key]?.some((point) => isVisiblePowerValue(point.value_kw))
+    const powerForecastLinesFor = (key, className, visible) => visible && powerForecastPoints[key]?.length > 1
       ? this.buildForecastDisplayMarkup(powerForecastPoints[key], "value_kw", `${className} chart-power-forecast`, x, meterY)
       : "";
     const meterDisplayGeometry = {

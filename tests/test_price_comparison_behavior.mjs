@@ -147,5 +147,15 @@ assert.equal(enriched.series.solar.points.length, 1, "forecast update must prese
 assert.equal(enriched.power_forecast.series.solar.forecast_points.length, 1, "forecast update must retain forecast points");
 assert.match(panelSource, /powerLinesFor\("solar", "chart-power-solar", visibleLayers\.solar\)/, "actual solar line must remain in chart assembly");
 assert.match(panelSource, /powerForecastLinesFor\("solar", "chart-power-solar", visibleLayers\.solar\)/, "forecast solar line must remain in chart assembly");
+assert.match(
+  hourlyRender,
+  /const powerForecastLinesFor = \(key, className, visible\) => visible && powerForecastPoints\[key\]\?\.length > 1/,
+  "valid zero-valued forecast points must not be hidden by the actual-value visibility threshold",
+);
+assert.doesNotMatch(
+  hourlyRender,
+  /powerForecastPoints\[key\].*some\(\(point\) => isVisiblePowerValue\(point\.value_kw\)\)/,
+  "forecast presence must not require a non-zero power value",
+);
 
 console.log("price comparison behavior PASS");
