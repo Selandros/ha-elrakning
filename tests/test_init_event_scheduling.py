@@ -218,6 +218,11 @@ def test_replay_artifact_generation_is_background_work_outside_startup_barrier()
     assert "replay_task_completed" in source
     assert "replay_task_cancelled" in source
     assert "replay_task_failed" in source
+    assert "replay_trigger_coalesced" in source
+    assert "replay_active_task" in source
+    assert "replay_pending_site_ids" in source
+    assert '"run_id": run_id' in source
+    assert '"elrakning_replay_artifact_coalesced"' in source
     assert 'frontend_data["replay_artifact_startup_task"] = hass.async_create_task' not in source
     assert "replay_refresh_task = hass.create_task(_generate_replay_artifact" not in source
 

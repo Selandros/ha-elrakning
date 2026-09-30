@@ -728,6 +728,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return [event_site_id] if event_site_id in site_ids else []
         return site_ids
 
+    replay_active_task = None
+    replay_pending_all = False
+    replay_pending_site_ids = set()
+    frontend_data["replay_scheduler_closed"] = False
+
     async def _generate_replay_artifact(_call=None, event_site_id=None):
         for site_id in _replay_site_ids(event_site_id):
             result = await async_generate_artifact(hass, site_id)
@@ -754,7 +759,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Run replay work off the startup task barrier and consume failures."""
         started_at = dt_util.now().astimezone(timezone.utc)
         site_ids = _replay_site_ids(event_site_id)
+        run_id = f"{source}:{started_at.isoformat()}"
         status = {
+            "run_id": run_id,
             "source": source,
             "outcome": "running",
             "started_at": started_at.isoformat(),
@@ -764,7 +771,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _record_replay_diagnostic(
             "INFO",
             "replay_task_started",
-            json.dumps({"source": source, "started_at": started_at.isoformat(), "site_ids": site_ids}, separators=(",", ":")),
+            json.dumps({"run_id": run_id, "source": source, "started_at": started_at.isoformat(), "site_ids": site_ids}, separators=(",", ":")),
         )
         started_monotonic = time.monotonic()
         try:
@@ -777,8 +784,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await _record_replay_diagnostic(
                 "INFO",
                 "replay_task_cancelled",
-                json.dumps({"source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids}, separators=(",", ":")),
+                json.dumps({"run_id": run_id, "source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids}, separators=(",", ":")),
             )
+            _schedule_pending_replay()
             raise
         except Exception as err:  # Background work must not poison startup.
             finished_at = dt_util.now().astimezone(timezone.utc)
@@ -792,8 +800,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await _record_replay_diagnostic(
                 "ERROR",
                 "replay_task_failed",
-                json.dumps({"source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids, "error_type": type(err).__name__, "error": str(err)[:200]}, separators=(",", ":")),
+                json.dumps({"run_id": run_id, "source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids, "error_type": type(err).__name__, "error": str(err)[:200]}, separators=(",", ":")),
             )
+            _schedule_pending_replay()
             return None
         finished_at = dt_util.now().astimezone(timezone.utc)
         frontend_data["replay_artifact_task_status"] = {
@@ -802,23 +811,55 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _record_replay_diagnostic(
             "INFO",
             "replay_task_completed",
-            json.dumps({"source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids}, separators=(",", ":")),
+            json.dumps({"run_id": run_id, "source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids}, separators=(",", ":")),
         )
+        _schedule_pending_replay()
         return result
 
-    replay_refresh_task = None
+    def _queue_replay_diagnostic(level, event, payload):
+        """Queue one bounded diagnostic without blocking an event callback."""
+        create_task = getattr(hass, "async_create_task", None) or getattr(hass, "create_task", None)
+        if callable(create_task):
+            create_task(_record_replay_diagnostic(level, event, payload))
+
+    def _schedule_pending_replay():
+        nonlocal replay_active_task, replay_pending_all
+        if frontend_data.get("replay_scheduler_closed") or replay_active_task is not asyncio.current_task():
+            return
+        if not replay_pending_all and not replay_pending_site_ids:
+            replay_active_task = None
+            return
+        event_site_id = None if replay_pending_all or len(replay_pending_site_ids) != 1 else next(iter(replay_pending_site_ids))
+        replay_pending_all = False
+        replay_pending_site_ids.clear()
+        replay_active_task = _create_replay_background_task(
+            hass,
+            lambda: _run_replay_artifact_background("coalesced", event_site_id),
+            "elrakning_replay_artifact_coalesced",
+        )
+        frontend_data["replay_benchmark_refresh_task"] = replay_active_task
 
     def _schedule_replay_evidence(event):
-        nonlocal replay_refresh_task
-        if replay_refresh_task is not None and not replay_refresh_task.done():
-            return
+        nonlocal replay_active_task, replay_pending_all
         event_site_id = event.data.get("site_id") if getattr(event, "data", None) else None
-        replay_refresh_task = _create_replay_background_task(
+        event_type = getattr(event, "event_type", None) or "unknown"
+        if replay_active_task is not None and not replay_active_task.done():
+            if isinstance(event_site_id, str) and event_site_id:
+                replay_pending_site_ids.add(event_site_id)
+            else:
+                replay_pending_all = True
+            _queue_replay_diagnostic(
+                "INFO",
+                "replay_trigger_coalesced",
+                json.dumps({"event_type": event_type, "site_id": event_site_id, "active_run": True}, separators=(",", ":")),
+            )
+            return
+        replay_active_task = _create_replay_background_task(
             hass,
             lambda: _run_replay_artifact_background("event", event_site_id),
             "elrakning_replay_artifact_event",
         )
-        frontend_data["replay_benchmark_refresh_task"] = replay_refresh_task
+        frontend_data["replay_benchmark_refresh_task"] = replay_active_task
 
     hass.services.async_register(DOMAIN, "replay_artifact_generate", _generate_replay_artifact)
     frontend_data["replay_benchmark_event_unsubs"] = [
@@ -849,11 +890,12 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             lambda _event: clear_forecast_view_caches(hass),
         ),
     ]
-    frontend_data["replay_artifact_startup_task"] = _create_replay_background_task(
+    replay_active_task = _create_replay_background_task(
         hass,
         lambda: _run_replay_artifact_background("startup"),
         "elrakning_replay_artifact_startup",
     )
+    frontend_data["replay_artifact_startup_task"] = replay_active_task
     await _record_replay_diagnostic(
         "INFO",
         "replay_scheduler_registered",
@@ -871,6 +913,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Elräkning from a config entry."""
     frontend_data = hass.data.get(DOMAIN, {})
+    frontend_data["replay_scheduler_closed"] = True
     entry_coordinator = getattr(entry, "runtime_data", None)
     frontend_data["runtime_status"] = "unavailable"
     if unsubscribe := frontend_data.pop("coordinator_unsub", None):
