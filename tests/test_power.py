@@ -303,6 +303,20 @@ class PowerTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_explicit_false_survives_save_and_mapping_hydration(self):
+        states = {"sensor.battery_power": _state(-2.5, "kW")}
+        manager = power.PowerManager(_hass(states))
+        saved = await manager.async_save_mapping({
+            "battery_power_entity": "sensor.battery_power",
+            "invert_battery_power": False,
+        })
+
+        reloaded = power.PowerManager(_hass(states))
+        await reloaded.async_restore_mapping(saved)
+
+        self.assertIs(saved["invert_battery_power"], False)
+        self.assertIs((await reloaded.async_state())["invert_battery_power"], False)
+
     async def test_combined_battery_history_preserves_sign_before_split(self):
         states = {"sensor.battery_power": _state(0, "kW")}
         hass = _hass(states)

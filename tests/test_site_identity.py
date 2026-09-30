@@ -1,5 +1,6 @@
 import types
 import unittest
+from unittest.mock import patch
 
 from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
 
@@ -7,6 +8,7 @@ from tests._elrakning_test_bootstrap import install_elrakning_package_stub, inst
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 from custom_components.elrakning.site_identity import (  # noqa: E402
+    CANONICAL_SOURCE_MIGRATIONS,
     SiteIdentityManager,
     classify_source,
     resolve_source_identity,
@@ -205,6 +207,98 @@ class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(active), 1)
         self.assertNotEqual(active[0]["generation_id"], old_generation)
         self.assertTrue(active[0]["provenance"]["source_mapping_invert_battery_power"])
+
+    async def test_canonical_source_migration_does_not_override_later_explicit_false(self):
+        migration = dict(CANONICAL_SOURCE_MIGRATIONS[0])
+        migration["source_identity_fingerprint"] = "fingerprint"
+
+        class _Storage:
+            def recanonicalize_source_generation(self, *args, **kwargs):
+                raise AssertionError("migration must not run twice")
+
+        manager = SiteIdentityManager.__new__(SiteIdentityManager)
+        manager.state = {
+            "active_site_id": migration["site_id"],
+            "site_configs": {
+                migration["site_id"]: {
+                    "power": {
+                        "battery_power_entity": migration["entity_id"],
+                        "invert_battery_power": False,
+                    }
+                }
+            },
+            "ledger": [
+                {
+                    "site_id": migration["site_id"],
+                    "logical_role": migration["logical_role"],
+                    "entity_id": migration["entity_id"],
+                    "effective_to": None,
+                    "generation_id": "active-false",
+                    "provenance": {},
+                    "source_identity": {"identity_key": "new-user-mapping"},
+                },
+                {
+                    "site_id": migration["site_id"],
+                    "logical_role": migration["logical_role"],
+                    "entity_id": migration["entity_id"],
+                    "effective_to": "2026-09-21T00:00:00Z",
+                    "generation_id": "migrated-true",
+                    "provenance": {"canonical_source_migration": migration["migration_id"]},
+                    "source_identity": {"identity_key": "old-mapping"},
+                },
+            ],
+        }
+        manager.power_manager = None
+        manager.store = _Store(manager.state)
+
+        with patch("custom_components.elrakning.site_identity.CANONICAL_SOURCE_MIGRATIONS", (migration,)):
+            result = await manager.async_apply_canonical_source_migrations(_Storage())
+
+        self.assertEqual(result, [])
+        self.assertFalse(manager.state["site_configs"][migration["site_id"]]["power"]["invert_battery_power"])
+
+    async def test_canonical_source_migration_runs_once_for_unmigrated_legacy_record(self):
+        migration = dict(CANONICAL_SOURCE_MIGRATIONS[0])
+        migration["source_identity_fingerprint"] = "fingerprint"
+        source_identity = "legacy-mapping"
+
+        class _Storage:
+            def recanonicalize_source_generation(self, *args, **kwargs):
+                return 0
+
+        import hashlib
+
+        migration["source_identity_fingerprint"] = hashlib.sha256(source_identity.encode()).hexdigest()
+        manager = SiteIdentityManager.__new__(SiteIdentityManager)
+        manager.state = {
+            "active_site_id": migration["site_id"],
+            "site_configs": {
+                migration["site_id"]: {
+                    "power": {
+                        "battery_power_entity": migration["entity_id"],
+                        "invert_battery_power": False,
+                    }
+                }
+            },
+            "ledger": [{
+                "site_id": migration["site_id"],
+                "logical_role": migration["logical_role"],
+                "entity_id": migration["entity_id"],
+                "effective_to": None,
+                "generation_id": "legacy",
+                "resource_id": "resource",
+                "provenance": {},
+                "source_identity": {"identity_key": source_identity},
+            }],
+        }
+        manager.power_manager = None
+        manager.store = _Store(manager.state)
+
+        with patch("custom_components.elrakning.site_identity.CANONICAL_SOURCE_MIGRATIONS", (migration,)):
+            result = await manager.async_apply_canonical_source_migrations(_Storage())
+
+        self.assertEqual(len(result), 1)
+        self.assertTrue(manager.state["site_configs"][migration["site_id"]]["power"]["invert_battery_power"])
 
     async def test_replacement_closes_old_generation_and_starts_new_one(self):
         entries = {

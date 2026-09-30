@@ -1265,6 +1265,12 @@ class SiteIdentityManager:
             config = configs.get(site_id)
             if not isinstance(config, dict):
                 continue
+            if any(
+                item.get("site_id") == site_id
+                and item.get("provenance", {}).get("canonical_source_migration") == migration["migration_id"]
+                for item in ledger
+            ):
+                continue
             power = config.setdefault("power", {})
             if power.get("battery_power_entity") != migration["entity_id"]:
                 continue
