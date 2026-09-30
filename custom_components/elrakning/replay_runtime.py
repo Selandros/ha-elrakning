@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from .replay_artifact_store import build_artifact, build_runtime_holdout_matrix
 from .economic_optimizer import build_eon_economics
 from .ella_ess_twin import resolve_shared_ess_resource
+from .grid_tariff_timeline import resolve_grid_tariff
 from .replay_benchmark import (
     ESSReplayLimits,
     EconomicOptimizerBaseline,
@@ -373,6 +374,34 @@ def _shared_ess_context(site_manager: Any, site_id: str) -> dict[str, Any]:
     return {"shared": shared, "active_generations": active_generations}
 
 
+def _timeline_economics(grid_manager: Any, site_id: str, decision_at: datetime) -> dict[str, Any] | None:
+    """Resolve replay economics from the causal effective-dated tariff timeline."""
+    records = getattr(grid_manager, "tariff_timeline", None)
+    if not isinstance(records, list):
+        return None
+    record = resolve_grid_tariff(records, site_id=site_id, at=decision_at, decision_at=decision_at)
+    if not isinstance(record, dict):
+        return None
+    known_at = record.get("known_at")
+    valid_from = record.get("valid_from")
+    if not isinstance(known_at, str) or not isinstance(valid_from, str):
+        return None
+    return {
+        "source_schema": "eon.grid_economic_effective_dated_snapshot.v1",
+        "known_at": known_at,
+        "valid_from": valid_from,
+        "valid_to": record.get("valid_to"),
+        "provider_valid_from": valid_from,
+        "provider_reference": record.get("source_generation_id"),
+        "component_provenance": {
+            "provider": record.get("provider"),
+            "source_status": record.get("source_status"),
+            "timeline_schema": record.get("schema"),
+            "timeline_provenance": deepcopy(record.get("provenance") or {}),
+        },
+    }
+
+
 def _frame_dict(row: tuple[Any, ...], site_id: str | None) -> dict[str, Any]:
     return {
         "frame_id": row[0], "schema_version": row[1], "dataset_version": row[2], "semantic_key": row[3],
@@ -641,7 +670,11 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
 
     def resolve_economics(decision_at: datetime) -> dict[str, Any] | None:
         if not isinstance(grid_state, dict) or not binding:
-            return None
+            timeline_economics = _timeline_economics(grid_manager, site_id, decision_at)
+            return timeline_economics
+        timeline_economics = _timeline_economics(grid_manager, site_id, decision_at)
+        if timeline_economics is not None:
+            return timeline_economics
         economics = build_eon_economics(grid_state, binding, decision_at) if isinstance(grid_state, dict) else None
         if not isinstance(economics, dict):
             return None

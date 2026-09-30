@@ -199,6 +199,52 @@ def test_runtime_runner_rejects_future_economics_without_causal_override():
     assert replay_runtime._economics_is_causal(economics, datetime(2026, 9, 27, tzinfo=timezone.utc)) is True
 
 
+def test_replay_economics_uses_causal_effective_dated_tariff_timeline():
+    from datetime import datetime, timezone
+
+    site = "site-vik"
+    decision = datetime(2026, 9, 29, 13, 30, tzinfo=timezone.utc)
+    class GridManager:
+        tariff_timeline = [{
+            "schema": "elrakning.grid_tariff_timeline.v1",
+            "site_id": site,
+            "provider": "eon",
+            "source_generation_id": "eon-manual-september",
+            "known_at": "2026-09-27T22:21:31.858330+00:00",
+            "valid_from": "2026-08-31T22:00:00+00:00",
+            "valid_to": "2026-09-30T22:00:00+00:00",
+            "source_status": "MANUALLY_VERIFIED",
+            "provenance": {"origin": "user_confirmed"},
+            "grid_price": {"variable_total_ore_per_kwh_gross": 142.0},
+        }]
+
+    economics = replay_runtime._timeline_economics(GridManager(), site, decision)
+    assert economics["provider_reference"] == "eon-manual-september"
+    assert economics["known_at"] == "2026-09-27T22:21:31.858330+00:00"
+    assert economics["valid_from"] == "2026-08-31T22:00:00+00:00"
+    assert replay_runtime._economics_is_causal(economics, decision) is True
+
+
+def test_replay_economics_does_not_use_future_tariff_for_pre_boundary_window():
+    from datetime import datetime, timezone
+
+    class GridManager:
+        tariff_timeline = [{
+            "schema": "elrakning.grid_tariff_timeline.v1",
+            "site_id": "site-vik",
+            "provider": "eon",
+            "source_generation_id": "eon-future",
+            "known_at": "2026-09-27T20:20:14.109315+00:00",
+            "valid_from": "2026-09-30T22:00:00+00:00",
+            "source_status": "FUTURE",
+            "grid_price": {"variable_total_ore_per_kwh_gross": 142.0},
+        }]
+
+    assert replay_runtime._timeline_economics(
+        GridManager(), "site-vik", datetime(2026, 9, 27, 20, tzinfo=timezone.utc)
+    ) is None
+
+
 def test_benchmark_readiness_reports_unqualified_frame_without_relaxing_replay(monkeypatch):
     from datetime import datetime, timezone
 
