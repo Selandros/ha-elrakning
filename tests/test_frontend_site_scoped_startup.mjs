@@ -20,7 +20,8 @@ assert.match(history, /_loadPowerHistoryCycle\(\{ requestedDate, cycle, siteId, 
 const historyCycle = frontend.slice(frontend.indexOf("async _loadPowerHistoryCycle("), frontend.indexOf("async loadPowerHistoryEnrichment("));
 assert.match(historyCycle, /siteId !== activeSiteId/);
 assert.match(historyCycle, /siteContextGeneration !== this\._siteContextGeneration/);
-assert.match(historyCycle, /this\._powerHistoryContextKey = `\$\{siteId\}:\$\{siteContextGeneration\}:/);
+assert.match(historyCycle, /const nextContextKey = `\$\{siteId\}:\$\{siteContextGeneration\}:/);
+assert.match(historyCycle, /this\._powerHistoryContextKey = nextContextKey/);
 
 for (const method of ["loadPricePlan(", "loadSolarEvidence(", "loadSolarForecast(", "loadBillingHistory("]) {
   const start = frontend.indexOf(`async ${method}`);

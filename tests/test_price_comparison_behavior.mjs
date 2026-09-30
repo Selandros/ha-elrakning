@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mergePowerHistoryRefreshState } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(
   new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url),
@@ -103,5 +104,28 @@ assert.doesNotMatch(
   /dualAxis:\s*true[\s\S]*rightAxisLabels/,
   "hourly price chart must keep price as background without a price axis",
 );
+
+const forecastState = {
+  schema: "ella_power_forecast.v1",
+  available: true,
+  series: { solar: { available: true, forecast_points: [{ timestamp: "2026-09-30T10:00:00Z", value_kw: 2 }] } },
+};
+const sameContextRefresh = mergePowerHistoryRefreshState({
+  response: { date: "2026-09-30" },
+  series: { solar: { points: [{ timestamp: "2026-09-30T09:00:00Z", value_kw: 1 }] } },
+  existingState: { power_forecast: forecastState, solar_evidence: { available: true } },
+  contextKey: "site-a:1:2026-09-30",
+  previousContextKey: "site-a:1:2026-09-30",
+});
+assert.equal(sameContextRefresh.power_forecast, forecastState, "history refresh must preserve forecast in the same context");
+const differentContextRefresh = mergePowerHistoryRefreshState({
+  response: { date: "2026-10-01" },
+  series: { solar: { points: [] } },
+  existingState: { power_forecast: forecastState },
+  contextKey: "site-a:1:2026-10-01",
+  previousContextKey: "site-a:1:2026-09-30",
+});
+assert.equal(differentContextRefresh.power_forecast.available, false, "site/date context change must not reuse forecast");
+assert.match(panelSource, /mergePowerHistoryRefreshState\(/, "history refresh must assemble actual and forecast state without replacement");
 
 console.log("price comparison behavior PASS");

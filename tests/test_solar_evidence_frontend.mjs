@@ -19,7 +19,7 @@ assert.match(websocket, /REPLAY_BENCHMARK_EVIDENCE_COMMAND/);
 assert.match(websocket, /websocket_replay_benchmark_evidence/);
 assert.doesNotMatch(panel, /data-solar-evidence-debug/);
 assert.match(panel, /solar_evidence: powerHistory\.solar_evidence/);
-assert.match(panel, /solar_evidence: this\._powerHistory\?\.solar_evidence \|\| \{ available: false, days: \[\] \}/);
+assert.match(panel, /solar_evidence: existingState\.solar_evidence \|\| \{ available: false, days: \[\] \}/);
 assert.match(panel, /Open-Meteo/);
 assert.match(panel, /applySolarEvidenceVisibility\(solarEvidenceCard, this\._debugEnabled, this\._powerHistory\?\.solar_evidence\?\.available\)/);
 assert.match(websocket, /SOLAR_EVIDENCE_STATE_COMMAND/);
@@ -32,7 +32,7 @@ assert.match(panel, /export function solarEvidenceStatus\(evidenceDays, date, to
 assert.match(panel, /evidenceDay\.audit_complete === true\) return "✅"/);
 assert.match(panel, /return date === today \? "–" : "❌"/);
 assert.match(panel, /solarEvidenceStatus\(evidenceDays, day\.date, today\)/);
-assert.match(panel, /solar_evidence: this\._powerHistory\?\.solar_evidence/);
+assert.match(panel, /solar_evidence: (?:existingState|this\._powerHistory)\.solar_evidence/);
 assert.match(panel, /solar-evidence-list \{[^}]*max-height: 58vh;[^}]*overflow-x: hidden;[^}]*overflow-y: auto;/);
 assert.match(panel, /data-card-source="solar-evidence"[^>]*>Visa data<\/button>/);
 assert.match(panel, /data-card-source="benchmark-evidence"[^>]*>Visa data<\/button>/);

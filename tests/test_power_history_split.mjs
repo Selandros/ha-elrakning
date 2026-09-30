@@ -31,7 +31,7 @@ assert.ok(
 );
 assert.match(historyLoader, /cycle\.enrichment = this\.loadPowerHistoryEnrichment\(/);
 assert.ok(
-  historyLoader.indexOf("this._powerHistoryContextKey =")
+  historyLoader.indexOf("this._powerHistoryContextKey = nextContextKey")
     < historyLoader.indexOf("cycle.enrichment = this.loadPowerHistoryEnrichment("),
   "history state must be established before enrichment starts",
 );

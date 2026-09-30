@@ -575,6 +575,25 @@ export function selectPowerForecastPoints(source, {
   return selectForecastPointsFromFrames(frames, { siteId, selectedDate, now, includeElapsed });
 }
 
+export function mergePowerHistoryRefreshState({ response, series, existingState = {}, contextKey, previousContextKey } = {}) {
+  const unavailableForecast = { schema: "ella_power_forecast.v1", available: false, series: {} };
+  const sameContext = contextKey && contextKey === previousContextKey;
+  return {
+    date: response?.date || null,
+    series: series || {},
+    power_forecast: sameContext ? (existingState.power_forecast || unavailableForecast) : unavailableForecast,
+    solar_analysis: { available: false, days: [] },
+    solar_forecast: { available: false },
+    solar_forecast_baselines: {},
+    solar_shadow: { available: false, days: [] },
+    solar_evidence: existingState.solar_evidence || { available: false, days: [] },
+    solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
+    solar_sun: { available: false },
+    solar_pvgis: { available: false, source: "jrc_pvgis" },
+    solar_open_meteo: { available: false, source: "open_meteo" },
+  };
+}
+
 export const POWER_DISPLAY_THRESHOLD_KW = 0.1;
 
 export function isVisiblePowerValue(value) {
@@ -9052,22 +9071,16 @@ class ElrakningPanel {
         for (const [timestamp, point] of points) merged.set(timestamp, point);
         series[key] = { ...(series[key] || {}), points: [...merged.values()].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp)) };
       }
-      this._powerHistory = {
-        date: response?.date || requestedDate || null,
+      const nextContextKey = `${siteId}:${siteContextGeneration}:${requestedDate || response?.date || ""}`;
+      this._powerHistory = mergePowerHistoryRefreshState({
+        response: { ...response, date: response?.date || requestedDate || null },
         series,
-        power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} },
-        solar_analysis: { available: false, days: [] },
-        solar_forecast: { available: false },
-        solar_forecast_baselines: {},
-        solar_shadow: { available: false, days: [] },
-        solar_evidence: this._powerHistory?.solar_evidence || { available: false, days: [] },
-        solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] },
-        solar_sun: { available: false },
-        solar_pvgis: { available: false, source: "jrc_pvgis" },
-        solar_open_meteo: { available: false, source: "open_meteo" },
-      };
+        existingState: this._powerHistory,
+        contextKey: nextContextKey,
+        previousContextKey: this._powerHistoryContextKey,
+      });
       this._loadForecast = { available: false, reason: "enrichment_pending", frames: [] };
-      this._powerHistoryContextKey = `${siteId}:${siteContextGeneration}:${requestedDate || response?.date || ""}`;
+      this._powerHistoryContextKey = nextContextKey;
       this._refreshDailyEnergyStateFromAcceptedHistory();
       stage = "enrichment_start";
       this._recordPowerFlowDiagnostic("enrichment_request_start", { requested_date: requestedDate, active_enrichment_jobs: 1 });
