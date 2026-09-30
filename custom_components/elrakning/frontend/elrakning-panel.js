@@ -8231,6 +8231,7 @@ class ElrakningPanel {
   _calculateMeterEnergy(field) {
     const points = this._meterPowerHistory?.points;
     if (!Array.isArray(points) || points.length < 2) return null;
+    const now = new Date();
     const window = stockholmDayWindow(now);
     return integrateMeterHistoryKwh(points, field, window.start, window.end, now);
   }
