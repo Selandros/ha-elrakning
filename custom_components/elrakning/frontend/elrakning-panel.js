@@ -10550,7 +10550,7 @@ class ElrakningPanel {
 
   _renderCostChart(chart, series) {
     if (!chart) return;
-    if (!series?.days?.length || !series.days.some((day) => day.available)) {
+    if (!series?.days?.length) {
       chart.innerHTML = '<div class="cost-chart-unavailable">Ingen daglig serie tillgänglig för vald månad</div>';
       return;
     }

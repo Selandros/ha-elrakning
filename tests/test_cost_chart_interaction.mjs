@@ -243,11 +243,15 @@ assert.equal(dailyBars.days[3].total_variable_cost_sek, 6);
 assert.equal(dailyBars.days[4].status, "unavailable");
 assert.equal(dailyBars.days[0].average_price_ore_per_kwh, 150);
 assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.label), ["Import", "Elhandel", "Elnät rörlig", "Total rörlig kostnad", "Snittpris", "Status"]);
+const unavailableMonth = buildDailyCostSeries([], "2026-08");
+assert.equal(unavailableMonth.days.length, 31);
+assert.equal(unavailableMonth.days.every((day) => day.status === "unavailable" && !day.available), true);
 
 const source = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series)"), source.indexOf("  _bindCostCard()"));
 
 assert.match(costRender, /buildDailyCostTooltipFields\(point\)/);
+assert.doesNotMatch(costRender, /!series\.days\.some\(\(day\) => day\.available\)/);
 assert.match(costRender, /cost-chart-bar-forecast/);
 assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
 assert.match(costRender, /buildCostChartGeometry\(width, plot, series\.days_in_month\)/);
