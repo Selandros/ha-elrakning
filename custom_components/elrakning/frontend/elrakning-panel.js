@@ -12541,7 +12541,7 @@ class ElrakningPanel {
         siteId: activeSiteId,
         selectedDate: dayStart,
         now,
-        includeElapsed: key === "solar",
+        includeElapsed: false,
       })]),
     );
     if (loadForecastPoints.length) powerForecastPoints.consumption = loadForecastPoints;

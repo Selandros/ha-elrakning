@@ -78,4 +78,20 @@ assert.match(
   "tooltip must use the same comparison calculation",
 );
 
+assert.match(
+  hourlyRender,
+  /selectPowerForecastPoints\(source,\s*\{[\s\S]*?\}\)/,
+  "forecast power must remain direct value_kw points",
+);
+assert.match(
+  hourlyRender,
+  /includeElapsed: false/,
+  "presentation must split today's forecast after now while backend keeps full-day payload",
+);
+assert.doesNotMatch(
+  hourlyRender,
+  /dualAxis:\s*true[\s\S]*rightAxisLabels/,
+  "hourly price chart must keep price as background without a price axis",
+);
+
 console.log("price comparison behavior PASS");
