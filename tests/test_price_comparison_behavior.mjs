@@ -88,6 +88,16 @@ assert.match(
   /includeElapsed: false/,
   "presentation must split today's forecast after now while backend keeps full-day payload",
 );
+assert.match(
+  hourlyRender,
+  /const actualDayEnd = localDateKey\(dayStart\) === localDateKey\(now\)[\s\S]*?now\.getTime\(\)[\s\S]*?dayEnd\.getTime\(\)/,
+  "actual power must be bounded by now on the current local day",
+);
+assert.match(
+  hourlyRender,
+  /timestamp <= actualDayEnd/,
+  "actual history must not render future points",
+);
 assert.doesNotMatch(
   hourlyRender,
   /dualAxis:\s*true[\s\S]*rightAxisLabels/,

@@ -8231,7 +8231,6 @@ class ElrakningPanel {
   _calculateMeterEnergy(field) {
     const points = this._meterPowerHistory?.points;
     if (!Array.isArray(points) || points.length < 2) return null;
-    const now = new Date();
     const window = stockholmDayWindow(now);
     return integrateMeterHistoryKwh(points, field, window.start, window.end, now);
   }
@@ -12423,6 +12422,9 @@ class ElrakningPanel {
       dayDuration,
     };
     const now = new Date();
+    const actualDayEnd = localDateKey(dayStart) === localDateKey(now)
+      ? now.getTime()
+      : dayEnd.getTime();
     const currentPeriod = periods.find((period) => {
       const start = new Date(period.start);
       const end = new Date(period.end);
@@ -12434,11 +12436,11 @@ class ElrakningPanel {
       ? this._meterPowerHistory.points.filter((point) => {
         const timestamp = new Date(point.timestamp).getTime();
         return !forecastPointIsMarked(point)
-          && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+          && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp <= actualDayEnd;
       })
       : [];
     const historicalMeterPoints = energyHistoryToMeterStepPoints(energyHistory).filter((point) => (
-      point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+      point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
     ));
     const useHistoricalMeter = rawMeterPoints.length === 0 && historicalMeterPoints.length > 0;
     const meterPoints = useHistoricalMeter ? historicalMeterPoints : rawMeterPoints;
@@ -12458,7 +12460,7 @@ class ElrakningPanel {
       valueKeys: ["import_kw", "export_kw"],
     });
     const historicalMeterDisplayPoints = energyHistoryToMeterCurvePoints(energyHistory).filter((point) => (
-      point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+      point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
     ));
     const meterDisplayPoints = useHistoricalMeter
       ? this.prepareMeterDisplayPoints(decimateDisplayPoints(historicalMeterDisplayPoints, {
@@ -12474,11 +12476,11 @@ class ElrakningPanel {
         ? this._powerHistory.series[key].points.filter((point) => {
           const timestamp = new Date(point.timestamp).getTime();
           return !forecastPointIsMarked(point)
-            && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
+            && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp <= actualDayEnd;
         })
         : [];
       const historicalPoints = energyIntervalsToStepPoints(energyHistory?.series?.[key]).filter((point) => (
-        point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+        point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
       ));
       const useHistoricalPower = rawPoints.length === 0 && historicalPoints.length > 0;
       const renderRawPoints = decimateDisplayPoints(rawPoints, {
@@ -12489,7 +12491,7 @@ class ElrakningPanel {
         ? historicalPoints
         : this.buildCanonicalPowerPoints(renderRawPoints, dayStart, dayEnd);
       const historicalPowerDisplayPoints = energyIntervalsToCurvePoints(energyHistory?.series?.[key]).filter((point) => (
-        point.timestamp >= dayStart.getTime() && point.timestamp < dayEnd.getTime()
+        point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
       ));
       const displaySource = useHistoricalPower
         ? decimateDisplayPoints(historicalPowerDisplayPoints, {
