@@ -818,9 +818,23 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     def _queue_replay_diagnostic(level, event, payload):
         """Queue one bounded diagnostic without blocking an event callback."""
-        create_task = getattr(hass, "async_create_task", None) or getattr(hass, "create_task", None)
-        if callable(create_task):
-            create_task(_record_replay_diagnostic(level, event, payload))
+        def create_on_loop():
+            coroutine = _record_replay_diagnostic(level, event, payload)
+            create_task = getattr(hass, "async_create_background_task", None)
+            if callable(create_task):
+                create_task(coroutine, name="elrakning_replay_trigger_diagnostic")
+            else:
+                hass.async_create_task(coroutine)
+
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        ha_loop = getattr(hass, "loop", None) or running_loop
+        if ha_loop is not None and running_loop is not ha_loop:
+            ha_loop.call_soon_threadsafe(create_on_loop)
+        else:
+            create_on_loop()
 
     def _schedule_pending_replay():
         nonlocal replay_active_task, replay_pending_all
