@@ -2,8 +2,10 @@
 
 import asyncio
 import concurrent.futures
+import inspect
 import json
 import threading
+import time
 from functools import partial
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -739,28 +741,69 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "holdouts": result.get("holdouts"),
                 })
 
+    async def _record_replay_diagnostic(level, event, payload):
+        """Record one bounded replay lifecycle event when diagnostics are available."""
+        diagnostic = getattr(manager, "async_diagnostic", None)
+        if not callable(diagnostic):
+            return
+        result = diagnostic(level, "replay", event, payload)
+        if inspect.isawaitable(result):
+            await result
+
     async def _run_replay_artifact_background(source, event_site_id=None):
         """Run replay work off the startup task barrier and consume failures."""
-        status = {"source": source, "outcome": "running"}
+        started_at = dt_util.now().astimezone(timezone.utc)
+        site_ids = _replay_site_ids(event_site_id)
+        status = {
+            "source": source,
+            "outcome": "running",
+            "started_at": started_at.isoformat(),
+            "site_ids": site_ids,
+        }
         frontend_data["replay_artifact_task_status"] = status
+        await _record_replay_diagnostic(
+            "INFO",
+            "replay_task_started",
+            json.dumps({"source": source, "started_at": started_at.isoformat(), "site_ids": site_ids}, separators=(",", ":")),
+        )
+        started_monotonic = time.monotonic()
         try:
             result = await _generate_replay_artifact(event_site_id=event_site_id)
         except asyncio.CancelledError:
+            finished_at = dt_util.now().astimezone(timezone.utc)
             frontend_data["replay_artifact_task_status"] = {
-                **status, "outcome": "cancelled"
+                **status, "outcome": "cancelled", "finished_at": finished_at.isoformat(),
             }
+            await _record_replay_diagnostic(
+                "INFO",
+                "replay_task_cancelled",
+                json.dumps({"source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids}, separators=(",", ":")),
+            )
             raise
         except Exception as err:  # Background work must not poison startup.
+            finished_at = dt_util.now().astimezone(timezone.utc)
             frontend_data["replay_artifact_task_status"] = {
                 **status,
                 "outcome": "error",
+                "finished_at": finished_at.isoformat(),
                 "error_type": type(err).__name__,
                 "error": str(err)[:200],
             }
+            await _record_replay_diagnostic(
+                "ERROR",
+                "replay_task_failed",
+                json.dumps({"source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids, "error_type": type(err).__name__, "error": str(err)[:200]}, separators=(",", ":")),
+            )
             return None
+        finished_at = dt_util.now().astimezone(timezone.utc)
         frontend_data["replay_artifact_task_status"] = {
-            **status, "outcome": "success"
+            **status, "outcome": "success", "finished_at": finished_at.isoformat(),
         }
+        await _record_replay_diagnostic(
+            "INFO",
+            "replay_task_completed",
+            json.dumps({"source": source, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_ms": round((time.monotonic() - started_monotonic) * 1000, 3), "site_ids": site_ids}, separators=(",", ":")),
+        )
         return result
 
     replay_refresh_task = None
@@ -810,6 +853,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         lambda: _run_replay_artifact_background("startup"),
         "elrakning_replay_artifact_startup",
+    )
+    await _record_replay_diagnostic(
+        "INFO",
+        "replay_scheduler_registered",
+        json.dumps({"source": "startup", "scheduled_at": dt_util.now().astimezone(timezone.utc).isoformat()}, separators=(",", ":")),
     )
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     # Run one deterministic startup capture after setup returns so bootstrap timeouts

@@ -213,6 +213,11 @@ def test_replay_artifact_generation_is_background_work_outside_startup_barrier()
     assert '"elrakning_replay_artifact_event"' in source
     assert "_run_replay_artifact_background" in source
     assert "Background work must not poison startup" in source
+    assert "replay_scheduler_registered" in source
+    assert "replay_task_started" in source
+    assert "replay_task_completed" in source
+    assert "replay_task_cancelled" in source
+    assert "replay_task_failed" in source
     assert 'frontend_data["replay_artifact_startup_task"] = hass.async_create_task' not in source
     assert "replay_refresh_task = hass.create_task(_generate_replay_artifact" not in source
 
