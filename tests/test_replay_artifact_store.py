@@ -8,6 +8,7 @@ install_elrakning_package_stub()
 from custom_components.elrakning.replay_artifact_store import (
     MAX_ARTIFACTS_PER_SITE,
     ReplayArtifactStore,
+    build_runtime_holdout_matrix,
     build_artifact,
     normalize_artifact,
     validate_holdout_matrix,
@@ -49,6 +50,18 @@ def test_holdout_contract_requires_all_kinds_and_rejects_contaminated_cases():
     result = validate_holdout_matrix(cases)
     assert result["qualified"] is False
     assert "holdout_season_unqualified" in result["reasons"]
+
+
+def test_runtime_holdout_matrix_reports_real_evidence_without_fixture_claims():
+    descriptors = [
+        {"descriptor_id": "a", "site_id": SITE, "local_month": 9, "qualified": True, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "96/96", "publication_cutoff_verified": True},
+        {"descriptor_id": "b", "site_id": SITE, "local_month": 10, "qualified": True, "mature": True, "source_generations": ["gen-b"], "dst_transition": False, "actual_coverage": "96/96", "publication_cutoff_verified": True},
+    ]
+    result = build_runtime_holdout_matrix(descriptors)
+    assert result["candidate_count"] == 2
+    assert result["qualified_count"] == 2
+    assert all(item["status"] != "qualified" for item in result["items"] if item["kind"] in {"site", "dst", "gap"})
+    assert all("deterministic_fixture" not in str(item) for item in result["items"])
 
 
 def test_store_is_site_scoped_bounded_and_schema_fail_closed():

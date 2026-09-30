@@ -1,10 +1,28 @@
 # Elräkning – Current State
 
-Updated: 2026-09-27
+Updated: 2026-09-30
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
+
+## 0.0.892 Step 9 runtime holdout pipeline checkpoint
+
+- IMPLEMENTED/TESTED: Runtime replay now enumerates bounded candidate windows
+  from exact-site canonical immutable frames and actual history. Descriptors
+  retain decision/horizon identity, source generations, frame identities,
+  maturity, actual coverage, causal status and publication-cutoff evidence.
+- IMPLEMENTED/TESTED: Holdout categories report `qualified`, `pending`,
+  `unavailable` or `disqualified` with explicit reasons and evidence
+  references. Synthetic `deterministic_fixture` records are no longer used by
+  the runtime runner as holdout evidence.
+- IMPLEMENTED/TESTED: Qualified runtime runs include the canonical optimizer
+  adapter when its inputs are available, plus evaluation-only actual,
+  hindsight and regret evidence. Missing metrics remain unavailable.
+- OPEN RUNTIME GATE: deployment must still produce real candidate windows and
+  persistent artifact readback. Step 9 is not complete until the required
+  real holdout categories and duplicate deterministic runtime readback are
+  verified on Home Assistant.
 
 ## Canonical roadmap status
 

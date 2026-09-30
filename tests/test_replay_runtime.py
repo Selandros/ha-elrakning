@@ -42,6 +42,8 @@ def test_internal_runner_builds_persists_and_reads_back_exact_site(monkeypatch):
         "baselines": {"no_battery": {"points": [{"valid_at": "x"}]}},
     }
     monkeypatch.setattr(replay_runtime, "_build_run", lambda *_args: (run, {"source": "fixture"}))
+    holdouts = [{"kind": kind, "status": "qualified", "reason": "verified_test_window", "evidence": [{"descriptor_id": f"descriptor-{kind}", "site_id": "site-a"}]} for kind in ("season", "site", "dst", "gap", "source_generation_change", "publication_cutoff")]
+    monkeypatch.setattr(replay_runtime, "_benchmark_readiness", lambda *_args: {"holdout_matrix": {"qualified": True, "items": holdouts, "candidate_count": 6, "mature_count": 6, "qualified_count": 6}})
     store = ReplayArtifactStore(object())
     store.store = _MemoryStore()
 

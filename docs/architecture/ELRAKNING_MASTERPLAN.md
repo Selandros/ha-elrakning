@@ -219,15 +219,15 @@ cutoffs are covered; contaminated or incomplete runs are non-qualifying.
 
 Status: ACTIVE. The causal replay foundation, explicit fixed/cheapest/threshold
 baselines, the read-only Step 8 optimizer adapter and evaluation-only hindsight
-oracle contract are implemented in `replay_benchmark.py` and
-covered by deterministic unit tests. The full benchmark suite is not complete;
-the historical Vikarbodarna foundation replay is runtime-verified, while the
-The persistent artifact/store contract, bounded retention, schema fail-closed
-handling and holdout matrix contract are now implemented and tested. An
-internal canonical-storage runner now selects a mature causal 96-slot window,
-resolves exact-site ESS facts and timestamped initial state, builds an artifact
-through the existing Store API and emits bounded readback evidence; live
-deployment verification remains the closure gate.
+oracle contract are implemented in `replay_benchmark.py` and covered by
+deterministic unit tests. The persistent artifact/store contract, bounded
+retention, schema fail-closed handling and runtime holdout descriptors are
+implemented and tested. The canonical-storage runner enumerates real causal
+candidate windows, records explicit holdout status/reason/evidence references,
+and includes optimizer/evaluation scorecard data when canonical inputs
+qualify. It never labels synthetic fixture cases as runtime holdouts. Live
+deployment verification remains the closure gate; missing real holdout
+categories remain pending/unavailable rather than qualified.
 Evaluation scorecards now expose actual-outcome peak/tariff/throughput/EFC
 metrics with explicit unavailable degradation provenance, and plan evaluation
 is separate from causal decisions. No execution or actuator path is included.

@@ -87,10 +87,45 @@ def validate_holdout_matrix(cases: Any) -> dict[str, Any]:
             reasons.append("holdout_kind_missing")
             continue
         seen.add(case["kind"])
+        if case.get("status") is not None:
+            if case.get("status") != "qualified":
+                reasons.append(f"holdout_{case['kind']}_unqualified")
+            continue
         if not case.get("run_fingerprint") or case.get("contaminated") or case.get("incomplete"):
             reasons.append(f"holdout_{case['kind']}_unqualified")
     reasons.extend(f"holdout_{kind}_missing" for kind in sorted(REQUIRED_HOLDOUTS - seen))
     return {"qualified": not reasons, "reasons": sorted(set(reasons)), "kinds": sorted(seen)}
+
+
+def build_runtime_holdout_matrix(descriptors: Any) -> dict[str, Any]:
+    """Classify only real canonical candidate windows; never synthesize holdouts."""
+    items = [item for item in descriptors if isinstance(item, dict)] if isinstance(descriptors, list) else []
+    qualified = [item for item in items if item.get("qualified") is True]
+    result = []
+
+    def record(kind: str, status: str, reason: str, evidence: list[dict[str, Any]]) -> None:
+        result.append({"kind": kind, "status": status, "reason": reason, "evidence": deepcopy(evidence)})
+
+    months = {str(item.get("local_month")) for item in qualified if item.get("local_month") is not None}
+    record("season", "qualified" if len(months) >= 2 else "pending", "distinct_mature_periods" if len(months) >= 2 else "no_distinct_mature_periods", [item for item in qualified if item.get("local_month") in months])
+
+    sites = {str(item.get("site_id")) for item in qualified if item.get("site_id")}
+    record("site", "qualified" if len(sites) >= 2 else "pending", "multiple_sites" if len(sites) >= 2 else "single_site_runtime_scope", qualified)
+
+    dst = [item for item in qualified if item.get("dst_transition") is True]
+    record("dst", "qualified" if dst else "pending", "dst_transition_window" if dst else "no_real_dst_window", dst)
+
+    gaps = [item for item in items if item.get("actual_coverage") not in (None, "96/96")]
+    record("gap", "disqualified" if gaps else "pending", "actual_coverage_gap" if gaps else "no_real_gap_window", gaps)
+
+    generations = {str(generation) for item in qualified for generation in item.get("source_generations", []) if generation}
+    generation_items = [item for item in qualified if item.get("source_generations")]
+    record("source_generation_change", "qualified" if len(generations) >= 2 and len(generation_items) >= 2 else "pending", "multiple_source_generations" if len(generations) >= 2 and len(generation_items) >= 2 else "no_real_source_generation_boundary", generation_items)
+
+    cutoff = [item for item in qualified if item.get("publication_cutoff_verified") is True]
+    record("publication_cutoff", "qualified" if cutoff else "pending", "causal_publication_cutoff" if cutoff else "no_real_publication_cutoff_evidence", cutoff)
+    status = {item["kind"]: item for item in result}
+    return {"qualified": all(item["status"] == "qualified" for item in result), "items": result, "kinds": sorted(status), "candidate_count": len(items), "mature_count": len([item for item in items if item.get("mature") is True]), "qualified_count": len(qualified)}
 
 
 class ReplayArtifactStore:

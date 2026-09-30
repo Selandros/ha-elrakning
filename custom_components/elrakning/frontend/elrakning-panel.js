@@ -8929,7 +8929,8 @@ class ElrakningPanel {
     if (sourceButton) sourceButton.hidden = !this._debugEnabled;
     if (!evidence.available) return;
     const horizon = evidence.horizon || {};
-    summary.textContent = `96 slots: ${horizon.actual_coverage || "0/96"} actual · ${horizon.available_slots || 0}/${horizon.required_slots || 96} causal slots`;
+    const matrix = evidence.holdout_matrix || {};
+    summary.textContent = `96 slots: ${horizon.actual_coverage || "0/96"} actual · ${horizon.available_slots || 0}/${horizon.required_slots || 96} causal slots · ${matrix.qualified_count || 0}/${matrix.candidate_count || 0} qualified windows`;
     status.textContent = evidence.blocker ? `BLOCKER: ${evidence.blocker}` : (evidence.status || "UNKNOWN");
     const rows = [
       ["Site", evidence.site_id || "—"],
@@ -8947,8 +8948,11 @@ class ElrakningPanel {
       ["Provenance", evidence.frame_provenance ? Object.keys(evidence.frame_provenance).map((key) => `${key}:${Object.keys(evidence.frame_provenance[key] || {}).join("/") || "recorded"}`).join(", ") || "—" : "—"],
       ["Qualified", evidence.qualified === true ? "yes" : "no"],
       ["Fingerprint", evidence.fingerprint || "—"],
-      ["Artifact readback", evidence.artifact?.readback === true ? (evidence.artifact.artifact_id || "verified") : "—"],
-      ["Holdouts", evidence.holdouts?.qualified === true ? "qualified" : (evidence.holdouts?.reasons || []).join(", ") || "—"],
+      ["Artifact", evidence.artifact?.artifact_id || "—"],
+      ["Holdouts", Array.isArray(matrix.items) && matrix.items.length
+        ? matrix.items.map((item) => `${item.kind}:${item.status}${item.reason ? ` (${item.reason})` : ""}`).join(" · ")
+        : "—"],
+      ["Persistent readback", evidence.artifact?.readback === true ? "verified" : "pending"],
     ];
     list.replaceChildren(...rows.map(([label, value]) => {
       const row = document.createElement("div");

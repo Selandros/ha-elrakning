@@ -5,13 +5,24 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
+import hashlib
 import json
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from .replay_artifact_store import build_artifact, validate_holdout_matrix
+from .replay_artifact_store import build_artifact, build_runtime_holdout_matrix
 from .economic_optimizer import build_eon_economics
 from .ella_ess_twin import resolve_shared_ess_resource
-from .replay_benchmark import ESSReplayLimits, NoBatteryBaseline, SelfConsumptionBaseline, build_replay_run
+from .replay_benchmark import (
+    ESSReplayLimits,
+    EconomicOptimizerBaseline,
+    NoBatteryBaseline,
+    SelfConsumptionBaseline,
+    build_actual_evaluation_scorecard,
+    build_hindsight_oracle,
+    build_replay_run,
+    compute_regret,
+)
 
 
 UTC = timezone.utc
@@ -214,6 +225,89 @@ def _input_rows(storage: Any, site_id: str, decision_us: int, solar: bool) -> li
     return rows
 
 
+def _runtime_holdout_descriptors(
+    storage: Any,
+    facts: list[dict[str, Any]],
+    site_id: str,
+    now: datetime,
+    economics_resolver=None,
+    ess_context: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Enumerate bounded real candidate windows from canonical immutable storage."""
+    descriptors = []
+    try:
+        zone = ZoneInfo("Europe/Stockholm")
+    except Exception:
+        zone = timezone.utc
+    now_us = int(now.timestamp() * 1_000_000)
+    for load_row in _frame_rows(storage, site_id, "load.forecast", now_us):
+        decision_at = datetime.fromtimestamp(load_row[12] / 1_000_000, tz=UTC)
+        load_points = _frame_points(storage, load_row[0])
+        future_load = [point for point in load_points if point["valid_at"] > decision_at]
+        expected_times = [point["valid_at"] for point in future_load[:HORIZON_SLOTS]]
+        economics = economics_resolver(decision_at) if economics_resolver else None
+        solar_window = _resolve_causal_input_window(storage, _input_rows(storage, site_id, load_row[12], True), expected_times, solar=True, decision_us=load_row[12]) if expected_times else {"available": False, "reason": "missing_causal_slot"}
+        price_window = _resolve_causal_input_window(storage, _input_rows(storage, site_id, load_row[12], False), expected_times, solar=False, decision_us=load_row[12]) if expected_times else {"available": False, "reason": "missing_causal_slot"}
+        horizon_end = expected_times[-1] + timedelta(minutes=15) if len(expected_times) == HORIZON_SLOTS else None
+        history = storage.read_site_energy_history(site_id, decision_at - timedelta(days=2), horizon_end or now) if hasattr(storage, "read_site_energy_history") else []
+        slot_keys = {slot.isoformat() for slot in expected_times}
+        actual_keys = {
+            row.get("interval_start").astimezone(UTC).isoformat()
+            for row in history
+            if isinstance(row, dict)
+            and row.get("site_id") == site_id
+            and row.get("logical_role") in {"grid.power/import", "battery.power", "battery.soc"}
+            and isinstance(row.get("interval_start"), datetime)
+            and row["interval_start"].astimezone(UTC).isoformat() in slot_keys
+        }
+        actual_coverage = f"{min(len(actual_keys), HORIZON_SLOTS)}/{HORIZON_SLOTS}"
+        source_generations = {str(load_row[5])} if load_row[5] else set()
+        source_generations.update(str(row[5]) for row in solar_window.get("frames", []) if row[5])
+        source_generations.update(str(row[5]) for row in price_window.get("frames", []) if row[5])
+        source_generations.update(str(row.get("source_generation_id")) for row in history if isinstance(row, dict) and row.get("source_generation_id"))
+        ess, ess_status = _ess_inputs(facts, history, site_id, decision_at, {**(ess_context or {}), "storage": storage})
+        future_price = _input_rows(storage, site_id, now_us, False)
+        future_solar = _input_rows(storage, site_id, now_us, True)
+        publication_cutoff_verified = any(row[12] > load_row[12] for row in future_price + future_solar)
+        causal = bool(isinstance(economics, dict) and _economics_is_causal(economics, decision_at))
+        mature = bool(horizon_end and horizon_end <= now)
+        qualified = bool(
+            len(expected_times) == HORIZON_SLOTS
+            and solar_window.get("available")
+            and price_window.get("available")
+            and causal
+            and mature
+            and actual_coverage == "96/96"
+            and ess is not None
+            and load_row[16] in {"good", "valid", "complete"}
+        )
+        descriptor = {
+            "site_id": site_id,
+            "decision_at": decision_at.isoformat(),
+            "horizon_start": expected_times[0].isoformat() if expected_times else None,
+            "horizon_end": horizon_end.isoformat() if horizon_end else None,
+            "load_frame_id": load_row[0],
+            "load_frame_known_at": _iso_us(load_row[12]),
+            "load_quality": load_row[16],
+            "solar_frame_ids": list(solar_window.get("frame_ids", [])),
+            "price_frame_ids": list(price_window.get("frame_ids", [])),
+            "source_generations": sorted(source_generations),
+            "actual_generation_ids": sorted({str(row.get("source_generation_id")) for row in history if isinstance(row, dict) and row.get("source_generation_id")}),
+            "mature": mature,
+            "actual_coverage": actual_coverage,
+            "causal": causal,
+            "causal_reasons": [] if causal else ["economics_not_causal"],
+            "ess": ess_status,
+            "publication_cutoff_verified": publication_cutoff_verified,
+            "local_month": decision_at.astimezone(zone).month,
+            "dst_transition": decision_at.astimezone(zone).utcoffset() != (horizon_end.astimezone(zone).utcoffset() if horizon_end else decision_at.astimezone(zone).utcoffset()),
+            "qualified": qualified,
+        }
+        descriptor["descriptor_id"] = hashlib.sha256(json.dumps(descriptor, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+        descriptors.append(descriptor)
+    return descriptors[:128]
+
+
 def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: datetime) -> datetime | None:
     """Read causal publication time separately; interval start is never a substitute."""
     start = row.get("interval_start")
@@ -384,9 +478,38 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
         frames = [_frame_dict(load_row, site_id)]
         frames.extend(_frame_dict(row, row[7]) for row in solar_window["frames"])
         frames.extend(_frame_dict(row, row[7]) for row in price_window["frames"])
-        run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=(NoBatteryBaseline(), SelfConsumptionBaseline()), timezone_name="Europe/Stockholm")
+        baselines = [NoBatteryBaseline(), SelfConsumptionBaseline()]
+        if ess is not None:
+            baselines.append(EconomicOptimizerBaseline(
+                site_id=site_id,
+                decision_at=decision_at,
+                economics=economics,
+                resource_id=ess_status.get("resource_id"),
+            ))
+        run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=baselines, timezone_name="Europe/Stockholm")
         if not run["qualification"].get("qualified"):
             continue
+        actual_scorecard = build_actual_evaluation_scorecard(site_id=site_id, slots=slots, actual_rows=actual_rows, ess=ess)
+        hindsight = build_hindsight_oracle(
+            site_id=site_id,
+            decision_at=decision_at,
+            slots=slots,
+            actual_rows=actual_rows,
+            economics=economics,
+            ess=ess,
+            resource_id=ess_status.get("resource_id"),
+        )
+        regrets = {}
+        if hindsight.get("available"):
+            for name, baseline in run.get("baselines", {}).items():
+                if baseline.get("available") and baseline.get("scorecard"):
+                    regrets[name] = compute_regret(baseline["scorecard"], hindsight["scorecard"], reference_kind="hindsight_oracle")
+        run["evaluation"] = {
+            "actual": actual_scorecard,
+            "hindsight_oracle": hindsight,
+            "regret": regrets,
+            "forecast_regret": {"available": False, "reason": "forecast_outcome_pairing_not_available"},
+        }
         run["runtime_ess_status"] = ess_status
         return run, {"selected_decision_at": decision_at.isoformat(), "frame_ids": [frame["frame_id"] for frame in frames], "actual_row_count": len(actual_rows), "ess": ess_status}
     return None, {"available": False, "reason": "no_mature_causal_96_slot_window"}
@@ -413,9 +536,17 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
         "ess": {"available": False, "reason": "not_evaluated"},
         "artifact": {"artifact_id": None, "readback": False},
         "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
+        "candidate_windows": [],
+        "holdout_matrix": {"qualified": False, "items": [], "candidate_count": 0, "mature_count": 0, "qualified_count": 0},
         "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
         "last_attempt": None,
     }
+    try:
+        descriptors = _runtime_holdout_descriptors(storage, facts, site_id, now, economics_resolver, ess_context)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        descriptors = []
+    evidence["candidate_windows"] = descriptors
+    evidence["holdout_matrix"] = build_runtime_holdout_matrix(descriptors)
     if not candidates:
         return evidence
     load_row = candidates[0]
@@ -548,13 +679,13 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
             await store.async_record_attempt(result)
             await store.async_record_evidence(site_id, result["evidence"])
         return result
-    holdouts = [{"kind": kind, "run_fingerprint": run["run_fingerprint"], "source": "deterministic_fixture", "contaminated": False, "incomplete": False} for kind in ("season", "site", "dst", "gap", "source_generation_change", "publication_cutoff")]
-    holdout_status = validate_holdout_matrix(holdouts)
-    artifact = build_artifact(run, dataset_identity={"source": "canonical_storage", "site_id": site_id, "evidence": evidence}, parameter_identity={"baselines": ["no_battery", "self_consumption_only"], "holdout_policy": "v1"}, holdouts=holdouts)
+    holdout_status = readiness.get("holdout_matrix") if isinstance(readiness.get("holdout_matrix"), dict) else {"qualified": False, "items": [], "reasons": ["holdout_matrix_missing"]}
+    holdouts = holdout_status.get("items") if isinstance(holdout_status.get("items"), list) else []
+    artifact = build_artifact(run, dataset_identity={"source": "canonical_storage", "site_id": site_id, "evidence": evidence}, parameter_identity={"baselines": sorted(run.get("baselines", {})), "holdout_policy": "v2_runtime_descriptors"}, holdouts=holdouts)
     store = hass.data.get("elrakning", {}).get("replay_artifact_store")
     accepted = bool(artifact and holdout_status["qualified"] and store and await store.async_append(artifact))
     readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
-    result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if accepted and readback is not None else "blocked", "blocker": None if accepted and readback is not None else "artifact_not_verified", "qualified": bool(run["qualification"].get("qualified")), "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint")}}
+    result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if accepted and readback is not None else "blocked", "blocker": None if accepted and readback is not None else ("holdout_matrix_unqualified" if not holdout_status.get("qualified") else "artifact_not_verified"), "qualified": bool(run["qualification"].get("qualified")), "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint"), "evaluation": run.get("evaluation")}}
     result["evidence"]["last_attempt"] = {"at": now.isoformat(), "accepted": accepted, "reason": None if accepted else "artifact_not_verified", "artifact_id": result["artifact_id"]}
     if store:
         await store.async_record_attempt(result)
