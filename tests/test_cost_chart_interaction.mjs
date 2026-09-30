@@ -316,6 +316,8 @@ assert.match(source, /\.cost-kpi-value-row \{[\s\S]*display: flex;[\s\S]*gap: 8p
 const costKpiComparisonCss = source.match(/\.cost-kpi-comparison \{[^}]*\}/)?.[0] || "";
 assert.match(costKpiComparisonCss, /font-size: 1\.2rem;[\s\S]*font-weight: 600;[\s\S]*padding: 0;/);
 assert.doesNotMatch(costKpiComparisonCss, /border: 1px solid/);
+assert.match(source, /\.cost-kpi-comparison\.up \{[^}]*font-size: 16px;/);
+assert.match(source, /\.cost-kpi-comparison\.unavailable \{[^}]*font-size: 16px;/);
 assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
 assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*valueRow\.className = "cost-kpi-value-row"[\s\S]*valueRow\.append\(output, bubble\)[\s\S]*item\.append\(name, valueRow\)/);
 assert.doesNotMatch(costKpiRender, /item\.append\(name, output, bubble\)/);

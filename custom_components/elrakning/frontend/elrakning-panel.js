@@ -4944,9 +4944,9 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
-        .cost-kpi-comparison.up { color: var(--error-color, var(--secondary-text-color)); }
+        .cost-kpi-comparison.up { color: var(--error-color, var(--secondary-text-color)); font-size: 16px; }
         .cost-kpi-comparison.down { color: var(--success-color, var(--secondary-text-color)); }
-        .cost-kpi-comparison.unavailable { color: var(--secondary-text-color); }
+        .cost-kpi-comparison.unavailable { color: var(--secondary-text-color); font-size: 16px; }
 
         .cost-chart {
           min-height: 144px;
