@@ -1604,6 +1604,15 @@ async def _async_power_forecast_state(
     target_date = requested_date or now.astimezone(ZoneInfo(timezone_name)).date()
     learning_store = hass.data.get(DOMAIN, {}).get("ella_learning_store")
     power_calibration = learning_store.persistent_power_calibration(str(site_id), now) if learning_store else {}
+    stage6_store = hass.data.get(DOMAIN, {}).get("ella_stage6_store")
+    solar_calibration = stage6_store.public_state(str(site_id)) if stage6_store else None
+    pvgis_manager = hass.data.get(DOMAIN, {}).get("solar_pvgis_manager")
+    pvgis_state = pvgis_manager.public_state(target_date) if pvgis_manager else None
+    solar_physical_reference = (
+        pvgis_state
+        if isinstance(pvgis_state, dict) and pvgis_state.get("site_id") == str(site_id)
+        else None
+    )
     cache_key = (
         str(site_id),
         target_date.isoformat(),
@@ -1612,6 +1621,8 @@ async def _async_power_forecast_state(
         str(binding_fingerprint or ""),
         tuple(sorted((key, str(value)) for key, value in solar_facts.items() if key != "baselines")),
         json.dumps(power_calibration, sort_keys=True, separators=(",", ":"), default=str),
+        json.dumps(solar_calibration, sort_keys=True, separators=(",", ":"), default=str),
+        json.dumps(solar_physical_reference, sort_keys=True, separators=(",", ":"), default=str),
     )
     counters = hass.data.setdefault(DOMAIN, {}).setdefault("power_flow_diagnostics", {"history_active": 0, "enrichment_active": 0, "forecast_active": 0})
     inflight = hass.data.setdefault(DOMAIN, {}).setdefault("power_forecast_inflight", {})
@@ -1648,6 +1659,8 @@ async def _async_power_forecast_state(
             solar_facts=solar_facts,
             target_date=target_date,
             power_calibration=power_calibration,
+            solar_physical_reference=solar_physical_reference,
+            solar_calibration=solar_calibration,
             request_id=request_id,
         ))
         inflight[inflight_key] = task
@@ -1686,6 +1699,8 @@ async def _build_power_forecast_state(
     solar_facts,
     target_date,
     power_calibration,
+    solar_physical_reference,
+    solar_calibration,
     request_id=None,
 ):
     """Build one immutable forecast result for a shared site/day computation."""
@@ -1737,6 +1752,8 @@ async def _build_power_forecast_state(
         open_meteo_frames=open_meteo_frames,
         open_meteo_targets=open_meteo_targets,
         learning_calibration=power_calibration,
+        solar_physical_reference=solar_physical_reference,
+        solar_calibration=solar_calibration,
     )
     await _power_flow_diagnostic(hass, "INFO", "power_forecast_build_complete", {
         "request_id": request_id, "date": target_date.isoformat(),

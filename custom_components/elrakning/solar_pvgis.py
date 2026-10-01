@@ -244,6 +244,8 @@ class SolarPvgisManager:
 
     def public_state(self, target_date: date | None = None) -> dict[str, Any]:
         result = dict(self._state)
+        if self._site_id is not None:
+            result["site_id"] = self._site_id
         if self._profile is not None:
             result["profile"] = profile_for_date(self._profile, target_date or dt_util.as_local(dt_util.now()).date())
         return result

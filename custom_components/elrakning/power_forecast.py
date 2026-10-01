@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from datetime import date, datetime, time, timedelta, timezone
 from statistics import median
 from typing import Any
@@ -141,6 +142,84 @@ def _with_slot_metadata(result: dict[str, Any]) -> dict[str, Any]:
         "first_valid_at": points[0].get("valid_at") if points else None,
         "last_valid_at": points[-1].get("valid_at") if points else None,
     }
+
+
+def _solar_layers(
+    solar: dict[str, Any],
+    site_id: str,
+    known_at: datetime,
+    physical_reference: dict[str, Any] | None,
+    calibration: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep physical, provider and site-calibrated solar layers explicit."""
+    baseline_points = deepcopy(solar.get("forecast_points") or [])
+    baseline = {
+        "schema": "solar.provider_baseline.v1",
+        "layer": "provider_baseline",
+        "site_id": site_id,
+        "source": solar.get("source"),
+        "method": solar.get("method"),
+        "known_at": solar.get("known_at") or known_at.isoformat(),
+        "target_date": solar.get("target_date"),
+        "available": bool(baseline_points),
+        "forecast_points": baseline_points,
+        "slot_count": len(baseline_points),
+    }
+    physical = physical_reference if isinstance(physical_reference, dict) else {}
+    physical_layer = {
+        "schema": "solar.physical_reference.v1",
+        "layer": "physical_reference",
+        "site_id": site_id,
+        "source": physical.get("source"),
+        "installation": deepcopy(physical.get("installation")),
+        "profile": deepcopy(physical.get("profile")),
+        "captured_at": physical.get("fetched_at") or physical.get("captured_at"),
+        "available": bool(physical.get("available") and physical.get("profile")),
+        "reason": None if physical.get("available") and physical.get("profile") else "physical_reference_unavailable",
+    }
+    calibrated = {
+        "schema": "solar.site_calibrated_forecast.v1",
+        "layer": "site_calibrated_forecast",
+        "site_id": site_id,
+        "known_at": solar.get("known_at") or known_at.isoformat(),
+        "target_date": solar.get("target_date"),
+        "available": False,
+        "forecast_points": [],
+        "slot_count": 0,
+        "calibration_version": None,
+        "reason": "site_calibration_unavailable",
+    }
+    resources = calibration.get("resources") if isinstance(calibration, dict) else None
+    calibrated_points = []
+    versions = set()
+    if isinstance(resources, dict) and baseline_points:
+        for point in baseline_points:
+            provenance = point.get("provenance") if isinstance(point.get("provenance"), dict) else {}
+            generation_ids = provenance.get("source_generation_ids") or [provenance.get("source_generation_id")]
+            matches = []
+            for generation_id in generation_ids:
+                resource = resources.get(generation_id) if isinstance(generation_id, str) else None
+                item = resource.get("calibration") if isinstance(resource, dict) else None
+                factor = _finite(item.get("factor")) if isinstance(item, dict) else None
+                if isinstance(item, dict) and item.get("quality") == "calibrated" and factor is not None:
+                    matches.append((factor, item.get("calibration_version")))
+            if len(matches) != 1:
+                calibrated_points = []
+                break
+            factor, version = matches[0]
+            versions.add(version)
+            calibrated_point = dict(point)
+            calibrated_point["value_w"] = max(0.0, float(point["value_w"]) * factor)
+            calibrated_point["value_kw"] = calibrated_point["value_w"] / 1000.0
+            calibrated_point["layer"] = "site_calibrated_forecast"
+            calibrated_point["provenance"] = {**provenance, "calibration_version": version, "calibration_factor": factor}
+            calibrated_points.append(calibrated_point)
+    if calibrated_points and len(versions) == 1:
+        calibrated.update({
+            "available": True, "forecast_points": calibrated_points, "slot_count": len(calibrated_points),
+            "calibration_version": next(iter(versions)), "reason": None,
+        })
+    return {"physical_reference": physical_layer, "provider_baseline": baseline, "site_calibrated_forecast": calibrated}
 
 
 def _battery_forecast(rows: list[dict[str, Any]], site_id: str, zone: ZoneInfo, slots: list[tuple[datetime, datetime]], load: dict[str, dict[str, Any]], solar: dict[str, dict[str, Any]], known_at: datetime, active_generation_ids: set[str] | None = None, *, active_solar_generation_ids: set[str] | None = None, use_ratio_projection: bool = False, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -444,12 +523,13 @@ def _load_points(load_forecast: dict[str, Any], site_id: str, known_at: datetime
     return result
 
 
-def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, active_solar_generation_ids: set[str] | None = None, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None, learning_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_power_forecast(site_id: str, timezone_name: str, rows: list[dict[str, Any]], load_forecast: dict[str, Any], solar_facts: dict[str, Any], solar_binding: dict[str, Any] | None, known_at: datetime, active_battery_generation_ids: set[str] | None = None, *, active_solar_generation_ids: set[str] | None = None, target_date: date | None = None, open_meteo_frames: list[dict[str, Any]] | None = None, open_meteo_targets: list[dict[str, Any]] | None = None, learning_calibration: dict[str, Any] | None = None, solar_physical_reference: dict[str, Any] | None = None, solar_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build read-only forecast flows without changing execution or policy gates."""
     zone = ZoneInfo(timezone_name)
     local_day = target_date or known_at.astimezone(zone).date()
     slots = _local_slots(local_day, zone)
     solar = _solar_forecast(site_id, zone, solar_facts, solar_binding, slots, known_at, target_date=local_day, open_meteo_frames=open_meteo_frames, open_meteo_targets=open_meteo_targets)
+    solar["layers"] = _solar_layers(solar, site_id, known_at, solar_physical_reference, solar_calibration)
     load = _load_points(load_forecast, site_id, known_at, horizon_start=slots[0][0], horizon_end=slots[-1][1])
     solar_by_slot = {point["valid_at"]: point for point in solar["forecast_points"]}
     battery = _battery_forecast(

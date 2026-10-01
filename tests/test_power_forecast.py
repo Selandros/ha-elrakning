@@ -8,7 +8,7 @@ from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install
 install_homeassistant_stubs()
 install_elrakning_package_stub()
 
-from custom_components.elrakning.power_forecast import _local_slots, build_power_forecast
+from custom_components.elrakning.power_forecast import _local_slots, _solar_layers, build_power_forecast
 from custom_components.elrakning.canonical_storage import CanonicalStorage
 
 
@@ -96,6 +96,55 @@ def test_forecast_is_site_scoped_and_deterministic_with_battery_sign_split():
         {"this_hour_kwh": 0.6, "next_hour_kwh": None},
         {"binding_fingerprint": "bind", "entities": {"this_hour_kwh": "sensor.solar_hour"}}, known_at,
     )
+
+
+def test_solar_layers_keep_physical_baseline_and_calibrated_values_separate():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    solar = {
+        "source": "open_meteo", "method": "full_day_open_meteo_causal", "known_at": known_at.isoformat(),
+        "target_date": "2026-09-21", "forecast_points": [{
+            "valid_at": "2026-09-21T18:15:00+00:00", "value_w": 1000.0, "value_kw": 1.0,
+            "provenance": {"source_generation_ids": ["solar-gen"]},
+        }],
+    }
+    physical = {"available": True, "source": "pvgis", "fetched_at": known_at.isoformat(), "installation": {"fingerprint": "install-a"}, "profile": {"target_date": "2026-09-21", "hourly_profile": [1.0]}}
+    calibration = {"resources": {"solar-gen": {"calibration": {"quality": "calibrated", "factor": 0.8, "calibration_version": "solar-cal-v1"}}}}
+    layers = _solar_layers(solar, SITE, known_at, physical, calibration)
+    assert layers["physical_reference"]["available"] is True
+    assert layers["provider_baseline"]["forecast_points"][0]["value_w"] == 1000.0
+    assert layers["site_calibrated_forecast"]["available"] is True
+    assert layers["site_calibrated_forecast"]["forecast_points"][0]["value_w"] == 800.0
+    assert layers["site_calibrated_forecast"]["calibration_version"] == "solar-cal-v1"
+
+
+def test_solar_layers_fail_closed_without_site_calibration():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    solar = {"source": "forecast_solar", "method": "short_forecast_solar_fallback", "known_at": known_at.isoformat(), "forecast_points": [{"value_w": 100.0, "value_kw": 0.1, "provenance": {"source_generation_id": "solar-gen"}}]}
+    layers = _solar_layers(solar, SITE, known_at, None, {"resources": {}})
+    assert layers["provider_baseline"]["available"] is True
+    assert layers["site_calibrated_forecast"]["available"] is False
+    assert layers["site_calibrated_forecast"]["reason"] == "site_calibration_unavailable"
+
+
+def test_solar_layers_do_not_accept_calibration_from_unmatched_generation():
+    known_at = datetime(2026, 9, 21, 18, 0, tzinfo=UTC)
+    solar = {
+        "source": "open_meteo", "method": "full_day_open_meteo_causal",
+        "known_at": known_at.isoformat(), "target_date": "2026-09-21",
+        "forecast_points": [{
+            "value_w": 100.0, "value_kw": 0.1,
+            "provenance": {"source_generation_id": "foreign-generation"},
+        }],
+    }
+    calibration = {"site_id": SITE, "resources": {
+        "local-generation": {"calibration": {
+            "quality": "calibrated", "factor": 0.5, "calibration_version": "solar-cal-v1",
+        }},
+    }}
+    layers = _solar_layers(solar, SITE, known_at, None, calibration)
+    assert layers["provider_baseline"]["available"] is True
+    assert layers["site_calibrated_forecast"]["available"] is False
+    assert layers["site_calibrated_forecast"]["reason"] == "site_calibration_unavailable"
 
 
 def test_battery_split_never_emits_negative_magnitudes():
