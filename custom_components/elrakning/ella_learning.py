@@ -27,6 +27,7 @@ MAX_POWER_FORECASTS_PER_SITE = 256
 MAX_POWER_RECORDS_PER_SITE = 4096
 MAX_MONTHLY_FORECASTS_PER_SITE = 96
 MAX_MONTHLY_EVALUATIONS_PER_SITE = 512
+MAX_GLOBAL_MODEL_HISTORY = 16
 POWER_CALIBRATION_MIN_SUPPORT = 3
 POWER_CALIBRATION_MIN_PREDICTED_W = 100.0
 POWER_CALIBRATION_MIN_FACTOR = 0.8
@@ -89,6 +90,7 @@ class EllaLearningStore:
         ratios: dict[str, list[float]] = {}
         site_count = 0
         record_count = 0
+        training_cutoff = None
         for site_id, site in self.state.get("sites", {}).items():
             if not isinstance(site_id, str) or not isinstance(site, dict):
                 continue
@@ -116,6 +118,7 @@ class EllaLearningStore:
                 ratios.setdefault(key, []).append(ratio)
                 site_used = True
                 record_count += 1
+                training_cutoff = max(training_cutoff, valid_at) if training_cutoff else valid_at
             if site_used:
                 site_count += 1
         by_slot: dict[str, dict[str, Any]] = {}
@@ -140,18 +143,63 @@ class EllaLearningStore:
             "source_site_count": site_count,
             "source_record_count": record_count,
             "by_slot": by_slot,
+            "training_cutoff": training_cutoff.isoformat() if training_cutoff else None,
         }
         fingerprint_payload = {key: value for key, value in model.items() if key != "source_record_count"}
         model["fingerprint"] = hashlib.sha256(
             json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+        previous = self.state.setdefault("global_models", {}).get("load_profile")
+        history = list(previous.get("version_history") or []) if isinstance(previous, dict) else []
+        if isinstance(previous, dict) and previous.get("fingerprint"):
+            previous_snapshot = {
+                key: value for key, value in previous.items() if key != "version_history"
+            }
+            if not any(item.get("fingerprint") == previous_snapshot.get("fingerprint") for item in history if isinstance(item, dict)):
+                history.append(previous_snapshot)
+        if not any(item.get("fingerprint") == model["fingerprint"] for item in history if isinstance(item, dict)):
+            history.append(dict(model))
+        model["version_history"] = history[-MAX_GLOBAL_MODEL_HISTORY:]
         self.state.setdefault("global_models", {})["load_profile"] = model
 
-    def global_calibration_prior(self, known_at: datetime | None = None) -> dict[str, Any]:
+    def global_model_history(self) -> list[dict[str, Any]]:
+        """Return bounded site-free global model versions for replay/rollback inspection."""
+        model = self.state.get("global_models", {}).get("load_profile")
+        if not isinstance(model, dict):
+            return []
+        return [dict(item) for item in model.get("version_history", []) if isinstance(item, dict)]
+
+    def global_calibration_prior(
+        self,
+        known_at: datetime | None = None,
+        fingerprint: str | None = None,
+    ) -> dict[str, Any]:
         """Return only transferable aggregate knowledge and safe provenance."""
         model = self.state.get("global_models", {}).get("load_profile")
         if not isinstance(model, dict):
             return {"version": GLOBAL_LOAD_PRIOR_VERSION, "by_slot": {}, "available": False, "reason": "no_global_prior"}
+        candidates = self.global_model_history() or [dict(model)]
+        if fingerprint:
+            candidates = [item for item in candidates if item.get("fingerprint") == fingerprint]
+        elif isinstance(known_at, datetime) and known_at.tzinfo:
+            causal_candidates = []
+            for item in candidates:
+                cutoff = item.get("training_cutoff")
+                if not cutoff:
+                    causal_candidates.append((datetime.min.replace(tzinfo=timezone.utc), item))
+                    continue
+                try:
+                    parsed_cutoff = datetime.fromisoformat(str(cutoff).replace("Z", "+00:00"))
+                except (TypeError, ValueError):
+                    continue
+                if parsed_cutoff.tzinfo is None:
+                    continue
+                if parsed_cutoff <= known_at:
+                    causal_candidates.append((parsed_cutoff, item))
+            candidates = [item for _, item in sorted(causal_candidates, key=lambda entry: (entry[0], entry[1].get("fingerprint") or ""))]
+        if not candidates:
+            return {"version": GLOBAL_LOAD_PRIOR_VERSION, "by_slot": {}, "available": False, "reason": "causal_model_version_unavailable"}
+        model = candidates[-1]
         return {
             "version": model.get("model_version", GLOBAL_LOAD_PRIOR_VERSION),
             "by_slot": dict(model.get("by_slot") or {}),
@@ -163,6 +211,8 @@ class EllaLearningStore:
                 "source_site_count": model.get("source_site_count", 0),
                 "source_record_count": model.get("source_record_count", 0),
                 "fingerprint": model.get("fingerprint"),
+                "training_cutoff": model.get("training_cutoff"),
+                "version_history_count": len(self.global_model_history()),
                 "known_at": known_at.astimezone(timezone.utc).isoformat() if isinstance(known_at, datetime) and known_at.tzinfo else None,
             },
         }

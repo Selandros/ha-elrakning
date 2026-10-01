@@ -94,6 +94,33 @@ def test_global_load_prior_bootstraps_new_site_without_site_evidence_leakage():
     asyncio.run(run())
 
 
+def test_global_load_prior_keeps_bounded_reproducible_history_and_causal_selection():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        for index, value in enumerate((600, 800, 1000)):
+            await store.async_record("site-a", {
+                "records": [{
+                    "frame_id": f"history-{index}", "revision": 1,
+                    "valid_at": f"2026-09-{3 + index * 7:02d}T18:00:00+00:00",
+                    "baseline_w": 1000, "actual_w": value, "learning_eligible": True,
+                }],
+            }, {}, "Europe/Stockholm")
+        history = store.global_model_history()
+        assert history
+        assert len(history) <= 16
+        fingerprints = [item["fingerprint"] for item in history]
+        assert fingerprints[-1] == store.global_calibration_prior()["provenance"]["fingerprint"]
+        selected = store.global_calibration_prior(fingerprint=fingerprints[0])
+        assert selected["provenance"]["fingerprint"] == fingerprints[0]
+        causal = store.global_calibration_prior(datetime(2026, 9, 15, tzinfo=timezone.utc))
+        assert causal["provenance"]["training_cutoff"] == "2026-09-10T18:00:00+00:00"
+        assert "site_id" not in json.dumps(history)
+        assert "history-" not in json.dumps(history)
+        assert store.global_calibration_prior(datetime(2026, 9, 1, tzinfo=timezone.utc))["available"] is False
+    asyncio.run(run())
+
+
 def test_power_forecast_evidence_is_immutable_scored_and_calibrated_per_context():
     async def run():
         store = EllaLearningStore(object())
