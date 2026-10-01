@@ -1,4 +1,5 @@
 import unittest
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
@@ -106,6 +107,92 @@ class LoadForecastTests(unittest.TestCase):
         self.assertEqual(points[0]["point"]["calibration_scope"], "site")
         self.assertAlmostEqual(points[0]["point"]["persistent_factor"], 1.1)
         self.assertIsNone(points[0]["point"]["global_prior_fingerprint"])
+
+    def test_segmented_evaluation_weekend_is_local_and_provenance_versioned(self):
+        decision_at = datetime(2026, 9, 28, 12, tzinfo=UTC)
+        weekday = datetime(2026, 9, 25, 10, tzinfo=UTC)
+        weekend = datetime(2026, 9, 26, 22, tzinfo=UTC)
+        frames = [{
+            "site_id": "site-a", "payload_schema": "load_forecast.v1", "frame_id": "frame-a",
+            "revision": 1, "known_at": datetime(2026, 9, 24, tzinfo=UTC),
+            "points": [
+                {"valid_at": weekday, "value": 100, "point": {"corrected_forecast_w": 100}},
+                {"valid_at": weekend, "value": 100, "point": {"corrected_forecast_w": 100}},
+            ],
+        }]
+        actuals = [{
+            "site_id": "site-a", "logical_role": "house.consumption", "unit": "W",
+            "interval_start": timestamp, "interval_end": timestamp + timedelta(minutes=15),
+            "value": value, "quality_status": "good", "coverage_ratio": 1.0,
+        } for timestamp, value in ((weekday, 110), (weekend, 130))]
+        provenance = {
+            "model_version": "model-v2", "training_dataset_version": "dataset-v3",
+            "parameter_config_version": "params-v4", "parameter_config_hash": "hash-v4",
+            "site_calibration_version": "site-cal-v5",
+        }
+        evaluation = build_forecast_evaluation(
+            frames, actuals, decision_at, "site-a", timezone_name="Europe/Stockholm", provenance=provenance,
+        )
+        weekend_metric = evaluation["segments"]["weekend"]
+        self.assertEqual(weekend_metric["support_count"], 1)
+        self.assertEqual(weekend_metric["eligible_count"], 1)
+        self.assertAlmostEqual(weekend_metric["bias_w"], 30)
+        self.assertAlmostEqual(weekend_metric["mae_w"], 30)
+        self.assertEqual(weekend_metric["model_version"], "model-v2")
+        self.assertEqual(weekend_metric["parameter_config_hash"], "hash-v4")
+        self.assertEqual(evaluation["segment_contract"]["schema"], "ella_forecast_segment_metrics.v1")
+        self.assertEqual(evaluation["segments"]["cold"]["unavailable_reason"], "temperature_input_missing")
+        self.assertEqual(evaluation["segments"]["anomaly"]["unavailable_reason"], "explicit_anomaly_classification_missing")
+        self.assertEqual(evaluation["segments"]["normal"]["unavailable_reason"], "normal_classifier_contract_missing")
+
+    def test_segmented_evaluation_is_causal_site_scoped_and_deterministic(self):
+        decision_at = datetime(2026, 9, 28, 12, tzinfo=UTC)
+        valid_at = datetime(2026, 9, 26, 22, tzinfo=UTC)
+        frames = [{
+            "site_id": "site-a", "payload_schema": "load_forecast.v1", "frame_id": "frame-a",
+            "known_at": datetime(2026, 9, 24, tzinfo=UTC),
+            "points": [{"valid_at": valid_at, "value": 100, "point": {"corrected_forecast_w": 100}}],
+        }, {
+            "site_id": "site-b", "payload_schema": "load_forecast.v1", "frame_id": "foreign",
+            "known_at": datetime(2026, 9, 24, tzinfo=UTC),
+            "points": [{"valid_at": valid_at, "value": 1, "point": {"corrected_forecast_w": 1}}],
+        }, {
+            "site_id": "site-a", "payload_schema": "load_forecast.v1", "frame_id": "future",
+            "known_at": decision_at, "points": [{"valid_at": decision_at - timedelta(minutes=15), "value": 1, "point": {"corrected_forecast_w": 1}}],
+        }]
+        actuals = [{
+            "site_id": "site-a", "logical_role": "house.consumption", "unit": "W",
+            "interval_start": valid_at, "interval_end": valid_at + timedelta(minutes=15),
+            "value": 100, "quality_status": "good", "coverage_ratio": 1.0,
+        }, {
+            "site_id": "site-b", "logical_role": "house.consumption", "unit": "W",
+            "interval_start": valid_at, "interval_end": valid_at + timedelta(minutes=15),
+            "value": 900, "quality_status": "good", "coverage_ratio": 1.0,
+        }]
+        first = build_forecast_evaluation(frames, actuals, decision_at, "site-a", timezone_name="Europe/Stockholm")
+        second = build_forecast_evaluation(frames, actuals, decision_at, "site-a", timezone_name="Europe/Stockholm")
+        self.assertEqual(first, second)
+        self.assertEqual(first["summary"]["count"], 1)
+        self.assertEqual(first["segments"]["weekend"]["support_count"], 1)
+        self.assertEqual(first["summary"]["hindsight_excluded_count"], 1)
+        self.assertNotIn("site-b", json.dumps(first, sort_keys=True))
+
+    def test_segmented_evaluation_wape_is_unavailable_for_near_zero_actuals(self):
+        decision_at = datetime(2026, 9, 28, 12, tzinfo=UTC)
+        valid_at = datetime(2026, 9, 26, 22, tzinfo=UTC)
+        frame = [{
+            "site_id": "site-a", "payload_schema": "load_forecast.v1", "frame_id": "frame-a",
+            "known_at": datetime(2026, 9, 24, tzinfo=UTC),
+            "points": [{"valid_at": valid_at, "value": 0.5, "point": {"corrected_forecast_w": 0.5}}],
+        }]
+        actual = [{
+            "site_id": "site-a", "logical_role": "house.consumption", "unit": "W",
+            "interval_start": valid_at, "interval_end": valid_at + timedelta(minutes=15),
+            "value": 0.5, "quality_status": "good", "coverage_ratio": 1.0,
+        }]
+        metric = build_forecast_evaluation(frame, actual, decision_at, "site-a", timezone_name="Europe/Stockholm")["segments"]["weekend"]
+        self.assertIsNone(metric["wape"])
+        self.assertEqual(metric["unavailable_reason"], "zero_or_near_zero_actual_denominator")
 
     def _adaptive_history(self, now, current_values=(), current_coverage=1.0):
         history = []

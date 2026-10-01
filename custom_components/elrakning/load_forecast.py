@@ -22,6 +22,8 @@ TRAINING_DATASET_VERSION = "canonical-house-consumption-60d-v1"
 PARAMETER_CONFIG_VERSION = "load-forecast-parameters-v1"
 MIN_DISTINCT_DAYS = 7
 SLOT_SECONDS = 900
+SEGMENT_SCHEMA = "ella_forecast_segment_metrics.v1"
+SEGMENT_CLASSIFIER_VERSION = "weekday-weekend-facets-v1"
 
 
 def _quarter_start(value: datetime) -> datetime:
@@ -180,8 +182,84 @@ def _intraday_calibration(history: list[dict[str, Any]], timezone_name: str, kno
     }
 
 
+def _parse_evaluation_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _segment_metric(
+    name: str,
+    records: list[dict[str, Any]],
+    provenance: dict[str, Any],
+    timezone_name: str | None,
+) -> dict[str, Any]:
+    result = {
+        "schema": SEGMENT_SCHEMA,
+        "classifier_version": SEGMENT_CLASSIFIER_VERSION,
+        "segment": name,
+        "model_version": provenance.get("model_version"),
+        "training_dataset_version": provenance.get("training_dataset_version"),
+        "parameter_config_version": provenance.get("parameter_config_version"),
+        "parameter_config_hash": provenance.get("parameter_config_hash"),
+        "site_calibration_version": provenance.get("site_calibration_version"),
+        "support_count": 0,
+        "eligible_count": 0,
+        "coverage": 0.0,
+        "mae_w": None,
+        "bias_w": None,
+        "wape": None,
+        "unavailable_reason": None,
+    }
+    if name == "weekend":
+        if not timezone_name:
+            result["unavailable_reason"] = "timezone_unavailable"
+            return result
+        try:
+            zone = ZoneInfo(timezone_name)
+        except Exception:
+            result["unavailable_reason"] = "timezone_unavailable"
+            return result
+        selected = [
+            record for record in records
+            if (timestamp := _parse_evaluation_timestamp(record.get("valid_at"))) is not None
+            and timestamp.astimezone(zone).weekday() >= 5
+        ]
+    elif name == "cold":
+        result["unavailable_reason"] = "temperature_input_missing"
+        return result
+    elif name == "anomaly":
+        result["unavailable_reason"] = "explicit_anomaly_classification_missing"
+        return result
+    else:
+        result["unavailable_reason"] = "normal_classifier_contract_missing"
+        return result
+    result["support_count"] = len(selected)
+    result["eligible_count"] = len(selected)
+    result["coverage"] = len(selected) / len(records) if records else 0.0
+    if not selected:
+        result["unavailable_reason"] = "no_matured_observations"
+        return result
+    errors = [float(record["signed_error_w"]) for record in selected]
+    actual_total = sum(float(record["actual_w"]) for record in selected)
+    result["mae_w"] = sum(abs(error) for error in errors) / len(errors)
+    result["bias_w"] = sum(errors) / len(errors)
+    if actual_total > 1:
+        result["wape"] = sum(abs(error) for error in errors) / actual_total
+    else:
+        result["unavailable_reason"] = "zero_or_near_zero_actual_denominator"
+    return result
+
+
 def build_forecast_evaluation(
     frames: list[dict[str, Any]], actual_rows: list[dict[str, Any]], decision_at: datetime, site_id: str,
+    timezone_name: str | None = None, provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score frozen forecast revisions only against later qualified actuals."""
     scoped_actuals = {
@@ -238,7 +316,12 @@ def build_forecast_evaluation(
                 "actual_w": actual_value, "actual_energy_kwh": actual_value * 0.25 / 1000.0,
                 "signed_error_w": signed_error,
                 "absolute_error_w": abs(signed_error), "relative_error": relative,
-                "actual_quality": {"quality_status": actual.get("quality_status"), "coverage_ratio": actual.get("coverage_ratio")},
+                "actual_quality": {
+                    "quality_status": actual.get("quality_status"),
+                    "coverage_ratio": actual.get("coverage_ratio"),
+                    "gap_status": actual.get("gap_status"),
+                    "anomaly_classification": actual.get("anomaly_classification"),
+                },
                 "learning_eligible": True, "learning_reason": "qualified_actual_observed", "error_classification": classification,
             })
     records = sorted(records, key=lambda item: (item["valid_at"], item["frame_id"] or "", item["revision"] or 0))[-256:]
@@ -256,9 +339,23 @@ def build_forecast_evaluation(
             "wape": sum(abs(error) for error in selected_errors) / denominator if denominator > 1 else None,
         }
     recent_records = records[-32:]
+    frame_provenance = provenance or {}
+    evaluation_provenance = {
+        "model_version": frame_provenance.get("model_version") or MODEL_VERSION,
+        "training_dataset_version": frame_provenance.get("training_dataset_version") or TRAINING_DATASET_VERSION,
+        "parameter_config_version": frame_provenance.get("parameter_config_version") or PARAMETER_CONFIG_VERSION,
+        "parameter_config_hash": frame_provenance.get("parameter_config_hash"),
+        "site_calibration_version": frame_provenance.get("site_calibration_version"),
+    }
+    segments = {
+        name: _segment_metric(name, records, evaluation_provenance, timezone_name)
+        for name in ("weekend", "cold", "anomaly", "normal")
+    }
     return {
         "schema": "ella_forecast_evaluation.v1", "site_id": site_id,
-        "model_version": MODEL_VERSION, "known_at": decision_at.isoformat(),
+        "model_version": evaluation_provenance["model_version"], "known_at": decision_at.isoformat(),
+        "segment_contract": {"schema": SEGMENT_SCHEMA, "classifier_version": SEGMENT_CLASSIFIER_VERSION},
+        "provenance": evaluation_provenance,
         "summary": {
             "count": len(records), "matured_count": matured_count,
             "learning_eligible_count": len(records), "ineligible_actual_count": ineligible_actual_count,
@@ -272,6 +369,7 @@ def build_forecast_evaluation(
         "baseline_scorecard": scorecard("baseline_w", records),
         "corrected_scorecard": scorecard("corrected_forecast_w", records),
         "recent_scorecard": scorecard("corrected_forecast_w", recent_records),
+        "segments": segments,
         "records": records,
         "learning_eligibility": {"forecast": bool(records), "reason": "qualified_actual_observed" if records else ("no_observation" if no_observation_count else "insufficient_actual_quality")},
         "planner_quality": {"status": "not_evaluable", "reason": "no_stage5_counterfactual_or_execution_evidence"},
@@ -502,14 +600,18 @@ def build_site_load_forecast(storage: CanonicalStorage, site_id: str, timezone_n
     previous_frames = storage.read_external_input_frames(
         now, source_scope="site", site_id=site_id, logical_role=LOGICAL_ROLE,
     )
-    evaluation = build_forecast_evaluation(previous_frames, history, now, site_id)
     frame, points = build_load_forecast_frame(
         site_id, timezone_name, history, now,
         persistent_calibration=persistent_calibration,
         global_prior_calibration=global_prior_calibration,
     )
     if frame is None:
+        evaluation = build_forecast_evaluation(previous_frames, history, now, site_id, timezone_name=timezone_name)
         return {"site_id": site_id, "available": False, "reason": "insufficient_historical_support", "point_count": 0, "evaluation": evaluation}
+    evaluation = build_forecast_evaluation(
+        previous_frames, history, now, site_id, timezone_name=timezone_name,
+        provenance=frame.get("quality") or frame.get("provenance"),
+    )
     written = persist_load_forecast(storage, frame, points, now)
     return {
         "site_id": site_id, "available": True, "frame_id": frame["frame_id"],
