@@ -38,6 +38,15 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
     assert "async_fetch_app_sources()" in source.split("    async def async_source_data", 1)[1]
 
 
+def test_optional_endpoint_failure_does_not_abort_cached_cost_state():
+    collector = manager_text().split("    async def async_fetch_app_sources", 1)[1].split("    async def async_save_web_credentials", 1)[0]
+    assert 'getattr(err, "code", None) == "reauth_required"' in collector
+    assert 'monthly_status.append({"status": "failed"' in collector
+    assert 'hourly_status.append({"status": "failed"' in collector
+    assert 'quarter_hour_status.append({"status": "failed"' in collector
+    assert 'trend_status.append({"status": "failed"' in collector
+
+
 def test_source_redaction_covers_credentials_and_account_identifiers():
     source = (ROOT / "custom_components/elrakning/elnat/eon_manager.py").read_text()
     assert "from ..diagnostics import sanitize_source_data" in source

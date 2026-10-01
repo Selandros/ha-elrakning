@@ -293,8 +293,11 @@ class EonGridManager:
         async def fetch(name: str, request):
             try:
                 payload = await request()
-            except EonAuthError:
-                raise
+            except EonAuthError as err:
+                if getattr(err, "code", None) == "reauth_required":
+                    raise
+                sources["source_status"][name] = {"status": "failed", "error": getattr(err, "code", "api_error")}
+                return None
             except Exception:
                 sources["source_status"][name] = {"status": "failed", "error": "api_error"}
                 return None
@@ -344,8 +347,10 @@ class EonGridManager:
                 )
                 sources["monthly_transfer"].append({"installation_id": installation_id, "payload": monthly})
                 monthly_status.append({"status": "ok"})
-            except EonAuthError:
-                raise
+            except EonAuthError as err:
+                if getattr(err, "code", None) == "reauth_required":
+                    raise
+                monthly_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
             except Exception:
                 monthly_status.append({"status": "failed", "error": "api_error"})
             hourly_request = getattr(client, "async_get_hourly_transfer", None)
@@ -368,8 +373,10 @@ class EonGridManager:
                     )
                     sources["hourly_transfer"].append({"installation_id": installation_id, "payload": hourly})
                     hourly_status.append({"status": "ok"})
-                except EonAuthError:
-                    raise
+                except EonAuthError as err:
+                    if getattr(err, "code", None) == "reauth_required":
+                        raise
+                    hourly_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
                 except Exception:
                     hourly_status.append({"status": "failed", "error": "api_error"})
             if day_request is not None:
@@ -385,8 +392,10 @@ class EonGridManager:
                     )
                     sources["day_transfer"].append({"installation_id": installation_id, "payload": day})
                     day_status.append({"status": "ok"})
-                except EonAuthError:
-                    raise
+                except EonAuthError as err:
+                    if getattr(err, "code", None) == "reauth_required":
+                        raise
+                    day_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
                 except Exception:
                     day_status.append({"status": "failed", "error": "api_error"})
             if quarter_hour_request is not None:
@@ -402,8 +411,10 @@ class EonGridManager:
                     )
                     sources["quarter_hour_transfer"].append({"installation_id": installation_id, "payload": quarter_hour})
                     quarter_hour_status.append({"status": "ok"})
-                except EonAuthError:
-                    raise
+                except EonAuthError as err:
+                    if getattr(err, "code", None) == "reauth_required":
+                        raise
+                    quarter_hour_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
                 except Exception:
                     quarter_hour_status.append({"status": "failed", "error": "api_error"})
             if trend_request is not None:
@@ -426,8 +437,10 @@ class EonGridManager:
                         },
                     })
                     trend_status.append({"status": "ok"})
-                except EonAuthError:
-                    raise
+                except EonAuthError as err:
+                    if getattr(err, "code", None) == "reauth_required":
+                        raise
+                    trend_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
                 except Exception:
                     trend_status.append({"status": "failed", "error": "api_error"})
             pod = installation["point_of_delivery_number"]
@@ -435,8 +448,10 @@ class EonGridManager:
                 outage = await client.async_get_outages(pod)
                 sources["outages"].append({"installation_id": installation_id, "payload": outage})
                 outage_status.append({"status": "ok"})
-            except EonAuthError:
-                raise
+            except EonAuthError as err:
+                if getattr(err, "code", None) == "reauth_required":
+                    raise
+                outage_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
             except Exception:
                 outage_status.append({"status": "failed", "error": "api_error"})
         sources["source_status"]["monthly_transfer"] = monthly_status or [{"status": "skipped"}]
