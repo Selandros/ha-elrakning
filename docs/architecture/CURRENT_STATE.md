@@ -6,6 +6,15 @@ Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
 
+## 0.0.918 replay lifecycle checkpoint
+
+- CORRECTED/TESTED: A replay task has a bounded 20-minute lifecycle timeout,
+  based on the observed normal 12–15 minute production duration. Timeout,
+  exception and cancellation paths all publish terminal diagnostics and then
+  release coalesced pending work.
+- IMPROVED/TESTED: Site start/completion diagnostics identify the last
+  site-level phase without exposing telemetry or credentials.
+
 ## 0.0.917 Step 9 site-holdout semantics checkpoint
 
 - CORRECTED/TESTED: The runtime site holdout requires at least one complete,

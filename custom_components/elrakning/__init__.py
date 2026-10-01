@@ -57,6 +57,12 @@ PANEL_LOADER_URL = f"{PANEL_LOADER_PATH}?v={PANEL_LOADER_VERSION}"
 PANEL_RESOURCE_PATH = f"/{DOMAIN}/elrakning-panel.js"
 PANEL_CADENCE_AUDIT_PATH = f"/{DOMAIN}/elrakning-cadence-audit.js"
 PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
+REPLAY_RUN_TIMEOUT_SECONDS = 20 * 60
+
+
+async def _run_replay_with_timeout(coroutine, timeout_seconds=REPLAY_RUN_TIMEOUT_SECONDS):
+    """Bound one replay task so worker stalls cannot hold the scheduler forever."""
+    return await asyncio.wait_for(coroutine, timeout=timeout_seconds)
 
 
 def _replay_trigger_identity(event) -> str:
@@ -817,6 +823,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _generate_replay_artifact(_call=None, event_site_id=None):
         for site_id in _replay_site_ids(event_site_id):
+            await _record_replay_diagnostic(
+                "INFO",
+                "replay_site_started",
+                json.dumps({"site_id": site_id}, separators=(",", ":")),
+            )
             result = await async_generate_artifact(hass, site_id)
             hass.bus.async_fire("elrakning_replay_benchmark_evidence_update", {"site_id": site_id, "status": (result.get("evidence") or {}).get("status")})
             if result.get("accepted"):
@@ -827,6 +838,11 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "readback": result.get("readback") is True,
                     "holdouts": result.get("holdouts"),
                 })
+            await _record_replay_diagnostic(
+                "INFO",
+                "replay_site_completed",
+                json.dumps({"site_id": site_id, "accepted": result.get("accepted") is True}, separators=(",", ":")),
+            )
 
     async def _record_replay_diagnostic(level, event, payload):
         """Record one bounded replay lifecycle event when diagnostics are available."""
@@ -857,7 +873,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         started_monotonic = time.monotonic()
         try:
-            result = await _generate_replay_artifact(event_site_id=event_site_id)
+            result = await _run_replay_with_timeout(_generate_replay_artifact(event_site_id=event_site_id))
         except asyncio.CancelledError:
             finished_at = dt_util.now().astimezone(timezone.utc)
             frontend_data["replay_artifact_task_status"] = {

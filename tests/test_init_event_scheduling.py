@@ -311,6 +311,29 @@ def test_replay_scheduler_uses_background_api_on_active_loop():
     asyncio.run(exercise())
 
 
+def test_replay_work_has_bounded_timeout():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    nodes = [
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run_replay_with_timeout"
+    ]
+    namespace = {"asyncio": asyncio, "REPLAY_RUN_TIMEOUT_SECONDS": 20 * 60}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
+
+    async def exercise():
+        async def stuck():
+            await asyncio.sleep(10)
+
+        try:
+            await namespace["_run_replay_with_timeout"](stuck(), timeout_seconds=0.001)
+        except asyncio.TimeoutError:
+            return
+        raise AssertionError("replay timeout did not terminalize")
+
+    asyncio.run(exercise())
+
+
 def test_replay_scheduler_marshals_worker_thread_without_loop_mismatch():
     scheduler = _load_replay_scheduler()
 
