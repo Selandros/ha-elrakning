@@ -253,6 +253,26 @@ class LoadForecastTests(unittest.TestCase):
         self.assertTrue(result["records"][0]["learning_eligible"])
         self.assertEqual(build_forecast_evaluation([frame], [], now, "site-a")["summary"]["count"], 0)
 
+    def test_forecast_evaluation_keeps_consumption_when_other_role_shares_slot(self):
+        now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+        valid_at = now - timedelta(minutes=30)
+        frame = {
+            "site_id": "site-a", "frame_id": "frame-a", "revision": 1,
+            "payload_schema": "load_forecast.v1", "known_at": now - timedelta(hours=1),
+            "points": [{"valid_at": valid_at, "value": 1000, "point": {"baseline_w": 1000}}],
+        }
+        actual = [
+            {"site_id": "site-a", "logical_role": "house.consumption", "interval_start": valid_at,
+             "interval_end": valid_at + timedelta(minutes=15), "unit": "W", "value": 600,
+             "quality_status": "good", "coverage_ratio": 1.0},
+            {"site_id": "site-a", "logical_role": "battery.power", "interval_start": valid_at,
+             "interval_end": valid_at + timedelta(minutes=15), "unit": "W", "value": -300,
+             "quality_status": "good", "coverage_ratio": 1.0},
+        ]
+        result = build_forecast_evaluation([frame], actual, now, "site-a")
+        self.assertEqual(result["summary"]["count"], 1)
+        self.assertEqual(result["records"][0]["actual_w"], 600)
+
     def test_forecast_evaluation_marks_poor_actual_as_ineligible(self):
         now = datetime(2026, 9, 20, 12, tzinfo=UTC)
         valid_at = now - timedelta(minutes=30)

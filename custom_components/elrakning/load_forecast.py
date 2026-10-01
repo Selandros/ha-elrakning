@@ -172,7 +172,9 @@ def build_forecast_evaluation(
     """Score frozen forecast revisions only against later qualified actuals."""
     scoped_actuals = {
         row["interval_start"]: row for row in actual_rows
-        if row.get("site_id") in {None, site_id} and isinstance(row.get("interval_start"), datetime)
+        if row.get("site_id") in {None, site_id}
+        and row.get("logical_role") == "house.consumption"
+        and isinstance(row.get("interval_start"), datetime)
     }
     actual_by_start = {key: row for key, row in scoped_actuals.items() if _qualified_actual(row, decision_at)}
     records = []
