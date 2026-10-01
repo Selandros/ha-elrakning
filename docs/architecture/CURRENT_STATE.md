@@ -6,6 +6,17 @@ Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
 
+## 0.0.931 E.ON quarter-hour transfer checkpoint
+
+- IMPLEMENTED/TESTED: The isolated E.ON provider adapter accepts the verified
+  `QUARTER_HOUR` transfer aggregation and preserves exact provider timestamps,
+  timezone offsets, actual versus padded points, and provider provenance in
+  the per-facility state. Padded points are never included in actual totals;
+  missing slots remain missing rather than being fabricated.
+- PRESERVED: Existing MONTH and HOUR transfer paths are unchanged. Complete
+  96-point daily and DST 92/96/100-point runtime evidence remains UNKNOWN and
+  is not inferred from partial provider responses.
+
 ## 0.0.918 replay lifecycle checkpoint
 
 - CORRECTED/TESTED: A replay task has a bounded 20-minute lifecycle timeout,

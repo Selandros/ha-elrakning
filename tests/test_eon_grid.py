@@ -252,6 +252,41 @@ def test_hourly_transfer_keeps_actual_points_and_excludes_padded_points():
     assert result["actual_points"][0]["timestamp"].endswith("+02:00")
 
 
+def test_quarter_hour_transfer_sums_verified_hour_and_excludes_future_padded_points():
+    quarter_values = [0.734, 0.450, 0.491, 0.430]
+    transfer = [
+        {
+            "timestamp": f"2026-10-01T18:{minute:02d}:00.000+02:00",
+            "consumption": {"total": value, "padded": False},
+        }
+        for minute, value in zip((0, 15, 30, 45), quarter_values)
+    ]
+    transfer.extend(
+        {
+            "timestamp": f"2026-10-01T{hour:02d}:{minute:02d}:00.000+02:00",
+            "consumption": {"total": 0, "padded": True},
+        }
+        for hour in range(19, 20)
+        for minute in (0, 15, 30, 45)
+    )
+    result = models.parse_transfer_points(
+        {"productType": "ELECTRICITY", "aggregation": "QUARTER_HOUR", "transfer": transfer},
+        "QUARTER_HOUR",
+        date(2026, 10, 1),
+    )
+    assert result["resolution"] == "QUARTER_HOUR"
+    assert result["actual_count"] == 4
+    assert result["padded_count"] == 4
+    assert result["actual_total_kwh"] == 2.105
+    assert sum(quarter_values) == 2.105
+    assert result["padded_excluded"] is True
+
+
+def test_quarter_hour_points_are_not_accepted_as_hourly_data():
+    payload = {"productType": "ELECTRICITY", "aggregation": "QUARTER_HOUR", "transfer": []}
+    assert models.parse_transfer_points(payload, "HOUR", date(2026, 10, 1))["status"] == "unsupported"
+
+
 def test_transfer_points_reject_wrong_aggregation_and_future_date():
     payload = {"productType": "ELECTRICITY", "aggregation": "HOUR", "transfer": []}
     assert models.parse_transfer_points(payload, "DAY", date(2026, 10, 1))["status"] == "unsupported"

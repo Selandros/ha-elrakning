@@ -408,7 +408,7 @@ def parse_monthly_transfer(payload: Any, year: int, month: int) -> dict[str, Any
 def parse_transfer_points(payload: Any, aggregation: str, target_date: date) -> dict[str, Any]:
     """Normalize causal E.ON transfer points without promoting padded values."""
     expected = str(aggregation).upper()
-    if expected not in {"DAY", "HOUR"}:
+    if expected not in {"DAY", "HOUR", "QUARTER_HOUR"}:
         return {"status": "unsupported", "resolution": expected}
     if not isinstance(payload, Mapping) or payload.get("productType") != "ELECTRICITY":
         return {"status": "unsupported", "resolution": expected}
@@ -444,6 +444,11 @@ def parse_transfer_points(payload: Any, aggregation: str, target_date: date) -> 
         "status": "ok" if actual else "missing",
         "resolution": expected,
         "date": target_date.isoformat(),
+        "provenance": {
+            "provider": "eon",
+            "dataset": "energy_transfer",
+            "aggregation": expected,
+        },
         "actual_points": actual,
         "padded_points": padded,
         "actual_count": len(actual),
