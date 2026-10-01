@@ -723,10 +723,15 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     holdouts = holdout_status.get("items") if isinstance(holdout_status.get("items"), list) else []
     artifact = build_artifact(run, dataset_identity={"source": "canonical_storage", "site_id": site_id, "evidence": evidence}, parameter_identity={"baselines": sorted(run.get("baselines", {})), "holdout_policy": "v2_runtime_descriptors"}, holdouts=holdouts)
     store = hass.data.get("elrakning", {}).get("replay_artifact_store")
-    accepted = bool(artifact and holdout_status["qualified"] and store and await store.async_append(artifact))
+    # A valid replay artifact is qualified by its own causal, mature and
+    # complete inputs. The holdout matrix remains a separate promotion gate.
+    if artifact and store:
+        await store.async_append(artifact)
     readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
-    result = {"accepted": accepted, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if accepted and readback is not None else "blocked", "blocker": None if accepted and readback is not None else ("holdout_matrix_unqualified" if not holdout_status.get("qualified") else "artifact_not_verified"), "qualified": bool(run["qualification"].get("qualified")), "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint"), "evaluation": run.get("evaluation")}}
-    result["evidence"]["last_attempt"] = {"at": now.isoformat(), "accepted": accepted, "reason": None if accepted else "artifact_not_verified", "artifact_id": result["artifact_id"]}
+    artifact_verified = bool(artifact and readback is not None)
+    promotion_eligible = bool(holdout_status.get("qualified"))
+    result = {"accepted": artifact_verified, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if artifact_verified else "blocked", "blocker": None if artifact_verified else "artifact_not_verified", "qualified": bool(run["qualification"].get("qualified")), "promotion_eligible": promotion_eligible, "promotion_blockers": [] if promotion_eligible else [item.get("kind") for item in holdout_status.get("items", []) if item.get("status") != "qualified"], "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint"), "evaluation": run.get("evaluation")}}
+    result["evidence"]["last_attempt"] = {"at": now.isoformat(), "accepted": artifact_verified, "reason": None if artifact_verified else "artifact_not_verified", "artifact_id": result["artifact_id"], "promotion_eligible": promotion_eligible}
     if store:
         await store.async_record_attempt(result)
         await store.async_record_evidence(site_id, result["evidence"])

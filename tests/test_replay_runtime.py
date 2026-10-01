@@ -60,6 +60,35 @@ def test_internal_runner_builds_persists_and_reads_back_exact_site(monkeypatch):
     asyncio.run(exercise())
 
 
+def test_internal_runner_persists_qualified_artifact_when_global_holdouts_are_pending(monkeypatch):
+    run = {
+        "site_id": "site-a",
+        "decision_at": "2026-09-24T20:08:31+00:00",
+        "run_fingerprint": "run-pending-holdouts",
+        "qualification": {"qualified": True, "contaminated": False, "incomplete": False, "reasons": []},
+        "input_identity": {"model": {"version": "fixture"}},
+        "baselines": {"no_battery": {"points": [{"valid_at": "x"}]}},
+    }
+    monkeypatch.setattr(replay_runtime, "_build_run", lambda *_args: (run, {"source": "fixture"}))
+    holdouts = [{"kind": kind, "status": "pending", "reason": "future_evidence_required", "evidence": []} for kind in ("season", "site", "dst", "gap", "source_generation_change", "publication_cutoff")]
+    monkeypatch.setattr(replay_runtime, "_benchmark_readiness", lambda *_args: {"holdout_matrix": {"qualified": False, "items": holdouts, "candidate_count": 1, "mature_count": 1, "qualified_count": 1}})
+    store = ReplayArtifactStore(object())
+    store.store = _MemoryStore()
+
+    async def exercise():
+        result = await replay_runtime.async_generate_artifact(_Hass(store), "site-a")
+        assert result["accepted"] is True
+        assert result["readback"] is True
+        assert result["qualification"]["qualified"] is True
+        assert result["evidence"]["status"] == "artifact_verified"
+        assert result["evidence"]["promotion_eligible"] is False
+        assert result["evidence"]["blocker"] is None
+        assert result["evidence"]["last_attempt"]["reason"] is None
+        assert len(store.state["sites"]["site-a"]) == 1
+
+    asyncio.run(exercise())
+
+
 def test_runtime_frame_points_keep_frame_identity_for_slot_provenance():
     class Result:
         def fetchall(self):

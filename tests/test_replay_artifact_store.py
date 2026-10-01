@@ -64,6 +64,19 @@ def test_runtime_holdout_matrix_reports_real_evidence_without_fixture_claims():
     assert all("deterministic_fixture" not in str(item) for item in result["items"])
 
 
+def test_gap_negative_evidence_does_not_disqualify_complete_windows():
+    descriptors = [
+        {"descriptor_id": "complete", "site_id": SITE, "local_month": 9, "qualified": True, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "96/96", "publication_cutoff_verified": True},
+        {"descriptor_id": "gap", "site_id": SITE, "local_month": 9, "qualified": False, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "95/96", "publication_cutoff_verified": True},
+    ]
+    result = build_runtime_holdout_matrix(descriptors)
+    assert result["qualified_count"] == 1
+    assert result["items"][-1]["kind"] == "publication_cutoff"
+    gap = next(item for item in result["items"] if item["kind"] == "gap")
+    assert gap["status"] == "disqualified"
+    assert result["qualified"] is False
+
+
 def test_store_is_site_scoped_bounded_and_schema_fail_closed():
     class MemoryStore:
         def __init__(self, *_args, **_kwargs):
