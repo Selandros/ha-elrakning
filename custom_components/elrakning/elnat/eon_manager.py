@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from copy import deepcopy
 import secrets
 import time
+import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -419,7 +420,7 @@ class EonGridManager:
                             "path": "/energy/trend",
                             "params": {
                                 "installations": f"{installation_id}:ELECTRICITY:GRID:false",
-                                "includeElectricityCost": "false",
+                                "includeElectricityCost": "true",
                                 "language": "sv",
                             },
                         },
@@ -472,6 +473,7 @@ class EonGridManager:
             state = next(iter(states.values()), self._empty_state())
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
+            await self._async_persist_provider_imports(states)
             await self._async_capture_tariff_fact()
             await self._async_reconcile_site_bindings()
             await self._persist_web_session(config, session)
@@ -605,6 +607,122 @@ class EonGridManager:
             "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         return states
+
+    async def _async_persist_provider_imports(self, states: dict[str, dict[str, Any]]) -> None:
+        """Persist only verified E.ON import buckets for explicitly bound sites."""
+        domain_data = self.hass.data.get(DOMAIN, {})
+        collector = domain_data.get("canonical_collector")
+        site_manager = domain_data.get("site_identity_manager")
+        storage = getattr(collector, "storage", None)
+        site_state = getattr(site_manager, "state", {}) if site_manager else {}
+        configs = site_state.get("site_configs", {}) if isinstance(site_state, dict) else {}
+        if storage is None or not isinstance(configs, dict):
+            return
+        captured_at = datetime.now(timezone.utc)
+        for site_id, config in configs.items():
+            if not isinstance(config, dict) or config.get("collection_enabled") is not True:
+                continue
+            binding = (config.get("bindings") or {}).get("grid")
+            if not isinstance(binding, dict) or binding.get("provider") != "eon":
+                continue
+            if binding.get("config_entry_id") != getattr(self.entry, "entry_id", None):
+                continue
+            facility = binding.get("facility")
+            if not isinstance(facility, dict):
+                continue
+            identity = facility_identity(facility)
+            state = states.get(identity) if identity else None
+            if not isinstance(state, dict):
+                continue
+            installation_id = (state.get("facility") or {}).get("installation_identifier")
+            if not installation_id:
+                continue
+            selected = self._provider_import_points(state)
+            if not selected:
+                continue
+            resolution, points = selected
+            generation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"eon:grid.energy_import:{site_id}:{installation_id}:{resolution}"))
+            first_start = points[0]["start"]
+            storage.ensure_source_generation({
+                "generation_id": generation_id,
+                "site_id": str(site_id),
+                "logical_role": "grid.energy_import",
+                "source_identity": {
+                    "identity_key": f"eon:{installation_id}:electricity:grid:false",
+                    "identity_strength": "strong",
+                    "identity_provenance": "eon_provider_installation_binding",
+                },
+                "source_resolution_kind": "native_bucket",
+                "source_resolution_seconds": resolution,
+                "timezone_state": "verified",
+                "effective_from": first_start.isoformat(),
+            }, captured_at)
+            observations = []
+            for item in points:
+                start = item["start"]
+                end = item["end"]
+                semantic_key = f"{site_id}|grid.energy_import|{generation_id}|{start.isoformat()}"
+                observations.append({
+                    "record_id": str(uuid.uuid5(uuid.NAMESPACE_URL, semantic_key)),
+                    "semantic_key": semantic_key,
+                    "site_id": str(site_id),
+                    "logical_role": "grid.energy_import",
+                    "source_generation_id": generation_id,
+                    "interval_start": start,
+                    "interval_end": end,
+                    "resolution_seconds": resolution,
+                    "source_resolution_kind": "native_bucket",
+                    "source_resolution_seconds": resolution,
+                    "observed_at": start,
+                    "captured_at": captured_at,
+                    "fetched_at": captured_at,
+                    "known_at": captured_at,
+                    "classification": "measured",
+                    "value": item["value"],
+                    "unit": "kWh",
+                    "sign_convention": "positive_import_energy",
+                    "quality_status": "good",
+                    "coverage_ratio": 1.0,
+                    "gap_status": "none",
+                    "quality": {"padded": False, "provider_actual": True},
+                    "provenance": {
+                        "provider": "eon",
+                        "dataset": "energy_transfer",
+                        "installation_identifier": installation_id,
+                        "point_of_delivery_number": (state.get("facility") or {}).get("point_of_delivery_number"),
+                        "resolution": resolution,
+                        "site_binding_fingerprint": binding.get("binding_fingerprint"),
+                    },
+                })
+            storage.insert_historical_observations_atomic(observations)
+
+    @staticmethod
+    def _provider_import_points(state: dict[str, Any]) -> tuple[int, list[dict[str, Any]]] | None:
+        """Select one actual provider resolution without disaggregating coarser data."""
+        for key, seconds in (("quarter_hour_consumption", 900), ("hourly_consumption", 3600), ("day_consumption", 86400)):
+            parsed = state.get(key)
+            if isinstance(parsed, dict) and parsed.get("status") == "ok" and parsed.get("actual_points"):
+                points = []
+                for point in parsed["actual_points"]:
+                    try:
+                        start = datetime.fromisoformat(str(point["timestamp"]).replace("Z", "+00:00"))
+                        value = float(point["consumption_kwh"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if start.tzinfo is None or value < 0 or point.get("padded") is True:
+                        continue
+                    points.append({"start": start.astimezone(timezone.utc), "end": start.astimezone(timezone.utc) + timedelta(seconds=seconds), "value": value})
+                if points:
+                    return seconds, sorted(points, key=lambda item: item["start"])
+        consumption = state.get("consumption")
+        if isinstance(consumption, dict) and consumption.get("status") == "ok":
+            try:
+                start = datetime(int(consumption["year"]), int(consumption["month"]), 1, tzinfo=timezone.utc)
+                end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+                return int((end - start).total_seconds()), [{"start": start, "end": end, "value": float(consumption["consumption_kwh"])}]
+            except (KeyError, TypeError, ValueError):
+                return None
+        return None
 
     def _state_for_active_binding(self, states: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
         binding = getattr(self, "_active_binding", None)
@@ -944,6 +1062,7 @@ def _build_app_source_data(
         else None
     )
     grid_price = tariff.get("grid_price") if isinstance(tariff, dict) else None
+    trend = state.get("provider_trend") if isinstance(state.get("provider_trend"), dict) else {}
     source_status = sources.get("source_status") or {}
     return _redact_source_data({
         "provider": "eon",
@@ -997,6 +1116,13 @@ def _build_app_source_data(
             "energy_tax_ore_per_kwh": tariff.get("energy_tax_ore_per_kwh"),
             "variable_grid_ore_per_kwh": grid_price.get("variable_total_ore_per_kwh_gross") if isinstance(grid_price, dict) else None,
             "source": "canonical_eon_grid_cost",
+        },
+        "provider_monthly_estimate": {
+            "consumption_kwh": trend.get("estimated_month_consumption_kwh"),
+            "status": "ok" if trend.get("estimated_month_consumption_kwh") is not None else "unavailable",
+            "reason": trend.get("estimate_unavailable_reason"),
+            "provenance": trend.get("estimate_provenance"),
+            "cost_status": "unavailable_future_price_not_resolved",
         },
         "provider_monthly_transfer": _monthly_transfer_provenance(
             sources.get("monthly_transfer"), consumption

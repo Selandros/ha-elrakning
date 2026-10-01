@@ -92,6 +92,44 @@ class EnergyHistoryTests(unittest.TestCase):
         self.assertEqual(series["consumption"][1]["source_interval_start"], start.isoformat())
         self.assertEqual(series["consumption"][1]["source_interval_end"], (start + timedelta(hours=1)).isoformat())
 
+    def test_eon_provider_prefers_quarter_hour_and_local_import_sensor_wins(self):
+        start = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+        provider_hour = {
+            "logical_role": "grid.energy_import", "source_generation_id": "eon-hour",
+            "interval_start": start, "interval_end": start + timedelta(hours=1),
+            "value": 2.105, "unit": "kWh", "quality_status": "good",
+            "coverage_ratio": 1.0, "storage_class": "historical",
+            "provenance": {"provider": "eon"},
+        }
+        provider_quarters = [
+            {**provider_hour, "source_generation_id": f"eon-q{index}",
+             "interval_start": start + timedelta(minutes=15 * index),
+             "interval_end": start + timedelta(minutes=15 * (index + 1)),
+             "value": value}
+            for index, value in enumerate((0.734, 0.450, 0.491, 0.430))
+        ]
+        rows = [provider_hour, *provider_quarters]
+        ledger = {row["source_generation_id"]: _ledger("site-a", "grid.energy_import", "", row["source_generation_id"]) for row in rows}
+        contributions = canonical_contributions(rows, ledger)
+        series = merge_contributions(contributions)
+        self.assertEqual(len(series["import"]), 4)
+        self.assertEqual(sum(item["value_kw"] * 0.25 for item in series["import"]), 2.105)
+
+    def test_local_grid_import_overrides_overlapping_eon_provider(self):
+        start = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+        rows = [
+            {"logical_role": "grid.energy_import", "source_generation_id": "eon-q", "interval_start": start,
+             "interval_end": start + timedelta(minutes=15), "value": 0.734, "unit": "kWh", "quality_status": "good",
+             "coverage_ratio": 1.0, "storage_class": "historical", "provenance": {"provider": "eon"}},
+            {"logical_role": "grid.energy_import", "source_generation_id": "local", "interval_start": start,
+             "interval_end": start + timedelta(minutes=15), "value": 0.8, "unit": "kWh", "quality_status": "good",
+             "coverage_ratio": 1.0, "storage_class": "canonical", "provenance": {"provider": "ha"}},
+        ]
+        ledger = {row["source_generation_id"]: _ledger("site-a", "grid.energy_import", "", row["source_generation_id"]) for row in rows}
+        series = merge_contributions(canonical_contributions(rows, ledger))
+        self.assertEqual(series["import"][0]["source"], "canonical")
+        self.assertEqual(series["import"][0]["value_kw"], 0.8 / 0.25)
+
     def test_energy_counters_override_net_power_for_import_and_export(self):
         start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
         targets = [

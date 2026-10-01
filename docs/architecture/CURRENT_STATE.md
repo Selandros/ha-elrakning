@@ -1924,3 +1924,9 @@ or milestone names below as active scope.
   safety scope. The active v2 step is 6 and step 7 is next. This historical
   closure must not be read as claiming that the older Stage labels were the
   complete long-term Energy Intelligence plan.
+## 0.0.933 E.ON provider import fallback checkpoint
+
+- E.ON actual transfer buckets are persisted only as site-scoped `grid.energy_import` observations.
+- Priority is local canonical grid/import data, then actual E.ON QUARTER_HOUR, HOUR, DAY and MONTH buckets.
+- Padded provider points are rejected; coarse buckets are never disaggregated.
+- E.ON trend remains separate and is not actual or forecast input.

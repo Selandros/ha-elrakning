@@ -184,7 +184,7 @@ class EonAppClient:
             TREND_URL,
             params={
                 "installations": f"{installation_identifier}:ELECTRICITY:GRID:false",
-                "includeElectricityCost": "false",
+                "includeElectricityCost": "true",
                 "language": "sv",
             },
         )

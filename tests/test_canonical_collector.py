@@ -930,6 +930,38 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                 storage.insert_observation(changed)
             storage.close()
 
+    def test_provider_native_resolution_observation_is_immutable_and_site_scoped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
+            storage.open()
+            start = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+            captured = start + timedelta(hours=2)
+            target = _target("site-a", "grid.energy_import", "eon:40093679", "eon-q")
+            target.update({
+                "source_resolution_kind": "native_bucket",
+                "source_resolution_seconds": 900,
+                "timezone_state": "verified",
+            })
+            storage.ensure_source_generation(target, captured)
+            observation = {
+                "semantic_key": "site-a|grid.energy_import|eon-q|2026-10-01T18:00:00+00:00",
+                "site_id": "site-a", "logical_role": "grid.energy_import", "source_generation_id": "eon-q",
+                "interval_start": start, "interval_end": start + timedelta(minutes=15),
+                "resolution_seconds": 900, "source_resolution_kind": "native_bucket",
+                "source_resolution_seconds": 900, "observed_at": start, "captured_at": captured,
+                "fetched_at": captured, "known_at": captured, "value": 0.734, "unit": "kWh",
+                "sign_convention": "positive_import_energy", "quality_status": "good", "coverage_ratio": 1.0,
+                "gap_status": "none", "quality": {"padded": False}, "provenance": {"provider": "eon"},
+            }
+            self.assertEqual(storage.insert_historical_observations_atomic([observation]), 1)
+            self.assertEqual(storage.insert_historical_observations_atomic([observation]), 0)
+            rows = storage.read_site_energy_history("site-a", start, start + timedelta(minutes=15))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["value"], 0.734)
+            self.assertEqual(rows[0]["provenance"]["provider"], "eon")
+            self.assertEqual(storage.read_site_energy_history("site-b", start, start + timedelta(minutes=15)), [])
+            storage.close()
+
     def test_recanonicalization_is_append_only_idempotent_and_site_scoped(self):
         with tempfile.TemporaryDirectory() as directory:
             storage = CanonicalStorage(Path(directory) / "canonical.sqlite")

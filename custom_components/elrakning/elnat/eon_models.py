@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import re
 from typing import Any, Mapping
 
 
@@ -489,7 +490,7 @@ def parse_provider_trend(
     consumption = item.get("consumption")
     if not isinstance(consumption, Mapping):
         return {**base, "reason": "consumption_missing"}
-    return {
+    result = {
         **base,
         "status": "ok",
         "value": consumption.get("value"),
@@ -498,6 +499,26 @@ def parse_provider_trend(
         "compare_percentage": consumption.get("comparePercentage"),
         "dialog_copy": item.get("dialogCopy"),
     }
+    text = result.get("text")
+    if isinstance(text, str):
+        match = re.fullmatch(
+            r"Vi beräknar att du kommer att förbruka cirka ([0-9]+(?:[,.][0-9]+)?) kWh denna månad",
+            text.strip(),
+        )
+        if match:
+            result["estimated_month_consumption_kwh"] = float(match.group(1).replace(",", "."))
+            result["estimate_provenance"] = {
+                "method": "provider_display_text_exact_v1",
+                "source_field": "consumption.text",
+                "source_text": text,
+            }
+        else:
+            result["estimated_month_consumption_kwh"] = None
+            result["estimate_unavailable_reason"] = "provider_trend_text_format_unrecognized"
+    else:
+        result["estimated_month_consumption_kwh"] = None
+        result["estimate_unavailable_reason"] = "provider_trend_text_missing"
+    return result
 
 
 def normalize_outage(payload: Any) -> dict[str, Any]:

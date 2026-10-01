@@ -721,6 +721,84 @@ class CanonicalStorage:
             connection.rollback()
             raise
 
+    def insert_historical_observations_atomic(self, observations: list[dict[str, Any]]) -> int:
+        """Insert immutable provider observations with their native resolution."""
+        connection = self._connection()
+        inserted = 0
+        try:
+            for observation in observations:
+                inserted += int(self._insert_historical_observation(connection, observation))
+            connection.commit()
+            return inserted
+        except Exception:
+            connection.rollback()
+            raise
+
+    def _insert_historical_observation(self, connection: sqlite3.Connection, observation: dict[str, Any]) -> bool:
+        """Insert one native-resolution observation without committing."""
+        value = observation.get("value")
+        if value is not None:
+            value = float(value)
+            if not math.isfinite(value):
+                raise ValueError("nonfinite_observation")
+        start = observation["interval_start"]
+        end = observation["interval_end"]
+        resolution_seconds = int(observation["resolution_seconds"])
+        if start.tzinfo is None or end.tzinfo is None or resolution_seconds <= 0 or end <= start:
+            raise ValueError("historical_observation_interval_invalid")
+        columns = (
+            "record_id, schema_version, dataset_version, semantic_key, revision, supersedes_record_id, "
+            "site_id, logical_role, source_generation_id, interval_start_us, interval_end_us, "
+            "resolution_seconds, source_resolution_kind, source_resolution_seconds, observed_at_us, "
+            "captured_at_us, fetched_at_us, known_at_us, classification, value, unit, sign_convention, "
+            "quality_status, coverage_ratio, gap_status, quality_json, provenance_json"
+        )
+        values = (
+            observation.get("record_id") or str(uuid.uuid4()), SCHEMA_VERSION, DATASET_VERSION,
+            observation["semantic_key"], int(observation.get("revision", 1)), observation.get("supersedes_record_id"),
+            observation["site_id"], observation["logical_role"], observation["source_generation_id"],
+            timestamp_us(start), timestamp_us(end), resolution_seconds,
+            observation.get("source_resolution_kind", "native_bucket"),
+            int(observation.get("source_resolution_seconds", resolution_seconds)),
+            timestamp_us(observation["observed_at"]) if observation.get("observed_at") else None,
+            timestamp_us(observation["captured_at"]), timestamp_us(observation["fetched_at"]) if observation.get("fetched_at") else None,
+            timestamp_us(observation["known_at"]), observation.get("classification", "measured"), value,
+            observation["unit"], observation["sign_convention"], observation["quality_status"],
+            observation.get("coverage_ratio"), observation["gap_status"],
+            json.dumps(observation.get("quality", {}), sort_keys=True),
+            json.dumps(observation.get("provenance", {}), sort_keys=True),
+        )
+        try:
+            cursor = connection.execute(
+                f"INSERT INTO historical_energy_observations({columns}) VALUES ({','.join('?' for _ in values)})",
+                values,
+            )
+        except sqlite3.IntegrityError as error:
+            if "historical_energy_observations.semantic_key, historical_energy_observations.revision" not in str(error):
+                raise
+            existing = connection.execute(
+                """SELECT site_id, logical_role, source_generation_id, interval_start_us, interval_end_us,
+                          resolution_seconds, source_resolution_kind, source_resolution_seconds, observed_at_us,
+                          value, unit, sign_convention, quality_status, coverage_ratio, gap_status,
+                          quality_json, provenance_json
+                     FROM historical_energy_observations WHERE semantic_key = ? AND revision = ?""",
+                (observation["semantic_key"], int(observation.get("revision", 1))),
+            ).fetchone()
+            expected = (
+                observation["site_id"], observation["logical_role"], observation["source_generation_id"],
+                timestamp_us(start), timestamp_us(end), resolution_seconds,
+                observation.get("source_resolution_kind", "native_bucket"), int(observation.get("source_resolution_seconds", resolution_seconds)),
+                timestamp_us(observation["observed_at"]) if observation.get("observed_at") else None, value,
+                observation["unit"], observation["sign_convention"], observation["quality_status"],
+                observation.get("coverage_ratio"), observation["gap_status"],
+                json.dumps(observation.get("quality", {}), sort_keys=True),
+                json.dumps(observation.get("provenance", {}), sort_keys=True),
+            )
+            if existing == expected:
+                return False
+            raise ValueError("canonical_historical_revision_conflict") from error
+        return cursor.rowcount == 1
+
     def _insert_observation(self, connection: sqlite3.Connection, observation: dict[str, Any]) -> bool:
         """Insert one row without committing; the caller owns the transaction."""
         value = observation.get("value")

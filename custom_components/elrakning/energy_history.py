@@ -122,12 +122,29 @@ def _contribution(series: str, start: datetime, end: datetime, value_kw: float, 
     }
 
 
+def _prefer_non_overlapping_provider_resolution(contributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop coarser overlapping E.ON buckets after finer actual buckets exist."""
+    provider = [item for item in contributions if item.get("source") == "eon_provider"]
+    other = [item for item in contributions if item.get("source") != "eon_provider"]
+    kept: list[dict[str, Any]] = []
+    for item in sorted(provider, key=lambda value: (int(value.get("source_resolution_seconds") or 0), value["start"], value["end"])):
+        overlaps_finer = any(
+            int(candidate.get("source_resolution_seconds") or 0) < int(item.get("source_resolution_seconds") or 0)
+            and candidate["start"] < item["end"]
+            and candidate["end"] > item["start"]
+            for candidate in kept
+        )
+        if not overlaps_finer:
+            kept.append(item)
+    return other + kept
+
+
 def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert stored canonical/historical rows into graph-series contributions."""
     result: list[dict[str, Any]] = []
     for row in rows:
         role = str(row.get("logical_role") or "")
-        if role not in _POWER_ROLES or row.get("quality_status") not in {"good", "partial"}:
+        if role not in _SUPPORTED_ROLES or row.get("quality_status") not in {"good", "partial"}:
             continue
         start = row.get("interval_start")
         end = row.get("interval_end")
@@ -137,19 +154,26 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
         target = ledger_by_generation.get(generation_id)
         if target is not None and not _active_for_interval(target, start, end):
             continue
-        value_kw = _power_to_kw(row.get("value"), row.get("unit"))
+        if role in _ENERGY_COUNTER_ROLES:
+            energy_kwh = _energy_to_kwh(row.get("value"), row.get("unit"))
+            duration_hours = (end - start).total_seconds() / 3600
+            value_kw = energy_kwh / duration_hours if energy_kwh is not None and duration_hours > 0 else None
+        else:
+            value_kw = _power_to_kw(row.get("value"), row.get("unit"))
         if value_kw is None:
             continue
-        source = "canonical" if row.get("storage_class") == "canonical" else "historical_canonical"
-        priority = 30 if source == "canonical" else 25
-        for series, value in _role_values(role, value_kw).items():
+        is_provider = (row.get("provenance") or {}).get("provider") == "eon"
+        source = "eon_provider" if is_provider else "canonical" if row.get("storage_class") == "canonical" else "historical_canonical"
+        priority = 10 if is_provider else 30 if source == "canonical" else 25
+        values = {"import": value_kw} if role == "grid.energy_import" else {"export": value_kw} if role == "grid.energy_export" else _role_values(role, value_kw)
+        for series, value in values.items():
             result.append(_contribution(
                 series, start, end, value, priority=priority, source=source,
                 generation_id=generation_id, quality=str(row.get("quality_status")),
                 coverage=row.get("coverage_ratio"),
                 source_resolution_seconds=row.get("source_resolution_seconds"),
             ))
-    return result
+    return _prefer_non_overlapping_provider_resolution(result)
 
 
 def _metadata_unit(metadata: dict[str, Any], statistic_id: str) -> Any:

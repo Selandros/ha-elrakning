@@ -324,6 +324,34 @@ def test_provider_trend_is_separate_and_never_actual_or_forecast_input():
     assert result["usable_as_forecast_input"] is False
 
 
+def test_provider_trend_parses_only_the_verified_swedish_estimate_format():
+    result = models.parse_provider_trend(
+        [{"productType": "ELECTRICITY", "consumption": {
+            "value": 6.926,
+            "text": "Vi beräknar att du kommer att förbruka cirka 215 kWh denna månad",
+            "timestamp": "2026-10-01T00:00:00+02:00",
+        }}],
+        "2026-10-01T12:00:00+00:00",
+        "2026-10-01T12:00:00+00:00",
+        "40093679",
+    )
+    assert result["value"] == 6.926
+    assert result["estimated_month_consumption_kwh"] == 215.0
+    assert result["estimate_provenance"]["method"] == "provider_display_text_exact_v1"
+    assert result["usable_as_actual"] is False
+
+
+def test_provider_trend_unknown_text_fails_closed_for_estimate():
+    result = models.parse_provider_trend(
+        [{"productType": "ELECTRICITY", "consumption": {"value": 6.926, "text": "215 kWh"}}],
+        "2026-10-01T12:00:00+00:00",
+        "2026-10-01T12:00:00+00:00",
+        "40093679",
+    )
+    assert result["estimated_month_consumption_kwh"] is None
+    assert result["estimate_unavailable_reason"] == "provider_trend_text_format_unrecognized"
+
+
 def test_transfer_points_reject_wrong_aggregation_and_future_date():
     payload = {"productType": "ELECTRICITY", "aggregation": "HOUR", "transfer": []}
     assert models.parse_transfer_points(payload, "DAY", date(2026, 10, 1))["status"] == "unsupported"
