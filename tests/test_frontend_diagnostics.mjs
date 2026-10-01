@@ -1722,6 +1722,9 @@ assert.match(panelSource, /invoice: \[[\s\S]*data-invoice-estimate-card[\s\S]*da
 assert.match(panelSource, /this\._configurationCardsVisible = false;/);
 assert.match(panelSource, /_applyConfigurationCardsVisibility\(visible, mainCards[\s\S]{0,1500}this\._renderDashboardCardVisibility\(\)/);
 assert.match(panelSource, /const visible = \(key\) => this\._configurationCardsVisible/);
+assert.match(panelSource, /node\.toggleAttribute\("hidden", !visible\(key\)\)/);
+assert.match(panelSource, /toggle\.hidden = !this\._configurationCardsVisible/);
+assert.match(panelSource, /dashboard-card-toggle\[hidden\]/);
 assert.match(panelSource, /main_cards/);
 assert.match(panelSource, /data-config-card-key="elhandel"/);
 assert.match(panelSource, /data-config-card-key="elnet"/);

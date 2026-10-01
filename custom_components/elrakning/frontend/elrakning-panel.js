@@ -6741,6 +6741,10 @@ class ElrakningPanel {
           flex: 0 0 auto;
         }
 
+        .dashboard-card-toggle[hidden] {
+          display: none !important;
+        }
+
         .dashboard-card-toggle input {
           height: 0;
           opacity: 0;
@@ -7290,12 +7294,13 @@ class ElrakningPanel {
     };
     for (const [key, selectors] of Object.entries(groups)) {
       for (const selector of selectors) {
-        for (const node of this.host.querySelectorAll(selector)) node.hidden = !visible(key);
+        for (const node of this.host.querySelectorAll(selector)) node.toggleAttribute("hidden", !visible(key));
       }
     }
     for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
       const key = toggle.dataset.dashboardCardToggle;
       const input = toggle.querySelector("input");
+      toggle.hidden = !this._configurationCardsVisible;
       if (input && key in this._dashboardCardVisibility) input.checked = this._dashboardCardVisibility[key] !== "hidden";
     }
   }
