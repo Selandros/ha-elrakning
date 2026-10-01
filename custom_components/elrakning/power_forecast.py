@@ -156,6 +156,7 @@ def _solar_source_identity(points: list[dict[str, Any]]) -> dict[str, list[str]]
     """Extract source identities without copying raw provider payloads."""
     frame_ids: set[str] = set()
     generation_ids: set[str] = set()
+    revisions: set[str] = set()
     for point in points:
         provenance = point.get("provenance") if isinstance(point, dict) else None
         if not isinstance(provenance, dict):
@@ -166,7 +167,10 @@ def _solar_source_identity(points: list[dict[str, Any]]) -> dict[str, list[str]]
         for value in provenance.get("source_generation_ids") or ([provenance.get("source_generation_id")] if provenance.get("source_generation_id") else []):
             if isinstance(value, str) and value:
                 generation_ids.add(value)
-    return {"frame_ids": sorted(frame_ids), "source_generation_ids": sorted(generation_ids)}
+        for value in provenance.get("frame_revisions") or ([provenance.get("revision")] if provenance.get("revision") is not None else []):
+            if value is not None:
+                revisions.add(str(value))
+    return {"frame_ids": sorted(frame_ids), "source_generation_ids": sorted(generation_ids), "frame_revisions": sorted(revisions)}
 
 
 def _solar_layers(
@@ -210,6 +214,7 @@ def _solar_layers(
             "parameter_config_hash": _solar_digest(baseline_identity),
             "input_frame_ids": source_identity["frame_ids"],
             "input_source_generation_ids": source_identity["source_generation_ids"],
+            "input_frame_revisions": source_identity["frame_revisions"],
             "known_at": baseline_identity["known_at"],
             "target_date": baseline_identity["target_date"],
             "frame_fingerprint": baseline_fingerprint,
@@ -525,12 +530,14 @@ def _single_run_solar_forecast(site_id: str, zone: ZoneInfo, slots: list[tuple[d
         watts = sum((value / 1000.0) * float(target["peak_power_kwp"]) * 1000.0 for value, (target, _frame) in zip(section_values, selected))
         frame_ids = [str(frame.get("frame_id")) for _target, frame in selected]
         generation_ids = [str(frame.get("source_generation_id") or target.get("generation_id")) for target, frame in selected]
+        frame_revisions = [int(frame.get("revision") or 0) for _target, frame in selected]
         points.append(_point(watts, slot_start, slot_end, source="solar.slot_forecast.v1", provenance={
             "schema": "solar.slot_forecast.v1",
             "method": "open_meteo_hourly_gti_to_four_equal_15m_average_power",
             "site_id": site_id,
             "target_date": target_date.isoformat(),
             "frame_ids": frame_ids,
+            "frame_revisions": frame_revisions,
             "source_generation_ids": generation_ids,
             "section_peak_power_kwp": [float(target["peak_power_kwp"]) for target, _frame in selected],
             "known_at": known_at.isoformat(),

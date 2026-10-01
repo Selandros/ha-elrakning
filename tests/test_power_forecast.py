@@ -104,7 +104,7 @@ def test_solar_layers_keep_physical_baseline_and_calibrated_values_separate():
         "source": "open_meteo", "method": "full_day_open_meteo_causal", "known_at": known_at.isoformat(),
         "target_date": "2026-09-21", "forecast_points": [{
             "valid_at": "2026-09-21T18:15:00+00:00", "value_w": 1000.0, "value_kw": 1.0,
-            "provenance": {"source_generation_ids": ["solar-gen"]},
+            "provenance": {"frame_ids": ["frame-solar"], "frame_revisions": [3], "source_generation_ids": ["solar-gen"]},
         }],
     }
     physical = {"available": True, "source": "pvgis", "fetched_at": known_at.isoformat(), "installation": {"fingerprint": "install-a"}, "profile": {"target_date": "2026-09-21", "hourly_profile": [1.0]}}
@@ -114,6 +114,7 @@ def test_solar_layers_keep_physical_baseline_and_calibrated_values_separate():
     assert layers["provider_baseline"]["forecast_points"][0]["value_w"] == 1000.0
     assert layers["provider_baseline"]["provenance"]["forecast_algorithm_version"] == "solar-layering-v1"
     assert layers["provider_baseline"]["provenance"]["frame_fingerprint"]
+    assert layers["provider_baseline"]["provenance"]["input_frame_revisions"] == ["3"]
     assert layers["physical_reference"]["provenance"]["installation_fingerprint"] == "install-a"
     assert layers["site_calibrated_forecast"]["available"] is True
     assert layers["site_calibrated_forecast"]["forecast_points"][0]["value_w"] == 800.0
