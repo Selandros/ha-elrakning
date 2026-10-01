@@ -10,7 +10,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage
-from custom_components.elrakning.load_forecast import _intraday_calibration, _qualified_actual, build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, persist_load_forecast
+from custom_components.elrakning.load_forecast import _intraday_calibration, _qualified_actual, build_forecast_evaluation, build_historical_model_points, build_load_forecast_frame, build_load_forecast_shadow_evaluation, persist_load_forecast
 
 
 UTC = timezone.utc
@@ -193,6 +193,43 @@ class LoadForecastTests(unittest.TestCase):
         metric = build_forecast_evaluation(frame, actual, decision_at, "site-a", timezone_name="Europe/Stockholm")["segments"]["weekend"]
         self.assertIsNone(metric["wape"])
         self.assertEqual(metric["unavailable_reason"], "zero_or_near_zero_actual_denominator")
+
+    def test_load_forecast_shadow_requires_two_real_candidates(self):
+        result = build_load_forecast_shadow_evaluation([], [], "site-a", datetime(2026, 9, 28, tzinfo=UTC))
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"], "single_candidate_only")
+        self.assertFalse(result["auto_promotion"])
+
+    def test_load_forecast_shadow_compares_candidates_on_same_frame(self):
+        decision_at = datetime(2026, 9, 28, tzinfo=UTC)
+        records = [{"site_id": "site-a", "valid_at": "2026-09-26T22:00:00+00:00", "actual_w": 110}]
+        candidates = [{
+            "site_id": "site-a", "candidate_id": "candidate-a", "model_version": "model-a",
+            "parameter_config_hash": "hash-a", "site_calibration_version": "cal-a",
+            "global_prior_fingerprint": "prior-a", "input_frame_id": "frame-1",
+            "predictions": {"2026-09-26T22:00:00+00:00": 100},
+        }, {
+            "site_id": "site-a", "candidate_id": "candidate-b", "model_version": "model-b",
+            "parameter_config_hash": "hash-b", "site_calibration_version": "cal-b",
+            "global_prior_fingerprint": "prior-a", "input_frame_id": "frame-1",
+            "predictions": {"2026-09-26T22:00:00+00:00": 90},
+        }]
+        result = build_load_forecast_shadow_evaluation(records, candidates, "site-a", decision_at)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["input_frame_id"], "frame-1")
+        self.assertEqual([item["bias_w"] for item in result["candidates"]], [10, 20])
+        self.assertFalse(result["auto_promotion"])
+
+    def test_load_forecast_shadow_rejects_foreign_or_different_frame_candidate(self):
+        base = {
+            "candidate_id": "candidate-a", "model_version": "model-a", "parameter_config_hash": "hash-a",
+            "site_calibration_version": "cal-a", "global_prior_fingerprint": "prior-a", "input_frame_id": "frame-1",
+        }
+        foreign = {**base, "site_id": "site-b"}
+        local = {**base, "site_id": "site-a", "candidate_id": "candidate-b", "input_frame_id": "frame-2"}
+        result = build_load_forecast_shadow_evaluation([], [foreign, local], "site-a", datetime(2026, 9, 28, tzinfo=UTC))
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"], "candidate_site_scope_invalid")
 
     def _adaptive_history(self, now, current_values=(), current_coverage=1.0):
         history = []

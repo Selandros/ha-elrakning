@@ -24,6 +24,8 @@ MIN_DISTINCT_DAYS = 7
 SLOT_SECONDS = 900
 SEGMENT_SCHEMA = "ella_forecast_segment_metrics.v1"
 SEGMENT_CLASSIFIER_VERSION = "weekday-weekend-facets-v1"
+SHADOW_SCHEMA = "ella_load_forecast_shadow.v1"
+SHADOW_CONTRACT_VERSION = "same-frame-candidate-comparison-v1"
 
 
 def _quarter_start(value: datetime) -> datetime:
@@ -257,6 +259,79 @@ def _segment_metric(
     return result
 
 
+def build_load_forecast_shadow_evaluation(
+    records: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    site_id: str,
+    decision_at: datetime,
+) -> dict[str, Any]:
+    """Compare explicit candidates on one immutable matured record set."""
+    base = {
+        "schema": SHADOW_SCHEMA,
+        "contract_version": SHADOW_CONTRACT_VERSION,
+        "site_id": site_id,
+        "decision_at": decision_at.isoformat(),
+        "available": False,
+        "auto_promotion": False,
+        "execution_eligible": False,
+        "candidates": [],
+    }
+    if len(candidates) < 2:
+        base["reason"] = "single_candidate_only"
+        return base
+    identities = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or candidate.get("site_id") != site_id:
+            base["reason"] = "candidate_site_scope_invalid"
+            return base
+        identity = {
+            "candidate_id": candidate.get("candidate_id"),
+            "model_version": candidate.get("model_version"),
+            "parameter_config_hash": candidate.get("parameter_config_hash"),
+            "site_calibration_version": candidate.get("site_calibration_version"),
+            "global_prior_fingerprint": candidate.get("global_prior_fingerprint"),
+            "input_frame_id": candidate.get("input_frame_id"),
+        }
+        if not all(isinstance(identity[key], str) and identity[key] for key in identity):
+            base["reason"] = "candidate_identity_incomplete"
+            return base
+        identities.append(identity)
+    frame_ids = {identity["input_frame_id"] for identity in identities}
+    candidate_ids = {identity["candidate_id"] for identity in identities}
+    if len(frame_ids) != 1:
+        base["reason"] = "input_frame_mismatch"
+        return base
+    if len(candidate_ids) != len(identities):
+        base["reason"] = "duplicate_candidate_identity"
+        return base
+    usable = [record for record in records if record.get("site_id") == site_id and _parse_evaluation_timestamp(record.get("valid_at")) is not None]
+    if not usable:
+        base["reason"] = "no_matured_observations"
+        return base
+    results = []
+    for identity, candidate in zip(identities, candidates):
+        predictions = candidate.get("predictions") or {}
+        errors = []
+        actual_values = []
+        for record in usable:
+            prediction = predictions.get(record.get("valid_at"))
+            if not isinstance(prediction, (int, float)) or not math.isfinite(float(prediction)):
+                continue
+            errors.append(float(record["actual_w"]) - float(prediction))
+            actual_values.append(float(record["actual_w"]))
+        actual_total = sum(actual_values)
+        results.append({
+            **identity,
+            "support_count": len(errors),
+            "mae_w": sum(abs(error) for error in errors) / len(errors) if errors else None,
+            "bias_w": sum(errors) / len(errors) if errors else None,
+            "wape": sum(abs(error) for error in errors) / actual_total if actual_total > 1 else None,
+            "unavailable_reason": None if errors else "candidate_observations_missing",
+        })
+    base.update({"available": True, "input_frame_id": identities[0]["input_frame_id"], "candidates": results})
+    return base
+
+
 def build_forecast_evaluation(
     frames: list[dict[str, Any]], actual_rows: list[dict[str, Any]], decision_at: datetime, site_id: str,
     timezone_name: str | None = None, provenance: dict[str, Any] | None = None,
@@ -356,6 +431,7 @@ def build_forecast_evaluation(
         "model_version": evaluation_provenance["model_version"], "known_at": decision_at.isoformat(),
         "segment_contract": {"schema": SEGMENT_SCHEMA, "classifier_version": SEGMENT_CLASSIFIER_VERSION},
         "provenance": evaluation_provenance,
+        "shadow": build_load_forecast_shadow_evaluation([], [], site_id, decision_at),
         "summary": {
             "count": len(records), "matured_count": matured_count,
             "learning_eligible_count": len(records), "ineligible_actual_count": ineligible_actual_count,
