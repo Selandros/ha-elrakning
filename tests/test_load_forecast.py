@@ -220,6 +220,38 @@ class LoadForecastTests(unittest.TestCase):
         self.assertEqual([item["bias_w"] for item in result["candidates"]], [10, 20])
         self.assertFalse(result["auto_promotion"])
 
+    def test_evaluation_builds_causal_recency_candidate_on_same_frame(self):
+        decision_at = datetime(2026, 9, 10, 12, tzinfo=UTC)
+        frame_known_at = datetime(2026, 9, 9, 12, tzinfo=UTC)
+        valid_at = datetime(2026, 9, 9, 13, tzinfo=UTC)
+        actual = []
+        for day in range(1, 8):
+            start = frame_known_at - timedelta(days=day) + timedelta(hours=1)
+            actual.append({
+                "site_id": "site-a", "logical_role": "house.consumption", "unit": "W",
+                "interval_start": start, "interval_end": start + timedelta(minutes=15),
+                "value": 900 + day * 10, "quality_status": "good", "coverage_ratio": 1.0,
+            })
+        actual.append({
+            "site_id": "site-a", "logical_role": "house.consumption", "unit": "W",
+            "interval_start": valid_at, "interval_end": valid_at + timedelta(minutes=15),
+            "value": 980, "quality_status": "good", "coverage_ratio": 1.0,
+        })
+        frames = [{
+            "site_id": "site-a", "payload_schema": "load_forecast.v1", "frame_id": "frame-a",
+            "known_at": frame_known_at, "revision": 1,
+            "quality": {"model_version": "load-profile-v2", "training_dataset_version": "canonical-house-consumption-60d-v1", "parameter_config_version": "load-forecast-parameters-v1", "parameter_config_hash": "champion-hash", "site_calibration_version": "site-cal-v1"},
+            "provenance": {"global_model_fingerprint": "global-none"},
+            "points": [{"valid_at": valid_at, "value": 1000, "point": {"corrected_forecast_w": 1000}}],
+        }]
+        result = build_forecast_evaluation(frames, actual, decision_at, "site-a", timezone_name="UTC")
+        self.assertTrue(result["shadow"]["available"])
+        self.assertEqual(result["shadow"]["input_frame_id"], "frame-a")
+        candidates = {item["candidate_id"]: item for item in result["shadow"]["candidates"]}
+        self.assertEqual(set(candidates), {"champion", "load-profile-recency-v1"})
+        self.assertEqual(candidates["load-profile-recency-v1"]["training_cutoff"], frame_known_at.isoformat())
+        self.assertFalse(result["shadow"]["auto_promotion"])
+
     def test_load_forecast_shadow_rejects_foreign_or_different_frame_candidate(self):
         base = {
             "candidate_id": "candidate-a", "model_version": "model-a", "parameter_config_hash": "hash-a",

@@ -26,6 +26,10 @@ SEGMENT_SCHEMA = "ella_forecast_segment_metrics.v1"
 SEGMENT_CLASSIFIER_VERSION = "weekday-weekend-facets-v1"
 SHADOW_SCHEMA = "ella_load_forecast_shadow.v1"
 SHADOW_CONTRACT_VERSION = "same-frame-candidate-comparison-v1"
+RECENCY_SHADOW_MODEL_VERSION = "load-profile-recency-v1"
+RECENCY_SHADOW_DATASET_VERSION = "canonical-house-consumption-14d-v1"
+RECENCY_SHADOW_PARAMETER_VERSION = "load-profile-recency-parameters-v1"
+RECENCY_SHADOW_DAYS = 14
 
 
 def _quarter_start(value: datetime) -> datetime:
@@ -97,6 +101,85 @@ def _baseline_point(profile, local_time: datetime) -> tuple[float | None, str, i
     if not candidates:
         return None, support, 0
     return sum(value for value, _row in candidates) / len(candidates), support, len(candidates)
+
+
+def _recency_profile(history: list[dict[str, Any]], timezone_name: str, known_at: datetime):
+    """Build a causal recent-history profile for shadow evaluation only."""
+    try:
+        zone = ZoneInfo(timezone_name)
+    except Exception:
+        return None
+    eligible = [
+        row for row in history
+        if _qualified_actual(row, known_at)
+    ]
+    dates = sorted({row["interval_start"].astimezone(zone).date() for row in eligible})
+    if len(dates) < MIN_DISTINCT_DAYS:
+        return None
+    selected_dates = set(dates[-RECENCY_SHADOW_DAYS:])
+    selected = [
+        row for row in eligible
+        if row["interval_start"].astimezone(zone).date() in selected_dates
+    ]
+    return _profile_buckets(selected, timezone_name)
+
+
+def _shadow_parameter_hash() -> str:
+    payload = {
+        "model_version": RECENCY_SHADOW_MODEL_VERSION,
+        "training_dataset_version": RECENCY_SHADOW_DATASET_VERSION,
+        "parameter_config_version": RECENCY_SHADOW_PARAMETER_VERSION,
+        "recency_days": RECENCY_SHADOW_DAYS,
+        "min_distinct_days": MIN_DISTINCT_DAYS,
+        "slot_seconds": SLOT_SECONDS,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _build_recency_shadow_candidate(
+    frame: dict[str, Any],
+    history: list[dict[str, Any]],
+    site_id: str,
+    timezone_name: str,
+) -> dict[str, Any] | None:
+    """Build one real recent-profile candidate from pre-frame observations."""
+    known_at = frame.get("known_at")
+    if not isinstance(known_at, datetime) or known_at.tzinfo is None:
+        return None
+    profile = _recency_profile(history, timezone_name, known_at)
+    if profile is None:
+        return None
+    predictions = {}
+    for point in frame.get("points") or []:
+        valid_at = point.get("valid_at")
+        if not isinstance(valid_at, datetime) or valid_at.tzinfo is None:
+            return None
+        local_time = valid_at.astimezone(ZoneInfo(timezone_name))
+        value, _support_method, support = _baseline_point(profile, local_time)
+        if support < 2:
+            slot = local_time.hour * 4 + local_time.minute // 15
+            fallback = profile[2].get(slot, [])
+            if len(fallback) >= 2:
+                value = sum(item[0] for item in fallback) / len(fallback)
+                support = len(fallback)
+        if value is None or support < 2:
+            return None
+        predictions[valid_at.isoformat()] = value
+    if not predictions:
+        return None
+    return {
+        "site_id": site_id,
+        "candidate_id": RECENCY_SHADOW_MODEL_VERSION,
+        "model_version": RECENCY_SHADOW_MODEL_VERSION,
+        "training_dataset_version": RECENCY_SHADOW_DATASET_VERSION,
+        "parameter_config_version": RECENCY_SHADOW_PARAMETER_VERSION,
+        "parameter_config_hash": _shadow_parameter_hash(),
+        "site_calibration_version": "none",
+        "global_prior_fingerprint": "none",
+        "input_frame_id": frame.get("frame_id"),
+        "training_cutoff": known_at.isoformat(),
+        "predictions": predictions,
+    }
 
 
 def _qualified_actual(row: dict[str, Any], decision_at: datetime) -> bool:
@@ -287,10 +370,13 @@ def build_load_forecast_shadow_evaluation(
         identity = {
             "candidate_id": candidate.get("candidate_id"),
             "model_version": candidate.get("model_version"),
+            "training_dataset_version": candidate.get("training_dataset_version") or "unspecified",
+            "parameter_config_version": candidate.get("parameter_config_version") or "unspecified",
             "parameter_config_hash": candidate.get("parameter_config_hash"),
             "site_calibration_version": candidate.get("site_calibration_version"),
             "global_prior_fingerprint": candidate.get("global_prior_fingerprint"),
             "input_frame_id": candidate.get("input_frame_id"),
+            "training_cutoff": candidate.get("training_cutoff") or "unspecified",
         }
         if not all(isinstance(identity[key], str) and identity[key] for key in identity):
             base["reason"] = "candidate_identity_incomplete"
@@ -426,12 +512,43 @@ def build_forecast_evaluation(
         name: _segment_metric(name, records, evaluation_provenance, timezone_name)
         for name in ("weekend", "cold", "anomaly", "normal")
     }
+    shadow = build_load_forecast_shadow_evaluation([], [], site_id, decision_at)
+    candidate_frames = sorted(
+        (frame for frame in frames if frame.get("site_id") == site_id and frame.get("frame_id")),
+        key=lambda frame: (frame.get("known_at") or datetime.min.replace(tzinfo=timezone.utc), frame.get("frame_id")),
+    )
+    for frame in reversed(candidate_frames):
+        frame_records = [record for record in records if record.get("frame_id") == frame.get("frame_id")]
+        if not frame_records:
+            continue
+        candidate = _build_recency_shadow_candidate(frame, actual_rows, site_id, timezone_name or "UTC")
+        if candidate is None:
+            continue
+        champion_predictions = {record["valid_at"]: record["corrected_forecast_w"] for record in frame_records}
+        frame_provenance = frame.get("quality") or frame.get("provenance") or {}
+        champion = {
+            "site_id": site_id,
+            "candidate_id": "champion",
+            "model_version": frame_provenance.get("model_version") or MODEL_VERSION,
+            "training_dataset_version": frame_provenance.get("training_dataset_version") or TRAINING_DATASET_VERSION,
+            "parameter_config_version": frame_provenance.get("parameter_config_version") or PARAMETER_CONFIG_VERSION,
+            "parameter_config_hash": frame_provenance.get("parameter_config_hash") or "unspecified",
+            "site_calibration_version": frame_provenance.get("site_calibration_version") or "unspecified",
+            "global_prior_fingerprint": (frame.get("provenance") or {}).get("global_model_fingerprint") or "none",
+            "input_frame_id": frame.get("frame_id"),
+            "predictions": champion_predictions,
+        }
+        shadow = build_load_forecast_shadow_evaluation(
+            frame_records, [champion, candidate], site_id, decision_at,
+        )
+        if shadow.get("available"):
+            break
     return {
         "schema": "ella_forecast_evaluation.v1", "site_id": site_id,
         "model_version": evaluation_provenance["model_version"], "known_at": decision_at.isoformat(),
         "segment_contract": {"schema": SEGMENT_SCHEMA, "classifier_version": SEGMENT_CLASSIFIER_VERSION},
         "provenance": evaluation_provenance,
-        "shadow": build_load_forecast_shadow_evaluation([], [], site_id, decision_at),
+        "shadow": shadow,
         "summary": {
             "count": len(records), "matured_count": matured_count,
             "learning_eligible_count": len(records), "ineligible_actual_count": ineligible_actual_count,
