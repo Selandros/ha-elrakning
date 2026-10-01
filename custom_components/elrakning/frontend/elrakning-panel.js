@@ -3336,7 +3336,7 @@ class ElrakningPanel {
         <div class="dashboard-card-stack">
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="house" aria-label="Visa Hus"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3345,7 +3345,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="house" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
-            <div class="live-power-heading"><span class="live-power-title">Sol</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="solar" aria-label="Visa Sol"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Sol</span><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3354,7 +3354,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="grid" aria-label="Visa Nät"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3363,7 +3363,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="grid" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
-            <div class="live-power-heading"><span class="live-power-title">Batteri</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="battery" aria-label="Visa Batteri"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Batteri</span><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3381,7 +3381,7 @@ class ElrakningPanel {
           </article>
         </section>
 
-        <section class="price-section" data-dashboard-card-group="grid" aria-labelledby="price-title">
+        <section class="price-section" aria-labelledby="price-title">
           <div class="section-heading">
             <div class="price-heading-main">
               <div>
@@ -3470,7 +3470,7 @@ class ElrakningPanel {
         </div>
         </section>
 
-        <div class="price-plan-rail" data-price-plan-rail data-dashboard-card-group="grid" hidden role="list" aria-label="Prisplan"></div>
+        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
 
         <div class="daily-energy-row">
           <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
@@ -6803,7 +6803,6 @@ class ElrakningPanel {
     this._bindConfigurationCardsToggle();
     this._bindSiteSettingsDialog();
     this._bindMainCardToggles();
-    this._bindDashboardCardToggles();
     this._bindProviderSourceDialog();
     this._bindBoardDataDialog();
     this._bindMeterSourceDialog();
@@ -7279,7 +7278,7 @@ class ElrakningPanel {
     const groups = {
       house: ["[data-live-power-tile=house]", "[data-daily-energy]"],
       solar: ["[data-live-power-tile=solar]", "[data-power-card=solar-history]", "[data-solar-evidence-card]"],
-      grid: ["[data-live-power-tile=grid]", "[data-dashboard-card-group=grid]", "[data-phase-history-card]"],
+      grid: ["[data-live-power-tile=grid]", "[data-phase-history-card]"],
       battery: ["[data-live-power-tile=battery]", "[data-power-card=battery-history]", "[data-soc-card]"],
       invoice: ["[data-invoice-estimate-card]", "[data-cost-card]"],
     };
@@ -7287,11 +7286,6 @@ class ElrakningPanel {
       for (const selector of selectors) {
         for (const node of this.host.querySelectorAll(selector)) node.hidden = !visible(key);
       }
-    }
-    for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
-      const input = toggle.querySelector("input");
-      const key = toggle.dataset.dashboardCardToggle;
-      if (input && key in this._dashboardCardVisibility) input.checked = this._dashboardCardVisibility[key] !== "hidden";
     }
   }
 
@@ -7748,20 +7742,6 @@ class ElrakningPanel {
         if (key === "elmatare") this._mainCards.consumption = false;
         this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
         this._persistChartPreferences({ main_cards: { ...this._mainCards } });
-      });
-    }
-  }
-
-  _bindDashboardCardToggles() {
-    for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
-      const input = toggle.querySelector("input");
-      const key = toggle.dataset.dashboardCardToggle;
-      if (!input || !(key in this._dashboardCardVisibility)) continue;
-      input.checked = this._dashboardCardVisibility[key] !== "hidden";
-      input.addEventListener("change", () => {
-        this._dashboardCardVisibility[key] = input.checked ? "always" : "hidden";
-        this._renderDashboardCardVisibility();
-        this._persistChartPreferences({ dashboard_card_visibility: { ...this._dashboardCardVisibility } });
       });
     }
   }
