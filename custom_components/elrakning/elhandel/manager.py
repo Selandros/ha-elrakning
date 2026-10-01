@@ -52,7 +52,7 @@ DASHBOARD_CARD_VISIBILITY_VALUES = ("always", "config_only", "hidden")
 DASHBOARD_CARD_VISIBILITY_DEFAULTS = {
     "house": "always",
     "solar": "config_only",
-    "grid": "config_only",
+    "grid": "always",
     "battery": "config_only",
     "invoice": "always",
 }

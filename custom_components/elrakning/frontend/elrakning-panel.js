@@ -3381,7 +3381,7 @@ class ElrakningPanel {
           </article>
         </section>
 
-        <section class="price-section" aria-labelledby="price-title">
+        <section class="price-section" data-dashboard-card-group="grid" aria-labelledby="price-title">
           <div class="section-heading">
             <div class="price-heading-main">
               <div>
@@ -3470,7 +3470,7 @@ class ElrakningPanel {
         </div>
         </section>
 
-        <div class="price-plan-rail" data-price-plan-rail hidden role="list" aria-label="Prisplan"></div>
+        <div class="price-plan-rail" data-price-plan-rail data-dashboard-card-group="grid" hidden role="list" aria-label="Prisplan"></div>
 
         <div class="daily-energy-row">
           <section class="card daily-energy-card" data-daily-energy hidden aria-labelledby="daily-energy-title">
@@ -7279,7 +7279,7 @@ class ElrakningPanel {
     const groups = {
       house: ["[data-live-power-tile=house]", "[data-daily-energy]"],
       solar: ["[data-live-power-tile=solar]", "[data-power-card=solar-history]", "[data-solar-evidence-card]"],
-      grid: ["[data-live-power-tile=grid]", "[data-phase-history-card]"],
+      grid: ["[data-live-power-tile=grid]", "[data-dashboard-card-group=grid]", "[data-phase-history-card]"],
       battery: ["[data-live-power-tile=battery]", "[data-power-card=battery-history]", "[data-soc-card]"],
       invoice: ["[data-invoice-estimate-card]", "[data-cost-card]"],
     };
@@ -10484,7 +10484,7 @@ class ElrakningPanel {
       month.textContent = "";
       if (estimateStatus) {
         estimateStatus.hidden = false;
-        estimateStatus.textContent = this._costUnavailableReason === "meter_not_configured" ? "Mätare ej konfigurerad" : "Historik saknas";
+        estimateStatus.textContent = this._costUnavailableReason === "meter_not_configured" ? "Sensor saknas: Elmätarens effekt (kW)" : "Historik saknas för Elmätarens effekt (kW)";
       }
       today.hidden = true;
       today.textContent = "";
@@ -10574,9 +10574,9 @@ class ElrakningPanel {
     if (!estimate) {
       card.hidden = false;
       const reason = this._costUnavailableReason === "meter_not_configured"
-        ? "Mätare ej konfigurerad"
+        ? "Sensor saknas: Elmätarens effekt (kW)"
         : this._costUnavailableReason === "history_missing"
-          ? "Historik saknas"
+          ? "Historik saknas för Elmätarens effekt (kW)"
           : "Prisdata saknas";
       status.textContent = reason;
       kpis.replaceChildren();

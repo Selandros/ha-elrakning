@@ -555,11 +555,11 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
         manager.chart_preferences_store = _Store()
 
         defaults = (await manager.async_get_ui_preferences("user-a"))["dashboard_card_visibility"]
-        self.assertEqual(defaults, {"house": "always", "solar": "config_only", "grid": "config_only", "battery": "config_only", "invoice": "always"})
+        self.assertEqual(defaults, {"house": "always", "solar": "config_only", "grid": "always", "battery": "config_only", "invoice": "always"})
         updated = await manager.async_update_ui_preferences("user-a", {"dashboard_card_visibility": {"battery": "hidden", "solar": "always"}})
         self.assertEqual(updated["dashboard_card_visibility"]["battery"], "hidden")
         self.assertEqual(updated["dashboard_card_visibility"]["solar"], "always")
-        self.assertEqual(updated["dashboard_card_visibility"]["grid"], "config_only")
+        self.assertEqual(updated["dashboard_card_visibility"]["grid"], "always")
         self.assertEqual((await manager.async_get_ui_preferences("user-b"))["dashboard_card_visibility"], defaults)
 
     async def test_dashboard_card_visibility_ignores_invalid_migration_values(self):
