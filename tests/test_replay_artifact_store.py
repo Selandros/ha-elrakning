@@ -73,7 +73,7 @@ def test_runtime_holdout_matrix_reports_real_evidence_without_fixture_claims():
     assert all("deterministic_fixture" not in str(item) for item in result["items"])
 
 
-def test_gap_negative_evidence_does_not_disqualify_complete_windows():
+def test_gap_negative_evidence_passes_holdout_without_qualifying_gap_windows():
     descriptors = [
         {"descriptor_id": "complete", "site_id": SITE, "local_month": 9, "qualified": True, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "96/96", "publication_cutoff_verified": True},
         {"descriptor_id": "gap", "site_id": SITE, "local_month": 9, "qualified": False, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "95/96", "publication_cutoff_verified": True},
@@ -82,8 +82,9 @@ def test_gap_negative_evidence_does_not_disqualify_complete_windows():
     assert result["qualified_count"] == 1
     assert result["items"][-1]["kind"] == "publication_cutoff"
     gap = next(item for item in result["items"] if item["kind"] == "gap")
-    assert gap["status"] == "disqualified"
-    assert result["qualified"] is False
+    assert gap["status"] == "qualified"
+    assert gap["outcome"] == "correctly_rejected"
+    assert gap["evidence"][0]["qualified"] is False
 
 
 def test_store_is_site_scoped_bounded_and_schema_fail_closed():

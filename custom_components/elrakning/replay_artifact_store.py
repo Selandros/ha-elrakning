@@ -111,8 +111,11 @@ def build_runtime_holdout_matrix(descriptors: Any) -> dict[str, Any]:
     qualified = [item for item in items if item.get("qualified") is True]
     result = []
 
-    def record(kind: str, status: str, reason: str, evidence: list[dict[str, Any]]) -> None:
-        result.append({"kind": kind, "status": status, "reason": reason, "evidence": deepcopy(evidence)})
+    def record(kind: str, status: str, reason: str, evidence: list[dict[str, Any]], outcome: str | None = None) -> None:
+        item = {"kind": kind, "status": status, "reason": reason, "evidence": deepcopy(evidence)}
+        if outcome is not None:
+            item["outcome"] = outcome
+        result.append(item)
 
     months = {str(item.get("local_month")) for item in qualified if item.get("local_month") is not None}
     record("season", "qualified" if len(months) >= 2 else "pending", "distinct_mature_periods" if len(months) >= 2 else "no_distinct_mature_periods", [item for item in qualified if item.get("local_month") in months])
@@ -124,7 +127,13 @@ def build_runtime_holdout_matrix(descriptors: Any) -> dict[str, Any]:
     record("dst", "qualified" if dst else "pending", "dst_transition_window" if dst else "no_real_dst_window", dst)
 
     gaps = [item for item in items if item.get("actual_coverage") not in (None, "96/96")]
-    record("gap", "disqualified" if gaps else "pending", "actual_coverage_gap" if gaps else "no_real_gap_window", gaps)
+    record(
+        "gap",
+        "qualified" if gaps else "pending",
+        "correctly_rejected_gap_windows" if gaps else "no_real_gap_window",
+        gaps,
+        outcome="correctly_rejected" if gaps else None,
+    )
 
     generations = {str(generation) for item in qualified for generation in item.get("source_generations", []) if generation}
     generation_items = [item for item in qualified if item.get("source_generations")]
