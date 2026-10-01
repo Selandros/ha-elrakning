@@ -218,8 +218,8 @@ def resolve_grid_tariff(
         candidates.append((start, known, str(record.get("source_generation_id") or ""), record))
     if not candidates:
         return None
-    candidates.sort(key=lambda item: item[:3])
+    # Resolve the latest causally known revision for the applicable interval.
+    # Input order must never decide which historical revision wins.
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     chosen = candidates[-1][3]
-    if any(item[0] == candidates[-1][0] and item[3].get("grid_price") != chosen.get("grid_price") for item in candidates[:-1]):
-        return None
     return deepcopy(chosen)

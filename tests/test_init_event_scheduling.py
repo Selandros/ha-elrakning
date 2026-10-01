@@ -3,6 +3,7 @@ import asyncio
 import concurrent.futures
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 
 def _load_schedule_price_update():
@@ -225,8 +226,35 @@ def test_replay_artifact_generation_is_background_work_outside_startup_barrier()
     assert '"elrakning_replay_artifact_coalesced"' in source
     assert "call_soon_threadsafe(create_on_loop)" in source
     assert "elrakning_replay_trigger_diagnostic" in source
+    assert "_replay_trigger_identity" in source
+    assert "replay_active_trigger_keys" in source
+    assert "replay_pending_trigger_keys" in source
     assert 'frontend_data["replay_artifact_startup_task"] = hass.async_create_task' not in source
     assert "replay_refresh_task = hass.create_task(_generate_replay_artifact" not in source
+
+
+def test_replay_trigger_identity_is_stable_for_duplicate_source_events():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_replay_trigger_identity")
+    namespace = {"json": __import__("json")}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
+    _replay_trigger_identity = namespace["_replay_trigger_identity"]
+
+    event = SimpleNamespace(
+        event_type="elrakning_load_forecast_update",
+        data={"site_id": "site-a", "frame_id": "frame-1", "forecast_id": "forecast-1"},
+    )
+    duplicate = SimpleNamespace(
+        event_type=event.event_type,
+        data={"forecast_id": "forecast-1", "frame_id": "frame-1", "site_id": "site-a"},
+    )
+    changed = SimpleNamespace(
+        event_type=event.event_type,
+        data={"site_id": "site-a", "frame_id": "frame-2", "forecast_id": "forecast-2"},
+    )
+    assert _replay_trigger_identity(event) == _replay_trigger_identity(duplicate)
+    assert _replay_trigger_identity(event) != _replay_trigger_identity(changed)
 
 
 def _load_replay_scheduler():

@@ -2,6 +2,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +21,9 @@ from custom_components.elrakning.site_economic_frames import (
     persist_eon_grid_economic_snapshot,
     resolve_grid_binding_site_id,
     schedule_eon_grid_economic_capture,
+    _persist_eon_grid_economic_snapshot_with_retry,
 )
+from unittest.mock import patch
 
 
 UTC = timezone.utc
@@ -116,6 +119,17 @@ class SiteEconomicFrameTests(unittest.TestCase):
     def tearDown(self):
         self.storage.close()
         self.directory.cleanup()
+
+    def test_locked_idempotent_snapshot_write_retries_once_in_executor_path(self):
+        with patch(
+            "custom_components.elrakning.site_economic_frames.persist_eon_grid_economic_snapshot_path",
+            side_effect=[sqlite3.OperationalError("database is locked"), 3],
+        ) as persist:
+            result = _persist_eon_grid_economic_snapshot_with_retry(
+                self.path, "site-a", _binding(), _state(), self.captured
+            )
+        self.assertEqual(result, 3)
+        self.assertEqual(persist.call_count, 2)
 
     def test_matching_targets_fan_out_shared_source_without_active_site_identity(self):
         binding_a = _binding(fingerprint="a")

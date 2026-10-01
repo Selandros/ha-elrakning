@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
+import sqlite3
+import time
 from copy import deepcopy
 import math
 from datetime import datetime, timezone
@@ -15,7 +16,6 @@ from .canonical_storage import DATASET_VERSION, SCHEMA_VERSION, CanonicalStorage
 from .const import DOMAIN
 from .elnat.eon_models import facility_identity
 
-_LOGGER = logging.getLogger(__name__)
 UTC = timezone.utc
 
 _EON_COMPONENTS = (
@@ -343,6 +343,26 @@ def persist_eon_grid_economic_snapshot_path(
         storage.close()
 
 
+def _persist_eon_grid_economic_snapshot_with_retry(
+    storage_path: str | Path,
+    site_id: str,
+    binding: dict[str, Any],
+    state: dict[str, Any],
+    captured_at: datetime,
+) -> int:
+    """Retry only the idempotent snapshot write on transient SQLite contention."""
+    for attempt in range(2):
+        try:
+            return persist_eon_grid_economic_snapshot_path(
+                storage_path, site_id, binding, state, captured_at
+            )
+        except sqlite3.OperationalError as err:
+            if "locked" not in str(err).lower() or attempt:
+                raise
+            time.sleep(0.1)
+    raise RuntimeError("eon_grid_snapshot_retry_exhausted")
+
+
 async def _async_capture_eon_grid_economic_snapshot(hass: Any, captured_at: datetime) -> None:
     domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
     site_identity = domain_data.get("site_identity_manager")
@@ -392,19 +412,30 @@ async def _async_capture_eon_grid_economic_snapshot(hass: Any, captured_at: date
             state_snapshot = deepcopy(explicit_state)
         try:
             await hass.async_add_executor_job(
-                persist_eon_grid_economic_snapshot_path,
+                _persist_eon_grid_economic_snapshot_with_retry,
                 storage_path,
                 site_id,
                 binding,
                 state_snapshot,
                 captured_at,
             )
-        except (OSError, ValueError):
-            _LOGGER.debug(
-                "Unable to persist site economic frame for site_id=%s",
-                site_id,
-                exc_info=True,
-            )
+        except Exception as err:
+            diagnostic = getattr(domain_data.get("manager"), "async_diagnostic", None)
+            if callable(diagnostic):
+                try:
+                    result = diagnostic(
+                        "ERROR",
+                        "canonical_storage",
+                        "eon_grid_capture_failed",
+                        json.dumps(
+                            {"site_id": site_id, "error_type": type(err).__name__, "error": str(err)[:200]},
+                            separators=(",", ":"),
+                        ),
+                    )
+                    if hasattr(result, "__await__"):
+                        await result
+                except Exception:
+                    pass
 
 
 def schedule_eon_grid_economic_capture(hass: Any) -> None:

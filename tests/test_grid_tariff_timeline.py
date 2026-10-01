@@ -137,3 +137,63 @@ def test_user_confirmed_tariff_requires_exact_runtime_identity_and_is_determinis
     assert build_user_confirmed_grid_tariff_record(
         site_id=SITE, binding=binding, state=mismatched, fact=fact, captured_at=CAPTURED
     ) is None
+
+
+def _timeline_record(generation, known_at, valid_from, valid_to, price, site=SITE):
+    return {
+        "schema": "elrakning.grid_tariff_timeline.v1",
+        "site_id": site,
+        "provider": "eon",
+        "source_generation_id": generation,
+        "known_at": known_at,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "grid_price": {"variable_total_ore_per_kwh_gross": price},
+    }
+
+
+def test_resolver_uses_causal_applicable_historical_revision_not_future_record():
+    records = [
+        _timeline_record(
+            "october",
+            "2026-09-29T22:00:00+00:00",
+            "2026-09-30T22:00:00+00:00",
+            None,
+            150.0,
+        ),
+        _timeline_record(
+            "september",
+            "2026-09-27T22:21:31+00:00",
+            "2026-08-31T22:00:00+00:00",
+            "2026-09-30T22:00:00+00:00",
+            142.0,
+        ),
+    ]
+    resolved = resolve_grid_tariff(
+        records,
+        site_id=SITE,
+        at=datetime(2026, 9, 30, 1, 15, tzinfo=timezone.utc),
+        decision_at=datetime(2026, 9, 30, 1, 15, tzinfo=timezone.utc),
+    )
+    assert resolved["source_generation_id"] == "september"
+
+
+def test_resolver_revision_choice_is_independent_of_input_order():
+    records = [
+        _timeline_record("old", "2026-09-27T22:00:00+00:00", "2026-08-31T22:00:00+00:00", "2026-09-30T22:00:00+00:00", 140.0),
+        _timeline_record("new", "2026-09-28T12:00:00+00:00", "2026-08-31T22:00:00+00:00", "2026-09-30T22:00:00+00:00", 142.0),
+    ]
+    decision = datetime(2026, 9, 30, 7, 15, tzinfo=timezone.utc)
+    first = resolve_grid_tariff(records, site_id=SITE, at=decision, decision_at=decision)
+    second = resolve_grid_tariff(list(reversed(records)), site_id=SITE, at=decision, decision_at=decision)
+    assert first["source_generation_id"] == second["source_generation_id"] == "new"
+
+
+def test_resolver_rejects_future_known_or_effective_records_and_wrong_site():
+    decision = datetime(2026, 9, 30, 7, 15, tzinfo=timezone.utc)
+    records = [
+        _timeline_record("known-later", "2026-10-01T00:00:00+00:00", "2026-08-31T22:00:00+00:00", "2026-09-30T22:00:00+00:00", 142.0),
+        _timeline_record("effective-later", "2026-09-27T22:00:00+00:00", "2026-09-30T22:00:00+00:00", None, 150.0),
+        _timeline_record("wrong-site", "2026-09-27T22:00:00+00:00", "2026-08-31T22:00:00+00:00", "2026-09-30T22:00:00+00:00", 142.0, site="other"),
+    ]
+    assert resolve_grid_tariff(records, site_id=SITE, at=decision, decision_at=decision) is None

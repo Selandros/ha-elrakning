@@ -58,6 +58,39 @@ PANEL_CADENCE_AUDIT_PATH = f"/{DOMAIN}/elrakning-cadence-audit.js"
 PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
 
 
+def _replay_trigger_identity(event) -> str:
+    """Return a stable identity for one source event without using wall-clock time."""
+    data = getattr(event, "data", None)
+    if not isinstance(data, dict):
+        data = {}
+    stable_fields = {
+        key: data[key]
+        for key in (
+            "site_id",
+            "frame_id",
+            "forecast_id",
+            "model_version",
+            "source_generation_id",
+            "generation_id",
+            "known_at",
+            "decision_at",
+            "request_id",
+        )
+        if key in data
+    }
+    if not stable_fields:
+        stable_fields = data
+    return json.dumps(
+        {
+            "event_type": getattr(event, "event_type", None) or "unknown",
+            "data": stable_fields,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
 def _schedule_price_update(hass: HomeAssistant) -> None:
     """Schedule the existing price update event on Home Assistant's loop."""
     hass.loop.call_soon_threadsafe(hass.bus.async_fire, "elrakning_price_update")
@@ -731,6 +764,8 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     replay_active_task = None
     replay_pending_all = False
     replay_pending_site_ids = set()
+    replay_active_trigger_keys = set()
+    replay_pending_trigger_keys = set()
     frontend_data["replay_scheduler_closed"] = False
 
     async def _generate_replay_artifact(_call=None, event_site_id=None):
@@ -836,28 +871,50 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             create_on_loop()
 
+    def _start_replay(source, event_site_id, trigger_keys):
+        nonlocal replay_active_task, replay_active_trigger_keys
+        replay_active_trigger_keys = set(trigger_keys)
+        task_names = {
+            "startup": "elrakning_replay_artifact_startup",
+            "event": "elrakning_replay_artifact_event",
+            "coalesced": "elrakning_replay_artifact_coalesced",
+        }
+        replay_active_task = _create_replay_background_task(
+            hass,
+            lambda: _run_replay_artifact_background(source, event_site_id),
+            task_names.get(source, "elrakning_replay_artifact_event"),
+        )
+        frontend_data["replay_benchmark_refresh_task"] = replay_active_task
+
     def _schedule_pending_replay():
-        nonlocal replay_active_task, replay_pending_all
+        nonlocal replay_active_task, replay_pending_all, replay_active_trigger_keys
         if frontend_data.get("replay_scheduler_closed") or replay_active_task is not asyncio.current_task():
             return
-        if not replay_pending_all and not replay_pending_site_ids:
+        pending_keys = replay_pending_trigger_keys - replay_active_trigger_keys
+        if not replay_pending_all and not replay_pending_site_ids and not pending_keys:
             replay_active_task = None
+            replay_active_trigger_keys = set()
             return
         event_site_id = None if replay_pending_all or len(replay_pending_site_ids) != 1 else next(iter(replay_pending_site_ids))
         replay_pending_all = False
         replay_pending_site_ids.clear()
-        replay_active_task = _create_replay_background_task(
-            hass,
-            lambda: _run_replay_artifact_background("coalesced", event_site_id),
-            "elrakning_replay_artifact_coalesced",
-        )
-        frontend_data["replay_benchmark_refresh_task"] = replay_active_task
+        replay_pending_trigger_keys.clear()
+        _start_replay("coalesced", event_site_id, pending_keys)
 
     def _schedule_replay_evidence(event):
         nonlocal replay_active_task, replay_pending_all
         event_site_id = event.data.get("site_id") if getattr(event, "data", None) else None
         event_type = getattr(event, "event_type", None) or "unknown"
+        trigger_key = f"{event_site_id or '*'}:{_replay_trigger_identity(event)}"
         if replay_active_task is not None and not replay_active_task.done():
+            if trigger_key in replay_active_trigger_keys or trigger_key in replay_pending_trigger_keys:
+                _queue_replay_diagnostic(
+                    "INFO",
+                    "replay_trigger_duplicate",
+                    json.dumps({"event_type": event_type, "site_id": event_site_id}, separators=(",", ":")),
+                )
+                return
+            replay_pending_trigger_keys.add(trigger_key)
             if isinstance(event_site_id, str) and event_site_id:
                 replay_pending_site_ids.add(event_site_id)
             else:
@@ -868,12 +925,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 json.dumps({"event_type": event_type, "site_id": event_site_id, "active_run": True}, separators=(",", ":")),
             )
             return
-        replay_active_task = _create_replay_background_task(
-            hass,
-            lambda: _run_replay_artifact_background("event", event_site_id),
-            "elrakning_replay_artifact_event",
-        )
-        frontend_data["replay_benchmark_refresh_task"] = replay_active_task
+        _start_replay("event", event_site_id, {trigger_key})
 
     hass.services.async_register(DOMAIN, "replay_artifact_generate", _generate_replay_artifact)
     frontend_data["replay_benchmark_event_unsubs"] = [
@@ -904,11 +956,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             lambda _event: clear_forecast_view_caches(hass),
         ),
     ]
-    replay_active_task = _create_replay_background_task(
-        hass,
-        lambda: _run_replay_artifact_background("startup"),
-        "elrakning_replay_artifact_startup",
-    )
+    _start_replay("startup", None, {"startup"})
     frontend_data["replay_artifact_startup_task"] = replay_active_task
     await _record_replay_diagnostic(
         "INFO",
