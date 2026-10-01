@@ -48,6 +48,14 @@ MAIN_CARD_DEFAULTS = {
     "consumption": False,
     "battery": False,
 }
+DASHBOARD_CARD_VISIBILITY_VALUES = ("always", "config_only", "hidden")
+DASHBOARD_CARD_VISIBILITY_DEFAULTS = {
+    "house": "always",
+    "solar": "config_only",
+    "grid": "config_only",
+    "battery": "config_only",
+    "invoice": "always",
+}
 PRICE_COMPARISON_DEFAULTS = {
     "electricity": True,
     "grid": False,
@@ -246,6 +254,14 @@ class ElhandelManager:
                 for name, default in defaults.items()
             }
 
+        saved_visibility = user_state.get("dashboard_card_visibility", {})
+        dashboard_card_visibility = {
+            name: saved_visibility[name]
+            if isinstance(saved_visibility, dict) and saved_visibility.get(name) in DASHBOARD_CARD_VISIBILITY_VALUES
+            else default
+            for name, default in DASHBOARD_CARD_VISIBILITY_DEFAULTS.items()
+        }
+
         main_cards = merge(MAIN_CARD_DEFAULTS, "main_cards")
         return {
             "chart_layers": merge(CHART_LAYER_DEFAULTS, "chart_layers"),
@@ -262,6 +278,7 @@ class ElhandelManager:
                 else CONFIGURATION_CARDS_VISIBLE_DEFAULT
             ),
             "main_cards": main_cards,
+            "dashboard_card_visibility": dashboard_card_visibility,
         }
 
     async def async_get_ui_preferences(self, user_id: str) -> dict[str, Any]:
@@ -299,6 +316,11 @@ class ElhandelManager:
                             key: value[key] if key in value and isinstance(value[key], bool) else current[domain][key]
                             for key in defaults
                         }
+                elif domain == "dashboard_card_visibility" and isinstance(value, dict):
+                    current[domain] = {
+                        key: value[key] if value.get(key) in DASHBOARD_CARD_VISIBILITY_VALUES else current[domain][key]
+                        for key in DASHBOARD_CARD_VISIBILITY_DEFAULTS
+                    }
                 elif domain == "configuration_cards_visible" and isinstance(value, bool):
                     current[domain] = value
                 elif domain == "phase_history_metric" and value in PHASE_HISTORY_METRICS:
@@ -312,6 +334,7 @@ class ElhandelManager:
                 "phase_history_metric": current["phase_history_metric"],
                 "configuration_cards_visible": current["configuration_cards_visible"],
                 "main_cards": current["main_cards"],
+                "dashboard_card_visibility": current["dashboard_card_visibility"],
             }
             await self.chart_preferences_store.async_save({"users": users})
             saved = await self.chart_preferences_store.async_load()

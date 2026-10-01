@@ -3292,8 +3292,11 @@ class ElrakningPanel {
     this._providerConfigured = false;
     this._electricityProviderState = null;
     this._billingHistory = null;
+    this._billingHistoryStatus = null;
+    this._costUnavailableReason = "billing_history_missing";
     this._billingDailyByMonth = new Map();
     this._costSelectedMonth = null;
+    this._dashboardCardVisibility = { house: "always", solar: "config_only", grid: "config_only", battery: "config_only", invoice: "always" };
     const pickerNow = new Date();
     this._periodPickerState = {
       mode: "hour",
@@ -3333,7 +3336,7 @@ class ElrakningPanel {
         <div class="dashboard-card-stack">
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="house" aria-label="Visa Hus"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3342,7 +3345,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="house" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
-            <div class="live-power-heading"><span class="live-power-title">Sol</span><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Sol</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="solar" aria-label="Visa Sol"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3351,7 +3354,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="grid" aria-label="Visa Nät"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3360,7 +3363,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="grid" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
-            <div class="live-power-heading"><span class="live-power-title">Batteri</span><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Batteri</span><label class="dashboard-card-toggle" data-dashboard-card-toggle="battery" aria-label="Visa Batteri"><input type="checkbox" checked><span class="main-card-track" aria-hidden="true"></span></label><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3372,6 +3375,7 @@ class ElrakningPanel {
             <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
             <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span><span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span></div>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
+            <span class="invoice-estimate-status" data-invoice-estimate-status hidden></span>
             <span class="invoice-estimate-today" data-invoice-estimate-today hidden></span>
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="invoice" hidden>Visa data</button></div>
           </article>
@@ -3621,6 +3625,10 @@ class ElrakningPanel {
           <button type="button" data-site-activate disabled>Gör till aktiv installation</button>
           <p class="site-settings-result" data-site-settings-result aria-live="polite"></p>
           <label class="site-settings-config-toggle"><input type="checkbox" data-site-config-cards-toggle> Visa konfigurationskort på tavlan</label>
+          <fieldset class="site-settings-card-visibility">
+            <legend>Kort på tavlan</legend>
+            ${[["house", "Hus"], ["solar", "Sol"], ["grid", "Nät"], ["battery", "Batteri"], ["invoice", "Estimerad faktura"]].map(([key, label]) => `<label>${label}<select data-dashboard-card-visibility="${key}"><option value="always">Alltid</option><option value="config_only">När konfigurerat</option><option value="hidden">Dölj</option></select></label>`).join("")}
+          </fieldset>
           <button type="button" data-site-settings-close>Stäng</button>
         </div>
       </div>
@@ -6723,6 +6731,28 @@ class ElrakningPanel {
           transform: translateX(12px);
         }
 
+        .dashboard-card-toggle {
+          align-items: center;
+          cursor: pointer;
+          display: inline-flex;
+          margin-left: auto;
+        }
+
+        .dashboard-card-toggle input {
+          height: 0;
+          opacity: 0;
+          position: absolute;
+          width: 0;
+        }
+
+        .dashboard-card-toggle input:checked + .main-card-track {
+          background: var(--primary-color);
+        }
+
+        .dashboard-card-toggle input:checked + .main-card-track::after {
+          transform: translateX(11px);
+        }
+
         h2 {
           font-size: 19px;
           font-weight: 500;
@@ -6773,6 +6803,7 @@ class ElrakningPanel {
     this._bindConfigurationCardsToggle();
     this._bindSiteSettingsDialog();
     this._bindMainCardToggles();
+    this._bindDashboardCardToggles();
     this._bindProviderSourceDialog();
     this._bindBoardDataDialog();
     this._bindMeterSourceDialog();
@@ -7226,6 +7257,44 @@ class ElrakningPanel {
     }
   }
 
+  _applyDashboardCardVisibility(preferences) {
+    if (!preferences || typeof preferences !== "object") return;
+    for (const key of Object.keys(this._dashboardCardVisibility)) {
+      if (["always", "config_only", "hidden"].includes(preferences[key])) this._dashboardCardVisibility[key] = preferences[key];
+    }
+    this._renderDashboardCardVisibility();
+  }
+
+  _dashboardCardIsConfigured(key) {
+    if (key === "house") return Boolean(this._powerState?.consumption_entity);
+    if (key === "solar") return Array.isArray(this._powerState?.solar_entities) && this._powerState.solar_entities.some(Boolean);
+    if (key === "grid") return this._meterState?.configured === true;
+    if (key === "battery") return Boolean(this._powerState?.battery_power_entity || this._powerState?.charging_entity || this._powerState?.discharging_entity || this._powerState?.soc_entity || this._powerState?.capacity_entity);
+    return true;
+  }
+
+  _renderDashboardCardVisibility() {
+    const visible = (key) => this._dashboardCardVisibility[key] !== "hidden"
+      && (this._dashboardCardVisibility[key] === "always" || this._dashboardCardIsConfigured(key));
+    const groups = {
+      house: ["[data-live-power-tile=house]", "[data-daily-energy]"],
+      solar: ["[data-live-power-tile=solar]", "[data-power-card=solar-history]", "[data-solar-evidence-card]"],
+      grid: ["[data-live-power-tile=grid]", "[data-phase-history-card]"],
+      battery: ["[data-live-power-tile=battery]", "[data-power-card=battery-history]", "[data-soc-card]"],
+      invoice: ["[data-invoice-estimate-card]", "[data-cost-card]"],
+    };
+    for (const [key, selectors] of Object.entries(groups)) {
+      for (const selector of selectors) {
+        for (const node of this.host.querySelectorAll(selector)) node.hidden = !visible(key);
+      }
+    }
+    for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
+      const input = toggle.querySelector("input");
+      const key = toggle.dataset.dashboardCardToggle;
+      if (input && key in this._dashboardCardVisibility) input.checked = this._dashboardCardVisibility[key] !== "hidden";
+    }
+  }
+
   _applyChartLayerState(layers) {
     if (!layers || typeof layers !== "object") return;
     if (typeof layers.spot === "boolean") this._spotBarsVisible = layers.spot;
@@ -7299,6 +7368,7 @@ class ElrakningPanel {
       this._applyPhaseHistoryPreference(response.phase_history_metric);
       this._applyPhaseHistoryVisibility(response.phase_history_visible);
       this._applyConfigurationCardsVisibility(response.configuration_cards_visible, response.main_cards);
+      this._applyDashboardCardVisibility(response.dashboard_card_visibility);
       this._chartPreferencesReady = true;
       this._syncChartLayerButtons();
       this._syncPriceComparisonControls();
@@ -7557,6 +7627,9 @@ class ElrakningPanel {
     if (id) id.textContent = currentId || "–";
     if (created) created.textContent = current.created_at ? `Skapad ${current.created_at}` : "";
     if (configToggle) configToggle.checked = this._configurationCardsVisible;
+    for (const select of this.host.querySelectorAll("[data-dashboard-card-visibility]")) {
+      select.value = this._dashboardCardVisibility[select.dataset.dashboardCardVisibility] || "always";
+    }
     if (!select) return;
     const sites = Array.isArray(state.available_sites) ? state.available_sites : [];
     select.replaceChildren(...sites.map((site) => {
@@ -7598,6 +7671,15 @@ class ElrakningPanel {
       this._applyConfigurationCardsVisibility(configToggle.checked);
       this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
     });
+    for (const select of dialog.querySelectorAll("[data-dashboard-card-visibility]")) {
+      select.addEventListener("change", () => {
+        const key = select.dataset.dashboardCardVisibility;
+        if (!(key in this._dashboardCardVisibility)) return;
+        this._dashboardCardVisibility[key] = select.value;
+        this._renderDashboardCardVisibility();
+        this._persistChartPreferences({ dashboard_card_visibility: { ...this._dashboardCardVisibility } });
+      });
+    }
     rename.addEventListener("click", async () => {
       const id = currentId();
       const name = window.prompt("Namn på installationen", this._siteState?.current_site?.name || "");
@@ -7666,6 +7748,20 @@ class ElrakningPanel {
         if (key === "elmatare") this._mainCards.consumption = false;
         this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
         this._persistChartPreferences({ main_cards: { ...this._mainCards } });
+      });
+    }
+  }
+
+  _bindDashboardCardToggles() {
+    for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
+      const input = toggle.querySelector("input");
+      const key = toggle.dataset.dashboardCardToggle;
+      if (!input || !(key in this._dashboardCardVisibility)) continue;
+      input.checked = this._dashboardCardVisibility[key] !== "hidden";
+      input.addEventListener("change", () => {
+        this._dashboardCardVisibility[key] = input.checked ? "always" : "hidden";
+        this._renderDashboardCardVisibility();
+        this._persistChartPreferences({ dashboard_card_visibility: { ...this._dashboardCardVisibility } });
       });
     }
   }
@@ -8314,6 +8410,7 @@ class ElrakningPanel {
     }
     this._renderLivePowerRow();
     this._renderMergedMeterSummary();
+    this._renderDashboardCardVisibility();
     this._renderSocChart();
     this._renderBatteryHistoryCard();
     this._renderSolarHistoryCard();
@@ -10366,6 +10463,7 @@ class ElrakningPanel {
     const month = this.host.querySelector("[data-invoice-estimate-month]");
     const total = this.host.querySelector("[data-invoice-estimate-total]");
     const today = this.host.querySelector("[data-invoice-estimate-today]");
+    const estimateStatus = this.host.querySelector("[data-invoice-estimate-status]");
     if (!card || !month || !total || !today) return;
     const billingHistory = this._billingHistory;
     const applicableGridPrice = billingHistory?.grid_price || null;
@@ -10380,8 +10478,14 @@ class ElrakningPanel {
     const monthlyForecast = billingHistory?.monthly_forecast;
     estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
     const configured = this._meterState?.configured === true;
-    card.hidden = !configured || !billingHistory;
+    card.hidden = false;
     if (!configured || !billingHistory) {
+      total.textContent = "Ej tillgängligt";
+      month.textContent = "";
+      if (estimateStatus) {
+        estimateStatus.hidden = false;
+        estimateStatus.textContent = this._costUnavailableReason === "meter_not_configured" ? "Mätare ej konfigurerad" : "Historik saknas";
+      }
       today.hidden = true;
       today.textContent = "";
       this._invoiceEstimateRaw = null;
@@ -10390,8 +10494,11 @@ class ElrakningPanel {
       return;
     }
     month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month).split(" ")[0] : "";
+    if (estimateStatus) estimateStatus.hidden = true;
     if (!estimate) {
+      card.hidden = false;
       total.textContent = "–";
+      if (estimateStatus) { estimateStatus.hidden = false; estimateStatus.textContent = "Prisdata saknas"; }
       today.hidden = true;
       today.textContent = "";
       this._invoiceEstimateRaw = null;
@@ -10450,6 +10557,7 @@ class ElrakningPanel {
       element.hidden = !available;
     }
     this._renderCostCard();
+    this._renderDashboardCardVisibility();
   }
 
   _renderCostCard() {
@@ -10463,6 +10571,22 @@ class ElrakningPanel {
     const historyStatus = this.host.querySelector("[data-cost-history-status]");
     if (!card || !status || !kpis || !chart || !comparisonElement || !summary) return;
     const estimate = this._invoiceEstimateRaw;
+    if (!estimate) {
+      card.hidden = false;
+      const reason = this._costUnavailableReason === "meter_not_configured"
+        ? "Mätare ej konfigurerad"
+        : this._costUnavailableReason === "history_missing"
+          ? "Historik saknas"
+          : "Prisdata saknas";
+      status.textContent = reason;
+      kpis.replaceChildren();
+      chart.innerHTML = `<div class="cost-chart-unavailable">${reason}</div>`;
+      summary.replaceChildren();
+      if (historyChart) historyChart.innerHTML = `<div class="cost-chart-unavailable">Månadsserie ej tillgänglig · ${reason}</div>`;
+      if (historyStatus) historyStatus.textContent = reason;
+      comparisonElement.replaceChildren();
+      return;
+    }
     const currentMonth = estimate?.month || null;
     const selectedMonth = this._costSelectedMonth || currentMonth;
     const previous = estimate?.previous_month_actual;
@@ -11520,12 +11644,22 @@ class ElrakningPanel {
       if (response?.success === true && response.target_month && Array.isArray(response.daily_breakdown)) {
         this._billingDailyByMonth.set(response.target_month, response.daily_breakdown);
       }
-      if (!targetMonth) this._billingHistory = response?.success === true ? response : null;
+      if (!targetMonth) {
+        this._billingHistory = response?.success === true ? response : null;
+        this._billingHistoryStatus = response?.success === true ? null : response?.error || "billing_history_unavailable";
+        this._costUnavailableReason = this._billingHistoryStatus === "site_unconfigured"
+          ? "meter_not_configured"
+          : this._billingHistoryStatus === "history_unavailable"
+            ? "history_missing"
+            : "billing_history_unavailable";
+      }
       if (response?.success === true && this._invoiceEstimateRaw) {
         this._invoiceEstimateRaw.daily_breakdown_by_month = Object.fromEntries(this._billingDailyByMonth);
       }
     } catch {
       this._billingHistory = null;
+      this._billingHistoryStatus = "billing_history_unavailable";
+      this._costUnavailableReason = "billing_history_unavailable";
     }
     this._renderInvoiceEstimateCard();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();

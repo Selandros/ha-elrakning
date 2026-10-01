@@ -29,7 +29,7 @@ from .const import (
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data, grid_price_is_applicable, grid_price_is_current, grid_variable_cost_ex_vat
 from .energy_history import async_build_energy_history
-from .elhandel.manager import CHART_LAYER_DEFAULTS, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
+from .elhandel.manager import CHART_LAYER_DEFAULTS, DASHBOARD_CARD_VISIBILITY_DEFAULTS, DASHBOARD_CARD_VISIBILITY_VALUES, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
 from .elhandel.providers.greenely_consumption import normalize_greenely_consumption
@@ -1137,6 +1137,9 @@ async def websocket_chart_layers(hass, connection, msg):
         vol.Optional("main_cards", default={}): {
             vol.Optional(key): bool for key in MAIN_CARD_DEFAULTS
         },
+        vol.Optional("dashboard_card_visibility", default={}): {
+            vol.Optional(key): vol.In(DASHBOARD_CARD_VISIBILITY_VALUES) for key in DASHBOARD_CARD_VISIBILITY_DEFAULTS
+        },
         vol.Optional("price_comparison", default={}): {
             vol.Optional(key): bool for key in PRICE_COMPARISON_DEFAULTS
         },
@@ -1158,6 +1161,7 @@ async def websocket_chart_layers_set(hass, connection, msg):
             "chart_layers",
             "configuration_cards_visible",
             "main_cards",
+            "dashboard_card_visibility",
             "price_comparison",
             "phase_history_visible",
             "phase_history_metric",
