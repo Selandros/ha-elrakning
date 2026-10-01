@@ -405,6 +405,54 @@ def parse_monthly_transfer(payload: Any, year: int, month: int) -> dict[str, Any
     return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "month_missing"}
 
 
+def parse_transfer_points(payload: Any, aggregation: str, target_date: date) -> dict[str, Any]:
+    """Normalize causal E.ON transfer points without promoting padded values."""
+    expected = str(aggregation).upper()
+    if expected not in {"DAY", "HOUR"}:
+        return {"status": "unsupported", "resolution": expected}
+    if not isinstance(payload, Mapping) or payload.get("productType") != "ELECTRICITY":
+        return {"status": "unsupported", "resolution": expected}
+    if str(payload.get("aggregation", "")).upper() != expected:
+        return {"status": "unsupported", "resolution": expected}
+    transfers = payload.get("transfer")
+    if not isinstance(transfers, list):
+        return {"status": "unsupported", "resolution": expected}
+    actual: list[dict[str, Any]] = []
+    padded: list[dict[str, Any]] = []
+    for item in transfers:
+        if not isinstance(item, Mapping) or not isinstance(item.get("timestamp"), str):
+            continue
+        try:
+            timestamp = datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if timestamp.date() != target_date:
+            continue
+        consumption = item.get("consumption")
+        if not isinstance(consumption, Mapping) or not _is_number(consumption.get("total")):
+            continue
+        point = {
+            "timestamp": item["timestamp"],
+            "consumption_kwh": float(consumption["total"]),
+            "padded": consumption.get("padded") is True,
+            "has_higher_resolution_data": item.get("hasHigherResolutionData") is True,
+        }
+        (padded if point["padded"] else actual).append(point)
+    if not actual and not padded:
+        return {"status": "missing", "resolution": expected, "date": target_date.isoformat(), "reason": "date_missing"}
+    return {
+        "status": "ok" if actual else "missing",
+        "resolution": expected,
+        "date": target_date.isoformat(),
+        "actual_points": actual,
+        "padded_points": padded,
+        "actual_count": len(actual),
+        "padded_count": len(padded),
+        "actual_total_kwh": sum(point["consumption_kwh"] for point in actual),
+        "padded_excluded": True,
+    }
+
+
 def normalize_outage(payload: Any) -> dict[str, Any]:
     """Normalize outage status without assigning semantics to unknown types."""
     items = payload if isinstance(payload, list) else [payload]

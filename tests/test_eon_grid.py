@@ -231,6 +231,61 @@ def test_monthly_transfer_uses_timestamp_and_rejects_padded_values():
     assert models.parse_monthly_transfer(payload, 2026, 9)["reason"] == "padded"
 
 
+def test_hourly_transfer_keeps_actual_points_and_excludes_padded_points():
+    payload = {
+        "productType": "ELECTRICITY",
+        "aggregation": "HOUR",
+        "from": "2026-10-01T00:00:00.000+02:00",
+        "to": "2026-10-01T23:59:59.999+02:00",
+        "transfer": [
+            {"timestamp": "2026-10-01T18:00:00.000+02:00", "hasHigherResolutionData": True,
+             "consumption": {"total": 2.105, "padded": False, "hasHigherResolutionData": True}},
+            {"timestamp": "2026-10-01T19:00:00.000+02:00", "hasHigherResolutionData": False,
+             "consumption": {"total": 0, "padded": True, "hasHigherResolutionData": False}},
+        ],
+    }
+    result = models.parse_transfer_points(payload, "HOUR", date(2026, 10, 1))
+    assert result["status"] == "ok"
+    assert result["actual_count"] == 1
+    assert result["padded_count"] == 1
+    assert result["actual_total_kwh"] == 2.105
+    assert result["actual_points"][0]["timestamp"].endswith("+02:00")
+
+
+def test_transfer_points_reject_wrong_aggregation_and_future_date():
+    payload = {"productType": "ELECTRICITY", "aggregation": "HOUR", "transfer": []}
+    assert models.parse_transfer_points(payload, "DAY", date(2026, 10, 1))["status"] == "unsupported"
+    assert models.parse_transfer_points(payload, "HOUR", date(2026, 10, 1))["reason"] == "date_missing"
+
+
+def test_hourly_transfer_matches_verified_october_first_total():
+    values = [0, 0, 0, 0.127, 0.129, 0.012, 0.139, 0.156, 0.173, 0.133, 0, 0.104, 0, 0, 0, 0, 0.909, 2.939, 2.105]
+    transfer = [
+        {
+            "timestamp": f"2026-10-01T{hour:02d}:00:00.000+02:00",
+            "hasHigherResolutionData": True,
+            "consumption": {"total": value, "padded": False, "hasHigherResolutionData": True},
+        }
+        for hour, value in enumerate(values)
+    ]
+    transfer.extend(
+        {
+            "timestamp": f"2026-10-01T{hour:02d}:00:00.000+02:00",
+            "hasHigherResolutionData": False,
+            "consumption": {"total": 0, "padded": True, "hasHigherResolutionData": False},
+        }
+        for hour in range(19, 24)
+    )
+    result = models.parse_transfer_points(
+        {"productType": "ELECTRICITY", "aggregation": "HOUR", "transfer": transfer},
+        "HOUR",
+        date(2026, 10, 1),
+    )
+    assert result["actual_count"] == 19
+    assert result["padded_count"] == 5
+    assert result["actual_total_kwh"] == 6.926
+
+
 def test_normalize_outage_treats_no_info_as_no_known_outage():
     assert models.normalize_outage({"outageType": "NO_INFO", "affected": 0}) == {
         "status": "no_known_outage", "outages": []

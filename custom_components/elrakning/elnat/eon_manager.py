@@ -7,6 +7,7 @@ from copy import deepcopy
 import secrets
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -26,6 +27,7 @@ from .eon_models import (
     facility_identity,
     parse_monthly_consumption,
     parse_monthly_transfer,
+    parse_transfer_points,
     pricing_tariff_for_agreement,
 )
 from ..grid_tariff_timeline import (
@@ -278,6 +280,7 @@ class EonGridManager:
             "locations": None,
             "grouped_contracts": None,
             "monthly_transfer": [],
+            "hourly_transfer": [],
             "outages": [],
             "source_status": {},
         }
@@ -317,6 +320,7 @@ class EonGridManager:
             tzinfo=timezone.utc,
         )
         monthly_status = []
+        hourly_status = []
         outage_status = []
         for installation in locations:
             installation_id = installation["installation_identifier"]
@@ -336,6 +340,27 @@ class EonGridManager:
                 raise
             except Exception:
                 monthly_status.append({"status": "failed", "error": "api_error"})
+            hourly_request = getattr(client, "async_get_hourly_transfer", None)
+            if hourly_request is not None:
+                local_day = datetime.now(ZoneInfo("Europe/Stockholm")).date()
+                local_start = datetime.combine(local_day, datetime.min.time(), tzinfo=ZoneInfo("Europe/Stockholm"))
+                local_end = datetime.combine(local_day + timedelta(days=1), datetime.min.time(), tzinfo=ZoneInfo("Europe/Stockholm")) - timedelta(microseconds=1)
+                try:
+                    hourly = await hourly_request(
+                        installation_id,
+                        local_start.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                        local_end.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                        installation["production"],
+                        installation["street"],
+                        installation["city"],
+                        installation["postal_code"],
+                    )
+                    sources["hourly_transfer"].append({"installation_id": installation_id, "payload": hourly})
+                    hourly_status.append({"status": "ok"})
+                except EonAuthError:
+                    raise
+                except Exception:
+                    hourly_status.append({"status": "failed", "error": "api_error"})
             pod = installation["point_of_delivery_number"]
             try:
                 outage = await client.async_get_outages(pod)
@@ -346,6 +371,7 @@ class EonGridManager:
             except Exception:
                 outage_status.append({"status": "failed", "error": "api_error"})
         sources["source_status"]["monthly_transfer"] = monthly_status or [{"status": "skipped"}]
+        sources["source_status"]["hourly_transfer"] = hourly_status or [{"status": "skipped"}]
         sources["source_status"]["outages"] = outage_status or [{"status": "skipped"}]
         self._app_source_snapshot = sources
         return sources
@@ -449,8 +475,11 @@ class EonGridManager:
             current = next((item for item in candidates if item["agreement"]["status"] == "active"), None)
             selected = current or next((item for item in candidates if item["agreement"]["status"] == "future"), None)
             monthly = next((item["payload"] for item in sources.get("monthly_transfer", []) if item.get("installation_id") == installation_id), None)
+            hourly = next((item["payload"] for item in sources.get("hourly_transfer", []) if item.get("installation_id") == installation_id), None)
             outage_payload = next((item["payload"] for item in sources.get("outages", []) if item.get("installation_id") == installation_id), None)
             consumption = parse_monthly_transfer(monthly, now.year, now.month) if monthly is not None else {"status": "missing", "resolution": "Monthly"}
+            local_day = datetime.now(ZoneInfo("Europe/Stockholm")).date()
+            hourly_consumption = parse_transfer_points(hourly, "HOUR", local_day) if hourly is not None else {"status": "missing", "resolution": "HOUR", "date": local_day.isoformat(), "reason": "not_fetched"}
             agreement = selected["agreement"] if selected else {
                 "status": "future" if installation.get("is_future") is True else "configured",
                 "type": "ELECTRICITY_CONS_GRID",
@@ -481,6 +510,7 @@ class EonGridManager:
             "tariff": tariff,
             "grid_price": (pricing_tariff or {}).get("grid_price"),
             "consumption": consumption,
+            "hourly_consumption": hourly_consumption,
             "cost": cost,
             "outage": normalize_outage(outage_payload) if outage_payload is not None else None,
             "app_authenticated": True,
@@ -657,6 +687,7 @@ class EonGridManager:
             "grid_price": self.state.get("grid_price"),
             "tariff_timeline": self.public_tariff_timeline(),
             "consumption": self.state.get("consumption"),
+            "hourly_consumption": self.state.get("hourly_consumption"),
             "cost": self.state.get("cost"),
             "outage": self.state.get("outage"),
             "error": self.state.get("error"),
@@ -781,6 +812,7 @@ class EonGridManager:
             "tariff": None,
             "grid_price": None,
             "consumption": None,
+            "hourly_consumption": None,
             "cost": None,
             "reauth_required": False,
             "error": None,
@@ -830,6 +862,7 @@ def _build_app_source_data(
         "locations": sources.get("locations"),
         "grouped_contracts": sources.get("grouped_contracts"),
         "monthly_transfer": sources.get("monthly_transfer"),
+        "hourly_transfer": sources.get("hourly_transfer"),
         "outages": sources.get("outages"),
         "source_status": source_status,
         "normalized": {

@@ -68,9 +68,33 @@ class EonAppClient:
         city: str,
         postal_code: str,
     ) -> Any:
+        return await self.async_get_transfer(
+            "MONTH",
+            installation_identifier,
+            from_timestamp,
+            to_timestamp,
+            production,
+            street,
+            city,
+            postal_code,
+        )
+
+    async def async_get_transfer(
+        self,
+        aggregation: str,
+        installation_identifier: str,
+        from_timestamp: str,
+        to_timestamp: str,
+        production: bool,
+        street: str,
+        city: str,
+        postal_code: str,
+    ) -> Any:
+        if aggregation not in {"MONTH", "DAY", "HOUR"}:
+            raise ValueError("unsupported_transfer_aggregation")
         return await self.session.request_json(
             "GET",
-            MONTHLY_TRANSFER_URL,
+            f"{MIDDLELAYER_BASE}/energy/transfer/ELECTRICITY/{aggregation}",
             params={
                 "includeReference": "true",
                 "includeTotal": "true",
@@ -83,6 +107,27 @@ class EonAppClient:
                 "limelightActivationDate": "",
                 "language": "sv",
             },
+        )
+
+    async def async_get_hourly_transfer(
+        self,
+        installation_identifier: str,
+        from_timestamp: str,
+        to_timestamp: str,
+        production: bool,
+        street: str,
+        city: str,
+        postal_code: str,
+    ) -> Any:
+        return await self.async_get_transfer(
+            "HOUR",
+            installation_identifier,
+            from_timestamp,
+            to_timestamp,
+            production,
+            street,
+            city,
+            postal_code,
         )
 
     async def async_get_outages(self, point_of_delivery_number: str) -> Any:
