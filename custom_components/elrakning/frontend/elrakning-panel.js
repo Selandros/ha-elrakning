@@ -3336,7 +3336,7 @@ class ElrakningPanel {
         <div class="dashboard-card-stack">
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button><label class="dashboard-card-toggle" data-dashboard-card-toggle="house" aria-label="Visa Hus-kort"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3345,7 +3345,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="house" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="solar">
-            <div class="live-power-heading"><span class="live-power-title">Sol</span><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Sol</span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-power-configure="solar" hidden>Konfigurera</button><label class="dashboard-card-toggle" data-dashboard-card-toggle="solar" aria-label="Visa Sol-kort"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3354,7 +3354,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button><label class="dashboard-card-toggle" data-dashboard-card-toggle="grid" aria-label="Visa Nät-kort"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3363,7 +3363,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="grid" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="battery">
-            <div class="live-power-heading"><span class="live-power-title">Batteri</span><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button></div>
+            <div class="live-power-heading"><span class="live-power-title">Batteri</span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-power-configure="battery" hidden>Konfigurera</button><label class="dashboard-card-toggle" data-dashboard-card-toggle="battery" aria-label="Visa Batteri-kort"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3625,10 +3625,6 @@ class ElrakningPanel {
           <button type="button" data-site-activate disabled>Gör till aktiv installation</button>
           <p class="site-settings-result" data-site-settings-result aria-live="polite"></p>
           <label class="site-settings-config-toggle"><input type="checkbox" data-site-config-cards-toggle> Visa konfigurationskort på tavlan</label>
-          <div class="site-settings-card-visibility" aria-label="Kort på tavlan">
-            <p class="site-settings-label">Kort på tavlan</p>
-            ${[["house", "Hus"], ["solar", "Sol"], ["grid", "Nät"], ["battery", "Batteri"], ["invoice", "Estimerad faktura"]].map(([key, label]) => `<label class="dashboard-card-toggle"><span>${label}</span><input type="checkbox" data-dashboard-card-toggle="${key}"><span class="main-card-track" aria-hidden="true"></span></label>`).join("")}
-          </div>
           <button type="button" data-site-settings-close>Stäng</button>
         </div>
       </div>
@@ -5539,6 +5535,13 @@ class ElrakningPanel {
           min-width: 0;
         }
 
+        .live-power-card-actions {
+          align-items: center;
+          display: inline-flex;
+          gap: 8px;
+          margin-left: auto;
+        }
+
         .live-power-configure {
           font-size: 11px;
           margin: 0 0 0 auto;
@@ -6735,7 +6738,7 @@ class ElrakningPanel {
           align-items: center;
           cursor: pointer;
           display: inline-flex;
-          margin-left: auto;
+          flex: 0 0 auto;
         }
 
         .dashboard-card-toggle input {
@@ -6802,6 +6805,7 @@ class ElrakningPanel {
     this._bindDebugToggle();
     this._bindConfigurationCardsToggle();
     this._bindSiteSettingsDialog();
+    this._bindDashboardCardToggles();
     this._bindMainCardToggles();
     this._bindProviderSourceDialog();
     this._bindBoardDataDialog();
@@ -7287,8 +7291,7 @@ class ElrakningPanel {
         for (const node of this.host.querySelectorAll(selector)) node.hidden = !visible(key);
       }
     }
-    const settingsDialog = this.host.querySelector("[data-site-settings-dialog]");
-    for (const toggle of settingsDialog?.querySelectorAll("[data-dashboard-card-toggle]") || []) {
+    for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
       const key = toggle.dataset.dashboardCardToggle;
       const input = toggle.querySelector("input");
       if (input && key in this._dashboardCardVisibility) input.checked = this._dashboardCardVisibility[key] !== "hidden";
@@ -7668,16 +7671,6 @@ class ElrakningPanel {
       this._applyConfigurationCardsVisibility(configToggle.checked);
       this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
     });
-    for (const toggle of dialog.querySelectorAll("[data-dashboard-card-toggle]")) {
-      toggle.addEventListener("change", () => {
-        const key = toggle.dataset.dashboardCardToggle;
-        const input = toggle.querySelector("input");
-        if (!(key in this._dashboardCardVisibility) || !input) return;
-        this._dashboardCardVisibility[key] = input.checked ? "always" : "hidden";
-        this._renderDashboardCardVisibility();
-        this._persistChartPreferences({ dashboard_card_visibility: { ...this._dashboardCardVisibility } });
-      });
-    }
     rename.addEventListener("click", async () => {
       const id = currentId();
       const name = window.prompt("Namn på installationen", this._siteState?.current_site?.name || "");
@@ -7746,6 +7739,20 @@ class ElrakningPanel {
         if (key === "elmatare") this._mainCards.consumption = false;
         this._applyConfigurationCardsVisibility(this._configurationCardsVisible);
         this._persistChartPreferences({ main_cards: { ...this._mainCards } });
+      });
+    }
+  }
+
+  _bindDashboardCardToggles() {
+    for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
+      const input = toggle.querySelector("input");
+      if (!input) continue;
+      input.addEventListener("change", () => {
+        const key = toggle.dataset.dashboardCardToggle;
+        if (!(key in this._dashboardCardVisibility)) return;
+        this._dashboardCardVisibility[key] = input.checked ? "always" : "hidden";
+        this._renderDashboardCardVisibility();
+        this._persistChartPreferences({ dashboard_card_visibility: { ...this._dashboardCardVisibility } });
       });
     }
   }
