@@ -7258,6 +7258,7 @@ class ElrakningPanel {
       button.classList.toggle("active", visible);
       button.setAttribute("aria-pressed", String(visible));
     }
+    this._renderDashboardCardVisibility();
   }
 
   _applyDashboardCardVisibility(preferences) {
@@ -7277,8 +7278,9 @@ class ElrakningPanel {
   }
 
   _renderDashboardCardVisibility() {
-    const visible = (key) => this._dashboardCardVisibility[key] !== "hidden"
-      && (this._dashboardCardVisibility[key] === "always" || this._dashboardCardIsConfigured(key));
+    const visible = (key) => this._configurationCardsVisible
+      || (this._dashboardCardVisibility[key] !== "hidden"
+        && (this._dashboardCardVisibility[key] === "always" || this._dashboardCardIsConfigured(key)));
     const groups = {
       house: ["[data-live-power-tile=house]", "[data-daily-energy]"],
       solar: ["[data-live-power-tile=solar]", "[data-power-card=solar-history]", "[data-solar-evidence-card]"],

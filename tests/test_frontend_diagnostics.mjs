@@ -1720,6 +1720,8 @@ assert.doesNotMatch(panelSource, /data-price-plan-rail[^>]*data-dashboard-card-g
 assert.match(panelSource, /grid: \[[\s\S]*data-live-power-tile=grid[\s\S]*data-phase-history-card/);
 assert.match(panelSource, /invoice: \[[\s\S]*data-invoice-estimate-card[\s\S]*data-cost-card/);
 assert.match(panelSource, /this\._configurationCardsVisible = false;/);
+assert.match(panelSource, /_applyConfigurationCardsVisibility\(visible, mainCards[\s\S]{0,1500}this\._renderDashboardCardVisibility\(\)/);
+assert.match(panelSource, /const visible = \(key\) => this\._configurationCardsVisible/);
 assert.match(panelSource, /main_cards/);
 assert.match(panelSource, /data-config-card-key="elhandel"/);
 assert.match(panelSource, /data-config-card-key="elnet"/);
