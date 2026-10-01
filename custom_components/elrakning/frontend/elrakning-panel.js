@@ -3625,10 +3625,10 @@ class ElrakningPanel {
           <button type="button" data-site-activate disabled>Gör till aktiv installation</button>
           <p class="site-settings-result" data-site-settings-result aria-live="polite"></p>
           <label class="site-settings-config-toggle"><input type="checkbox" data-site-config-cards-toggle> Visa konfigurationskort på tavlan</label>
-          <fieldset class="site-settings-card-visibility">
-            <legend>Kort på tavlan</legend>
-            ${[["house", "Hus"], ["solar", "Sol"], ["grid", "Nät"], ["battery", "Batteri"], ["invoice", "Estimerad faktura"]].map(([key, label]) => `<label>${label}<select data-dashboard-card-visibility="${key}"><option value="always">Alltid</option><option value="config_only">När konfigurerat</option><option value="hidden">Dölj</option></select></label>`).join("")}
-          </fieldset>
+          <div class="site-settings-card-visibility" aria-label="Kort på tavlan">
+            <p class="site-settings-label">Kort på tavlan</p>
+            ${[["house", "Hus"], ["solar", "Sol"], ["grid", "Nät"], ["battery", "Batteri"], ["invoice", "Estimerad faktura"]].map(([key, label]) => `<label class="dashboard-card-toggle"><span>${label}</span><input type="checkbox" data-dashboard-card-toggle="${key}"><span class="main-card-track" aria-hidden="true"></span></label>`).join("")}
+          </div>
           <button type="button" data-site-settings-close>Stäng</button>
         </div>
       </div>
@@ -7287,6 +7287,12 @@ class ElrakningPanel {
         for (const node of this.host.querySelectorAll(selector)) node.hidden = !visible(key);
       }
     }
+    const settingsDialog = this.host.querySelector("[data-site-settings-dialog]");
+    for (const toggle of settingsDialog?.querySelectorAll("[data-dashboard-card-toggle]") || []) {
+      const key = toggle.dataset.dashboardCardToggle;
+      const input = toggle.querySelector("input");
+      if (input && key in this._dashboardCardVisibility) input.checked = this._dashboardCardVisibility[key] !== "hidden";
+    }
   }
 
   _applyChartLayerState(layers) {
@@ -7621,9 +7627,6 @@ class ElrakningPanel {
     if (id) id.textContent = currentId || "–";
     if (created) created.textContent = current.created_at ? `Skapad ${current.created_at}` : "";
     if (configToggle) configToggle.checked = this._configurationCardsVisible;
-    for (const select of this.host.querySelectorAll("[data-dashboard-card-visibility]")) {
-      select.value = this._dashboardCardVisibility[select.dataset.dashboardCardVisibility] || "always";
-    }
     if (!select) return;
     const sites = Array.isArray(state.available_sites) ? state.available_sites : [];
     select.replaceChildren(...sites.map((site) => {
@@ -7665,11 +7668,12 @@ class ElrakningPanel {
       this._applyConfigurationCardsVisibility(configToggle.checked);
       this._persistChartPreferences({ configuration_cards_visible: this._configurationCardsVisible });
     });
-    for (const select of dialog.querySelectorAll("[data-dashboard-card-visibility]")) {
-      select.addEventListener("change", () => {
-        const key = select.dataset.dashboardCardVisibility;
-        if (!(key in this._dashboardCardVisibility)) return;
-        this._dashboardCardVisibility[key] = select.value;
+    for (const toggle of dialog.querySelectorAll("[data-dashboard-card-toggle]")) {
+      toggle.addEventListener("change", () => {
+        const key = toggle.dataset.dashboardCardToggle;
+        const input = toggle.querySelector("input");
+        if (!(key in this._dashboardCardVisibility) || !input) return;
+        this._dashboardCardVisibility[key] = input.checked ? "always" : "hidden";
         this._renderDashboardCardVisibility();
         this._persistChartPreferences({ dashboard_card_visibility: { ...this._dashboardCardVisibility } });
       });
