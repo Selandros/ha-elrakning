@@ -125,7 +125,8 @@ class EonGridManager:
         if not self.configured:
             self.state = self._empty_state()
             self.facility_states = {}
-            self.tariff_timeline = []
+            # Historical tariff facts remain usable for replay even when the
+            # live provider session is currently unset or unavailable.
         await self._async_capture_tariff_fact()
 
     def _active_site_id(self) -> str | None:

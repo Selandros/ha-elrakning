@@ -14,6 +14,8 @@ install_homeassistant_stubs()
 install_optional_dependency_stubs()
 
 from custom_components.elrakning.elnat import manager as manager_module  # noqa: E402
+from custom_components.elrakning.const import DOMAIN  # noqa: E402
+from custom_components.elrakning.elnat.eon_manager import EonGridManager  # noqa: E402
 
 
 class _Provider:
@@ -57,3 +59,28 @@ class GridManagerLifecycleTests(unittest.TestCase):
         self.assertIsNone(manager._refresh_unsub)
         self.assertIsNone(manager._site_binding)
         self.assertEqual(provider.state, {"configured": False})
+
+    def test_unconfigured_provider_preserves_historical_tariff_timeline(self):
+        hass = types.SimpleNamespace(data={DOMAIN: {}})
+        manager = EonGridManager(hass, types.SimpleNamespace(data={}))
+        historical = {
+            "site_id": "site-a",
+            "source_generation_id": "manual-september",
+            "known_at": "2026-09-27T22:21:31+00:00",
+            "valid_from": "2026-08-31T22:00:00+00:00",
+            "valid_to": "2026-09-30T22:00:00+00:00",
+            "grid_price": {"variable_total_ore_per_kwh_gross": 142.0},
+        }
+
+        manager.store = types.SimpleNamespace(async_load=lambda: _async_value({"configured": True}))
+        manager.tariff_timeline_store = types.SimpleNamespace(
+            async_load=lambda: _async_value({"records": [historical]})
+        )
+        manager._async_capture_tariff_fact = lambda: _async_value(None)
+        asyncio.run(manager.async_load())
+
+        self.assertEqual(manager.tariff_timeline, [historical])
+
+
+async def _async_value(value):
+    return value
