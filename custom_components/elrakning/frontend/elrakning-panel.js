@@ -5503,7 +5503,7 @@ class ElrakningPanel {
         .live-power-row {
           align-items: stretch;
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           gap: 0;
         }
 
@@ -5519,7 +5519,7 @@ class ElrakningPanel {
           box-sizing: border-box;
           container-type: inline-size;
           display: grid;
-          flex: 1 1 280px;
+          flex: 1 1 0;
           grid-template-rows: auto auto auto 5px auto minmax(0, auto);
           row-gap: 1px;
           min-width: 0;
