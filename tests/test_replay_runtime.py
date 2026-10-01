@@ -262,6 +262,53 @@ def test_benchmark_readiness_reports_unqualified_frame_without_relaxing_replay(m
     assert "economics_applicability" in evidence
 
 
+def test_holdout_descriptors_annotate_causal_history_before_ess_inputs(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    decision = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
+    now = decision + timedelta(days=2)
+    load_row = ("load", 1, 1, "load", 1, "load-generation", "site", "site-a", "load.forecast", "forecast", 0, 0, int(decision.timestamp() * 1_000_000), 0, 0, 0, "good", "{}", "{}", "load.v1")
+    slots = [decision + timedelta(minutes=15 * (index + 1)) for index in range(96)]
+    soc_row = {"site_id": "site-a", "logical_role": "battery.soc", "interval_start": slots[0]}
+    captured = {}
+
+    class Storage:
+        def read_site_energy_history(self, *_args):
+            return [soc_row]
+
+    def input_rows(_storage, _site_id, _decision_us, _solar):
+        return []
+
+    def window(_storage, _rows, expected, **_kwargs):
+        return {
+            "available": True,
+            "points": {slot: {"value": 1.0, "frame": load_row} for slot in expected},
+            "frames": [load_row],
+            "frame_ids": [load_row[0]],
+        }
+
+    def observe_known_at(_storage, _row, _decision):
+        return decision - timedelta(minutes=1)
+
+    def ess_inputs(_facts, history, _site_id, _decision, _context):
+        captured["known_at"] = history[0].get("known_at")
+        return None, {"available": False, "reason": "causal_initial_soc_missing"}
+
+    monkeypatch.setattr(replay_runtime, "_frame_rows", lambda *_args, **_kwargs: [load_row])
+    monkeypatch.setattr(replay_runtime, "_frame_points", lambda *_args, **_kwargs: [{"valid_at": slot, "value": 1.0} for slot in slots])
+    monkeypatch.setattr(replay_runtime, "_input_rows", input_rows)
+    monkeypatch.setattr(replay_runtime, "_resolve_causal_input_window", window)
+    monkeypatch.setattr(replay_runtime, "_observation_known_at", observe_known_at)
+    monkeypatch.setattr(replay_runtime, "_ess_inputs", ess_inputs)
+
+    descriptors = replay_runtime._runtime_holdout_descriptors(
+        Storage(), [], "site-a", now, lambda _decision: {"known_at": decision.isoformat(), "valid_from": decision.isoformat()}
+    )
+
+    assert descriptors
+    assert captured["known_at"] == decision - timedelta(minutes=1)
+
+
 def test_causal_window_stitches_day_ahead_and_multiday_solar(monkeypatch):
     from datetime import datetime, timedelta, timezone
 

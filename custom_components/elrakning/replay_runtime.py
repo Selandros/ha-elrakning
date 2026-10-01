@@ -251,6 +251,10 @@ def _runtime_holdout_descriptors(
         price_window = _resolve_causal_input_window(storage, _input_rows(storage, site_id, load_row[12], False), expected_times, solar=False, decision_us=load_row[12]) if expected_times else {"available": False, "reason": "missing_causal_slot"}
         horizon_end = expected_times[-1] + timedelta(minutes=15) if len(expected_times) == HORIZON_SLOTS else None
         history = storage.read_site_energy_history(site_id, decision_at - timedelta(days=2), horizon_end or now) if hasattr(storage, "read_site_energy_history") else []
+        # Resolve publication timestamps once before readiness and ESS qualification.
+        # The readiness path must use the same causal history contract as _build_run().
+        for row in history:
+            row["known_at"] = _observation_known_at(storage, row, decision_at)
         slot_keys = {slot.isoformat() for slot in expected_times}
         actual_keys = {
             row.get("interval_start").astimezone(UTC).isoformat()
