@@ -1700,6 +1700,7 @@ assert.match(siteDialogSource, /select\.addEventListener\("change"/);
 assert.match(panelSource, /data-configuration-cards/);
 assert.match(panelSource, /_bindConfigurationCardsToggle()/);
 assert.match(panelSource, /this\._applyConfigurationCardsVisibility\(response\.configuration_cards_visible, response\.main_cards\)/);
+assert.match(panelSource, /this\._configurationCardsVisible = false;/);
 assert.match(panelSource, /main_cards/);
 assert.match(panelSource, /data-config-card-key="elhandel"/);
 assert.match(panelSource, /data-config-card-key="elnet"/);

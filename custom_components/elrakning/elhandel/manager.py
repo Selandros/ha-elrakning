@@ -39,7 +39,7 @@ CHART_LAYER_DEFAULTS = {
     "charging": True,
     "discharging": True,
 }
-CONFIGURATION_CARDS_VISIBLE_DEFAULT = True
+CONFIGURATION_CARDS_VISIBLE_DEFAULT = False
 MAIN_CARD_DEFAULTS = {
     "elhandel": False,
     "elnet": False,

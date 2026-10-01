@@ -503,13 +503,36 @@ class ChartPreferencesTests(unittest.IsolatedAsyncioTestCase):
         manager = object.__new__(ElhandelManager)
         manager.chart_preferences_store = _Store()
 
+        self.assertFalse(await manager.async_get_configuration_cards_visible("user-a"))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("user-b"))
+        self.assertTrue(await manager.async_set_configuration_cards_visible("user-a", True))
         self.assertTrue(await manager.async_get_configuration_cards_visible("user-a"))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("user-b"))
         self.assertFalse(await manager.async_set_configuration_cards_visible("user-a", False))
         self.assertFalse(await manager.async_get_configuration_cards_visible("user-a"))
-        self.assertTrue(await manager.async_get_configuration_cards_visible("user-b"))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("user-b"))
 
         stored = await manager.chart_preferences_store.async_load()
         self.assertFalse(stored["users"]["user-a"]["configuration_cards_visible"])
+
+    async def test_configuration_cards_visibility_migration_preserves_explicit_values(self):
+        manager = object.__new__(ElhandelManager)
+        manager.chart_preferences_store = _Store({
+            "users": {
+                "explicit-on": {"configuration_cards_visible": True},
+                "explicit-off": {"configuration_cards_visible": False},
+                "legacy": {"chart_layers": {"spot": True}},
+            },
+        })
+
+        self.assertTrue(await manager.async_get_configuration_cards_visible("explicit-on"))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("explicit-off"))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("legacy"))
+
+        await manager.async_update_ui_preferences("explicit-on", {"chart_layers": {"average": False}})
+        await manager.async_update_ui_preferences("explicit-off", {"main_cards": {"elhandel": True}})
+        self.assertTrue(await manager.async_get_configuration_cards_visible("explicit-on"))
+        self.assertFalse(await manager.async_get_configuration_cards_visible("explicit-off"))
 
     async def test_main_cards_are_defaulted_per_user_and_partial_updates_are_preserved(self):
         manager = object.__new__(ElhandelManager)

@@ -3213,7 +3213,7 @@ class ElrakningPanel {
     this.version = version;
     this._debugEnabled = false;
     this._debugPreferenceChanged = false;
-    this._configurationCardsVisible = true;
+    this._configurationCardsVisible = false;
     this._siteState = null;
     this._siteContextGeneration = 0;
     this._siteIdentityPromise = null;
