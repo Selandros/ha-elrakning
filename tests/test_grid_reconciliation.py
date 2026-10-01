@@ -57,6 +57,8 @@ def test_provider_conflict_is_exposed_not_averaged_and_sites_are_isolated():
     by_site = {item["site_id"]: item for item in result}
     assert by_site["site-a"]["source_status"] == "conflict"
     assert by_site["site-a"]["value"] is None
+    assert by_site["site-a"]["local_value"] == 0.5
+    assert by_site["site-a"]["provider_value"] == 0.8
     assert by_site["site-b"]["source_status"] == "provider_gap_fill"
     assert by_site["site-a"]["provenance"]["site_id"] == "site-a"
 

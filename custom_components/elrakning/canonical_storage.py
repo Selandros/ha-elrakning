@@ -120,6 +120,12 @@ class CanonicalStorage:
             UNIQUE(site_id, interval_start_us, interval_end_us, resolution_seconds)
         )""")
         connection.execute("CREATE INDEX IF NOT EXISTS reconciled_grid_import_by_site_time ON reconciled_grid_import(site_id, interval_start_us)")
+        for column in ("local_value", "provider_value"):
+            try:
+                connection.execute(f"ALTER TABLE reconciled_grid_import ADD COLUMN {column} REAL")
+            except sqlite3.OperationalError as error:
+                if "duplicate column name" not in str(error):
+                    raise
         if migration is not None:
             if migration[0] != INTEGRITY_MIGRATION_CHECKSUM:
                 raise RuntimeError("canonical_integrity_migration_mismatch")
@@ -942,17 +948,18 @@ class CanonicalStorage:
                 """INSERT INTO reconciled_grid_import(
                     reconciliation_id, site_id, logical_role, interval_start_us, interval_end_us,
                     resolution_seconds, value, unit, source_status, correction_reason,
-                    local_record_id, provider_record_id, known_at_us, provenance_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    local_record_id, provider_record_id, local_value, provider_value, known_at_us, provenance_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(site_id, interval_start_us, interval_end_us, resolution_seconds) DO UPDATE SET
                     value=excluded.value, source_status=excluded.source_status,
                     correction_reason=excluded.correction_reason, local_record_id=excluded.local_record_id,
-                    provider_record_id=excluded.provider_record_id, known_at_us=excluded.known_at_us,
+                    provider_record_id=excluded.provider_record_id, local_value=excluded.local_value,
+                    provider_value=excluded.provider_value, known_at_us=excluded.known_at_us,
                     provenance_json=excluded.provenance_json""",
                 (f"{site_id}|grid.energy_import|{item['interval_start'].isoformat()}|{item['resolution_seconds']}",
                  site_id, item["logical_role"], timestamp_us(item["interval_start"]), timestamp_us(item["interval_end"]),
                  item["resolution_seconds"], item["value"], item["unit"], item["source_status"], item["correction_reason"],
-                 item.get("local_record_id"), item.get("provider_record_id"),
+                 item.get("local_record_id"), item.get("provider_record_id"), item.get("local_value"), item.get("provider_value"),
                  timestamp_us(item["known_at"]) if item.get("known_at") else None,
                  json.dumps(item["provenance"], sort_keys=True)),
             )
@@ -964,7 +971,7 @@ class CanonicalStorage:
         rows = self._connection().execute(
             """SELECT interval_start_us, interval_end_us, resolution_seconds, value, unit,
                       source_status, correction_reason, local_record_id, provider_record_id,
-                      known_at_us, provenance_json FROM reconciled_grid_import
+                      local_value, provider_value, known_at_us, provenance_json FROM reconciled_grid_import
                 WHERE site_id = ? AND interval_start_us < ? AND interval_end_us > ?
                 ORDER BY interval_start_us""",
             (site_id, timestamp_us(end), timestamp_us(start)),
@@ -976,8 +983,9 @@ class CanonicalStorage:
             "resolution_seconds": row[2], "value": row[3], "unit": row[4],
             "source_status": row[5], "correction_reason": row[6],
             "local_record_id": row[7], "provider_record_id": row[8],
-            "known_at": datetime.fromtimestamp(row[9] / 1_000_000, tz=timezone.utc) if row[9] else None,
-            "provenance": json.loads(row[10]) if row[10] else {},
+            "local_value": row[9], "provider_value": row[10],
+            "known_at": datetime.fromtimestamp(row[11] / 1_000_000, tz=timezone.utc) if row[11] else None,
+            "provenance": json.loads(row[12]) if row[12] else {},
         } for row in rows]
 
     def observation_exists(self, semantic_key: str, revision: int = 1) -> bool:

@@ -54,6 +54,8 @@ def reconcile_grid_import(rows: list[dict[str, Any]], *, tolerance_kwh: float = 
             "value": value, "unit": "kWh", "source_status": status,
             "correction_reason": reason, "local_record_id": (local or {}).get("record_id"),
             "provider_record_id": (provider or {}).get("record_id"),
+            "local_value": float(local["value"]) if local else None,
+            "provider_value": float(provider["value"]) if provider else None,
             "known_at": max((row.get("known_at") for row in (local, provider) if row and row.get("known_at")), default=None),
             "provenance": {"schema": "elrakning.grid_import_reconciliation.v1", "tolerance_kwh": tolerance_kwh, "site_id": site_id},
         })
