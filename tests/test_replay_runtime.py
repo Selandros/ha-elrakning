@@ -225,6 +225,29 @@ def test_replay_economics_uses_causal_effective_dated_tariff_timeline():
     assert replay_runtime._economics_is_causal(economics, decision) is True
 
 
+def test_replay_economics_reads_timeline_from_grid_manager_provider_facade():
+    from datetime import datetime, timezone
+
+    site = "site-vik"
+    decision = datetime(2026, 9, 30, 7, 15, tzinfo=timezone.utc)
+    record = {
+        "schema": "elrakning.grid_tariff_timeline.v1",
+        "site_id": site,
+        "provider": "eon",
+        "source_generation_id": "eon-manual-september",
+        "known_at": "2026-09-27T22:21:31.858330+00:00",
+        "valid_from": "2026-08-31T22:00:00+00:00",
+        "valid_to": "2026-09-30T22:00:00+00:00",
+        "source_status": "MANUALLY_VERIFIED",
+        "provenance": {"origin": "user_confirmed"},
+        "grid_price": {"variable_total_ore_per_kwh_gross": 142.0},
+    }
+    facade = type("GridFacade", (), {"provider": type("Provider", (), {"tariff_timeline": [record]})()})()
+    economics = replay_runtime._timeline_economics(facade, site, decision)
+    assert economics["provider_reference"] == "eon-manual-september"
+    assert replay_runtime._economics_is_causal(economics, decision) is True
+
+
 def test_replay_economics_does_not_use_future_tariff_for_pre_boundary_window():
     from datetime import datetime, timezone
 

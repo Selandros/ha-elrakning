@@ -382,6 +382,9 @@ def _timeline_economics(grid_manager: Any, site_id: str, decision_at: datetime) 
     """Resolve replay economics from the causal effective-dated tariff timeline."""
     records = getattr(grid_manager, "tariff_timeline", None)
     if not isinstance(records, list):
+        provider = getattr(grid_manager, "provider", None)
+        records = getattr(provider, "tariff_timeline", None)
+    if not isinstance(records, list):
         return None
     record = resolve_grid_tariff(records, site_id=site_id, at=decision_at, decision_at=decision_at)
     if not isinstance(record, dict):
