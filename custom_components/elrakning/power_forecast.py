@@ -22,6 +22,8 @@ MODEL_KIND = "autonomous_behavior_baseline"
 MIN_BATTERY_SUPPORT = 3
 MIN_COVERAGE = 0.9
 RATIO_THRESHOLD_W = 100.0
+SOLAR_PROVENANCE_VERSION = "solar-forecast-provenance-v1"
+SOLAR_ALGORITHM_VERSION = "solar-layering-v1"
 
 
 def _datetime(value: Any) -> datetime | None:
@@ -144,6 +146,29 @@ def _with_slot_metadata(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _solar_digest(value: Any) -> str:
+    """Build a deterministic identity for a solar layer input/output."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _solar_source_identity(points: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Extract source identities without copying raw provider payloads."""
+    frame_ids: set[str] = set()
+    generation_ids: set[str] = set()
+    for point in points:
+        provenance = point.get("provenance") if isinstance(point, dict) else None
+        if not isinstance(provenance, dict):
+            continue
+        for value in provenance.get("frame_ids") or ([provenance.get("frame_id")] if provenance.get("frame_id") else []):
+            if isinstance(value, str) and value:
+                frame_ids.add(value)
+        for value in provenance.get("source_generation_ids") or ([provenance.get("source_generation_id")] if provenance.get("source_generation_id") else []):
+            if isinstance(value, str) and value:
+                generation_ids.add(value)
+    return {"frame_ids": sorted(frame_ids), "source_generation_ids": sorted(generation_ids)}
+
+
 def _solar_layers(
     solar: dict[str, Any],
     site_id: str,
@@ -153,6 +178,21 @@ def _solar_layers(
 ) -> dict[str, Any]:
     """Keep physical, provider and site-calibrated solar layers explicit."""
     baseline_points = deepcopy(solar.get("forecast_points") or [])
+    source_identity = _solar_source_identity(baseline_points)
+    baseline_identity = {
+        "algorithm_version": SOLAR_ALGORITHM_VERSION,
+        "source": solar.get("source"),
+        "method": solar.get("method"),
+        "target_date": solar.get("target_date"),
+        "known_at": solar.get("known_at") or known_at.isoformat(),
+        "source_identity": source_identity,
+        "binding_fingerprint": next(
+            (point.get("provenance", {}).get("binding_fingerprint") for point in baseline_points
+             if isinstance(point.get("provenance"), dict) and point.get("provenance", {}).get("binding_fingerprint")),
+            None,
+        ),
+    }
+    baseline_fingerprint = _solar_digest({"identity": baseline_identity, "points": baseline_points})
     baseline = {
         "schema": "solar.provider_baseline.v1",
         "layer": "provider_baseline",
@@ -164,8 +204,26 @@ def _solar_layers(
         "available": bool(baseline_points),
         "forecast_points": baseline_points,
         "slot_count": len(baseline_points),
+        "provenance": {
+            "schema": SOLAR_PROVENANCE_VERSION,
+            "forecast_algorithm_version": SOLAR_ALGORITHM_VERSION,
+            "parameter_config_hash": _solar_digest(baseline_identity),
+            "input_frame_ids": source_identity["frame_ids"],
+            "input_source_generation_ids": source_identity["source_generation_ids"],
+            "known_at": baseline_identity["known_at"],
+            "target_date": baseline_identity["target_date"],
+            "frame_fingerprint": baseline_fingerprint,
+        },
     }
     physical = physical_reference if isinstance(physical_reference, dict) else {}
+    installation = physical.get("installation") if isinstance(physical.get("installation"), dict) else {}
+    physical_profile = physical.get("profile") if isinstance(physical.get("profile"), dict) else {}
+    physical_identity = {
+        "source": physical.get("source"),
+        "api_version": physical.get("api_version"),
+        "reference_year": physical_profile.get("reference_year"),
+        "installation_fingerprint": installation.get("fingerprint"),
+    }
     physical_layer = {
         "schema": "solar.physical_reference.v1",
         "layer": "physical_reference",
@@ -176,7 +234,29 @@ def _solar_layers(
         "captured_at": physical.get("fetched_at") or physical.get("captured_at"),
         "available": bool(physical.get("available") and physical.get("profile")),
         "reason": None if physical.get("available") and physical.get("profile") else "physical_reference_unavailable",
+        "provenance": {
+            "schema": SOLAR_PROVENANCE_VERSION,
+            "physical_reference_version": f"pvgis-api-{physical.get('api_version')}" if physical.get("api_version") else None,
+            "parameter_config_hash": _solar_digest(physical_identity),
+            "installation_fingerprint": installation.get("fingerprint"),
+            "reference_year": physical_profile.get("reference_year"),
+            "frame_fingerprint": _solar_digest(physical_identity),
+        },
     }
+    resource_versions = sorted({
+        str(item.get("calibration_version"))
+        for resource in (calibration.get("resources", {}).values() if isinstance(calibration, dict) and isinstance(calibration.get("resources"), dict) else [])
+        for item in [resource.get("calibration")] if isinstance(resource, dict) and isinstance(resource.get("calibration"), dict) and resource.get("calibration", {}).get("calibration_version")
+    })
+    site_calibration_version = calibration.get("calibration_version") if isinstance(calibration, dict) else None
+    if not site_calibration_version and resource_versions:
+        site_calibration_version = "+".join(resource_versions)
+    calibration_identity = {
+        "site_id": site_id,
+        "site_calibration_version": site_calibration_version or "solar-calibration-v1",
+        "resource_versions": resource_versions,
+    }
+    calibration_fingerprint = _solar_digest(calibration_identity)
     calibrated = {
         "schema": "solar.site_calibrated_forecast.v1",
         "layer": "site_calibrated_forecast",
@@ -188,6 +268,13 @@ def _solar_layers(
         "slot_count": 0,
         "calibration_version": None,
         "reason": "site_calibration_unavailable",
+        "provenance": {
+            "schema": SOLAR_PROVENANCE_VERSION,
+            "site_calibration_version": site_calibration_version or "solar-calibration-v1",
+            "site_calibration_fingerprint": calibration_fingerprint,
+            "base_frame_fingerprint": baseline_fingerprint,
+            "available": False,
+        },
     }
     resources = calibration.get("resources") if isinstance(calibration, dict) else None
     calibrated_points = []
@@ -219,6 +306,16 @@ def _solar_layers(
             "available": True, "forecast_points": calibrated_points, "slot_count": len(calibrated_points),
             "calibration_version": next(iter(versions)), "reason": None,
         })
+        calibrated["provenance"] = {
+            **calibrated["provenance"],
+            "site_calibration_version": next(iter(versions)),
+            "available": True,
+            "frame_fingerprint": _solar_digest({
+                "base_frame_fingerprint": baseline_fingerprint,
+                "site_calibration_fingerprint": calibration_fingerprint,
+                "points": calibrated_points,
+            }),
+        }
     return {"physical_reference": physical_layer, "provider_baseline": baseline, "site_calibrated_forecast": calibrated}
 
 

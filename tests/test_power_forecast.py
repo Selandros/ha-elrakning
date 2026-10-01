@@ -112,9 +112,21 @@ def test_solar_layers_keep_physical_baseline_and_calibrated_values_separate():
     layers = _solar_layers(solar, SITE, known_at, physical, calibration)
     assert layers["physical_reference"]["available"] is True
     assert layers["provider_baseline"]["forecast_points"][0]["value_w"] == 1000.0
+    assert layers["provider_baseline"]["provenance"]["forecast_algorithm_version"] == "solar-layering-v1"
+    assert layers["provider_baseline"]["provenance"]["frame_fingerprint"]
+    assert layers["physical_reference"]["provenance"]["installation_fingerprint"] == "install-a"
     assert layers["site_calibrated_forecast"]["available"] is True
     assert layers["site_calibrated_forecast"]["forecast_points"][0]["value_w"] == 800.0
     assert layers["site_calibrated_forecast"]["calibration_version"] == "solar-cal-v1"
+    assert layers["site_calibrated_forecast"]["provenance"]["site_calibration_version"] == "solar-cal-v1"
+    assert layers["site_calibrated_forecast"]["provenance"]["base_frame_fingerprint"] == layers["provider_baseline"]["provenance"]["frame_fingerprint"]
+
+    changed = _solar_layers(solar, SITE, known_at, physical, {
+        "resources": {"solar-gen": {"calibration": {"quality": "calibrated", "factor": 0.9, "calibration_version": "solar-cal-v2"}}},
+    })
+    assert changed["provider_baseline"]["provenance"]["frame_fingerprint"] == layers["provider_baseline"]["provenance"]["frame_fingerprint"]
+    assert changed["site_calibrated_forecast"]["provenance"]["site_calibration_fingerprint"] != layers["site_calibrated_forecast"]["provenance"]["site_calibration_fingerprint"]
+    assert layers == _solar_layers(solar, SITE, known_at, physical, calibration)
 
 
 def test_solar_layers_fail_closed_without_site_calibration():
@@ -124,6 +136,8 @@ def test_solar_layers_fail_closed_without_site_calibration():
     assert layers["provider_baseline"]["available"] is True
     assert layers["site_calibrated_forecast"]["available"] is False
     assert layers["site_calibrated_forecast"]["reason"] == "site_calibration_unavailable"
+    assert layers["site_calibrated_forecast"]["provenance"]["available"] is False
+    assert layers["site_calibrated_forecast"]["provenance"]["site_calibration_version"] == "solar-calibration-v1"
 
 
 def test_solar_layers_do_not_accept_calibration_from_unmatched_generation():
