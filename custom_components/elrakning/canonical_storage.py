@@ -111,6 +111,15 @@ class CanonicalStorage:
             "SELECT checksum FROM schema_migrations WHERE version = ?",
             (INTEGRITY_MIGRATION_VERSION,),
         ).fetchone()
+        connection.execute("""CREATE TABLE IF NOT EXISTS reconciled_grid_import (
+            reconciliation_id TEXT PRIMARY KEY, site_id TEXT NOT NULL, logical_role TEXT NOT NULL,
+            interval_start_us INTEGER NOT NULL, interval_end_us INTEGER NOT NULL,
+            resolution_seconds INTEGER NOT NULL CHECK (resolution_seconds > 0), value REAL,
+            unit TEXT NOT NULL, source_status TEXT NOT NULL, correction_reason TEXT NOT NULL,
+            local_record_id TEXT, provider_record_id TEXT, known_at_us INTEGER, provenance_json TEXT NOT NULL,
+            UNIQUE(site_id, interval_start_us, interval_end_us, resolution_seconds)
+        )""")
+        connection.execute("CREATE INDEX IF NOT EXISTS reconciled_grid_import_by_site_time ON reconciled_grid_import(site_id, interval_start_us)")
         if migration is not None:
             if migration[0] != INTEGRITY_MIGRATION_CHECKSUM:
                 raise RuntimeError("canonical_integrity_migration_mismatch")
@@ -872,7 +881,7 @@ class CanonicalStorage:
             rows: list[tuple[Any, ...]] = []
             for table in ("historical_energy_observations", "energy_observations"):
                 rows.extend(connection.execute(
-                    f"""SELECT logical_role, source_generation_id, interval_start_us, interval_end_us,
+                    f"""SELECT record_id, logical_role, source_generation_id, interval_start_us, interval_end_us,
                                resolution_seconds, value, unit, sign_convention, quality_status,
                                coverage_ratio, gap_status, semantic_key, revision,
                                CASE WHEN ? = 'energy_observations' THEN 1 ELSE 0 END AS live_priority,
@@ -892,34 +901,84 @@ class CanonicalStorage:
             connection.close()
         latest: dict[tuple[str, str, int, int], tuple[Any, ...]] = {}
         for row in rows:
-            key = (str(row[0]), str(row[1]), int(row[2]), int(row[3]))
+            key = (str(row[1]), str(row[2]), int(row[3]), int(row[4]))
             previous = latest.get(key)
-            if previous is None or (int(row[13]), int(row[12])) > (int(previous[13]), int(previous[12])):
+            if previous is None or (int(row[14]), int(row[13])) > (int(previous[14]), int(previous[13])):
                 latest[key] = row
         return [
             {
-                "logical_role": row[0],
-                "source_generation_id": row[1],
-                "interval_start": datetime.fromtimestamp(row[2] / 1_000_000, tz=timezone.utc),
-                "interval_end": datetime.fromtimestamp(row[3] / 1_000_000, tz=timezone.utc),
-                "resolution_seconds": int(row[4]),
-                "value": row[5],
-                "unit": row[6],
-                "sign_convention": row[7],
-                "quality_status": row[8],
-                "coverage_ratio": row[9],
-                "gap_status": row[10],
-                "semantic_key": row[11],
-                "revision": int(row[12]),
-                "storage_class": "canonical" if int(row[13]) else "historical",
-                "site_id": row[14],
-                "provenance": json.loads(row[15]) if row[15] else {},
+                "record_id": row[0],
+                "logical_role": row[1],
+                "source_generation_id": row[2],
+                "interval_start": datetime.fromtimestamp(row[3] / 1_000_000, tz=timezone.utc),
+                "interval_end": datetime.fromtimestamp(row[4] / 1_000_000, tz=timezone.utc),
+                "resolution_seconds": int(row[5]),
+                "value": row[6],
+                "unit": row[7],
+                "sign_convention": row[8],
+                "quality_status": row[9],
+                "coverage_ratio": row[10],
+                "gap_status": row[11],
+                "semantic_key": row[12],
+                "revision": int(row[13]),
+                "storage_class": "canonical" if int(row[14]) else "historical",
+                "site_id": row[15],
+                "provenance": json.loads(row[16]) if row[16] else {},
             }
             for row in sorted(latest.values(), key=lambda item: (item[2], item[0], item[1]))
         ]
 
     def count_observations(self) -> int:
         return int(self._connection().execute("SELECT COUNT(*) FROM energy_observations").fetchone()[0])
+
+    def reconcile_grid_import(self, site_id: str, start: datetime, end: datetime) -> int:
+        """Persist the derived view while leaving raw rows immutable."""
+        from .grid_reconciliation import reconcile_grid_import
+        rows = self.read_site_energy_history(site_id, start, end)
+        derived = reconcile_grid_import(rows)
+        connection = self._connection()
+        for item in derived:
+            connection.execute(
+                """INSERT INTO reconciled_grid_import(
+                    reconciliation_id, site_id, logical_role, interval_start_us, interval_end_us,
+                    resolution_seconds, value, unit, source_status, correction_reason,
+                    local_record_id, provider_record_id, known_at_us, provenance_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_id, interval_start_us, interval_end_us, resolution_seconds) DO UPDATE SET
+                    value=excluded.value, source_status=excluded.source_status,
+                    correction_reason=excluded.correction_reason, local_record_id=excluded.local_record_id,
+                    provider_record_id=excluded.provider_record_id, known_at_us=excluded.known_at_us,
+                    provenance_json=excluded.provenance_json""",
+                (f"{site_id}|grid.energy_import|{item['interval_start'].isoformat()}|{item['resolution_seconds']}",
+                 site_id, item["logical_role"], timestamp_us(item["interval_start"]), timestamp_us(item["interval_end"]),
+                 item["resolution_seconds"], item["value"], item["unit"], item["source_status"], item["correction_reason"],
+                 item.get("local_record_id"), item.get("provider_record_id"),
+                 timestamp_us(item["known_at"]) if item.get("known_at") else None,
+                 json.dumps(item["provenance"], sort_keys=True)),
+            )
+        connection.commit()
+        return len(derived)
+
+    def read_reconciled_grid_import(self, site_id: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """Read the derived site-scoped grid-import series."""
+        rows = self._connection().execute(
+            """SELECT interval_start_us, interval_end_us, resolution_seconds, value, unit,
+                      source_status, correction_reason, local_record_id, provider_record_id,
+                      known_at_us, provenance_json FROM reconciled_grid_import
+                WHERE site_id = ? AND interval_start_us < ? AND interval_end_us > ?
+                ORDER BY interval_start_us""",
+            (site_id, timestamp_us(end), timestamp_us(start)),
+        ).fetchall()
+        return [{
+            "site_id": site_id, "logical_role": "grid.energy_import",
+            "interval_start": datetime.fromtimestamp(row[0] / 1_000_000, tz=timezone.utc),
+            "interval_end": datetime.fromtimestamp(row[1] / 1_000_000, tz=timezone.utc),
+            "resolution_seconds": row[2], "value": row[3], "unit": row[4],
+            "source_status": row[5], "correction_reason": row[6],
+            "local_record_id": row[7], "provider_record_id": row[8],
+            "known_at": datetime.fromtimestamp(row[9] / 1_000_000, tz=timezone.utc) if row[9] else None,
+            "provenance": json.loads(row[10]) if row[10] else {},
+        } for row in rows]
 
     def observation_exists(self, semantic_key: str, revision: int = 1) -> bool:
         return self._connection().execute(

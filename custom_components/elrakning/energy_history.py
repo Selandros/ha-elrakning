@@ -176,6 +176,27 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
     return _prefer_non_overlapping_provider_resolution(result)
 
 
+def reconciled_contributions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert the derived billing series without exposing conflicts as energy."""
+    result = []
+    for row in rows:
+        if row.get("logical_role") != "grid.energy_import" or row.get("value") is None:
+            continue
+        start = row.get("interval_start")
+        end = row.get("interval_end")
+        if not isinstance(start, datetime) or not isinstance(end, datetime):
+            continue
+        duration = (end - start).total_seconds() / 3600
+        if duration <= 0:
+            continue
+        result.append(_contribution(
+            "import", start, end, float(row["value"]) / duration, priority=50,
+            source="reconciled_grid_import", generation_id=str(row.get("provider_record_id") or row.get("local_record_id") or "reconciled"),
+            source_resolution_seconds=int(row.get("resolution_seconds") or duration * 3600),
+        ))
+    return result
+
+
 def _metadata_unit(metadata: dict[str, Any], statistic_id: str) -> Any:
     item = metadata.get(statistic_id)
     if not item or len(item) < 2:
@@ -358,7 +379,20 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
     ledger_by_generation = {
         str(item.get("generation_id")): item for item in targets if item.get("generation_id")
     }
-    contributions = canonical_contributions(rows, ledger_by_generation)
+    reconciled = await hass.async_add_executor_job(
+        collector.storage.read_reconciled_grid_import, str(site_id), start, end
+    ) if hasattr(collector.storage, "read_reconciled_grid_import") else []
+    reconciled_keys = {
+        (item.get("interval_start"), item.get("interval_end"), int(item.get("resolution_seconds") or 0))
+        for item in reconciled
+    }
+    raw_for_contributions = [
+        row for row in rows
+        if row.get("logical_role") != "grid.energy_import"
+        or (row.get("interval_start"), row.get("interval_end"), int(row.get("resolution_seconds") or 0)) not in reconciled_keys
+    ]
+    contributions = canonical_contributions(raw_for_contributions, ledger_by_generation)
+    contributions.extend(reconciled_contributions(reconciled))
 
     statistic_ids = {str(item["entity_id"]) for item in targets if item.get("entity_id")}
     if statistic_ids:

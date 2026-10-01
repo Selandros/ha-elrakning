@@ -695,6 +695,7 @@ class EonGridManager:
                     },
                 })
             storage.insert_historical_observations_atomic(observations)
+            storage.reconcile_grid_import(str(site_id), first_start, points[-1]["end"])
 
     @staticmethod
     def _provider_import_points(state: dict[str, Any]) -> tuple[int, list[dict[str, Any]]] | None:
