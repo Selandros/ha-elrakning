@@ -925,7 +925,7 @@ class CanonicalStorage:
                 "site_id": row[15],
                 "provenance": json.loads(row[16]) if row[16] else {},
             }
-            for row in sorted(latest.values(), key=lambda item: (item[2], item[0], item[1]))
+            for row in sorted(latest.values(), key=lambda item: (item[3], item[1], item[2]))
         ]
 
     def count_observations(self) -> int:
