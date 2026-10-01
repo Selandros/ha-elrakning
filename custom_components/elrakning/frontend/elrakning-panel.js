@@ -3252,6 +3252,7 @@ class ElrakningPanel {
     this._powerStateLifecycleGeneration = 0;
     this._powerHistory = { date: null, series: {}, power_forecast: { schema: "ella_power_forecast.v1", available: false, series: {} }, solar_forecast_baselines: {}, solar_shadow: { available: false, days: [] }, solar_evidence: { available: false, days: [] }, solar_weather: { available: false, source: "smhi", status: "unavailable", current: {}, hourly_forecast: [] }, solar_sun: { available: false }, solar_pvgis: { available: false, source: "jrc_pvgis" }, solar_open_meteo: { available: false, source: "open_meteo" } };
     this._benchmarkEvidence = { schema: "ella_replay_benchmark_evidence.v1", available: false, status: "unavailable", blocker: "not_loaded" };
+    this._benchmarkEvidenceRequestToken = 0;
     this._loadForecast = { available: false, reason: "not_loaded", frames: [] };
     this._pricePlan = { available: false, reason: "not_loaded", plan_blocks: [] };
     this._pricePlanContextKey = null;
@@ -7511,8 +7512,10 @@ class ElrakningPanel {
       this._siteContextGeneration += 1;
       this._powerHistoryRequestToken += 1;
       this._pricePlanRequestToken += 1;
+      this._benchmarkEvidenceRequestToken += 1;
       this._loadForecast = reconciled.loadForecast;
       this._pricePlan = reconciled.pricePlan;
+      this._benchmarkEvidence = { schema: "ella_replay_benchmark_evidence.v1", site_id: state?.current_site?.site_id || state?.site_id || null, available: false, status: "unavailable", blocker: "site_changed" };
       this._pricePlanContextKey = reconciled.changed ? null : this._pricePlanContextKey;
       this._ellaSelection = reconciled.ellaSelection;
     }
@@ -9483,11 +9486,16 @@ class ElrakningPanel {
     if (!this._siteState) await this._loadSiteIdentity();
     const siteId = this._siteState?.current_site?.site_id || this._siteState?.site_id;
     if (!siteId) return;
+    const requestToken = ++this._benchmarkEvidenceRequestToken;
+    const requestHass = this.hass;
     try {
-      const response = await this.hass.callWS({ type: "elrakning/replay_benchmark_evidence", site_id: siteId });
+      const response = await requestHass.callWS({ type: "elrakning/replay_benchmark_evidence", site_id: siteId });
+      const currentSiteId = this._siteState?.current_site?.site_id || this._siteState?.site_id || null;
+      if (requestToken !== this._benchmarkEvidenceRequestToken || this.hass !== requestHass || currentSiteId !== siteId || response?.site_id !== siteId) return;
       this._benchmarkEvidence = response || { available: false, status: "unavailable", blocker: "empty_response" };
       this._renderBenchmarkEvidence();
     } catch {
+      if (requestToken !== this._benchmarkEvidenceRequestToken || this.hass !== requestHass) return;
       this._benchmarkEvidence = { available: false, status: "unavailable", blocker: "transport_unavailable" };
       this._renderBenchmarkEvidence();
     }
