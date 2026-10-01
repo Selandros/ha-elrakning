@@ -45,6 +45,7 @@ from .ella_economic_policy import EllaEconomicPolicyStore
 from .replay_artifact_store import ReplayArtifactStore, async_register_replay_artifact_service
 from .replay_runtime import async_generate_artifact
 from .site_economic_frames import schedule_eon_grid_economic_capture
+from .grid_tariff_timeline import resolve_grid_tariff
 from .site_identity import SiteIdentityManager
 from .websocket import async_register_websocket_commands, clear_forecast_view_caches
 from .elhandel.providers.greenely_invoice_economics import GreenelyInvoiceEconomicsProducer, async_register_proof_service
@@ -187,29 +188,41 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
 
 async def _async_capture_monthly_forecast(hass) -> None:
     """Run the producer and persist a fail-closed state if input assembly aborts."""
-    try:
-        await _async_capture_monthly_forecast_impl(hass)
-    except Exception:
-        data = hass.data.get(DOMAIN, {})
-        identity = data.get("site_identity_manager")
-        manager = data.get("monthly_forecast_manager")
-        state = getattr(identity, "state", {}) if identity else {}
-        site_id = state.get("active_site_id") if isinstance(state, dict) else None
-        if not manager or not isinstance(site_id, str) or not site_id:
-            return
-        config = (state.get("site_configs", {}).get(site_id) or {}) if isinstance(state, dict) else {}
-        timezone_name = ((config.get("location") or {}).get("timezone") if isinstance(config, dict) else None) or "UTC"
-        now = dt_util.now().astimezone(timezone.utc)
-        target_month = now.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m")
-        await manager.async_record_unavailable(
-            site_id=site_id,
-            decision_at=now,
-            target_month=target_month,
-            reason="monthly_forecast_input_builder_failed",
-        )
+    data = hass.data.get(DOMAIN, {})
+    identity = data.get("site_identity_manager")
+    manager = data.get("monthly_forecast_manager")
+    if not identity or not manager:
+        return
+    site_ids = _monthly_forecast_site_ids(identity)
+    for site_id in site_ids:
+        try:
+            await _async_capture_monthly_forecast_impl(hass, requested_site_id=site_id)
+        except Exception:
+            config = (identity.collection_site_configs().get(site_id) or {})
+            timezone_name = ((config.get("location") or {}).get("timezone") if isinstance(config, dict) else None) or "UTC"
+            now = dt_util.now().astimezone(timezone.utc)
+            target_month = now.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m")
+            await manager.async_record_unavailable(
+                site_id=site_id,
+                decision_at=now,
+                target_month=target_month,
+                reason="monthly_forecast_input_builder_failed",
+            )
 
 
-async def _async_capture_monthly_forecast_impl(hass) -> None:
+def _monthly_forecast_site_ids(identity) -> list[str]:
+    """Return explicit collection sites without using the active UI site."""
+    configs = identity.collection_site_configs()
+    return sorted(
+        str(site_id)
+        for site_id, config in configs.items()
+        if isinstance(site_id, str)
+        and isinstance(config, dict)
+        and config.get("collection_enabled", True) is True
+    )
+
+
+async def _async_capture_monthly_forecast_impl(hass, requested_site_id: str | None = None) -> None:
     """Build one bounded monthly forecast from existing runtime readers."""
     data = hass.data.get(DOMAIN, {})
     identity = data.get("site_identity_manager")
@@ -218,10 +231,11 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
     entry = data.get("config_entry")
     if not identity or not collector or not manager or not entry:
         return
-    site_id = getattr(identity, "state", {}).get("active_site_id")
+    active_site_id = getattr(identity, "state", {}).get("active_site_id")
+    site_id = requested_site_id or active_site_id
     if not isinstance(site_id, str) or not site_id:
         return
-    config = (getattr(identity, "state", {}).get("site_configs", {}).get(site_id) or {})
+    config = (identity.collection_site_configs().get(site_id) or {})
     timezone_name = ((config.get("location") or {}).get("timezone") if isinstance(config, dict) else None) or "UTC"
     now = dt_util.now().astimezone(timezone.utc)
     from zoneinfo import ZoneInfo
@@ -283,14 +297,41 @@ async def _async_capture_monthly_forecast_impl(hass) -> None:
         )
     )
     grid_manager = data.get("grid_manager")
-    grid_state = grid_manager.public_state() if grid_manager else {}
+    grid_binding = ((config.get("bindings") or {}).get("grid") if isinstance(config, dict) else None)
+    grid_state = (
+        grid_manager.public_state_for_binding(grid_binding)
+        if grid_manager and isinstance(grid_binding, dict)
+        else {}
+    )
     grid_price = grid_state.get("grid_price") if isinstance(grid_state, dict) else {}
     grid_provider = getattr(grid_manager, "provider", None)
-    resolve_grid_price = getattr(grid_provider, "resolve_grid_price_at", None)
-    applicable_grid_price = resolve_grid_price(now) if callable(resolve_grid_price) else None
+    timeline = getattr(grid_provider, "tariff_timeline", []) if grid_provider else []
+    resolved_grid_tariff = resolve_grid_tariff(
+        timeline, site_id=site_id, at=now, decision_at=now
+    ) if timeline else None
+    applicable_grid_price = (
+        resolved_grid_tariff.get("grid_price")
+        if isinstance(resolved_grid_tariff, dict)
+        else None
+    )
+    if not isinstance(applicable_grid_price, dict) and isinstance(grid_price, dict):
+        applicable_grid_price = grid_price
     if not isinstance(applicable_grid_price, dict):
         applicable_grid_price = None
-    trade_state = data.get("elhandel_manager").public_state() if data.get("elhandel_manager") else {}
+    trade_manager = data.get("elhandel_manager")
+    trade_binding = ((config.get("bindings") or {}).get("elhandel") if isinstance(config, dict) else None)
+    trade_state = {}
+    if trade_manager and isinstance(trade_binding, dict):
+        if site_id == active_site_id:
+            trade_state = trade_manager.public_state()
+        else:
+            facility_id = trade_binding.get("facility_id")
+            provider = trade_binding.get("provider")
+            storage = getattr(trade_manager, "storage", None)
+            if storage and facility_id and provider:
+                trade_state = await storage.async_load(
+                    facility_id=facility_id, provider=provider, use_active_namespace=False
+                ) or {}
     trade_tariff = ((trade_state.get("summary") or {}).get("tariff") or {}) if isinstance(trade_state, dict) else {}
     actual = build_actual_priced_cost_to_date(
         points=billing_points,

@@ -422,7 +422,7 @@ def test_monthly_forecast_capture_persists_fail_closed_builder_errors():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
     wrapper = source.index("async def _async_capture_monthly_forecast(hass)")
-    implementation = source.index("async def _async_capture_monthly_forecast_impl(hass)")
+    implementation = source.index("async def _async_capture_monthly_forecast_impl(hass, requested_site_id")
     assert wrapper < implementation
     assert 'reason="monthly_forecast_input_builder_failed"' in source[wrapper:implementation]
     assert "manager.async_record_unavailable" in source[wrapper:implementation]
@@ -447,10 +447,40 @@ def test_monthly_forecast_startup_capture_is_owned_for_unload_cancellation():
 def test_monthly_forecast_uses_persisted_power_snapshot_during_startup_race():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
-    capture = source.index("async def _async_capture_monthly_forecast_impl(hass)")
+    capture = source.index("async def _async_capture_monthly_forecast_impl(hass, requested_site_id")
     assert "site_state.get(\"power_forecasts\")" in source[capture:]
     assert '"method": "persisted_power_forecast_fallback"' in source[capture:]
     assert 'item.get("site_id") == site_id' in source[capture:]
+
+
+def test_monthly_forecast_site_selection_is_independent_of_active_ui_site():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_monthly_forecast_site_ids")
+    namespace = {}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
+
+    class Identity:
+        def collection_site_configs(self):
+            return {
+                "fiskvik": {"collection_enabled": True},
+                "vikarbodarna": {"collection_enabled": True},
+                "disabled": {"collection_enabled": False},
+            }
+
+    assert namespace["_monthly_forecast_site_ids"](Identity()) == ["fiskvik", "vikarbodarna"]
+
+
+def test_monthly_forecast_uses_site_bound_provider_state_for_background_sites():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    capture = source.index("async def _async_capture_monthly_forecast_impl(hass, requested_site_id")
+    body = source[capture:source.index("\n\ndef _schedule_load_forecast_capture", capture)]
+    assert "site_id = requested_site_id or active_site_id" in body
+    assert "public_state_for_binding(grid_binding)" in body
+    assert "resolve_grid_tariff(" in body
+    assert "use_active_namespace=False" in body
+    assert "trade_manager.public_state()" in body
 
 
 def test_control_plane_state_handlers_have_safe_pre_ready_contract():

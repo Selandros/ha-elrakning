@@ -3326,6 +3326,7 @@ class ElrakningPanel {
               <button type="button" class="header-icon-button" aria-label="Visa data" data-board-data-toggle>Visa data</button>
             </div>
           </div>
+          <button type="button" class="site-attention" data-site-attention hidden></button>
         </header>
 
         <div class="dashboard-card-stack">
@@ -6731,6 +6732,18 @@ class ElrakningPanel {
           font-size: 14px;
         }
 
+        .site-attention {
+          background: color-mix(in srgb, var(--error-color) 16%, transparent);
+          border: 1px solid color-mix(in srgb, var(--error-color) 55%, transparent);
+          color: var(--primary-text-color);
+          display: block;
+          font-size: 13px;
+          margin-top: 10px;
+          padding: 7px 10px;
+          text-align: left;
+          width: 100%;
+        }
+
         .provider {
           margin-top: 16px;
         }
@@ -7505,7 +7518,26 @@ class ElrakningPanel {
     }
     this._siteState = state;
     this._renderSiteSettings();
+    this._renderSiteAttention();
     this._renderPricePlanCards();
+  }
+
+  _renderSiteAttention() {
+    const button = this.host.querySelector("[data-site-attention]");
+    if (!button) return;
+    const attention = Array.isArray(this._siteState?.site_attention)
+      ? this._siteState.site_attention[0]
+      : null;
+    const visible = attention?.status === "action_required";
+    button.hidden = !visible;
+    if (!visible) {
+      button.textContent = "";
+      return;
+    }
+    const siteName = attention.site_name || attention.site_id || "En annan installation";
+    button.textContent = `${siteName} behöver åtgärd`;
+    button.title = attention.details_safe_for_ui || "Öppna installationsinställningar";
+    button.onclick = () => this._openSiteSettings();
   }
 
   _renderSiteSettings() {

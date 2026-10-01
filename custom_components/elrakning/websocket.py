@@ -56,6 +56,7 @@ from .solar_forecast import SolarForecastManager
 from .solar_single_run import build_single_run_targets
 from .solar_weather import build_sun_context
 from .site_identity import SiteIdentityManager
+from .site_health import async_site_attention_state
 
 COMMAND = f"{DOMAIN}/price_data"
 GREENELY_TEST_COMMAND = f"{DOMAIN}/greenely_test"
@@ -2551,7 +2552,12 @@ async def websocket_site_identity(hass, connection, msg):
         connection.send_result(msg["id"], response)
         return
     manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
-    connection.send_result(msg["id"], manager.public_state() if manager else {"site_id": None, "logical_roles": [], "source_ledger": []})
+    if not manager:
+        connection.send_result(msg["id"], {"site_id": None, "logical_roles": [], "source_ledger": [], "site_attention": []})
+        return
+    response = manager.public_state()
+    response["site_attention"] = await async_site_attention_state(hass, manager)
+    connection.send_result(msg["id"], response)
 
 
 @websocket_api.websocket_command(

@@ -8,6 +8,10 @@ assert.match(frontend, /this\._siteIdentityPromise = null;/);
 assert.match(frontend, /if \(this\._siteIdentityPromise\) return this\._siteIdentityPromise;/);
 assert.match(frontend, /if \(this\.hass !== requestHass\) return null;/);
 assert.match(frontend, /this\._siteIdentityPromise === request/);
+assert.match(frontend, /data-site-attention/);
+assert.match(frontend, /_renderSiteAttention\(\)/);
+assert.match(backend, /async_site_attention_state/);
+assert.match(backend, /site_attention/);
 
 const history = frontend.slice(frontend.indexOf("async loadPowerHistory("), frontend.indexOf("async _loadPowerHistoryCycle("));
 assert.ok(history.indexOf("await this._loadSiteIdentity()") < history.indexOf('"history_request_start"'));

@@ -1,10 +1,26 @@
 # Elräkning – Current State
 
-Updated: 2026-09-30
+Updated: 2026-10-01
 
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
+
+## 0.0.904 multi-site background and attention checkpoint
+
+- IMPLEMENTED/TESTED: Monthly forecast input assembly iterates explicit
+  `collection_enabled` site IDs rather than `active_site_id`, and resolves
+  grid/electricity provider state from the requested site's binding/storage.
+  An unconfigured current site therefore cannot suppress a configured
+  background site or provide it with another site's tariff state.
+- IMPLEMENTED/TESTED: The site-identity response exposes a bounded
+  `ella.site_attention.v1` contract containing only safe metadata for
+  explicit provider reauthentication/configuration action. Healthy and
+  self-healing background states remain silent; foreign telemetry, source
+  generations, provider consumption, economics and artifacts are excluded.
+- VERIFIED/STATIC: Canonical collectors, solar/evidence capture, load forecast,
+  replay and Greenely economics target explicit site IDs independently of the
+  active UI site. Physical control remains disabled.
 
 ## 0.0.892 Step 9 runtime holdout pipeline checkpoint
 
