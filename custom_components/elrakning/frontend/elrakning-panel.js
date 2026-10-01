@@ -6778,7 +6778,7 @@ class ElrakningPanel {
           background: color-mix(in srgb, var(--error-color) 16%, transparent);
           border: 1px solid color-mix(in srgb, var(--error-color) 55%, transparent);
           color: var(--primary-text-color);
-          display: block;
+          display: none !important;
           font-size: 13px;
           margin-top: 10px;
           padding: 7px 10px;

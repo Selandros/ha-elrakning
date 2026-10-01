@@ -9,6 +9,7 @@ assert.match(frontend, /if \(this\._siteIdentityPromise\) return this\._siteIden
 assert.match(frontend, /if \(this\.hass !== requestHass\) return null;/);
 assert.match(frontend, /this\._siteIdentityPromise === request/);
 assert.match(frontend, /data-site-attention/);
+assert.match(frontend, /\.site-attention \{[\s\S]*display: none !important;/);
 assert.match(frontend, /_renderSiteAttention\(\)/);
 assert.match(backend, /async_site_attention_state/);
 assert.match(backend, /site_attention/);
