@@ -6,6 +6,18 @@ Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
 
+## 0.0.917 Step 9 site-holdout semantics checkpoint
+
+- CORRECTED/TESTED: The runtime site holdout requires at least one complete,
+  causal, qualified window with explicit site identity. A second qualified
+  physical site is not required by the canonical Step 9 contract.
+- PRESERVED: Incomplete, contaminated or foreign-site descriptors remain
+  excluded from the qualified evidence set; exact-site isolation and
+  fail-closed behavior remain mandatory.
+- OPEN RUNTIME GATES: Season and DST evidence remain pending. A separate
+  physical site is not fabricated; Fiskvik remains fail-closed until it has
+  legitimate site-scoped canonical inputs.
+
 ## 0.0.904 multi-site background and attention checkpoint
 
 - IMPLEMENTED/TESTED: Monthly forecast input assembly iterates explicit

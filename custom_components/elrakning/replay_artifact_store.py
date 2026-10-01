@@ -120,8 +120,13 @@ def build_runtime_holdout_matrix(descriptors: Any) -> dict[str, Any]:
     months = {str(item.get("local_month")) for item in qualified if item.get("local_month") is not None}
     record("season", "qualified" if len(months) >= 2 else "pending", "distinct_mature_periods" if len(months) >= 2 else "no_distinct_mature_periods", [item for item in qualified if item.get("local_month") in months])
 
-    sites = {str(item.get("site_id")) for item in qualified if item.get("site_id")}
-    record("site", "qualified" if len(sites) >= 2 else "pending", "multiple_sites" if len(sites) >= 2 else "single_site_runtime_scope", qualified)
+    site_scoped = bool(qualified) and all(item.get("site_id") for item in qualified)
+    record(
+        "site",
+        "qualified" if site_scoped else "pending",
+        "site_scoped_runtime_window" if site_scoped else "no_site_scoped_qualified_window",
+        qualified,
+    )
 
     dst = [item for item in qualified if item.get("dst_transition") is True]
     record("dst", "qualified" if dst else "pending", "dst_transition_window" if dst else "no_real_dst_window", dst)

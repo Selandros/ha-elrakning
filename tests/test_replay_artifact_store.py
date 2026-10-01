@@ -69,8 +69,28 @@ def test_runtime_holdout_matrix_reports_real_evidence_without_fixture_claims():
     result = build_runtime_holdout_matrix(descriptors)
     assert result["candidate_count"] == 2
     assert result["qualified_count"] == 2
-    assert all(item["status"] != "qualified" for item in result["items"] if item["kind"] in {"site", "dst", "gap"})
+    assert next(item for item in result["items"] if item["kind"] == "site")["status"] == "qualified"
+    assert all(item["status"] != "qualified" for item in result["items"] if item["kind"] in {"dst", "gap"})
     assert all("deterministic_fixture" not in str(item) for item in result["items"])
+
+
+def test_site_holdout_accepts_one_site_and_keeps_foreign_incomplete_site_out():
+    descriptors = [
+        {"descriptor_id": "local", "site_id": SITE, "local_month": 9, "qualified": True, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "96/96", "publication_cutoff_verified": True},
+        {"descriptor_id": "foreign-gap", "site_id": "site-b", "local_month": 9, "qualified": False, "mature": True, "source_generations": [], "dst_transition": False, "actual_coverage": "0/96", "publication_cutoff_verified": False},
+    ]
+    result = build_runtime_holdout_matrix(descriptors)
+    site = next(item for item in result["items"] if item["kind"] == "site")
+    assert site["status"] == "qualified"
+    assert [item["site_id"] for item in site["evidence"]] == [SITE]
+
+
+def test_site_holdout_rejects_qualified_descriptor_without_site_identity():
+    descriptors = [
+        {"descriptor_id": "unscoped", "local_month": 9, "qualified": True, "mature": True, "source_generations": ["gen-a"], "dst_transition": False, "actual_coverage": "96/96", "publication_cutoff_verified": True},
+    ]
+    site = next(item for item in build_runtime_holdout_matrix(descriptors)["items"] if item["kind"] == "site")
+    assert site["status"] == "pending"
 
 
 def test_gap_negative_evidence_passes_holdout_without_qualifying_gap_windows():
