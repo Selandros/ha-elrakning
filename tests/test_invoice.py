@@ -10,6 +10,7 @@ _MODULE = module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 build_today_variable_cost = _MODULE.build_today_variable_cost
 build_daily_actual_cost = _MODULE.build_daily_actual_cost
+build_bucketed_actual_cost = _MODULE.build_bucketed_actual_cost
 
 
 class InvoiceTodayCostTests(unittest.TestCase):
@@ -83,3 +84,23 @@ class InvoiceTodayCostTests(unittest.TestCase):
         ]
         self.assertIsNone(build_today_variable_cost(points, [{"start": "bad", "end": "2026-08-02T00:15:00+00:00"}], now))
         self.assertIsNone(build_today_variable_cost(points, [], now))
+
+    def test_bucketed_kwh_is_priced_without_kwh_to_kw_conversion_or_fixed_fee(self):
+        start = datetime.fromisoformat("2026-08-02T00:00:00+02:00")
+        result = build_bucketed_actual_cost(
+            [{"timestamp": start.isoformat(), "end": "2026-08-02T00:15:00+02:00", "import_kwh": 0.5}],
+            [{"start": start.isoformat(), "end": "2026-08-02T00:15:00+02:00", "trade_customer_price_ore_per_kwh": 100, "grid_variable_ore_per_kwh": 200, "fixed_fee_sek": 999}],
+            start, datetime.fromisoformat("2026-08-02T00:15:00+02:00"),
+        )
+        self.assertEqual(result["import_kwh"], 0.5)
+        self.assertEqual(result["total_variable_cost_sek"], 1.5)
+        self.assertNotIn("fixed_fee_sek", result)
+
+    def test_bucketed_cost_fails_closed_when_price_does_not_cover_bucket(self):
+        start = datetime.fromisoformat("2026-08-02T00:00:00+02:00")
+        result = build_bucketed_actual_cost(
+            [{"timestamp": start.isoformat(), "end": "2026-08-02T00:15:00+02:00", "import_kwh": 0.5}],
+            [{"start": start.isoformat(), "end": "2026-08-02T00:10:00+02:00", "trade_customer_price_ore_per_kwh": 100, "grid_variable_ore_per_kwh": 200}],
+            start, datetime.fromisoformat("2026-08-02T00:15:00+02:00"),
+        )
+        self.assertIsNone(result)

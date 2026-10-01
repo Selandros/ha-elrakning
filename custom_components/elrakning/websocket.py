@@ -37,7 +37,7 @@ from .elhandel.providers.greenely_source import paginate_source
 from .elnat.manager import GridManager
 from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
-from .invoice import build_daily_actual_cost, build_today_variable_cost
+from .invoice import build_bucketed_actual_cost, build_daily_actual_cost, build_today_variable_cost
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
@@ -1320,6 +1320,24 @@ async def websocket_billing_history(hass, connection, msg):
     if coordinator is None:
         connection.send_result(msg["id"], {"success": True, **billing, "price_periods": [], "price_coverage": {"period_count": 0}})
         return
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    site_id = (site_manager.state or {}).get("active_site_id") if site_manager else None
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    reconciled_rows = []
+    if collector is not None and site_id and hasattr(collector.storage, "read_reconciled_grid_import"):
+        reconciled_rows = await hass.async_add_executor_job(
+            collector.storage.read_reconciled_grid_import,
+            site_id, datetime.fromisoformat(billing["start"]), datetime.fromisoformat(billing["end"]),
+        )
+    use_reconciled = not billing.get("points") and any(
+        row.get("value") is not None and row.get("source_status") in {"local_primary", "provider_gap_fill", "provider_reconciled"}
+        for row in reconciled_rows
+    )
+    reconciled_points = [
+        {"timestamp": row["interval_start"].isoformat(), "end": row["interval_end"].isoformat(), "import_kwh": row["value"]}
+        for row in reconciled_rows
+        if row.get("value") is not None and row.get("source_status") in {"local_primary", "provider_gap_fill", "provider_reconciled"}
+    ] if use_reconciled else []
     start = date.fromisoformat(billing["start"][:10])
     end = date.fromisoformat(billing["end"][:10])
     month_end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
@@ -1339,10 +1357,10 @@ async def websocket_billing_history(hass, connection, msg):
     grid_provider = getattr(grid_manager, "provider", None) if grid_manager else None
     resolve_grid_price = getattr(grid_provider, "resolve_grid_price_at", None)
     applicable_grid_price = resolve_grid_price(dt_util.now()) if callable(resolve_grid_price) else None
-    invoice_today = build_today_variable_cost(
-        billing.get("points", []),
-        price_periods,
-        dt_util.as_local(dt_util.now()),
+    current_local = dt_util.as_local(dt_util.now())
+    invoice_today = (
+        build_bucketed_actual_cost(reconciled_points, price_periods, current_local.replace(hour=0, minute=0, second=0, microsecond=0), current_local, current_local)
+        if use_reconciled else build_today_variable_cost(billing.get("points", []), price_periods, current_local)
     )
     zone = ZoneInfo("Europe/Stockholm")
     local_start = dt_util.as_local(datetime.fromisoformat(billing["start"]))
@@ -1352,13 +1370,15 @@ async def websocket_billing_history(hass, connection, msg):
     forecast_state = hass.data.get(DOMAIN, {}).get("monthly_forecast_manager").public_state(
         (hass.data.get(DOMAIN, {}).get("site_identity_manager").state or {}).get("active_site_id")
     ) if hass.data.get(DOMAIN, {}).get("monthly_forecast_manager") and hass.data.get(DOMAIN, {}).get("site_identity_manager") else None
-    current_local = dt_util.as_local(dt_util.now())
     while cursor < local_end:
         day_end = cursor + timedelta(days=1)
         observed_end = min(current_local, day_end) if cursor.date() == current_local.date() else day_end if day_end <= current_local else None
-        actual = build_daily_actual_cost(
-            billing.get("points", []), price_periods, cursor, day_end, observed_end
-        ) if observed_end is not None else None
+        actual = (
+            build_bucketed_actual_cost(reconciled_points, price_periods, cursor, day_end, observed_end)
+            if use_reconciled and observed_end is not None else
+            build_daily_actual_cost(billing.get("points", []), price_periods, cursor, day_end, observed_end)
+            if observed_end is not None else None
+        )
         daily_breakdown.append({
             "date": cursor.date().isoformat(),
             "actual": actual,
@@ -1389,13 +1409,15 @@ async def websocket_billing_history(hass, connection, msg):
         "success": True,
         "start": billing["start"],
         "end": billing["end"],
-        "energy_points": billing.get("points", []),
+        "energy_points": reconciled_points if use_reconciled else billing.get("points", []),
         "baseline_energy_points": billing.get("baseline_points", []),
         "energy_source": {
-            "method": "integrated_grid_power",
-            "entity_id": billing.get("entity_id"),
+            "method": "native_reconciled_energy_buckets" if use_reconciled else "integrated_grid_power",
+            "entity_id": billing.get("entity_id") if not use_reconciled else None,
             "source_entity": billing.get("entity_id"),
-            "raw_unit": "kW",
+            "raw_unit": "kWh" if use_reconciled else "kW",
+            "source": "reconciled_grid_import" if use_reconciled else "local_meter_history",
+            "provenance": [row.get("provenance", {}) for row in reconciled_rows] if use_reconciled else {"source": "meter_history"},
         },
         "integration_method": "trapezoidal_power_integration",
         "energy_coverage": billing.get("coverage", {}),

@@ -170,3 +170,61 @@ def build_daily_actual_cost(
         "source": "recorder_power_history_plus_effective_price_periods",
         "observed_until": limit.isoformat(),
     }
+
+
+def build_bucketed_actual_cost(
+    buckets: list[dict[str, Any]] | None,
+    periods: list[dict[str, Any]] | None,
+    interval_start: datetime,
+    interval_end: datetime,
+    observed_end: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Price complete native energy buckets without converting kWh to power."""
+    if interval_start.tzinfo is None or interval_end.tzinfo is None or interval_end <= interval_start:
+        return None
+    limit = min(interval_end, observed_end) if observed_end is not None else interval_end
+    if limit <= interval_start:
+        return None
+    eligible = []
+    for bucket in buckets or []:
+        start = _timestamp(bucket.get("timestamp"))
+        end = _timestamp(bucket.get("end"))
+        energy = _number(bucket.get("import_kwh"))
+        if not start or not end or end <= start or energy is None or energy < 0:
+            continue
+        if start < interval_start or end > limit:
+            continue
+        matching = []
+        for period in periods or []:
+            p_start = _timestamp(period.get("start"))
+            p_end = _timestamp(period.get("end"))
+            trade = _number(period.get("trade_customer_price_ore_per_kwh"))
+            grid = _number(period.get("grid_variable_ore_per_kwh"))
+            if p_start and p_end and p_start <= start and p_end >= end and trade is not None and grid is not None:
+                matching.append((p_start, p_end, trade, grid))
+        if len(matching) != 1:
+            continue
+        eligible.append((start, end, energy, matching[0], bucket))
+    cursor = interval_start
+    trade_total = grid_total = imported_total = 0.0
+    for start, end, energy, (_p_start, _p_end, trade, grid), _bucket in sorted(eligible):
+        if start != cursor:
+            return None
+        imported_total += energy
+        trade_total += energy * trade / 100
+        grid_total += energy * grid / 100
+        cursor = end
+    if cursor < limit:
+        return None
+    return {
+        "import_kwh": imported_total,
+        "elhandel_sek": trade_total,
+        "elnat_variable_sek": grid_total,
+        "total_variable_cost_sek": trade_total + grid_total,
+        "average_price_ore_per_kwh": (trade_total + grid_total) / imported_total * 100 if imported_total else None,
+        "status": "actual" if limit >= interval_end else "actual_to_date",
+        "quality": "qualified",
+        "method": "native_energy_bucket_by_effective_price_periods",
+        "source": "reconciled_grid_import",
+        "observed_until": limit.isoformat(),
+    }
