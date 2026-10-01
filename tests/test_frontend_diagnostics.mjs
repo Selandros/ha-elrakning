@@ -1725,6 +1725,7 @@ assert.match(panelSource, /const visible = \(key\) => this\._configurationCardsV
 assert.match(panelSource, /node\.toggleAttribute\("hidden", !visible\(key\)\)/);
 assert.match(panelSource, /toggle\.hidden = !this\._configurationCardsVisible/);
 assert.match(panelSource, /dashboard-card-toggle\[hidden\]/);
+assert.match(panelSource, /live-power-tile\[hidden\][\s\S]*display: none !important/);
 assert.match(panelSource, /main_cards/);
 assert.match(panelSource, /data-config-card-key="elhandel"/);
 assert.match(panelSource, /data-config-card-key="elnet"/);

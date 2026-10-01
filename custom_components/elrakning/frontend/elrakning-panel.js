@@ -5526,6 +5526,10 @@ class ElrakningPanel {
           position: relative;
         }
 
+        .live-power-tile[hidden] {
+          display: none !important;
+        }
+
         .live-power-heading {
           align-items: baseline;
           display: flex;
