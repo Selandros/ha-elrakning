@@ -45,6 +45,26 @@ class LoadForecastTests(unittest.TestCase):
         self.assertTrue(all(point["value"] != 0 for point in points))
         self.assertEqual(points[0]["point"]["model_version"], "load-profile-v2")
 
+    def test_global_prior_bootstraps_new_site_without_site_calibration(self):
+        now = datetime(2026, 9, 19, 12, tzinfo=UTC)
+        history = self._adaptive_history(now, [1000, 1000, 1000])
+        frame, points = build_load_forecast_frame(
+            "fiskvik", "Europe/Stockholm", history, now, horizon_hours=1,
+            persistent_calibration={"by_slot": {}},
+            global_prior_calibration={
+                "version": "load-profile-v2-global-prior-v1",
+                "by_slot": {"slot:57": {"factor": 0.6, "evidence_count": 12}},
+                "provenance": {"fingerprint": "global-prior-fingerprint"},
+            },
+        )
+        self.assertIsNotNone(frame)
+        self.assertTrue(points)
+        self.assertEqual(points[0]["point"]["calibration_scope"], "global_prior")
+        self.assertEqual(points[0]["point"]["global_prior_fingerprint"], "global-prior-fingerprint")
+        self.assertAlmostEqual(points[0]["point"]["persistent_factor"], 0.6)
+        self.assertEqual(frame["site_id"], "fiskvik")
+        self.assertNotIn("foreign-generation", str(frame))
+
     def _adaptive_history(self, now, current_values=(), current_coverage=1.0):
         history = []
         for day in range(7):

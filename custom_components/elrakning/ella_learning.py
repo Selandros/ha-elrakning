@@ -16,6 +16,8 @@ from .ella_learning_governance import build_learning_governance
 
 
 SCHEMA = "ella_learning_state.v1"
+GLOBAL_MODEL_SCHEMA = "ella_global_model_registry.v1"
+GLOBAL_LOAD_PRIOR_VERSION = "load-profile-v2-global-prior-v1"
 STORE_KEY = "elrakning.ella_learning"
 STORE_VERSION = 1
 MAX_RECORDS_PER_SITE = 512
@@ -36,12 +38,16 @@ class EllaLearningStore:
 
     def __init__(self, hass) -> None:
         self.store = Store(hass, STORE_VERSION, STORE_KEY)
-        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}}
+        self.state: dict[str, Any] = {"schema": SCHEMA, "version": 1, "sites": {}, "site_timezones": {}, "global_models": {}}
 
     async def async_load(self) -> None:
         cached = await self.store.async_load()
         if isinstance(cached, dict) and cached.get("schema") == SCHEMA and isinstance(cached.get("sites"), dict):
-            self.state = {"schema": SCHEMA, "version": 1, "sites": cached["sites"]}
+            self.state = {
+                "schema": SCHEMA, "version": 1, "sites": cached["sites"],
+                "site_timezones": cached.get("site_timezones", {}) if isinstance(cached.get("site_timezones", {}), dict) else {},
+                "global_models": cached.get("global_models", {}) if isinstance(cached.get("global_models", {}), dict) else {},
+            }
             self._drop_legacy_power_records()
 
     def _drop_legacy_power_records(self) -> None:
@@ -56,7 +62,7 @@ class EllaLearningStore:
                     if isinstance(record, dict) and isinstance(record.get("series"), dict)
                 ]
 
-    async def async_record(self, site_id: str, evaluation: dict[str, Any], calibration: dict[str, Any] | None = None) -> None:
+    async def async_record(self, site_id: str, evaluation: dict[str, Any], calibration: dict[str, Any] | None = None, timezone_name: str | None = None) -> None:
         if not isinstance(site_id, str) or not site_id.strip():
             return
         site = self.state.setdefault("sites", {}).setdefault(site_id, {"records": [], "latest": {}})
@@ -73,7 +79,93 @@ class EllaLearningStore:
         ))[-MAX_RECORDS_PER_SITE:]
         site["records"] = records
         site["latest"] = {"evaluation": evaluation, "calibration": calibration or {}}
+        if isinstance(timezone_name, str) and timezone_name:
+            self.state.setdefault("site_timezones", {})[site_id] = timezone_name
+        self._rebuild_global_load_prior()
         await self.store.async_save(self.state)
+
+    def _rebuild_global_load_prior(self) -> None:
+        """Aggregate transferable load knowledge without retaining site evidence."""
+        ratios: dict[str, list[float]] = {}
+        site_count = 0
+        record_count = 0
+        for site_id, site in self.state.get("sites", {}).items():
+            if not isinstance(site_id, str) or not isinstance(site, dict):
+                continue
+            site_used = False
+            for record in site.get("records", []):
+                if not isinstance(record, dict) or record.get("learning_eligible") is not True:
+                    continue
+                try:
+                    valid_at = datetime.fromisoformat(str(record["valid_at"]).replace("Z", "+00:00"))
+                    actual = float(record["actual_w"])
+                    baseline = float(record["baseline_w"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if valid_at.tzinfo is None or baseline <= 1 or actual < 0:
+                    continue
+                ratio = actual / baseline
+                if not math.isfinite(ratio):
+                    continue
+                timezone_name = self.state.get("site_timezones", {}).get(site_id, "UTC")
+                try:
+                    local = valid_at.astimezone(ZoneInfo(timezone_name))
+                except Exception:
+                    local = valid_at.astimezone(timezone.utc)
+                key = f"slot:{local.hour * 4 + local.minute // 15}"
+                ratios.setdefault(key, []).append(ratio)
+                site_used = True
+                record_count += 1
+            if site_used:
+                site_count += 1
+        by_slot: dict[str, dict[str, Any]] = {}
+        for key, values in sorted(ratios.items()):
+            if len(values) < 3:
+                continue
+            raw_ratio = median(values)
+            shrink = min(0.5, (len(values) - 2) / 8)
+            factor = min(1.15, max(0.85, 1.0 + (raw_ratio - 1.0) * shrink))
+            if abs(factor - 1.0) < 0.03:
+                factor = 1.0
+            by_slot[key] = {
+                "factor": factor,
+                "evidence_count": len(values),
+                "method": "cross_site_median_ratio",
+                "model_version": GLOBAL_LOAD_PRIOR_VERSION,
+            }
+        model = {
+            "schema": GLOBAL_MODEL_SCHEMA,
+            "model_version": GLOBAL_LOAD_PRIOR_VERSION,
+            "training_evidence_class": "qualified_actual_load_aggregate",
+            "source_site_count": site_count,
+            "source_record_count": record_count,
+            "by_slot": by_slot,
+        }
+        fingerprint_payload = {key: value for key, value in model.items() if key != "source_record_count"}
+        model["fingerprint"] = hashlib.sha256(
+            json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.state.setdefault("global_models", {})["load_profile"] = model
+
+    def global_calibration_prior(self, known_at: datetime | None = None) -> dict[str, Any]:
+        """Return only transferable aggregate knowledge and safe provenance."""
+        model = self.state.get("global_models", {}).get("load_profile")
+        if not isinstance(model, dict):
+            return {"version": GLOBAL_LOAD_PRIOR_VERSION, "by_slot": {}, "available": False, "reason": "no_global_prior"}
+        return {
+            "version": model.get("model_version", GLOBAL_LOAD_PRIOR_VERSION),
+            "by_slot": dict(model.get("by_slot") or {}),
+            "available": bool(model.get("by_slot")),
+            "provenance": {
+                "schema": model.get("schema", GLOBAL_MODEL_SCHEMA),
+                "model_version": model.get("model_version", GLOBAL_LOAD_PRIOR_VERSION),
+                "training_evidence_class": model.get("training_evidence_class"),
+                "source_site_count": model.get("source_site_count", 0),
+                "source_record_count": model.get("source_record_count", 0),
+                "fingerprint": model.get("fingerprint"),
+                "known_at": known_at.astimezone(timezone.utc).isoformat() if isinstance(known_at, datetime) and known_at.tzinfo else None,
+            },
+        }
 
     async def async_record_monthly_forecast(self, site_id: str, forecast: dict[str, Any]) -> dict[str, Any]:
         """Persist one immutable monthly forecast by deterministic fingerprint."""

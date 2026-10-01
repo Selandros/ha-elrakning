@@ -313,6 +313,7 @@ def build_load_forecast_frame(
     known_at: datetime,
     horizon_hours: int = 36,
     persistent_calibration: dict[str, Any] | None = None,
+    global_prior_calibration: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Build a 15-minute forecast only from observed canonical load points.
 
@@ -362,7 +363,13 @@ def build_load_forecast_frame(
             baseline = sum(item[0] for item in candidates) / len(candidates)
             persistent_key = f"{local.weekday()}:{slot}"
             persistent = (persistent_calibration or {}).get("by_slot", {}).get(persistent_key, {})
-            persistent_factor = float(persistent.get("factor", 1.0)) if isinstance(persistent, dict) else 1.0
+            global_prior = (global_prior_calibration or {}).get("by_slot", {}).get(
+                f"slot:{slot}", {}
+            )
+            use_site = isinstance(persistent, dict) and int(persistent.get("evidence_count", 0) or 0) >= 3
+            selected_calibration = persistent if use_site else (global_prior if isinstance(global_prior, dict) else {})
+            persistent_factor = float(selected_calibration.get("factor", 1.0))
+            calibration_scope = "site" if use_site else ("global_prior" if selected_calibration else "none")
             value = baseline * persistent_factor * calibration["factor"]
             points.append({
                 "point_id": "", "point_key": cursor.isoformat(), "valid_at": cursor,
@@ -371,6 +378,9 @@ def build_load_forecast_frame(
                           "corrected_forecast_w": value, "intraday_factor": calibration["factor"],
                           "persistent_factor": persistent_factor,
                           "persistent_calibration_evidence_count": persistent.get("evidence_count", 0) if isinstance(persistent, dict) else 0,
+                          "calibration_scope": calibration_scope,
+                          "global_prior_evidence_count": global_prior.get("evidence_count", 0) if isinstance(global_prior, dict) and calibration_scope == "global_prior" else 0,
+                          "global_prior_fingerprint": (global_prior_calibration or {}).get("provenance", {}).get("fingerprint") if calibration_scope == "global_prior" else None,
                           "correction_evidence_count": calibration["evidence_count"],
                           "confidence_status": calibration["confidence"],
                           "sample_support": len(candidates), "support_method": support,
@@ -383,6 +393,7 @@ def build_load_forecast_frame(
         "factor": calibration["factor"], "evidence_count": calibration["evidence_count"],
         "evidence": [item["valid_at"] for item in calibration.get("evidence", [])],
         "persistent": (persistent_calibration or {}).get("by_slot", {}),
+        "global_prior": (global_prior_calibration or {}).get("provenance", {}),
     }
     generation_id = _generation_id(site_id, source_generations, calibration_identity)
     semantic_key = f"{DATASET}|site:{site_id}|generation:{generation_id}|target:{target_start.date().isoformat()}"
@@ -399,6 +410,7 @@ def build_load_forecast_frame(
         "intraday_confidence": calibration["confidence"], "intraday_reason": calibration["reason"],
         "intraday_evidence": calibration.get("evidence", []),
         "persistent_calibration": persistent_calibration or {"version": "load-profile-v2-cross-day-v1", "by_slot": {}, "sample_count": 0},
+        "global_prior_calibration": global_prior_calibration or {"version": "load-profile-v2-global-prior-v1", "by_slot": {}, "available": False},
     }
     content = json.dumps([{key: value for key, value in point.items() if key != "point_id"}
                           for point in points], sort_keys=True, default=str, separators=(",", ":"))
@@ -416,6 +428,7 @@ def build_load_forecast_frame(
         "provenance": {"origin_type": "canonical_energy_observations", "site_id": site_id,
                         "model_version": MODEL_VERSION, "source_generations": sorted(source_generations),
                         "intraday_calibration": calibration,
+                        "global_prior": (global_prior_calibration or {}).get("provenance", {}),
                         "capture_contract": PAYLOAD_SCHEMA}, "payload_schema": PAYLOAD_SCHEMA,
     }
     return frame, points
@@ -453,14 +466,18 @@ def persist_load_forecast(storage: CanonicalStorage, frame: dict[str, Any], poin
     return storage.insert_external_frame(frame, points)
 
 
-def build_site_load_forecast(storage: CanonicalStorage, site_id: str, timezone_name: str, now: datetime, persistent_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_site_load_forecast(storage: CanonicalStorage, site_id: str, timezone_name: str, now: datetime, persistent_calibration: dict[str, Any] | None = None, global_prior_calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build and persist one site's forecast without active-site dependence."""
     history = storage.read_site_energy_history(site_id, now - timedelta(days=60), now)
     previous_frames = storage.read_external_input_frames(
         now, source_scope="site", site_id=site_id, logical_role=LOGICAL_ROLE,
     )
     evaluation = build_forecast_evaluation(previous_frames, history, now, site_id)
-    frame, points = build_load_forecast_frame(site_id, timezone_name, history, now, persistent_calibration=persistent_calibration)
+    frame, points = build_load_forecast_frame(
+        site_id, timezone_name, history, now,
+        persistent_calibration=persistent_calibration,
+        global_prior_calibration=global_prior_calibration,
+    )
     if frame is None:
         return {"site_id": site_id, "available": False, "reason": "insufficient_historical_support", "point_count": 0, "evaluation": evaluation}
     written = persist_load_forecast(storage, frame, points, now)

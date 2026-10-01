@@ -131,12 +131,18 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
                 learning_store.persistent_calibration(site_id, timezone_name, now)
                 if learning_store else None
             )
+            global_prior_calibration = (
+                learning_store.global_calibration_prior(now)
+                if learning_store else None
+            )
             result = await hass.async_add_executor_job(
                 build_site_load_forecast, canonical_collector.storage, site_id, timezone_name, now,
-                persistent_calibration,
+                persistent_calibration, global_prior_calibration,
             )
             if learning_store is not None:
-                await learning_store.async_record(site_id, result.get("evaluation") or {}, result.get("calibration") or {})
+                await learning_store.async_record(
+                    site_id, result.get("evaluation") or {}, result.get("calibration") or {}, timezone_name
+                )
             if stage6_store is not None:
                 try:
                     from .ella_stage6 import build_solar_calibration

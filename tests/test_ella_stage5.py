@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 from datetime import datetime, timezone, timedelta
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
@@ -66,6 +67,30 @@ def test_persistent_calibration_is_prior_day_site_scoped_and_bounded():
         assert calibration["by_slot"]
         assert next(iter(calibration["by_slot"].values()))["factor"] < 1.0
         assert store.persistent_calibration("site-b", "Europe/Stockholm", __import__("datetime").datetime(2026, 9, 20, 12, tzinfo=__import__("datetime").timezone.utc))["by_slot"] == {}
+    asyncio.run(run())
+
+
+def test_global_load_prior_bootstraps_new_site_without_site_evidence_leakage():
+    async def run():
+        store = EllaLearningStore(object())
+        store.store = _Store()
+        for index in range(3):
+            await store.async_record("vikarbodarna", {
+                "records": [{
+                    "frame_id": f"foreign-frame-{index}", "revision": 1,
+                    "valid_at": f"2026-09-{3 + index * 7:02d}T18:00:00+00:00",
+                    "baseline_w": 1000, "actual_w": 600, "learning_eligible": True,
+                    "source_generation_id": "foreign-generation",
+                }],
+            }, {}, "Europe/Stockholm")
+        prior = store.global_calibration_prior()
+        assert prior["available"] is True
+        assert prior["by_slot"]
+        assert prior["provenance"]["training_evidence_class"] == "qualified_actual_load_aggregate"
+        assert "site_id" not in json.dumps(prior)
+        assert "foreign-generation" not in json.dumps(prior)
+        assert store.persistent_calibration("fiskvik", "Europe/Stockholm", datetime(2026, 9, 20, 12, tzinfo=timezone.utc))["by_slot"] == {}
+        assert store.global_calibration_prior()["provenance"]["fingerprint"] == prior["provenance"]["fingerprint"]
     asyncio.run(run())
 
 
