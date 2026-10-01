@@ -1322,8 +1322,9 @@ assert.doesNotMatch(liveCardInteractivitySource, /addEventListener|_copyLivePowe
 assert.doesNotMatch(eonPanelSource, /live-power-icon/);
 assert.doesNotMatch(eonPanelSource, /live-power-tooltip/);
 assert.doesNotMatch(eonPanelSource, /_bindLivePowerTooltips/);
-assert.match(eonPanelSource, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)/);
-assert.match(eonPanelSource, /@media \(max-width: 760px\)[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)/);
+assert.match(eonPanelSource, /\.live-power-row \{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap;/);
+assert.match(eonPanelSource, /\.live-power-tile \{[\s\S]*flex: 1 1 280px;/);
+assert.doesNotMatch(eonPanelSource, /\.live-power-row \{[\s\S]*grid-template-columns: repeat\(5/);
 const solarOverReference = buildSolarDailyHistory(
   dailyHistoryPoints(new Date(2026, 7, 22, 0, 0), 2, 13),
   { "2026-08-22": 1 },
@@ -1899,7 +1900,9 @@ assert.match(panelSource, /\.daily-energy-row \{\n\s+align-items: stretch;\n\s+d
 assert.match(panelSource, /\.daily-energy-row:has\(> :not\(\[hidden\]\) ~ :not\(\[hidden\]\)\)\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);
 assert.match(panelSource, /@container \(max-width: 760px\) \{[\s\S]*\.daily-energy-row \{\n\s+align-items: start;/);
 assert.match(panelSource, /daily-energy-row[\s\S]*data-daily-energy[\s\S]*data-soc-card/);
-assert.match(panelSource, /\.live-power-row \{[\s\S]*display: grid;[\s\S]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\);/);
+assert.match(panelSource, /\.live-power-row \{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap;/);
+assert.match(panelSource, /\.live-power-tile \{[\s\S]*flex: 1 1 280px;/);
+assert.doesNotMatch(panelSource, /\.live-power-row \{[\s\S]*grid-template-columns: repeat\(5/);
 const livePowerRowRule = panelSource.match(/\.live-power-row \{([^}]*)\}/)?.[1] || "";
 assert.match(livePowerRowRule, /gap: 0;/);
 assert.match(panelSource, /\.live-power-row:has\(> :not\(\[hidden\]\) ~ :not\(\[hidden\]\)\)\s*\{[\s\S]*?gap: var\(--dashboard-card-gap\);/);

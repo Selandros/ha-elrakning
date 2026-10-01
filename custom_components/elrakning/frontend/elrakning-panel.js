@@ -5502,9 +5502,9 @@ class ElrakningPanel {
 
         .live-power-row {
           align-items: stretch;
-          display: grid;
+          display: flex;
+          flex-wrap: wrap;
           gap: 0;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
         }
 
         .live-power-row:has(> :not([hidden]) ~ :not([hidden])) {
@@ -5519,6 +5519,7 @@ class ElrakningPanel {
           box-sizing: border-box;
           container-type: inline-size;
           display: grid;
+          flex: 1 1 280px;
           grid-template-rows: auto auto auto 5px auto minmax(0, auto);
           row-gap: 1px;
           min-width: 0;
@@ -5652,10 +5653,6 @@ class ElrakningPanel {
         }
 
         @media (max-width: 760px) {
-          .live-power-row {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
           .invoice-estimate-card {
             grid-column: 1 / -1;
           }
