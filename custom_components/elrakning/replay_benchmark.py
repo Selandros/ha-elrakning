@@ -640,6 +640,7 @@ def build_replay_run(
     ess: ESSReplayLimits | None = None,
     baselines: Iterable[ReplayBaseline] = (NoBatteryBaseline(), SelfConsumptionBaseline()),
     timezone_name: str = "UTC",
+    required_actual_outcomes: int | None = None,
 ) -> dict[str, Any]:
     """Build one deterministic, non-persistent replay/benchmark artifact."""
     selected = select_causal_frames(frames, site_id=site_id, decision_at=decision_at)
@@ -688,6 +689,8 @@ def build_replay_run(
     actual_by_slot, _ = _actual_by_slot(actual_rows, site_id)
     replay_slot_keys = {_iso(slot.get("valid_at")) for slot in normalized_slots}
     actual_outcome_count = sum(key in replay_slot_keys for key in actual_by_slot)
+    if isinstance(required_actual_outcomes, int) and required_actual_outcomes > 0 and actual_outcome_count != required_actual_outcomes:
+        reasons.append("incomplete_actual_outcome_coverage")
     # Irrelevant future or other-site frames are safely excluded. Contamination
     # is reserved for data referenced by the replay that cannot be qualified.
     contamination = "slot_frame_provenance_missing" in reasons or "frame_quality_unqualified" in reasons
@@ -721,6 +724,7 @@ def build_replay_run(
             "contaminated": contamination,
             "incomplete": any(reason.startswith(("slot_", "incomplete_")) for reason in all_reasons),
             "actual_outcome_count": actual_outcome_count,
+            "required_actual_outcome_count": required_actual_outcomes,
             "hindsight_used_for_decision": False,
         },
         "input_identity": {

@@ -106,6 +106,21 @@ def test_actual_outcome_count_is_limited_to_replay_horizon():
     assert result["qualification"]["actual_outcome_count"] == 2
 
 
+def test_required_actual_coverage_rejects_incomplete_and_accepts_full_coverage():
+    decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    slots = _slots(decision + timedelta(minutes=15), count=96)
+    rows = [
+        {"site_id": SITE, "logical_role": "grid.power/import", "interval_start": slot["valid_at"], "value": 1000, "quality_status": "good", "coverage_ratio": 1.0}
+        for slot in slots
+    ]
+    incomplete = build_replay_run(site_id=SITE, decision_at=decision, frames=_frames(), slots=slots, actual_rows=rows[:95], model_identity={"model": "fixture"}, ess=ESS, required_actual_outcomes=96)
+    complete = build_replay_run(site_id=SITE, decision_at=decision, frames=_frames(), slots=slots, actual_rows=rows, model_identity={"model": "fixture"}, ess=ESS, required_actual_outcomes=96)
+    assert incomplete["qualification"]["qualified"] is False
+    assert "incomplete_actual_outcome_coverage" in incomplete["qualification"]["reasons"]
+    assert incomplete["qualification"]["incomplete"] is True
+    assert complete["qualification"]["qualified"] is True
+
+
 def test_gaps_stale_and_missing_frame_provenance_fail_closed():
     decision = datetime(2026, 9, 1, 12, tzinfo=UTC)
     slots = _slots(datetime(2026, 9, 1, 12, 15, tzinfo=UTC))

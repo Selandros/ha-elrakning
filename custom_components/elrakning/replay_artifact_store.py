@@ -42,6 +42,14 @@ def normalize_artifact(artifact: Any) -> dict[str, Any] | None:
         return None
     if not isinstance(artifact["site_id"], str) or not isinstance(artifact["scorecards"], dict):
         return None
+    qualification = artifact["qualification"]
+    horizon = artifact["horizon"]
+    if qualification.get("qualified") is True:
+        required = qualification.get("required_actual_outcome_count")
+        if required is None and horizon.get("slot_count") == 96 and isinstance(qualification.get("actual_outcome_count"), int):
+            required = 96
+        if isinstance(required, int) and required > 0 and qualification.get("actual_outcome_count") != required:
+            return None
     payload = {key: value for key, value in artifact.items() if key != "artifact_id"}
     if artifact["artifact_id"] != _fingerprint(payload):
         return None

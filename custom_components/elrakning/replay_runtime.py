@@ -522,7 +522,7 @@ def _build_run(storage: Any, facts: list[dict[str, Any]], site_id: str, now: dat
                 economics=economics,
                 resource_id=ess_status.get("resource_id"),
             ))
-        run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=baselines, timezone_name="Europe/Stockholm")
+        run = build_replay_run(site_id=site_id, decision_at=decision_at, frames=frames, slots=slots, actual_rows=actual_rows, model_identity={"model_version": "canonical-replay-runtime-v1", "calibration": {"source": "resolved_runtime_facts"}}, economics_identity={key: economics.get(key) for key in ("source_schema", "provider_reference", "known_at", "valid_from", "provider_valid_from", "component_provenance")}, ess=ess, baselines=baselines, timezone_name="Europe/Stockholm", required_actual_outcomes=HORIZON_SLOTS)
         if not run["qualification"].get("qualified"):
             continue
         actual_scorecard = build_actual_evaluation_scorecard(site_id=site_id, slots=slots, actual_rows=actual_rows, ess=ess)

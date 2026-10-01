@@ -10,6 +10,7 @@ from custom_components.elrakning.replay_artifact_store import (
     ReplayArtifactStore,
     build_runtime_holdout_matrix,
     build_artifact,
+    _fingerprint,
     normalize_artifact,
     validate_holdout_matrix,
 )
@@ -41,6 +42,14 @@ def test_artifact_round_trip_and_deterministic_identity():
     assert normalize_artifact(first)["immutable"] is True
     tampered = {**first, "site_id": "site-b"}
     assert normalize_artifact(tampered) is None
+
+
+def test_qualified_full_horizon_artifact_requires_exact_actual_coverage():
+    artifact = _artifact()
+    artifact["horizon"]["slot_count"] = 96
+    artifact["qualification"]["actual_outcome_count"] = 95
+    artifact["artifact_id"] = _fingerprint({key: value for key, value in artifact.items() if key != "artifact_id"})
+    assert normalize_artifact(artifact) is None
 
 
 def test_holdout_contract_requires_all_kinds_and_rejects_contaminated_cases():
