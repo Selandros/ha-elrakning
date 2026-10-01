@@ -6,6 +6,16 @@ Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
 
+## 0.0.932 E.ON DAY and provider-trend checkpoint
+
+- IMPLEMENTED/TESTED: The E.ON adapter now collects and normalizes verified
+  `DAY` transfer responses through the same site-scoped padded/actual path as
+  MONTH, HOUR and QUARTER_HOUR. Missing or padded data remains unavailable.
+- IMPLEMENTED/TESTED: `/energy/trend` is persisted as a separate provider
+  trend state with request, captured/known timestamps and installation-scoped
+  provenance. It is explicitly unavailable as canonical actual data and as a
+  forecast input; benchmark scoring remains a later separate design.
+
 ## 0.0.931 E.ON quarter-hour transfer checkpoint
 
 - IMPLEMENTED/TESTED: The isolated E.ON provider adapter accepts the verified

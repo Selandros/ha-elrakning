@@ -287,6 +287,43 @@ def test_quarter_hour_points_are_not_accepted_as_hourly_data():
     assert models.parse_transfer_points(payload, "HOUR", date(2026, 10, 1))["status"] == "unsupported"
 
 
+def test_day_transfer_excludes_padded_points():
+    payload = {
+        "productType": "ELECTRICITY",
+        "aggregation": "DAY",
+        "transfer": [
+            {"timestamp": "2026-10-01T00:00:00.000+02:00", "consumption": {"total": 6.926, "padded": False}},
+            {"timestamp": "2026-10-02T00:00:00.000+02:00", "consumption": {"total": 0, "padded": True}},
+        ],
+    }
+    result = models.parse_transfer_points(payload, "DAY", date(2026, 10, 1))
+    assert result["status"] == "ok"
+    assert result["actual_count"] == 1
+    assert result["padded_count"] == 0
+    assert result["actual_total_kwh"] == 6.926
+
+
+def test_provider_trend_is_separate_and_never_actual_or_forecast_input():
+    result = models.parse_provider_trend(
+        [{"productType": "ELECTRICITY", "consumption": {
+            "value": 6.926,
+            "text": "Trend",
+            "timestamp": "2026-10-01T00:00:00.000+02:00",
+            "comparePercentage": None,
+        }, "dialogCopy": None}],
+        "2026-10-01T22:00:00+00:00",
+        "2026-10-01T22:00:00+00:00",
+        "installation-1",
+        {"method": "GET", "path": "/energy/trend"},
+    )
+    assert result["status"] == "ok"
+    assert result["value"] == 6.926
+    assert result["provenance"]["installation_identifier"] == "installation-1"
+    assert result["provenance"]["request"]["path"] == "/energy/trend"
+    assert result["usable_as_actual"] is False
+    assert result["usable_as_forecast_input"] is False
+
+
 def test_transfer_points_reject_wrong_aggregation_and_future_date():
     payload = {"productType": "ELECTRICITY", "aggregation": "HOUR", "transfer": []}
     assert models.parse_transfer_points(payload, "DAY", date(2026, 10, 1))["status"] == "unsupported"

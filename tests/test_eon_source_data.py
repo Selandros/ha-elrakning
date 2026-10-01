@@ -12,6 +12,8 @@ def test_eon_source_data_command_and_manager_path_exist():
     assert "contract_accounts" in manager
     assert "monthly_transfer" in manager
     assert "quarter_hour_transfer" in manager
+    assert "day_transfer" in manager
+    assert "trend" in manager
     assert "outages" in manager
 
 
@@ -29,6 +31,8 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
     assert "async_get_grouped_contracts" in collector
     assert "async_get_monthly_transfer" in collector
     assert "async_get_quarter_hour_transfer" in collector
+    assert "async_get_daily_transfer" in collector
+    assert "async_get_trend" in collector
     assert "async_get_outages" in collector
     assert "self._app_source_snapshot = sources" in collector
     assert "async_fetch_app_sources()" in source.split("    async def async_source_data", 1)[1]

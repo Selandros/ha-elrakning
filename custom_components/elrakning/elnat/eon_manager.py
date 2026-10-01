@@ -27,6 +27,7 @@ from .eon_models import (
     facility_identity,
     parse_monthly_consumption,
     parse_monthly_transfer,
+    parse_provider_trend,
     parse_transfer_points,
     pricing_tariff_for_agreement,
 )
@@ -280,8 +281,10 @@ class EonGridManager:
             "locations": None,
             "grouped_contracts": None,
             "monthly_transfer": [],
+            "day_transfer": [],
             "hourly_transfer": [],
             "quarter_hour_transfer": [],
+            "trend": [],
             "outages": [],
             "source_status": {},
         }
@@ -321,8 +324,10 @@ class EonGridManager:
             tzinfo=timezone.utc,
         )
         monthly_status = []
+        day_status = []
         hourly_status = []
         quarter_hour_status = []
+        trend_status = []
         outage_status = []
         for installation in locations:
             installation_id = installation["installation_identifier"]
@@ -343,7 +348,9 @@ class EonGridManager:
             except Exception:
                 monthly_status.append({"status": "failed", "error": "api_error"})
             hourly_request = getattr(client, "async_get_hourly_transfer", None)
+            day_request = getattr(client, "async_get_daily_transfer", None)
             quarter_hour_request = getattr(client, "async_get_quarter_hour_transfer", None)
+            trend_request = getattr(client, "async_get_trend", None)
             local_day = datetime.now(ZoneInfo("Europe/Stockholm")).date()
             local_start = datetime.combine(local_day, datetime.min.time(), tzinfo=ZoneInfo("Europe/Stockholm"))
             local_end = datetime.combine(local_day + timedelta(days=1), datetime.min.time(), tzinfo=ZoneInfo("Europe/Stockholm")) - timedelta(microseconds=1)
@@ -364,6 +371,23 @@ class EonGridManager:
                     raise
                 except Exception:
                     hourly_status.append({"status": "failed", "error": "api_error"})
+            if day_request is not None:
+                try:
+                    day = await day_request(
+                        installation_id,
+                        local_start.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                        local_end.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                        installation["production"],
+                        installation["street"],
+                        installation["city"],
+                        installation["postal_code"],
+                    )
+                    sources["day_transfer"].append({"installation_id": installation_id, "payload": day})
+                    day_status.append({"status": "ok"})
+                except EonAuthError:
+                    raise
+                except Exception:
+                    day_status.append({"status": "failed", "error": "api_error"})
             if quarter_hour_request is not None:
                 try:
                     quarter_hour = await quarter_hour_request(
@@ -381,6 +405,30 @@ class EonGridManager:
                     raise
                 except Exception:
                     quarter_hour_status.append({"status": "failed", "error": "api_error"})
+            if trend_request is not None:
+                try:
+                    captured_at = datetime.now(timezone.utc).isoformat()
+                    trend = await trend_request(installation_id)
+                    sources["trend"].append({
+                        "installation_id": installation_id,
+                        "payload": trend,
+                        "captured_at": captured_at,
+                        "known_at": captured_at,
+                        "request": {
+                            "method": "GET",
+                            "path": "/energy/trend",
+                            "params": {
+                                "installations": f"{installation_id}:ELECTRICITY:GRID:false",
+                                "includeElectricityCost": "false",
+                                "language": "sv",
+                            },
+                        },
+                    })
+                    trend_status.append({"status": "ok"})
+                except EonAuthError:
+                    raise
+                except Exception:
+                    trend_status.append({"status": "failed", "error": "api_error"})
             pod = installation["point_of_delivery_number"]
             try:
                 outage = await client.async_get_outages(pod)
@@ -391,8 +439,10 @@ class EonGridManager:
             except Exception:
                 outage_status.append({"status": "failed", "error": "api_error"})
         sources["source_status"]["monthly_transfer"] = monthly_status or [{"status": "skipped"}]
+        sources["source_status"]["day_transfer"] = day_status or [{"status": "skipped"}]
         sources["source_status"]["hourly_transfer"] = hourly_status or [{"status": "skipped"}]
         sources["source_status"]["quarter_hour_transfer"] = quarter_hour_status or [{"status": "skipped"}]
+        sources["source_status"]["trend"] = trend_status or [{"status": "skipped"}]
         sources["source_status"]["outages"] = outage_status or [{"status": "skipped"}]
         self._app_source_snapshot = sources
         return sources
@@ -496,13 +546,23 @@ class EonGridManager:
             current = next((item for item in candidates if item["agreement"]["status"] == "active"), None)
             selected = current or next((item for item in candidates if item["agreement"]["status"] == "future"), None)
             monthly = next((item["payload"] for item in sources.get("monthly_transfer", []) if item.get("installation_id") == installation_id), None)
+            day = next((item["payload"] for item in sources.get("day_transfer", []) if item.get("installation_id") == installation_id), None)
             hourly = next((item["payload"] for item in sources.get("hourly_transfer", []) if item.get("installation_id") == installation_id), None)
             quarter_hour = next((item["payload"] for item in sources.get("quarter_hour_transfer", []) if item.get("installation_id") == installation_id), None)
+            trend = next((item for item in sources.get("trend", []) if item.get("installation_id") == installation_id), None)
             outage_payload = next((item["payload"] for item in sources.get("outages", []) if item.get("installation_id") == installation_id), None)
             consumption = parse_monthly_transfer(monthly, now.year, now.month) if monthly is not None else {"status": "missing", "resolution": "Monthly"}
             local_day = datetime.now(ZoneInfo("Europe/Stockholm")).date()
+            day_consumption = parse_transfer_points(day, "DAY", local_day) if day is not None else {"status": "missing", "resolution": "DAY", "date": local_day.isoformat(), "reason": "not_fetched"}
             hourly_consumption = parse_transfer_points(hourly, "HOUR", local_day) if hourly is not None else {"status": "missing", "resolution": "HOUR", "date": local_day.isoformat(), "reason": "not_fetched"}
             quarter_hour_consumption = parse_transfer_points(quarter_hour, "QUARTER_HOUR", local_day) if quarter_hour is not None else {"status": "missing", "resolution": "QUARTER_HOUR", "date": local_day.isoformat(), "reason": "not_fetched"}
+            provider_trend = parse_provider_trend(
+                trend.get("payload") if trend else None,
+                trend.get("captured_at") if trend else None,
+                trend.get("known_at") if trend else None,
+                installation_id,
+                trend.get("request") if trend else None,
+            )
             agreement = selected["agreement"] if selected else {
                 "status": "future" if installation.get("is_future") is True else "configured",
                 "type": "ELECTRICITY_CONS_GRID",
@@ -533,8 +593,10 @@ class EonGridManager:
             "tariff": tariff,
             "grid_price": (pricing_tariff or {}).get("grid_price"),
             "consumption": consumption,
+            "day_consumption": day_consumption,
             "hourly_consumption": hourly_consumption,
             "quarter_hour_consumption": quarter_hour_consumption,
+            "provider_trend": provider_trend,
             "cost": cost,
             "outage": normalize_outage(outage_payload) if outage_payload is not None else None,
             "app_authenticated": True,
@@ -711,8 +773,10 @@ class EonGridManager:
             "grid_price": self.state.get("grid_price"),
             "tariff_timeline": self.public_tariff_timeline(),
             "consumption": self.state.get("consumption"),
+            "day_consumption": self.state.get("day_consumption"),
             "hourly_consumption": self.state.get("hourly_consumption"),
             "quarter_hour_consumption": self.state.get("quarter_hour_consumption"),
+            "provider_trend": self.state.get("provider_trend"),
             "cost": self.state.get("cost"),
             "outage": self.state.get("outage"),
             "error": self.state.get("error"),
@@ -837,8 +901,10 @@ class EonGridManager:
             "tariff": None,
             "grid_price": None,
             "consumption": None,
+            "day_consumption": None,
             "hourly_consumption": None,
             "quarter_hour_consumption": None,
+            "provider_trend": None,
             "cost": None,
             "reauth_required": False,
             "error": None,
@@ -888,8 +954,10 @@ def _build_app_source_data(
         "locations": sources.get("locations"),
         "grouped_contracts": sources.get("grouped_contracts"),
         "monthly_transfer": sources.get("monthly_transfer"),
+        "day_transfer": sources.get("day_transfer"),
         "hourly_transfer": sources.get("hourly_transfer"),
         "quarter_hour_transfer": sources.get("quarter_hour_transfer"),
+        "trend": sources.get("trend"),
         "outages": sources.get("outages"),
         "source_status": source_status,
         "normalized": {

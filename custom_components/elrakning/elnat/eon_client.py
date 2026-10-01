@@ -13,6 +13,7 @@ MIDDLELAYER_BASE = "https://eonappapimrun.azure-api.net/middlelayer"
 CONTRACT_ACCOUNTS_URL = f"{MIDDLELAYER_BASE}/v2/ContractAccounts"
 LOCATIONS_URL = f"{MIDDLELAYER_BASE}/Locations"
 MONTHLY_TRANSFER_URL = f"{MIDDLELAYER_BASE}/energy/transfer/ELECTRICITY/MONTH"
+TREND_URL = f"{MIDDLELAYER_BASE}/energy/trend"
 OUTAGES_URL = f"{MIDDLELAYER_BASE}/OutagesV2"
 GROUPED_CONTRACTS_URL = "https://api.mobile-apps.eon.se/middlelayer/contracts/grouped"
 
@@ -130,6 +131,27 @@ class EonAppClient:
             postal_code,
         )
 
+    async def async_get_daily_transfer(
+        self,
+        installation_identifier: str,
+        from_timestamp: str,
+        to_timestamp: str,
+        production: bool,
+        street: str,
+        city: str,
+        postal_code: str,
+    ) -> Any:
+        return await self.async_get_transfer(
+            "DAY",
+            installation_identifier,
+            from_timestamp,
+            to_timestamp,
+            production,
+            street,
+            city,
+            postal_code,
+        )
+
     async def async_get_quarter_hour_transfer(
         self,
         installation_identifier: str,
@@ -154,6 +176,17 @@ class EonAppClient:
     async def async_get_outages(self, point_of_delivery_number: str) -> Any:
         return await self.session.request_json(
             "GET", OUTAGES_URL, params={"podIds": point_of_delivery_number}
+        )
+
+    async def async_get_trend(self, installation_identifier: str) -> Any:
+        return await self.session.request_json(
+            "GET",
+            TREND_URL,
+            params={
+                "installations": f"{installation_identifier}:ELECTRICITY:GRID:false",
+                "includeElectricityCost": "false",
+                "language": "sv",
+            },
         )
 
     async def async_get_grouped_contracts(

@@ -458,6 +458,48 @@ def parse_transfer_points(payload: Any, aggregation: str, target_date: date) -> 
     }
 
 
+def parse_provider_trend(
+    payload: Any,
+    captured_at: str | None,
+    known_at: str | None,
+    installation_identifier: str,
+    request: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Normalize E.ON trend metadata without promoting it to actual history."""
+    base = {
+        "status": "missing",
+        "resolution": "TREND",
+        "captured_at": captured_at,
+        "known_at": known_at,
+        "provenance": {
+            "provider": "eon",
+            "dataset": "energy_trend",
+            "endpoint": "/energy/trend",
+            "installation_identifier": installation_identifier,
+            "request": dict(request) if isinstance(request, Mapping) else None,
+        },
+        "usable_as_actual": False,
+        "usable_as_forecast_input": False,
+    }
+    if not isinstance(payload, list) or not payload:
+        return {**base, "reason": "trend_missing"}
+    item = payload[0]
+    if not isinstance(item, Mapping) or item.get("productType") != "ELECTRICITY":
+        return {**base, "reason": "unsupported"}
+    consumption = item.get("consumption")
+    if not isinstance(consumption, Mapping):
+        return {**base, "reason": "consumption_missing"}
+    return {
+        **base,
+        "status": "ok",
+        "value": consumption.get("value"),
+        "text": consumption.get("text"),
+        "timestamp": consumption.get("timestamp"),
+        "compare_percentage": consumption.get("comparePercentage"),
+        "dialog_copy": item.get("dialogCopy"),
+    }
+
+
 def normalize_outage(payload: Any) -> dict[str, Any]:
     """Normalize outage status without assigning semantics to unknown types."""
     items = payload if isinstance(payload, list) else [payload]
