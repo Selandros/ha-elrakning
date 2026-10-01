@@ -18,6 +18,8 @@ DATASET = "load_forecast.v1"
 PAYLOAD_SCHEMA = "load_forecast.v1"
 LOGICAL_ROLE = "load.forecast"
 MODEL_VERSION = "load-profile-v2"
+TRAINING_DATASET_VERSION = "canonical-house-consumption-60d-v1"
+PARAMETER_CONFIG_VERSION = "load-forecast-parameters-v1"
 MIN_DISTINCT_DAYS = 7
 SLOT_SECONDS = 900
 
@@ -32,6 +34,18 @@ def _generation_id(site_id: str, source_generations: set[str], calibration: dict
                 "source_generations": sorted(source_generations), "calibration": calibration or {}}
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
     return f"load-{digest}"
+
+
+def _parameter_config_hash(horizon_hours: int) -> str:
+    payload = {
+        "parameter_config_version": PARAMETER_CONFIG_VERSION,
+        "model_version": MODEL_VERSION,
+        "training_dataset_version": TRAINING_DATASET_VERSION,
+        "horizon_hours": horizon_hours,
+        "slot_seconds": SLOT_SECONDS,
+        "min_distinct_days": MIN_DISTINCT_DAYS,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _profile_buckets(history: list[dict[str, Any]], timezone_name: str):
@@ -398,6 +412,18 @@ def build_load_forecast_frame(
         "global_prior": (global_prior_calibration or {}).get("provenance", {}),
     }
     generation_id = _generation_id(site_id, source_generations, calibration_identity)
+    parameter_config_hash = _parameter_config_hash(horizon_hours)
+    site_calibration_version = (persistent_calibration or {}).get("version") or "load-profile-v2-cross-day-v1"
+    global_prior_provenance = (global_prior_calibration or {}).get("provenance", {})
+    training_provenance = {
+        "training_dataset_version": TRAINING_DATASET_VERSION,
+        "parameter_config_version": PARAMETER_CONFIG_VERSION,
+        "parameter_config_hash": parameter_config_hash,
+        "model_version": MODEL_VERSION,
+        "site_calibration_version": site_calibration_version,
+        "global_model_version": (global_prior_calibration or {}).get("version"),
+        "global_model_fingerprint": global_prior_provenance.get("fingerprint"),
+    }
     semantic_key = f"{DATASET}|site:{site_id}|generation:{generation_id}|target:{target_start.date().isoformat()}"
     # Canonical quality_status is schema-bound; retain confidence detail in
     # the quality object instead of introducing a non-canonical status value.
@@ -405,6 +431,7 @@ def build_load_forecast_frame(
     confidence_status = "good" if quality_status == "good" else "low_confidence"
     quality = {
         "status": confidence_status, "model_version": MODEL_VERSION,
+        **training_provenance,
         "sample_support_min": min(point["point"]["sample_support"] for point in points),
         "sample_support_max": max(point["point"]["sample_support"] for point in points),
         "observed_days": len(observed_days), "source_generations": sorted(source_generations),
@@ -431,6 +458,7 @@ def build_load_forecast_frame(
                         "model_version": MODEL_VERSION, "source_generations": sorted(source_generations),
                         "intraday_calibration": calibration,
                         "global_prior": (global_prior_calibration or {}).get("provenance", {}),
+                        **training_provenance,
                         "capture_contract": PAYLOAD_SCHEMA}, "payload_schema": PAYLOAD_SCHEMA,
     }
     return frame, points

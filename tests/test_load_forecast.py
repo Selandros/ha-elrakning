@@ -65,6 +65,32 @@ class LoadForecastTests(unittest.TestCase):
         self.assertEqual(frame["site_id"], "fiskvik")
         self.assertNotIn("foreign-generation", str(frame))
 
+    def test_forecast_frame_has_deterministic_training_and_calibration_provenance(self):
+        now = datetime(2026, 9, 19, 12, tzinfo=UTC)
+        history = self._adaptive_history(now)
+        global_prior = {
+            "version": "load-profile-v2-global-prior-v1",
+            "by_slot": {},
+            "provenance": {"fingerprint": "global-prior-fingerprint"},
+        }
+        first, _ = build_load_forecast_frame(
+            "site-a", "Europe/Stockholm", history, now, horizon_hours=1,
+            persistent_calibration={"version": "site-calibration-v1", "by_slot": {}},
+            global_prior_calibration=global_prior,
+        )
+        second, _ = build_load_forecast_frame(
+            "site-a", "Europe/Stockholm", history, now, horizon_hours=1,
+            persistent_calibration={"version": "site-calibration-v1", "by_slot": {}},
+            global_prior_calibration=global_prior,
+        )
+        self.assertEqual(first["provenance"], second["provenance"])
+        for payload in (first["quality"], first["provenance"]):
+            self.assertEqual(payload["training_dataset_version"], "canonical-house-consumption-60d-v1")
+            self.assertEqual(payload["parameter_config_version"], "load-forecast-parameters-v1")
+            self.assertEqual(payload["site_calibration_version"], "site-calibration-v1")
+            self.assertEqual(payload["global_model_fingerprint"], "global-prior-fingerprint")
+            self.assertTrue(payload["parameter_config_hash"])
+
     def test_site_calibration_overrides_global_prior(self):
         now = datetime(2026, 9, 19, 12, tzinfo=UTC)
         frame, points = build_load_forecast_frame(
