@@ -601,9 +601,9 @@ class EonGridManager:
             state = next(iter(states.values()), self._empty_state())
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
-            await self._async_persist_provider_imports(states)
             await self._async_capture_tariff_fact()
             await self._async_reconcile_site_bindings()
+            await self._async_persist_provider_imports(states)
             await self._persist_web_session(config, session)
             self._schedule_web_refresh(session)
         except (EonAuthError, ValueError) as err:
@@ -627,9 +627,9 @@ class EonGridManager:
             state = self._state_for_active_binding(states) or self._build_app_state(sources, locations)
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
-            await self._async_persist_provider_imports(states)
             await self._async_capture_tariff_fact()
             await self._async_reconcile_site_bindings()
+            await self._async_persist_provider_imports(states)
         except ValueError as err:
             self.state.update({"app_authenticated": True, "reauth_required": False, "error": str(err)})
             await self.store.async_save(self.state)
@@ -840,9 +840,11 @@ class EonGridManager:
                         "gap_status": "none",
                         "quality": {"padded": False, "provider_actual": True},
                         "provenance": {
-                            "provider": "eon",
-                            "dataset": "energy_transfer",
-                            "installation_identifier": installation_id,
+                        "provider": "eon",
+                        "dataset": "energy_transfer",
+                        "padded": False,
+                        "provider_actual": True,
+                        "installation_identifier": installation_id,
                             "point_of_delivery_number": (state.get("facility") or {}).get("point_of_delivery_number"),
                             "resolution": resolution,
                             "site_binding_fingerprint": binding.get("binding_fingerprint"),

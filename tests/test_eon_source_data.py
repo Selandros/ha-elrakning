@@ -42,6 +42,9 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
     assert "async_fetch_app_sources()" in source.split("    async def async_source_data", 1)[1]
     refresh = source.split("    async def _refresh_app", 1)[1].split("    def _build_app_state", 1)[0]
     assert "await self._async_persist_provider_imports(states)" in refresh
+    assert refresh.index("await self._async_reconcile_site_bindings()") < refresh.index("await self._async_persist_provider_imports(states)")
+    assert '"provider_actual": True' in source
+    assert '"padded": False' in source
 
 
 def test_completed_backfill_without_retained_transfer_is_recoverable():
