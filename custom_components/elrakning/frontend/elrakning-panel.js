@@ -10978,7 +10978,7 @@ class ElrakningPanel {
     const all = series.days.map((day) => day.total_variable_cost_sek).filter((value) => Number.isFinite(value));
     const max = Math.max(1, ...all);
     const axisLabels = [0, max / 2, max].map((value) => `${this._formatNumber(value)} kr`);
-    const axisGutter = priceAxisGutter(axisLabels);
+    const axisGutter = measuredPriceAxisGutter(chart, axisLabels);
     const plotWithAxisGutter = { ...plot, left: Math.max(plot.left, axisGutter) };
     const { x } = buildCostChartGeometry(width, plotWithAxisGutter, series.days_in_month);
     const y = (value) => plotWithAxisGutter.top + (1 - value / max) * (height - plotWithAxisGutter.top - plotWithAxisGutter.bottom);
