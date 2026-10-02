@@ -234,3 +234,94 @@ def build_bucketed_actual_cost(
         "trade_cost_status": "verified" if trade_complete else "unavailable",
         "unavailable_components": [] if trade_complete else ["elhandel_tariff"],
     }
+
+
+def build_canonical_cost_result(
+    *,
+    month: str,
+    daily_breakdown: list[dict[str, Any]] | None,
+    grid_fixed_monthly_sek: float | None,
+    trade_invoice_actual_sek: float | None,
+    trade_actual_status: str,
+    site_id: str | None,
+    timezone_name: str = "Europe/Stockholm",
+    monthly_forecast: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build one additive, source-separated cost contract for consumers."""
+    actual_days = [
+        item.get("actual")
+        for item in daily_breakdown or []
+        if isinstance(item, dict) and isinstance(item.get("actual"), dict)
+    ]
+
+    def total(field: str) -> float | None:
+        values = [_number(item.get(field)) for item in actual_days]
+        values = [value for value in values if value is not None]
+        return sum(values) if values else None
+
+    import_kwh = total("import_kwh")
+    grid_variable = total("elnat_variable_sek")
+    fixed = _number(grid_fixed_monthly_sek)
+    trade_invoice = _number(trade_invoice_actual_sek)
+    grid_known = (grid_variable or 0.0) + (fixed or 0.0) if grid_variable is not None or fixed is not None else None
+    trade_available = trade_invoice is not None and trade_actual_status == "invoice"
+    known_subtotal = grid_known
+    if trade_available:
+        known_subtotal = (known_subtotal or 0.0) + trade_invoice
+    full_available = grid_known is not None and trade_available
+    daily_variable = [
+        {
+            "date": item.get("date"),
+            "actual": item.get("actual"),
+            "availability": item.get("availability"),
+            "provenance": item.get("provenance"),
+        }
+        for item in daily_breakdown or []
+        if isinstance(item, dict) and isinstance(item.get("actual"), dict)
+    ]
+    return {
+        "schema": "elrakning.canonical_cost.v1",
+        "month": month,
+        "site_id": site_id,
+        "actual": {
+            "import_kwh": import_kwh,
+            "grid_variable_sek": grid_variable,
+            "trade_invoice_sek": trade_invoice if trade_available else None,
+            "status": "actual" if import_kwh is not None else "unavailable",
+        },
+        "partial": {
+            "known_month_subtotal_sek": known_subtotal,
+            "status": "complete" if full_available else "partial" if known_subtotal is not None else "unavailable",
+        },
+        "forecast": monthly_forecast if isinstance(monthly_forecast, dict) else None,
+        "fixed_monthly": {
+            "grid_sek": fixed,
+            "trade_sek": trade_invoice if trade_available else None,
+            "total_sek": fixed if fixed is not None else (trade_invoice if trade_available else None),
+            "allocation": "monthly_summary_only",
+        },
+        "daily_variable": daily_variable,
+        "completeness": "complete" if full_available else "partial" if known_subtotal is not None else "unavailable",
+        "provenance": {
+            "site_id": site_id,
+            "timezone": timezone_name,
+            "daily_source": "reconciled_grid_import",
+            "fixed_source": "effective_dated_grid_tariff",
+            "trade_source": "greenely_invoice" if trade_available else "greenely_invoice_required",
+        },
+        "source_status": {
+            "grid": "actual" if grid_known is not None else "unavailable",
+            "trade": "invoice" if trade_available else trade_actual_status,
+            "full_total": "actual" if full_available else "unavailable",
+        },
+        "import_kwh_actual": import_kwh,
+        "trade_actual_status": "invoice" if trade_available else trade_actual_status,
+        "grid_variable_actual_sek": grid_variable,
+        "grid_fixed_monthly_sek": fixed,
+        "known_month_subtotal_sek": known_subtotal,
+        "full_total": {
+            "available": full_available,
+            "sek": known_subtotal if full_available else None,
+            "reason": None if full_available else "trade_invoice_missing",
+        },
+    }

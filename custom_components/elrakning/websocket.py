@@ -37,7 +37,7 @@ from .elhandel.providers.greenely_source import paginate_source
 from .elnat.manager import GridManager
 from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
-from .invoice import build_bucketed_actual_cost, build_daily_actual_cost, build_today_variable_cost
+from .invoice import build_bucketed_actual_cost, build_canonical_cost_result, build_daily_actual_cost, build_today_variable_cost
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
@@ -1460,6 +1460,28 @@ async def websocket_billing_history(hass, connection, msg):
                 "reasons": forecast_state.get("reasons", []),
             }
             item["availability"] = "actual_plus_forecast" if item["actual"] else "forecast"
+    trade_state = _electricity_provider_state(_elhandel_manager(hass))
+    trade_invoice_total = None
+    trade_actual_status = "unavailable"
+    for invoice in trade_state.get("invoice_history") or []:
+        if not isinstance(invoice, dict) or invoice.get("month") != billing.get("start", "")[:7]:
+            continue
+        amount = invoice.get("amount_due_sek", invoice.get("period_cost_sek"))
+        if isinstance(amount, (int, float)):
+            trade_invoice_total = (trade_invoice_total or 0.0) + float(amount)
+    if trade_invoice_total is not None:
+        trade_actual_status = "invoice"
+    elif trade_state.get("provider") == GREENELY_PROVIDER:
+        trade_actual_status = "invoice_required"
+    canonical_cost = build_canonical_cost_result(
+        month=billing.get("start", "")[:7],
+        daily_breakdown=daily_breakdown,
+        grid_fixed_monthly_sek=(applicable_grid_price or {}).get("fixed_monthly_sek") if isinstance(applicable_grid_price, dict) else None,
+        trade_invoice_actual_sek=trade_invoice_total,
+        trade_actual_status=trade_actual_status,
+        site_id=site_id,
+        monthly_forecast=forecast_state,
+    )
     connection.send_result(msg["id"], {
         "success": True,
         "start": billing["start"],
@@ -1496,6 +1518,7 @@ async def websocket_billing_history(hass, connection, msg):
             "price_start": price_periods[0]["start"] if price_periods else None,
             "price_end": price_periods[-1]["end"] if price_periods else None,
         },
+        "canonical_cost": canonical_cost,
     })
 
 

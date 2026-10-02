@@ -11,6 +11,7 @@ _SPEC.loader.exec_module(_MODULE)
 build_today_variable_cost = _MODULE.build_today_variable_cost
 build_daily_actual_cost = _MODULE.build_daily_actual_cost
 build_bucketed_actual_cost = _MODULE.build_bucketed_actual_cost
+build_canonical_cost_result = _MODULE.build_canonical_cost_result
 
 
 class InvoiceTodayCostTests(unittest.TestCase):
@@ -117,3 +118,23 @@ class InvoiceTodayCostTests(unittest.TestCase):
             start, datetime.fromisoformat("2026-08-02T00:15:00+02:00"),
         )
         self.assertIsNone(result)
+
+    def test_canonical_cost_result_keeps_grid_partial_when_greenely_invoice_is_missing(self):
+        result = build_canonical_cost_result(
+            month="2026-10",
+            daily_breakdown=[{"date": "2026-10-01", "actual": {
+                "import_kwh": 28.611,
+                "elnat_variable_sek": 40.626,
+                "total_variable_cost_sek": 40.626,
+            }}],
+            grid_fixed_monthly_sek=241.25,
+            trade_invoice_actual_sek=None,
+            trade_actual_status="invoice_required",
+            site_id="site-fiskvik",
+        )
+        self.assertEqual(result["grid_variable_actual_sek"], 40.626)
+        self.assertEqual(result["grid_fixed_monthly_sek"], 241.25)
+        self.assertEqual(result["known_month_subtotal_sek"], 281.876)
+        self.assertEqual(result["completeness"], "partial")
+        self.assertFalse(result["full_total"]["available"])
+        self.assertEqual(result["trade_actual_status"], "invoice_required")
