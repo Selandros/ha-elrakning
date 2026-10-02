@@ -800,7 +800,7 @@ class CanonicalStorage:
                 f"INSERT INTO historical_energy_observations({columns}) VALUES ({','.join('?' for _ in values)})",
                 values,
             )
-        except sqlite3.IntegrityError as error:
+        except sqlite3.DatabaseError as error:
             if "historical_energy_observations.semantic_key, historical_energy_observations.revision" not in str(error):
                 raise
             existing = connection.execute(

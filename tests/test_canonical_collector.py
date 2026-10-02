@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import sqlite3
 import tempfile
 import threading
 import types
@@ -1003,6 +1004,43 @@ class CanonicalCollectorTests(unittest.IsolatedAsyncioTestCase):
                 ).fetchone()[0],
                 2,
             )
+            storage.close()
+
+    def test_provider_provenance_enrichment_handles_database_error_unique_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
+            storage.open()
+            start = datetime(2026, 10, 1, 18, 0, tzinfo=UTC)
+            captured = start + timedelta(hours=2)
+            observation = {
+                "semantic_key": "site-a|grid.energy_import|eon-q|2026-10-01T18:00:00+00:00",
+                "site_id": "site-a", "logical_role": "grid.energy_import", "source_generation_id": "eon-q",
+                "interval_start": start, "interval_end": start + timedelta(minutes=15),
+                "resolution_seconds": 900, "source_resolution_kind": "native_bucket",
+                "source_resolution_seconds": 900, "observed_at": start, "captured_at": captured,
+                "fetched_at": captured, "known_at": captured, "value": 0.734, "unit": "kWh",
+                "sign_convention": "positive_import_energy", "quality_status": "good", "coverage_ratio": 1.0,
+                "gap_status": "none", "quality": {"padded": False}, "provenance": {"provider": "eon"},
+            }
+            target = _target("site-a", "grid.energy_import", "eon:40093679", "eon-q")
+            target.update({"source_resolution_kind": "native_bucket", "source_resolution_seconds": 900, "timezone_state": "verified"})
+            storage.ensure_source_generation(target, captured)
+            self.assertEqual(storage.insert_historical_observations_atomic([observation]), 1)
+
+            enriched = dict(observation, provenance={"provider": "eon", "provider_actual": True, "padded": False})
+            real_connection = storage._connection()
+
+            class DatabaseErrorOnRevisionOne:
+                def execute(self, sql, parameters=()):
+                    if sql.startswith("INSERT INTO historical_energy_observations") and parameters[4] == 1:
+                        raise sqlite3.DatabaseError("UNIQUE constraint failed: historical_energy_observations.semantic_key, historical_energy_observations.revision")
+                    return real_connection.execute(sql, parameters)
+
+            self.assertTrue(storage._insert_historical_observation(DatabaseErrorOnRevisionOne(), enriched))
+            self.assertEqual(storage._connection().execute(
+                "SELECT max(revision) FROM historical_energy_observations WHERE semantic_key = ?",
+                (observation["semantic_key"],),
+            ).fetchone()[0], 2)
             storage.close()
 
     def test_recanonicalization_is_append_only_idempotent_and_site_scoped(self):
