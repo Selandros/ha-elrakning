@@ -5156,6 +5156,7 @@ class ElrakningPanel {
         }
 
         .cost-chart-plot {
+          --cost-axis-left-gutter: 48px;
           position: relative;
         }
 
@@ -5182,7 +5183,7 @@ class ElrakningPanel {
           padding-right: 8px;
           text-align: right;
           transform: translateY(-50%);
-          width: 48px;
+          width: var(--cost-axis-left-gutter, 48px);
         }
 
         .chart-axis-overlay-y-right {
@@ -10971,21 +10972,24 @@ class ElrakningPanel {
     const plot = { left: 48, right: 12, top: 12, bottom: 28 };
     const all = series.days.map((day) => day.total_variable_cost_sek).filter((value) => Number.isFinite(value));
     const max = Math.max(1, ...all);
-    const { x } = buildCostChartGeometry(width, plot, series.days_in_month);
-    const y = (value) => plot.top + (1 - value / max) * (height - plot.top - plot.bottom);
+    const axisLabels = [0, max / 2, max].map((value) => `${this._formatNumber(value)} kr`);
+    const axisGutter = priceAxisGutter(axisLabels);
+    const plotWithAxisGutter = { ...plot, left: Math.max(plot.left, axisGutter) };
+    const { x } = buildCostChartGeometry(width, plotWithAxisGutter, series.days_in_month);
+    const y = (value) => plotWithAxisGutter.top + (1 - value / max) * (height - plotWithAxisGutter.top - plotWithAxisGutter.bottom);
     const grid = [0, .5, 1].map((ratio) => {
       const value = max * ratio;
-      return `<line class="cost-chart-gridline" x1="${plot.left}" y1="${y(value)}" x2="${width - plot.right}" y2="${y(value)}" />`;
+      return `<line class="cost-chart-gridline" x1="${plotWithAxisGutter.left}" y1="${y(value)}" x2="${width - plotWithAxisGutter.right}" y2="${y(value)}" />`;
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-cost-axis-day="${day}">${day}</span>`).join("")}</div>`;
-    const barWidth = Math.max(3, (width - plot.left - plot.right) / Math.max(1, series.days_in_month) - 3);
+    const barWidth = Math.max(3, (width - plotWithAxisGutter.left - plotWithAxisGutter.right) / Math.max(1, series.days_in_month) - 3);
     const bars = series.days.map((day) => {
       const value = Number.isFinite(day.total_variable_cost_sek) ? day.total_variable_cost_sek : 0;
       const barHeight = value > 0 ? Math.max(2, height - plot.bottom - y(value)) : 2;
       const className = day.status === "forecast" ? "cost-chart-bar cost-chart-bar-forecast" : day.status === "actual_plus_forecast" ? "cost-chart-bar cost-chart-bar-mixed" : day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
-      return `<rect class="${className}" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plot.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
+      return `<rect class="${className}" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plotWithAxisGutter.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
     }).join("");
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span><span><i class="cost-chart-legend-estimated"></i>Faktiskt + prognos</span></div><div class="cost-chart-plot"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plot.left}" y="${plot.top}" width="${width - plot.left - plot.right}" height="${height - plot.top - plot.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span><span><i class="cost-chart-legend-estimated"></i>Faktiskt + prognos</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const axis = chart.querySelector(".chart-axis-overlay");
     const screenMatrix = svg.getScreenCTM?.();
@@ -11004,12 +11008,12 @@ class ElrakningPanel {
       hover.replaceChildren();
     };
     const update = (event) => {
-      const pointer = pointerToPlotCoordinates(svg, event, plot, width, height);
+      const pointer = pointerToPlotCoordinates(svg, event, plotWithAxisGutter, width, height);
       if (!pointer?.inside) {
         clear();
         return;
       }
-      const day = 1 + ((pointer.viewX - plot.left) / Math.max(1, width - plot.left - plot.right)) * (series.days_in_month - 1);
+      const day = 1 + ((pointer.viewX - plotWithAxisGutter.left) / Math.max(1, width - plotWithAxisGutter.left - plotWithAxisGutter.right)) * (series.days_in_month - 1);
       const point = nearest(day);
       if (!point) {
         clear();

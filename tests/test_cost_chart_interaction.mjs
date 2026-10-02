@@ -260,7 +260,12 @@ assert.match(source, /\.cost-chart-bar-mixed \{ fill: var\(--el-solar-color, #77
 assert.match(source, /\.cost-chart-legend i \{ background: var\(--el-solar-color, #77C2A1\);/);
 assert.match(costRender, /var\(--el-solar-color, #77C2A1\)/);
 assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
-assert.match(costRender, /buildCostChartGeometry\(width, plot, series\.days_in_month\)/);
+assert.match(costRender, /buildCostChartGeometry\(width, plotWithAxisGutter, series\.days_in_month\)/);
+assert.match(costRender, /priceAxisGutter\(axisLabels\)/);
+assert.match(costRender, /plotWithAxisGutter/);
+assert.match(costRender, /--cost-axis-left-gutter/);
+assert.match(source, /\.cost-chart-plot \{[\s\S]*--cost-axis-left-gutter: 48px;/);
+assert.match(source, /\.chart-axis-overlay-y-left \{[\s\S]*width: var\(--cost-axis-left-gutter, 48px\)/);
 assert.match(costRender, /getScreenCTM\?\.\(\)/);
 assert.match(costRender, /data-cost-axis-day/);
 assert.match(costRender, /cost-chart-svg" preserveAspectRatio="none"/);
