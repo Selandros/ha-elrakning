@@ -138,3 +138,28 @@ class InvoiceTodayCostTests(unittest.TestCase):
         self.assertEqual(result["completeness"], "partial")
         self.assertFalse(result["full_total"]["available"])
         self.assertEqual(result["trade_actual_status"], "invoice_required")
+
+    def test_canonical_forecast_summary_excludes_legacy_actual_and_raw_snapshot_fields(self):
+        result = build_canonical_cost_result(
+            month="2026-10",
+            daily_breakdown=[],
+            grid_fixed_monthly_sek=241.25,
+            trade_invoice_actual_sek=None,
+            trade_actual_status="invoice_required",
+            site_id="site-fiskvik",
+            monthly_forecast={
+                "available": False,
+                "quality": "unavailable",
+                "actual_cost_to_date_sek": 241.25,
+                "actual_import_to_date_kwh": 0,
+                "actual_priced_import_to_date_kwh": 0,
+                "timezone": "UTC",
+                "snapshot": {"actual_cost_to_date_sek": 241.25},
+                "forecast_method": "legacy_explicit_fallback_required",
+            },
+        )
+        forecast = result["forecast"]
+        self.assertFalse(forecast["available"])
+        self.assertNotIn("timezone", forecast)
+        self.assertNotIn("snapshot", forecast)
+        self.assertFalse(any(key.startswith("actual_") for key in forecast))

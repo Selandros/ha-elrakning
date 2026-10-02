@@ -2021,6 +2021,93 @@ export function finiteCostNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+export function buildCanonicalInvoiceEstimate(canonicalCost) {
+  if (!canonicalCost || canonicalCost.schema !== "elrakning.canonical_cost.v1") return null;
+  const actual = canonicalCost.actual && typeof canonicalCost.actual === "object" ? canonicalCost.actual : {};
+  const fixed = canonicalCost.fixed_monthly && typeof canonicalCost.fixed_monthly === "object" ? canonicalCost.fixed_monthly : {};
+  const partial = canonicalCost.partial && typeof canonicalCost.partial === "object" ? canonicalCost.partial : {};
+  const rawForecast = canonicalCost.forecast && typeof canonicalCost.forecast === "object" ? canonicalCost.forecast : null;
+  const forecast = rawForecast ? {
+    schema: rawForecast.schema || "elrakning.canonical_forecast_summary.v1",
+    available: rawForecast.available === true,
+    status: rawForecast.status || (rawForecast.available === true ? "available" : "unavailable"),
+    source: rawForecast.source || "monthly_forecast",
+    ...Object.fromEntries([
+      "target_month",
+      "estimated_month_total_sek",
+      "expected_future_cost_sek",
+      "estimated_month_import_kwh",
+      "expected_future_import_kwh",
+      "forecast_method",
+      "forecast_confidence",
+      "reason",
+      "unavailable_reason",
+    ].filter((key) => rawForecast[key] !== undefined && rawForecast[key] !== null).map((key) => [key, rawForecast[key]])),
+  } : null;
+  const gridVariable = finiteCostNumber(actual.grid_variable_sek);
+  const gridFixed = finiteCostNumber(fixed.grid_sek);
+  const tradeInvoice = finiteCostNumber(actual.trade_invoice_sek);
+  const gridTotal = gridVariable !== null || gridFixed !== null ? (gridVariable || 0) + (gridFixed || 0) : null;
+  const fullTotal = canonicalCost.full_total?.available === true ? finiteCostNumber(canonicalCost.full_total.sek) : null;
+  const rows = (Array.isArray(canonicalCost.daily_variable) ? canonicalCost.daily_variable : []).map((item) => {
+    const actualDay = item?.actual && typeof item.actual === "object" ? item.actual : {};
+    const date = typeof item?.date === "string" ? item.date : null;
+    return {
+      start: date ? `${date}T00:00:00` : null,
+      end: date ? `${date}T23:59:59` : null,
+      import_kwh: finiteCostNumber(actualDay.import_kwh),
+      trade_cost_sek: finiteCostNumber(actualDay.elhandel_sek),
+      grid_cost_sek: finiteCostNumber(actualDay.elnat_variable_sek),
+      total_variable_cost_sek: finiteCostNumber(actualDay.total_variable_cost_sek),
+      quality: actualDay.quality || null,
+      status: actualDay.status || null,
+      provenance: item?.provenance || null,
+    };
+  });
+  const complete = canonicalCost.completeness === "complete" && fullTotal !== null;
+  return {
+    month: canonicalCost.month || null,
+    imported_kwh_so_far: finiteCostNumber(actual.import_kwh),
+    total_so_far_sek: fullTotal,
+    known_month_subtotal_sek: finiteCostNumber(partial.known_month_subtotal_sek),
+    estimated_month_total_sek: finiteCostNumber(forecast?.estimated_month_total_sek),
+    estimated_grid_month_total_sek: null,
+    forecast_remaining_total_sek: finiteCostNumber(forecast?.expected_future_cost_sek),
+    forecast_import_kwh: finiteCostNumber(forecast?.estimated_month_import_kwh),
+    forecast_remaining_kwh: finiteCostNumber(forecast?.expected_future_import_kwh),
+    forecast,
+    forecast_confidence: complete ? "complete_available_data" : "partial_data",
+    forecast_method: forecast?.forecast_method || "unavailable",
+    estimate_status: canonicalCost.completeness === "partial" && canonicalCost.source_status?.trade === "invoice_required"
+      ? "partial_missing_greenely_invoice"
+      : canonicalCost.completeness || "unavailable",
+    trade: {
+      variable_cost_sek: null,
+      fixed_fee_sek: null,
+      booked_fixed_fee_sek: null,
+      accrued_fixed_fee_sek: null,
+      total_so_far_sek: tradeInvoice,
+      actual_status: canonicalCost.source_status?.trade || "unavailable",
+    },
+    grid: {
+      variable_cost_sek: gridVariable,
+      fixed_fee_sek: gridFixed,
+      booked_fixed_fee_sek: gridFixed,
+      accrued_fixed_fee_sek: gridFixed,
+      total_so_far_sek: gridTotal,
+    },
+    rows,
+    canonical_cost: canonicalCost,
+    provenance: canonicalCost.provenance || null,
+    source_status: canonicalCost.source_status || null,
+    estimate_provenance: {
+      source: "canonical_cost",
+      schema: canonicalCost.schema,
+      completeness: canonicalCost.completeness || "unavailable",
+    },
+  };
+}
+
 export function applyCanonicalMonthlyForecast(estimate, monthlyForecast) {
   if (!monthlyForecast || typeof monthlyForecast !== "object") return estimate;
   const canonicalField = (name) => Object.prototype.hasOwnProperty.call(monthlyForecast, name)
@@ -2094,13 +2181,18 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
   let cumulative = 0;
   for (const row of Array.isArray(estimate?.rows) ? [...estimate.rows].sort((left, right) => new Date(left.end).getTime() - new Date(right.end).getTime()) : []) {
     const timestamp = new Date(row.end || row.start).getTime();
-    const value = Number(row.trade_cost_sek) + Number(row.grid_cost_sek);
-    if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
+    const rowTotal = finiteCostNumber(row.total_variable_cost_sek);
+    const components = [row.trade_cost_sek, row.grid_cost_sek].map(finiteCostNumber).filter((value) => value !== null);
+    const value = rowTotal !== null ? rowTotal : components.length ? components.reduce((sum, item) => sum + item, 0) : null;
+    if (!Number.isFinite(timestamp) || value === null) continue;
     cumulative += value;
     actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, new Date(timestamp).getDate())), value: cumulative });
   }
-  const variableSoFar = Number(estimate?.trade?.variable_cost_sek) + Number(estimate?.grid?.variable_cost_sek);
-  if (Number.isFinite(variableSoFar)) {
+  const variableComponents = [estimate?.trade?.variable_cost_sek, estimate?.grid?.variable_cost_sek]
+    .map(finiteCostNumber)
+    .filter((value) => value !== null);
+  if (variableComponents.length) {
+    const variableSoFar = variableComponents.reduce((sum, value) => sum + value, 0);
     actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, current.getDate())), value: variableSoFar });
   }
   const dedupe = (points) => [...new Map(points.map((point) => [point.day, point])).values()].sort((left, right) => left.day - right.day);
@@ -10706,7 +10798,9 @@ class ElrakningPanel {
     const estimateStatus = this.host.querySelector("[data-invoice-estimate-status]");
     if (!card || !month || !total || !today) return;
     const billingHistory = this._billingHistory || {};
-    const providerOnlyEstimate = buildProviderOnlyInvoiceEstimate(
+    const canonicalCost = billingHistory?.canonical_cost;
+    const canonicalEstimate = buildCanonicalInvoiceEstimate(canonicalCost);
+    const providerOnlyEstimate = canonicalEstimate ? null : buildProviderOnlyInvoiceEstimate(
       this._eonGridState?.current_month_cost,
       new Date(),
     );
@@ -10714,7 +10808,7 @@ class ElrakningPanel {
       || this._eonGridState?.grid_price
       || this._eonGridState?.tariff?.grid_price
       || null;
-    const providerTrend = this._eonGridState?.provider_monthly_estimate
+    const providerTrend = canonicalEstimate ? null : this._eonGridState?.provider_monthly_estimate
       || (() => {
         const trend = this._eonGridState?.provider_trend;
         const value = Number(trend?.estimated_month_consumption_kwh);
@@ -10724,10 +10818,10 @@ class ElrakningPanel {
           provenance: trend?.estimate_provenance || trend?.provenance || null,
         } : null;
       })();
-    const nativeEnergyBuckets = billingHistory?.energy_source?.method === "native_reconciled_energy_buckets"
+    const nativeEnergyBuckets = !canonicalEstimate && billingHistory?.energy_source?.method === "native_reconciled_energy_buckets"
       && Array.isArray(billingHistory?.energy_points);
-    const hasBillingEnergyEvidence = billingHistoryHasEnergyEvidence(billingHistory);
-    let estimate = !hasBillingEnergyEvidence && providerOnlyEstimate
+    const hasBillingEnergyEvidence = canonicalEstimate || billingHistoryHasEnergyEvidence(billingHistory);
+    let estimate = canonicalEstimate || (!hasBillingEnergyEvidence && providerOnlyEstimate
       ? providerOnlyEstimate
       : nativeEnergyBuckets
       ? buildInvoiceEstimateFromEnergyBuckets(
@@ -10744,20 +10838,24 @@ class ElrakningPanel {
         this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
         new Date(),
         billingHistory?.baseline_energy_points,
-    );
-    const monthlyForecast = billingHistory?.monthly_forecast;
-    estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
-    estimate = mergeKnownProviderGridCost(estimate, providerOnlyEstimate);
-    estimate = applyProviderMonthlyTrendEstimate(
-      estimate,
-      providerTrend,
-      applicableGridPrice,
-    );
-    const greenelyActual = resolveGreenelyActualInvoiceCost(
-      this._electricityProviderState,
-      estimate?.month || null,
-    );
-    if (estimate && !greenelyActual.available && this._electricityProviderState?.provider === "greenely") {
+    ));
+    if (!canonicalEstimate) {
+      const monthlyForecast = billingHistory?.monthly_forecast;
+      estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
+      estimate = mergeKnownProviderGridCost(estimate, providerOnlyEstimate);
+      estimate = applyProviderMonthlyTrendEstimate(
+        estimate,
+        providerTrend,
+        applicableGridPrice,
+      );
+    }
+    const greenelyActual = canonicalEstimate
+      ? { available: canonicalEstimate.trade?.actual_status === "invoice", amount_sek: canonicalEstimate.trade?.total_so_far_sek }
+      : resolveGreenelyActualInvoiceCost(
+        this._electricityProviderState,
+        estimate?.month || null,
+      );
+    if (!canonicalEstimate && estimate && !greenelyActual.available && this._electricityProviderState?.provider === "greenely") {
       estimate = {
         ...estimate,
         trade: {
@@ -10781,7 +10879,7 @@ class ElrakningPanel {
           spot_analysis_excluded_from_actual: true,
         },
       };
-    } else if (estimate && greenelyActual.available && this._electricityProviderState?.provider === "greenely") {
+    } else if (!canonicalEstimate && estimate && greenelyActual.available && this._electricityProviderState?.provider === "greenely") {
       estimate.trade = {
         ...(estimate.trade || {}),
         variable_cost_sek: null,
@@ -10802,8 +10900,10 @@ class ElrakningPanel {
         spot_analysis_excluded_from_actual: true,
       };
     }
-    const providerEnergyAvailable = nativeEnergyBuckets && billingHistory.energy_points.length > 0;
-    const providerCostAvailable = Boolean(providerOnlyEstimate);
+    const providerEnergyAvailable = canonicalEstimate
+      ? Array.isArray(canonicalCost?.daily_variable) && canonicalCost.daily_variable.length > 0
+      : nativeEnergyBuckets && billingHistory.energy_points.length > 0;
+    const providerCostAvailable = canonicalEstimate ? canonicalEstimate.imported_kwh_so_far !== null : Boolean(providerOnlyEstimate);
     const configured = this._meterState?.configured === true || providerEnergyAvailable || providerCostAvailable;
     card.hidden = false;
     if (!configured || (!hasBillingEnergyEvidence && !providerCostAvailable)) {
@@ -10847,7 +10947,9 @@ class ElrakningPanel {
         : estimate.grid?.total_so_far_sek != null && Number.isFinite(Number(estimate.grid.total_so_far_sek))
           ? `Faktiskt ${this._formatSek(Number(estimate.grid.total_so_far_sek))}`
         : "–";
-    const todayVariableCostSek = Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
+    const todayVariableCostSek = canonicalEstimate
+      ? finiteCostNumber(canonicalEstimate.rows.at(-1)?.total_variable_cost_sek)
+      : Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
     today.hidden = !Number.isFinite(todayVariableCostSek);
     today.textContent = today.hidden ? "" : `+${this._formatSek(todayVariableCostSek)} idag`;
     const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(

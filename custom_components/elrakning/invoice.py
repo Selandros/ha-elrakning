@@ -248,6 +248,31 @@ def build_canonical_cost_result(
     monthly_forecast: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one additive, source-separated cost contract for consumers."""
+    def forecast_summary(value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        summary: dict[str, Any] = {
+            "schema": "elrakning.canonical_forecast_summary.v1",
+            "available": value.get("available") is True,
+            "status": value.get("quality") or ("available" if value.get("available") is True else "unavailable"),
+            "source": "monthly_forecast",
+        }
+        for key in (
+            "target_month",
+            "estimated_month_total_sek",
+            "expected_future_cost_sek",
+            "estimated_month_import_kwh",
+            "expected_future_import_kwh",
+            "forecast_method",
+            "forecast_confidence",
+        ):
+            if key in value and value[key] is not None:
+                summary[key] = value[key]
+        for key in ("reason", "unavailable_reason"):
+            if isinstance(value.get(key), str) and value[key]:
+                summary[key] = value[key]
+        return summary
+
     actual_days = [
         item.get("actual")
         for item in daily_breakdown or []
@@ -293,7 +318,7 @@ def build_canonical_cost_result(
             "known_month_subtotal_sek": known_subtotal,
             "status": "complete" if full_available else "partial" if known_subtotal is not None else "unavailable",
         },
-        "forecast": monthly_forecast if isinstance(monthly_forecast, dict) else None,
+        "forecast": forecast_summary(monthly_forecast),
         "fixed_monthly": {
             "grid_sek": fixed,
             "trade_sek": trade_invoice if trade_available else None,

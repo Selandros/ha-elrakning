@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, finiteCostNumber, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, finiteCostNumber, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
@@ -646,6 +646,38 @@ assert.equal(finiteCostNumber(null), null);
 assert.equal(finiteCostNumber(undefined), null);
 assert.equal(finiteCostNumber(Number.NaN), null);
 assert.equal(finiteCostNumber(0), 0);
+const canonicalProviderOnlyEstimate = buildCanonicalInvoiceEstimate({
+  schema: "elrakning.canonical_cost.v1",
+  month: "2026-10",
+  actual: { import_kwh: 28.611, grid_variable_sek: 40.626, trade_invoice_sek: null },
+  partial: { known_month_subtotal_sek: 281.876, status: "partial" },
+  fixed_monthly: { grid_sek: 241.25, trade_sek: null, total_sek: 241.25, allocation: "monthly_summary_only" },
+  forecast: {
+    schema: "elrakning.canonical_forecast_summary.v1",
+    available: false,
+    status: "unavailable",
+    actual_cost_to_date_sek: 241.25,
+    actual_import_to_date_kwh: 0,
+  },
+  daily_variable: [{
+    date: "2026-10-01",
+    actual: { import_kwh: 28.611, elhandel_sek: null, elnat_variable_sek: 40.626, total_variable_cost_sek: 40.626, status: "actual", quality: "partial" },
+    provenance: { source: "reconciled_grid_import" },
+  }],
+  completeness: "partial",
+  source_status: { grid: "actual", trade: "invoice_required", full_total: "unavailable" },
+  full_total: { available: false, sek: null, reason: "trade_invoice_missing" },
+  provenance: { timezone: "Europe/Stockholm" },
+});
+assert.equal(canonicalProviderOnlyEstimate.imported_kwh_so_far, 28.611);
+assert.equal(canonicalProviderOnlyEstimate.grid.total_so_far_sek, 281.876);
+assert.equal(canonicalProviderOnlyEstimate.trade.total_so_far_sek, null);
+assert.equal(canonicalProviderOnlyEstimate.total_so_far_sek, null);
+assert.equal(canonicalProviderOnlyEstimate.estimate_status, "partial_missing_greenely_invoice");
+assert.equal(canonicalProviderOnlyEstimate.rows[0].total_variable_cost_sek, 40.626);
+assert.equal(canonicalProviderOnlyEstimate.rows[0].trade_cost_sek, null);
+assert.equal(Object.keys(canonicalProviderOnlyEstimate.forecast || {}).includes("actual_cost_to_date_sek"), false);
+assert.equal(buildCostAnalysisSeries(canonicalProviderOnlyEstimate, null, new Date("2026-10-02T12:00:00+02:00")).actual.at(-1).value, 40.626);
 const canonicalUnavailableEstimate = applyCanonicalMonthlyForecast(
   { estimated_month_total_sek: 999, total_so_far_sek: 888, forecast_remaining_total_sek: 111 },
   {
