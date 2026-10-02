@@ -67,6 +67,7 @@ ELECTRICITY_PROVIDER_SAVE_COMMAND = f"{DOMAIN}/electricity_provider_save"
 ELECTRICITY_PROVIDER_SOURCE_DATA_COMMAND = f"{DOMAIN}/electricity_provider_source_data"
 ELECTRICITY_PROVIDER_REMOVE_COMMAND = f"{DOMAIN}/electricity_provider_remove"
 EON_GRID_STATE_COMMAND = f"{DOMAIN}/eon_grid_state"
+EON_GRID_REFRESH_COMMAND = f"{DOMAIN}/eon_grid_refresh"
 EON_GRID_SAVE_COMMAND = f"{DOMAIN}/eon_grid_save"
 EON_GRID_APP_SAVE_COMMAND = f"{DOMAIN}/eon_grid_app_save"
 EON_GRID_WEB_SAVE_COMMAND = f"{DOMAIN}/eon_grid_web_save"
@@ -161,6 +162,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_electricity_provider_source_data)
     websocket_api.async_register_command(hass, websocket_electricity_provider_remove)
     websocket_api.async_register_command(hass, websocket_eon_grid_state)
+    websocket_api.async_register_command(hass, websocket_eon_grid_refresh)
     websocket_api.async_register_command(hass, websocket_eon_grid_save)
     websocket_api.async_register_command(hass, websocket_eon_grid_app_save)
     websocket_api.async_register_command(hass, websocket_eon_grid_web_save)
@@ -782,6 +784,59 @@ async def websocket_eon_grid_state(hass, connection, msg):
         else manager.public_state() if manager else {"configured": False}
     )
     connection.send_result(msg["id"], {"success": True, **state})
+
+
+def _eon_refresh_error(value: object) -> str:
+    """Map provider failures to stable, secret-free categories."""
+    allowed = {
+        "api_error",
+        "invalid_profile",
+        "not_configured",
+        "reauth_required",
+        "site_unconfigured",
+    }
+    return value if isinstance(value, str) and value in allowed else "refresh_failed"
+
+
+@websocket_api.websocket_command({vol.Required("type"): EON_GRID_REFRESH_COMMAND})
+@websocket_api.async_response
+async def websocket_eon_grid_refresh(hass, connection, msg):
+    """Run one ordinary E.ON refresh without exposing provider data or secrets."""
+    if not _execution_admin(connection):
+        connection.send_result(msg["id"], {"success": False, "error": "admin_required"})
+        return
+    if not _site_binding_is_configured(hass, "grid"):
+        connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured"})
+        return
+    manager = _grid_manager(hass)
+    if manager is None or getattr(getattr(manager, "definition", None), "provider_id", None) != "eon":
+        connection.send_result(msg["id"], {"success": False, "error": "eon_grid_unavailable"})
+        return
+    try:
+        result = await manager.async_refresh()
+    except Exception as err:
+        _LOGGER.warning("E.ON one-shot refresh failed: %s", type(err).__name__)
+        connection.send_result(msg["id"], {"success": False, "provider": "eon", "error": _eon_refresh_error(getattr(err, "code", None))})
+        return
+    provider = getattr(manager, "provider", None)
+    provider_state = getattr(provider, "state", None)
+    provider_state = provider_state if isinstance(provider_state, dict) else {}
+    error = result.get("error") if isinstance(result, dict) else None
+    reauth_required = isinstance(result, dict) and result.get("reauth_required") is True
+    if error or reauth_required:
+        connection.send_result(msg["id"], {
+            "success": False,
+            "provider": "eon",
+            "error": _eon_refresh_error(error or "reauth_required"),
+        })
+        return
+    updated_at = provider_state.get("updated_at")
+    connection.send_result(msg["id"], {
+        "success": True,
+        "provider": "eon",
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        **({"updated_at": updated_at} if isinstance(updated_at, str) else {}),
+    })
 
 
 @websocket_api.websocket_command({
