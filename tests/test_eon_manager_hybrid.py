@@ -510,6 +510,32 @@ def test_public_state_filters_internal_installation_identifiers():
     assert public["facility"] == {"price_area": "SE2", "fuse_ampere": 16}
 
 
+def test_public_state_exposes_existing_current_month_cost_for_provider_only_ui():
+    manager = object.__new__(manager_module.EonGridManager)
+    manager.state = {
+        "facility": {"price_area": "SE2", "fuse_ampere": 16},
+        "cost": {"total_sek": 272.0498, "subscription_fee_sek": 241.25, "transfer_cost_sek": 21.69, "energy_tax_sek": 9.1098},
+        "consumption": {"status": "ok", "consumption_kwh": 21.69},
+        "tariff": {"subscription_fee_sek_per_month": 241.25, "transfer_fee_ore_per_kwh": 97.0, "energy_tax_ore_per_kwh": 45.0},
+        "provider_trend": None,
+        "agreement": None,
+        "grid_price": None,
+        "tariff_timeline": [],
+        "day_consumption": None,
+        "hourly_consumption": None,
+        "quarter_hour_consumption": None,
+        "outage": None,
+        "error": None,
+        "reauth_required": False,
+    }
+    manager._config = lambda: {"auth": "app", "account_id": "account", "password": "password"}
+    manager._web_config = lambda _config: {}
+    manager.public_tariff_timeline = lambda: []
+    public = manager.public_state()
+    assert public["current_month_cost"]["total_sek"] == 272.0498
+    assert public["current_month_cost"]["imported_kwh"] == 21.69
+
+
 def test_source_redaction_removes_identifiers_and_credentials():
     redacted = manager_module._redact_source_data({
         "id": "id-value", "podId": "pod-value", "installationIdentifier": "installation-value",

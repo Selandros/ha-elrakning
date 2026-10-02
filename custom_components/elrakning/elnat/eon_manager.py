@@ -1067,6 +1067,9 @@ class EonGridManager:
 
     def public_state(self) -> dict[str, Any]:
         facility = self.state.get("facility") or {}
+        cost = self.state.get("cost") or {}
+        consumption = self.state.get("consumption") or {}
+        tariff = self.state.get("tariff") or {}
         config = self._config()
         auth_mode = "app" if config.get("auth") == "app" else "web" if self._web_config(config).get("cookies") else None
         public_facility = {
@@ -1092,6 +1095,20 @@ class EonGridManager:
             "quarter_hour_consumption": self.state.get("quarter_hour_consumption"),
             "provider_trend": self.state.get("provider_trend"),
             "cost": self.state.get("cost"),
+            "current_month_cost": {
+                "total_sek": cost.get("total_sek"),
+                "fixed_sek": cost.get("subscription_fee_sek"),
+                "variable_sek": (
+                    cost.get("transfer_cost_sek", 0) + cost.get("energy_tax_sek", 0)
+                    if _number_pair(cost.get("transfer_cost_sek"), cost.get("energy_tax_sek"))
+                    else None
+                ),
+                "imported_kwh": consumption.get("consumption_kwh") if consumption.get("status") == "ok" else None,
+                "subscription_sek_per_month": tariff.get("subscription_fee_sek_per_month"),
+                "transfer_ore_per_kwh": tariff.get("transfer_fee_ore_per_kwh"),
+                "energy_tax_ore_per_kwh": tariff.get("energy_tax_ore_per_kwh"),
+                "source": "canonical_eon_grid_cost",
+            },
             "outage": self.state.get("outage"),
             "error": self.state.get("error"),
         }
