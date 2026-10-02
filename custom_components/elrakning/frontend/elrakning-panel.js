@@ -5295,10 +5295,8 @@ class ElrakningPanel {
         .cost-comparison {
           display: grid;
           gap: 8px;
-          grid-template-columns: minmax(0, 360px);
-          justify-content: end;
-          margin: 14px 0 0 auto;
-          max-width: 360px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 14px;
         }
 
         .cost-comparison-item {
@@ -5343,7 +5341,7 @@ class ElrakningPanel {
           .cost-kpis { gap: 8px; grid-template-columns: 1fr; }
           .cost-kpi strong { font-size: 1rem; }
           .cost-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .cost-comparison { grid-template-columns: minmax(0, 1fr); max-width: none; }
+          .cost-comparison { grid-template-columns: 1fr; }
           .cost-main-grid { grid-template-columns: 1fr; }
           .cost-side { border-left: 0; border-top: 1px solid var(--divider-color); padding-left: 0; padding-top: 14px; }
         }
