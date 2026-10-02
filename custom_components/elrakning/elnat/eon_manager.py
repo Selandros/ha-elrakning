@@ -85,6 +85,20 @@ EON_BACKFILL_DAYS = 7
 EON_BACKFILL_RETRY_HOURS = 6
 
 
+def _provider_timestamp(value: Any, fallback: datetime) -> datetime:
+    """Normalize persisted provider timestamps before canonical storage use."""
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo is not None else fallback
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return fallback
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc)
+    return fallback
+
+
 class EonGridManager:
     """Own E.ON credentials, refreshes, normalized state and update events."""
 
@@ -826,8 +840,8 @@ class EonGridManager:
                 for item in points:
                     start = item["start"]
                     end = item["end"]
-                    row_captured_at = item.get("captured_at") or captured_at
-                    row_known_at = item.get("known_at") or row_captured_at
+                    row_captured_at = _provider_timestamp(item.get("captured_at"), captured_at)
+                    row_known_at = _provider_timestamp(item.get("known_at"), row_captured_at)
                     semantic_key = f"{site_id}|grid.energy_import|{generation_id}|{start.isoformat()}"
                     observations.append({
                         "record_id": str(uuid.uuid5(uuid.NAMESPACE_URL, semantic_key)),
