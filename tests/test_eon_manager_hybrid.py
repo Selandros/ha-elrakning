@@ -300,6 +300,25 @@ def test_closed_day_provider_batches_prefer_quarter_hour_and_keep_known_at():
     assert batches[0][1][0]["known_at"] == "2026-10-02T06:00:00+00:00"
 
 
+def test_eon_binding_cache_survives_unavailable_provider_state():
+    manager = _manager({"auth": "app", "account_id": "account", "password": "password"})
+    manager.hass = types.SimpleNamespace(data={})
+    manager.state = manager_module.EonGridManager._empty_state()
+    manager.facility_states = {}
+    binding = {
+        "provider": "eon",
+        "facility": {"installation_identifier": "40093679", "point_of_delivery_number": "735999114000851039"},
+        "tariff": {"subscription_fee_sek_per_month": 226.25, "transfer_fee_ore_per_kwh": 97.0},
+        "grid_price": {"variable_total_ore_per_kwh_gross": 142.0},
+    }
+    state = manager.public_state_for_binding(binding)
+    assert state["configured"] is True
+    assert state["facility"]["installation_identifier"] == "40093679"
+    assert state["tariff"]["subscription_fee_sek_per_month"] == 226.25
+    assert state["grid_price"]["variable_total_ore_per_kwh_gross"] == 142.0
+    assert state["consumption"] is None
+
+
 def test_provider_backfill_batch_identity_is_idempotent():
     state = {
         "backfill_transfer": [{

@@ -948,7 +948,17 @@ class EonGridManager:
     def public_state_for_binding(self, binding: dict[str, Any] | None) -> dict[str, Any]:
         resolved = self.resolve_binding(binding)
         if not isinstance(resolved.get("state"), dict):
-            return {**self.public_state(), "facility": None, "site_status": resolved["status"]}
+            public = self.public_state()
+            if isinstance(binding, dict) and binding.get("provider") == EON_GRID_PROVIDER:
+                cached = {
+                    key: deepcopy(binding.get(key))
+                    for key in ("facility", "tariff", "grid_price", "agreement")
+                    if isinstance(binding.get(key), dict)
+                }
+                public = {**public, **cached, "configured": True}
+            else:
+                public["facility"] = None
+            return {**public, "site_status": resolved["status"]}
         previous = self.state
         try:
             self.state = resolved["state"]

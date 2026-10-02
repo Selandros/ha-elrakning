@@ -10427,6 +10427,7 @@ class ElrakningPanel {
   _updateInvoiceCard(response) {
     const provider = this.host.querySelector('[data-provider-name="elhandel"]');
     const summary = this.host.querySelector("[data-provider-summary]");
+    const status = this.host.querySelector("[data-provider-status]");
     if (!provider || !summary) return;
     const agreement = response.summary?.agreement_name;
     provider.textContent = providerLabel(response.provider_name, agreement);
@@ -10446,6 +10447,12 @@ class ElrakningPanel {
       if (invoicePeriod) rows.push(["Senaste faktura", this._formatInvoiceMonth(invoicePeriod)]);
       if (period.amount_due_sek != null) rows.push(["Att betala", this._formatSek(period.amount_due_sek)]);
     }
+    if (consumption?.month_to_date_kwh == null) {
+      const reason = response.consumption_error ? "Saknas · providerförbrukning unavailable" : "Saknas · ingen verifierad förbrukning";
+      rows.push(["Förbrukning", reason]);
+    }
+    if (!latest && Number(response.invoice_count || 0) === 0) rows.push(["Faktura", "Saknas · ingen faktura tillgänglig"]);
+    if (tariff.variable_cost_ore_per_kwh_incl_vat == null && tariff.fixed_fee_incl_vat_per_month == null) rows.push(["Prisdata", "Saknas · tariffdata unavailable"]);
     summary.replaceChildren(...rows.flatMap(([label, value]) => {
       const left = document.createElement("strong");
       left.textContent = label;
@@ -10453,7 +10460,11 @@ class ElrakningPanel {
       right.textContent = value;
       return [left, right];
     }));
-    summary.hidden = rows.length === 0;
+    summary.hidden = false;
+    if (status) {
+      status.textContent = rows.some(([label]) => ["Förbrukning", "Faktura", "Prisdata"].includes(label)) ? "Underlag saknas" : "";
+      status.hidden = !status.textContent;
+    }
     this._renderInvoiceCardCosts();
   }
 
@@ -11773,11 +11784,13 @@ class ElrakningPanel {
       rows.push(["Högsta säkringsandel", `${this._formatNumber(dailyFuseUtilizationPercent)} %`]);
     }
     if (consumption.status === "ok") rows.push(["Förbrukning", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
+    else if (configured) rows.push(["Förbrukning", state?.reauth_required ? "Saknas · återautentisering krävs" : "Saknas · providerdata unavailable"]);
     if (tariff.subscription_fee_sek_per_month != null) rows.push(["Abonnemang", this._formatSek(tariff.subscription_fee_sek_per_month) + "/mån"]);
     if (tariff.transfer_fee_ore_per_kwh != null) rows.push(["Överföring", `${this._formatNumber(tariff.transfer_fee_ore_per_kwh)} öre/kWh`]);
     if (tariff.energy_tax_ore_per_kwh != null) rows.push(["Energiskatt", `${this._formatNumber(tariff.energy_tax_ore_per_kwh)} öre/kWh`]);
     if (tariff.estimated_yearly_cost_sek != null) rows.push(["Beräknad årskostnad", this._formatSek(tariff.estimated_yearly_cost_sek)]);
     if (cost.total_sek != null) rows.push(["E.ON-kostnad", this._formatSek(cost.total_sek)]);
+    else if (configured) rows.push(["E.ON-kostnad", state?.reauth_required ? "Saknas · återautentisering krävs" : "Saknas · kostnadsdata unavailable"]);
     summary.replaceChildren(...rows.flatMap(([label, value]) => {
       const left = document.createElement("strong");
       left.textContent = label;
