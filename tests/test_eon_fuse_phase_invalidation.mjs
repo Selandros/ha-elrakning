@@ -22,5 +22,7 @@ assert.match(applySource, /const previousFuseAmpere = resolveFuseAmpere\(this\._
 assert.match(applySource, /this\._eonGridState = state;/);
 assert.match(applySource, /const fuseAmpere = resolveFuseAmpere\(this\._meterState, state\);/);
 assert.match(applySource, /if \(fuseChanged\) this\._renderPhaseHistoryCard\(\);/);
+assert.match(applySource, /\["Förbrukning hittills",/);
+assert.doesNotMatch(applySource, /\["E\.ON-kostnad",/);
 
 console.log("passed E.ON fuse phase-history invalidation test");

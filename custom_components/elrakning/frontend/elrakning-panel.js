@@ -12007,14 +12007,12 @@ class ElrakningPanel {
     if (Number.isFinite(dailyFuseUtilizationPercent)) {
       rows.push(["Högsta säkringsandel", `${this._formatNumber(dailyFuseUtilizationPercent)} %`]);
     }
-    if (consumption.status === "ok") rows.push(["Förbrukning", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
-    else if (configured) rows.push(["Förbrukning", state?.reauth_required ? "Saknas · återautentisering krävs" : "Saknas · providerdata unavailable"]);
+    if (consumption.status === "ok") rows.push(["Förbrukning hittills", `${this._formatNumber(consumption.consumption_kwh)} kWh`]);
+    else if (configured) rows.push(["Förbrukning hittills", state?.reauth_required ? "Saknas · återautentisering krävs" : "Saknas · providerdata unavailable"]);
     if (tariff.subscription_fee_sek_per_month != null) rows.push(["Abonnemang", this._formatSek(tariff.subscription_fee_sek_per_month) + "/mån"]);
     if (tariff.transfer_fee_ore_per_kwh != null) rows.push(["Överföring", `${this._formatNumber(tariff.transfer_fee_ore_per_kwh)} öre/kWh`]);
     if (tariff.energy_tax_ore_per_kwh != null) rows.push(["Energiskatt", `${this._formatNumber(tariff.energy_tax_ore_per_kwh)} öre/kWh`]);
     if (tariff.estimated_yearly_cost_sek != null) rows.push(["Beräknad årskostnad", this._formatSek(tariff.estimated_yearly_cost_sek)]);
-    if (cost.total_sek != null) rows.push(["E.ON-kostnad", this._formatSek(cost.total_sek)]);
-    else if (configured) rows.push(["E.ON-kostnad", state?.reauth_required ? "Saknas · återautentisering krävs" : "Saknas · kostnadsdata unavailable"]);
     summary.replaceChildren(...rows.flatMap(([label, value]) => {
       const left = document.createElement("strong");
       left.textContent = label;
