@@ -255,6 +255,67 @@ def test_app_only_refresh_keeps_middlelayer_state_without_web_tariff():
     assert result["reauth_required"] is False
 
 
+def test_closed_day_provider_batches_prefer_quarter_hour_and_keep_known_at():
+    state = {
+        "backfill_transfer": [
+            {
+                "date": "2026-10-01",
+                "resolution": "HOUR",
+                "parsed": {
+                    "status": "ok",
+                    "actual_points": [{"timestamp": "2026-10-01T18:00:00Z", "consumption_kwh": 2.105, "padded": False}],
+                },
+                "captured_at": "2026-10-02T06:00:00+00:00",
+                "known_at": "2026-10-02T06:00:00+00:00",
+            },
+            {
+                "date": "2026-10-01",
+                "resolution": "QUARTER_HOUR",
+                "parsed": {
+                    "status": "ok",
+                    "actual_points": [
+                        {"timestamp": "2026-10-01T18:00:00Z", "consumption_kwh": 0.734, "padded": False},
+                        {"timestamp": "2026-10-01T18:15:00Z", "consumption_kwh": 0.450, "padded": False},
+                    ],
+                },
+                "captured_at": "2026-10-02T06:00:00+00:00",
+                "known_at": "2026-10-02T06:00:00+00:00",
+            },
+            {
+                "date": "2026-10-02",
+                "resolution": "QUARTER_HOUR",
+                "parsed": {
+                    "status": "missing",
+                    "actual_points": [],
+                    "padded_points": [{"timestamp": "2026-10-02T00:00:00Z", "consumption_kwh": 0.1, "padded": True}],
+                },
+                "captured_at": "2026-10-02T06:00:00+00:00",
+                "known_at": "2026-10-02T06:00:00+00:00",
+            },
+        ],
+    }
+    batches = manager_module.EonGridManager._provider_import_batches(state)
+    assert [resolution for resolution, _points in batches] == [900]
+    assert batches[0][1][0]["value"] == 0.734
+    assert batches[0][1][0]["known_at"] == "2026-10-02T06:00:00+00:00"
+
+
+def test_provider_backfill_batch_identity_is_idempotent():
+    state = {
+        "backfill_transfer": [{
+            "date": "2026-10-01",
+            "resolution": "DAY",
+            "parsed": {"status": "ok", "actual_points": [{"timestamp": "2026-10-01T00:00:00Z", "consumption_kwh": 6.926, "padded": False}]},
+            "captured_at": "2026-10-02T06:00:00+00:00",
+            "known_at": "2026-10-02T06:00:00+00:00",
+        }],
+    }
+    first = manager_module.EonGridManager._provider_import_batches(state)
+    second = manager_module.EonGridManager._provider_import_batches(state)
+    assert first == second
+    assert first[0][0] == 86400
+
+
 def test_app_state_prefers_active_contract_and_does_not_cost_future_tariff():
     from datetime import date
 

@@ -80,6 +80,9 @@ USER_CONFIRMED_GRID_TARIFF_FACTS: tuple[dict[str, Any], ...] = (
     },
 )
 
+EON_BACKFILL_DAYS = 7
+EON_BACKFILL_RETRY_HOURS = 6
+
 
 class EonGridManager:
     """Own E.ON credentials, refreshes, normalized state and update events."""
@@ -285,6 +288,8 @@ class EonGridManager:
             "day_transfer": [],
             "hourly_transfer": [],
             "quarter_hour_transfer": [],
+            "backfill_transfer": [],
+            "backfill_status": [],
             "trend": [],
             "outages": [],
             "source_status": {},
@@ -454,6 +459,7 @@ class EonGridManager:
                 outage_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
             except Exception:
                 outage_status.append({"status": "failed", "error": "api_error"})
+        await self._async_fetch_closed_day_backfill(client, locations, sources)
         sources["source_status"]["monthly_transfer"] = monthly_status or [{"status": "skipped"}]
         sources["source_status"]["day_transfer"] = day_status or [{"status": "skipped"}]
         sources["source_status"]["hourly_transfer"] = hourly_status or [{"status": "skipped"}]
@@ -462,6 +468,87 @@ class EonGridManager:
         sources["source_status"]["outages"] = outage_status or [{"status": "skipped"}]
         self._app_source_snapshot = sources
         return sources
+
+    async def _async_fetch_closed_day_backfill(
+        self, client: EonAppClient, locations: list[dict[str, Any]], sources: dict[str, Any]
+    ) -> None:
+        """Fetch a bounded rolling window of closed local days without re-fetch spam."""
+        now = datetime.now(timezone.utc)
+        local_today = now.astimezone(ZoneInfo("Europe/Stockholm")).date()
+        metadata = self.state.get("backfill_state") if isinstance(self.state, dict) else None
+        metadata = deepcopy(metadata) if isinstance(metadata, dict) else {}
+        attempts = metadata.get("attempts") if isinstance(metadata.get("attempts"), dict) else {}
+        completed = metadata.get("completed") if isinstance(metadata.get("completed"), dict) else {}
+        for age in range(1, EON_BACKFILL_DAYS + 1):
+            target_date = local_today - timedelta(days=age)
+            target_date_key = target_date.isoformat()
+            day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=ZoneInfo("Europe/Stockholm"))
+            day_end = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=ZoneInfo("Europe/Stockholm")) - timedelta(microseconds=1)
+            for installation in locations:
+                installation_id = installation["installation_identifier"]
+                date_key = f"{installation_id}|{target_date.isoformat()}"
+                previous = attempts.get(date_key) if isinstance(attempts.get(date_key), dict) else {}
+                if completed.get(date_key) is True:
+                    continue
+                last_attempt = previous.get("at")
+                if last_attempt:
+                    try:
+                        if now - datetime.fromisoformat(str(last_attempt).replace("Z", "+00:00")) < timedelta(hours=EON_BACKFILL_RETRY_HOURS):
+                            continue
+                    except ValueError:
+                        pass
+                installation_actual = False
+                installation_attempted = False
+                preferred_actual = False
+                for aggregation in ("QUARTER_HOUR", "HOUR", "DAY"):
+                    try:
+                        payload = await client.async_get_transfer(
+                            aggregation,
+                            installation_id,
+                            day_start.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                            day_end.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                            installation["production"],
+                            installation["street"],
+                            installation["city"],
+                            installation["postal_code"],
+                        )
+                    except EonAuthError as err:
+                        if getattr(err, "code", None) == "reauth_required":
+                            raise
+                        sources["backfill_status"].append({"date": target_date_key, "installation_id": installation_id, "resolution": aggregation, "status": "failed", "error": getattr(err, "code", "api_error")})
+                        continue
+                    except Exception:
+                        sources["backfill_status"].append({"date": target_date_key, "installation_id": installation_id, "resolution": aggregation, "status": "failed", "error": "api_error"})
+                        continue
+                    captured_at = datetime.now(timezone.utc).isoformat()
+                    parsed = parse_transfer_points(payload, aggregation, target_date)
+                    actual_count = int(parsed.get("actual_count") or 0)
+                    padded_count = int(parsed.get("padded_count") or 0)
+                    installation_attempted = True
+                    installation_actual = installation_actual or actual_count > 0
+                    if aggregation == "QUARTER_HOUR" and actual_count > 0:
+                        preferred_actual = True
+                    sources["backfill_transfer"].append({
+                        "installation_id": installation_id,
+                        "date": target_date_key,
+                        "resolution": aggregation,
+                        "payload": payload,
+                        "captured_at": captured_at,
+                        "known_at": captured_at,
+                    })
+                    sources["backfill_status"].append({
+                        "date": target_date_key,
+                        "installation_id": installation_id,
+                        "resolution": aggregation,
+                        "status": parsed.get("status"),
+                        "actual_count": actual_count,
+                        "padded_count": padded_count,
+                    })
+                if installation_attempted:
+                    attempts[date_key] = {"at": now.isoformat(), "actual": installation_actual, "preferred_actual": preferred_actual}
+                    if preferred_actual:
+                        completed[date_key] = True
+        sources["backfill_state"] = {"attempts": attempts, "completed": completed, "horizon_days": EON_BACKFILL_DAYS}
 
     async def async_save_web_credentials(self, account_id: str, password: str) -> dict[str, Any]:
         """Report the unsupported browser-bound web login without changing app state."""
@@ -566,6 +653,10 @@ class EonGridManager:
             day = next((item["payload"] for item in sources.get("day_transfer", []) if item.get("installation_id") == installation_id), None)
             hourly = next((item["payload"] for item in sources.get("hourly_transfer", []) if item.get("installation_id") == installation_id), None)
             quarter_hour = next((item["payload"] for item in sources.get("quarter_hour_transfer", []) if item.get("installation_id") == installation_id), None)
+            backfill_transfer = [
+                item for item in sources.get("backfill_transfer", [])
+                if item.get("installation_id") == installation_id
+            ]
             trend = next((item for item in sources.get("trend", []) if item.get("installation_id") == installation_id), None)
             outage_payload = next((item["payload"] for item in sources.get("outages", []) if item.get("installation_id") == installation_id), None)
             consumption = parse_monthly_transfer(monthly, now.year, now.month) if monthly is not None else {"status": "missing", "resolution": "Monthly"}
@@ -613,6 +704,18 @@ class EonGridManager:
             "day_consumption": day_consumption,
             "hourly_consumption": hourly_consumption,
             "quarter_hour_consumption": quarter_hour_consumption,
+            "backfill_transfer": [
+                {
+                    "date": item.get("date"),
+                    "resolution": item.get("resolution"),
+                    "parsed": parse_transfer_points(item.get("payload"), item.get("resolution"), date.fromisoformat(item["date"])),
+                    "captured_at": item.get("captured_at"),
+                    "known_at": item.get("known_at"),
+                }
+                for item in backfill_transfer
+                if isinstance(item.get("date"), str)
+            ],
+            "backfill_state": sources.get("backfill_state") or {},
             "provider_trend": provider_trend,
             "cost": cost,
             "outage": normalize_outage(outage_payload) if outage_payload is not None else None,
@@ -652,65 +755,67 @@ class EonGridManager:
             installation_id = (state.get("facility") or {}).get("installation_identifier")
             if not installation_id:
                 continue
-            selected = self._provider_import_points(state)
-            if not selected:
+            batches = self._provider_import_batches(state)
+            if not batches:
                 continue
-            resolution, points = selected
-            generation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"eon:grid.energy_import:{site_id}:{installation_id}:{resolution}"))
-            first_start = points[0]["start"]
-            storage.ensure_source_generation({
-                "generation_id": generation_id,
-                "site_id": str(site_id),
-                "logical_role": "grid.energy_import",
-                "source_identity": {
-                    "identity_key": f"eon:{installation_id}:electricity:grid:false",
-                    "identity_strength": "strong",
-                    "identity_provenance": "eon_provider_installation_binding",
-                },
-                "source_resolution_kind": "native_bucket",
-                "source_resolution_seconds": resolution,
-                "timezone_state": "verified",
-                "effective_from": first_start.isoformat(),
-            }, captured_at)
-            observations = []
-            for item in points:
-                start = item["start"]
-                end = item["end"]
-                semantic_key = f"{site_id}|grid.energy_import|{generation_id}|{start.isoformat()}"
-                observations.append({
-                    "record_id": str(uuid.uuid5(uuid.NAMESPACE_URL, semantic_key)),
-                    "semantic_key": semantic_key,
+            for resolution, points in batches:
+                generation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"eon:grid.energy_import:{site_id}:{installation_id}:{resolution}"))
+                first_start = points[0]["start"]
+                storage.ensure_source_generation({
+                    "generation_id": generation_id,
                     "site_id": str(site_id),
                     "logical_role": "grid.energy_import",
-                    "source_generation_id": generation_id,
-                    "interval_start": start,
-                    "interval_end": end,
-                    "resolution_seconds": resolution,
+                    "source_identity": {
+                        "identity_key": f"eon:{installation_id}:electricity:grid:false",
+                        "identity_strength": "strong",
+                        "identity_provenance": "eon_provider_installation_binding",
+                    },
                     "source_resolution_kind": "native_bucket",
                     "source_resolution_seconds": resolution,
-                    "observed_at": start,
-                    "captured_at": captured_at,
-                    "fetched_at": captured_at,
-                    "known_at": captured_at,
-                    "classification": "measured",
-                    "value": item["value"],
-                    "unit": "kWh",
-                    "sign_convention": "positive_import_energy",
-                    "quality_status": "good",
-                    "coverage_ratio": 1.0,
-                    "gap_status": "none",
-                    "quality": {"padded": False, "provider_actual": True},
-                    "provenance": {
-                        "provider": "eon",
-                        "dataset": "energy_transfer",
-                        "installation_identifier": installation_id,
-                        "point_of_delivery_number": (state.get("facility") or {}).get("point_of_delivery_number"),
-                        "resolution": resolution,
-                        "site_binding_fingerprint": binding.get("binding_fingerprint"),
-                    },
-                })
-            storage.insert_historical_observations_atomic(observations)
-            storage.reconcile_grid_import(str(site_id), first_start, points[-1]["end"])
+                    "timezone_state": "verified",
+                    "effective_from": first_start.isoformat(),
+                }, captured_at)
+                observations = []
+                for item in points:
+                    start = item["start"]
+                    end = item["end"]
+                    row_captured_at = item.get("captured_at") or captured_at
+                    row_known_at = item.get("known_at") or row_captured_at
+                    semantic_key = f"{site_id}|grid.energy_import|{generation_id}|{start.isoformat()}"
+                    observations.append({
+                        "record_id": str(uuid.uuid5(uuid.NAMESPACE_URL, semantic_key)),
+                        "semantic_key": semantic_key,
+                        "site_id": str(site_id),
+                        "logical_role": "grid.energy_import",
+                        "source_generation_id": generation_id,
+                        "interval_start": start,
+                        "interval_end": end,
+                        "resolution_seconds": resolution,
+                        "source_resolution_kind": "native_bucket",
+                        "source_resolution_seconds": resolution,
+                        "observed_at": start,
+                        "captured_at": row_captured_at,
+                        "fetched_at": row_captured_at,
+                        "known_at": row_known_at,
+                        "classification": "measured",
+                        "value": item["value"],
+                        "unit": "kWh",
+                        "sign_convention": "positive_import_energy",
+                        "quality_status": "good",
+                        "coverage_ratio": 1.0,
+                        "gap_status": "none",
+                        "quality": {"padded": False, "provider_actual": True},
+                        "provenance": {
+                            "provider": "eon",
+                            "dataset": "energy_transfer",
+                            "installation_identifier": installation_id,
+                            "point_of_delivery_number": (state.get("facility") or {}).get("point_of_delivery_number"),
+                            "resolution": resolution,
+                            "site_binding_fingerprint": binding.get("binding_fingerprint"),
+                        },
+                    })
+                storage.insert_historical_observations_atomic(observations)
+                storage.reconcile_grid_import(str(site_id), first_start, points[-1]["end"])
 
     @staticmethod
     def _provider_import_points(state: dict[str, Any]) -> tuple[int, list[dict[str, Any]]] | None:
@@ -739,6 +844,44 @@ class EonGridManager:
             except (KeyError, TypeError, ValueError):
                 return None
         return None
+
+    @classmethod
+    def _provider_import_batches(cls, state: dict[str, Any]) -> list[tuple[int, list[dict[str, Any]]]]:
+        """Return actual backfill batches plus the current-state batch without overlap."""
+        batches: list[tuple[int, list[dict[str, Any]]]] = []
+        seen_dates: set[str] = set()
+        resolution_seconds = {"QUARTER_HOUR": 900, "HOUR": 3600, "DAY": 86400}
+        entries = state.get("backfill_transfer") if isinstance(state.get("backfill_transfer"), list) else []
+        rank = {"QUARTER_HOUR": 0, "HOUR": 1, "DAY": 2}
+        for entry in sorted(entries, key=lambda item: (str(item.get("date") or ""), rank.get(str(item.get("resolution") or "").upper(), 99))):
+            parsed = entry.get("parsed") if isinstance(entry, dict) else None
+            date_value = entry.get("date") if isinstance(entry, dict) else None
+            resolution = str(entry.get("resolution") or "").upper() if isinstance(entry, dict) else ""
+            if not isinstance(parsed, dict) or parsed.get("status") != "ok" or not isinstance(date_value, str) or resolution not in resolution_seconds or date_value in seen_dates:
+                continue
+            points = []
+            for point in parsed.get("actual_points") or []:
+                try:
+                    start = datetime.fromisoformat(str(point["timestamp"]).replace("Z", "+00:00"))
+                    value = float(point["consumption_kwh"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if start.tzinfo is None or value < 0 or point.get("padded") is True:
+                    continue
+                points.append({
+                    "start": start.astimezone(timezone.utc),
+                    "end": start.astimezone(timezone.utc) + timedelta(seconds=resolution_seconds[resolution]),
+                    "value": value,
+                    "captured_at": entry.get("captured_at"),
+                    "known_at": entry.get("known_at"),
+                })
+            if points:
+                batches.append((resolution_seconds[resolution], sorted(points, key=lambda item: item["start"])))
+                seen_dates.add(date_value)
+        current = cls._provider_import_points(state)
+        if current:
+            batches.append(current)
+        return batches
 
     def _state_for_active_binding(self, states: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
         binding = getattr(self, "_active_binding", None)
@@ -1039,6 +1182,8 @@ class EonGridManager:
             "hourly_consumption": None,
             "quarter_hour_consumption": None,
             "provider_trend": None,
+            "backfill_transfer": [],
+            "backfill_state": {"attempts": {}, "completed": {}, "horizon_days": EON_BACKFILL_DAYS},
             "cost": None,
             "reauth_required": False,
             "error": None,

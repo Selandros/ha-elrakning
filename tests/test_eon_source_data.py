@@ -15,6 +15,8 @@ def test_eon_source_data_command_and_manager_path_exist():
     assert "day_transfer" in manager
     assert "trend" in manager
     assert "outages" in manager
+    assert "EON_BACKFILL_DAYS = 7" in manager
+    assert "EON_BACKFILL_RETRY_HOURS = 6" in manager
 
 
 def test_source_data_reuses_manager_session_instead_of_logging_in_inline():
@@ -34,6 +36,8 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
     assert "async_get_daily_transfer" in collector
     assert "async_get_trend" in collector
     assert "async_get_outages" in collector
+    assert "_async_fetch_closed_day_backfill" in collector
+    assert "async_get_transfer" in source
     assert "self._app_source_snapshot = sources" in collector
     assert "async_fetch_app_sources()" in source.split("    async def async_source_data", 1)[1]
 
