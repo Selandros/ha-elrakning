@@ -40,6 +40,15 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
     assert "async_get_transfer" in source
     assert "self._app_source_snapshot = sources" in collector
     assert "async_fetch_app_sources()" in source.split("    async def async_source_data", 1)[1]
+    refresh = source.split("    async def _refresh_app", 1)[1].split("    def _build_app_state", 1)[0]
+    assert "await self._async_persist_provider_imports(states)" in refresh
+
+
+def test_completed_backfill_without_retained_transfer_is_recoverable():
+    source = manager_text()
+    method = source.split("    async def _async_fetch_closed_day_backfill", 1)[1].split("    async def async_save_web_credentials", 1)[0]
+    assert "retained_transfer_dates" in method
+    assert "completed.get(date_key) is True and date_key in retained_transfer_dates" in method
 
 
 def test_optional_endpoint_failure_does_not_abort_cached_cost_state():

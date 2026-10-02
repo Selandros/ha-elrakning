@@ -499,6 +499,11 @@ class EonGridManager:
         metadata = deepcopy(metadata) if isinstance(metadata, dict) else {}
         attempts = metadata.get("attempts") if isinstance(metadata.get("attempts"), dict) else {}
         completed = metadata.get("completed") if isinstance(metadata.get("completed"), dict) else {}
+        retained_transfer_dates = {
+            f"{item.get('installation_id')}|{item.get('date')}"
+            for item in (self.state.get("backfill_transfer", []) if isinstance(self.state, dict) else [])
+            if isinstance(item, dict) and item.get("installation_id") and item.get("date")
+        }
         for age in range(1, EON_BACKFILL_DAYS + 1):
             target_date = local_today - timedelta(days=age)
             target_date_key = target_date.isoformat()
@@ -508,7 +513,7 @@ class EonGridManager:
                 installation_id = installation["installation_identifier"]
                 date_key = f"{installation_id}|{target_date.isoformat()}"
                 previous = attempts.get(date_key) if isinstance(attempts.get(date_key), dict) else {}
-                if completed.get(date_key) is True:
+                if completed.get(date_key) is True and date_key in retained_transfer_dates:
                     continue
                 last_attempt = previous.get("at")
                 if last_attempt:
@@ -621,6 +626,7 @@ class EonGridManager:
             state = self._state_for_active_binding(states) or self._build_app_state(sources, locations)
             self.state = {**state, "facility_states": states}
             await self.store.async_save(self.state)
+            await self._async_persist_provider_imports(states)
             await self._async_capture_tariff_fact()
             await self._async_reconcile_site_bindings()
         except ValueError as err:
@@ -735,7 +741,7 @@ class EonGridManager:
                 {
                     "date": item.get("date"),
                     "resolution": item.get("resolution"),
-                    "parsed": parse_transfer_points(item.get("payload"), item.get("resolution"), date.fromisoformat(item["date"])),
+                    "parsed": item.get("parsed") if isinstance(item.get("parsed"), dict) else parse_transfer_points(item.get("payload"), item.get("resolution"), date.fromisoformat(item["date"])),
                     "captured_at": item.get("captured_at"),
                     "known_at": item.get("known_at"),
                 }
