@@ -362,6 +362,8 @@ assert.match(source, /Mot 12 månaders snitt/);
 assert.doesNotMatch(source, /comparison\.basis_label/);
 assert.doesNotMatch(source, /basis_key: "elhandel_gross"/);
 assert.match(source, /cost-main-grid/);
+assert.match(source, /\.cost-comparison \{[\s\S]*grid-template-columns: minmax\(0, 360px\);[\s\S]*justify-content: end;[\s\S]*margin: 14px 0 0 auto;[\s\S]*max-width: 360px;/);
+assert.match(source, /\.cost-comparison \{ grid-template-columns: minmax\(0, 1fr\); max-width: none; \}/);
 assert.match(source, /Ingen daglig serie tillgänglig för vald månad/);
 assert.match(source, /buildInvoiceMonthHistory\(estimate/);
 assert.match(source, /buildCostReferenceComparisons\(monthHistory, selectedMonth, selectedCost\)/);
