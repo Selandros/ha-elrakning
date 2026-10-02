@@ -10978,7 +10978,7 @@ class ElrakningPanel {
     const all = series.days.map((day) => day.total_variable_cost_sek).filter((value) => Number.isFinite(value));
     const max = Math.max(1, ...all);
     const axisLabels = [0, max / 2, max].map((value) => `${this._formatNumber(value)} kr`);
-    const axisGutter = measuredPriceAxisGutter(chart, axisLabels);
+    const axisGutter = measuredPriceAxisGutter(chart, axisLabels, 24);
     const initialBarWidth = Math.max(3, (width - axisGutter - plot.right) / Math.max(1, series.days_in_month) - 3);
     const plotWithAxisGutter = {
       ...plot,

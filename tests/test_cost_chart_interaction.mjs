@@ -261,7 +261,7 @@ assert.match(source, /\.cost-chart-legend i \{ background: var\(--el-solar-color
 assert.match(costRender, /var\(--el-solar-color, #77C2A1\)/);
 assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
 assert.match(costRender, /buildCostChartGeometry\(width, plotWithAxisGutter, series\.days_in_month\)/);
-assert.match(costRender, /measuredPriceAxisGutter\(chart, axisLabels\)/);
+assert.match(costRender, /measuredPriceAxisGutter\(chart, axisLabels, 24\)/);
 assert.match(costRender, /axisGutter \+ initialBarWidth \/ 2/);
 assert.match(costRender, /plotWithAxisGutter/);
 assert.match(costRender, /--cost-axis-left-gutter/);
