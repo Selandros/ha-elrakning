@@ -1,4 +1,6 @@
 import tempfile
+import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -11,6 +13,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage
+from custom_components.elrakning.replay_runtime import _observation_known_at, _observation_observed_at
 
 
 UTC = timezone.utc
@@ -57,6 +60,55 @@ def _observation(site_id: str, generation_id: str, start: datetime, index: int) 
 
 
 class CanonicalStorageConcurrencyTests(unittest.TestCase):
+    def test_replay_reads_and_reconciled_reads_share_one_connection_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
+            storage.open()
+            site_id = "site-a"
+            generation_id = "eon-generation"
+            start = datetime(2026, 10, 1, tzinfo=UTC)
+            storage.ensure_source_generation(_target(site_id, generation_id), start)
+            observation = _observation(site_id, generation_id, start, 0)
+            storage.insert_observation(observation)
+            row = {"site_id": site_id, "logical_role": "grid.energy_import", "source_generation_id": generation_id, "interval_start": start}
+            real_connection = storage.connection
+            active = 0
+            maximum = 0
+            state_lock = threading.Lock()
+
+            class TrackingConnection:
+                def execute(self, *args, **kwargs):
+                    nonlocal active, maximum
+                    with state_lock:
+                        active += 1
+                        maximum = max(maximum, active)
+                    try:
+                        time.sleep(0.001)
+                        return real_connection.execute(*args, **kwargs)
+                    finally:
+                        with state_lock:
+                            active -= 1
+
+                def __getattr__(self, name):
+                    return getattr(real_connection, name)
+
+            storage.connection = TrackingConnection()
+            decision_at = start + timedelta(days=2)
+
+            def replay_read(index):
+                return _observation_known_at(storage, row, decision_at) if index % 2 == 0 else _observation_observed_at(storage, row, decision_at)
+
+            def reconciled_read(_):
+                return storage.read_reconciled_grid_import(site_id, start, start + timedelta(days=1))
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(replay_read, index) for index in range(40)]
+                futures.extend(executor.submit(reconciled_read, index) for index in range(40))
+                [future.result() for future in futures]
+
+            self.assertEqual(maximum, 1)
+            storage.close()
+
     def test_parallel_reads_and_writes_are_serialized_on_one_storage(self):
         with tempfile.TemporaryDirectory() as directory:
             storage = CanonicalStorage(Path(directory) / "canonical.sqlite")

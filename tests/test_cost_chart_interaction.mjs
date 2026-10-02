@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -20,6 +20,24 @@ assert.deepEqual(monthHistory.map((item) => item.month), ["2026-09", "2026-08"])
 assert.equal(monthHistory[1].coverage, "complete");
 assert.equal(monthHistory[1].total_sek, 160);
 assert.equal(buildCostMonthComparison(monthHistory[1], monthHistory[0]).available, false);
+const partialProvider = mergeKnownProviderGridCost({
+  month: "2026-10",
+  total_so_far_sek: null,
+  estimated_total_sek: 0,
+  forecast_confidence: "partial_data",
+  trade: { total_so_far_sek: null },
+  grid: { total_so_far_sek: null, variable_cost_sek: null, fixed_fee_sek: null },
+}, {
+  imported_kwh_so_far: 28.611,
+  grid: { total_so_far_sek: 281.88, variable_cost_sek: 40.63, fixed_fee_sek: 241.25 },
+});
+const partialProviderHistory = buildInvoiceMonthHistory(partialProvider);
+assert.equal(partialProviderHistory[0].coverage, "partial");
+assert.equal(partialProviderHistory[0].known_amount_gross_sek, 281.88);
+assert.equal(partialProviderHistory[0].variable_actual_sek, 40.63);
+assert.equal(partialProviderHistory[0].fixed_monthly_sek, 241.25);
+assert.equal(invoiceMonthDisplayValue({ current: true, coverage: "partial", known_amount_gross_sek: 281.88, estimated_total_sek: 0 }), 281.88);
+assert.equal(invoiceMonthDisplayValue({ current: true, coverage: "partial", known_amount_gross_sek: 281.88, estimated_total_sek: null }), 281.88);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 160 }, { month: "2026-07", coverage: "complete", total_sek: 200 }).difference_sek, -40);
 const zeroInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
   trade: [{ month: "Aug 2026", amount_due_sek: 0, vat_included: true, revision: 1, _invoice_key: "zero-trade" }],
@@ -296,9 +314,9 @@ assert.match(source, /cost-history-bar-value/);
 assert.match(source, /amount\.textContent = hasValue \? this\._formatSek\(value\) : "–"/);
 assert.match(source, /itemElement\.append\(label, bar, amount\)/);
 assert.match(source, /const hasValue = item\.coverage !== "missing" && Number\.isFinite\(value\)/);
-assert.match(source, /const valueForItem = \(item\) => item\.current/);
-assert.match(source, /finiteCostNumber\(item\.estimated_total_sek/);
-assert.match(source, /item\.known_amount_gross_sek/);
+assert.match(source, /const valueForItem = invoiceMonthDisplayValue/);
+assert.match(source, /export function invoiceMonthDisplayValue/);
+assert.match(source, /item\.known_amount_gross_sek, item\.estimated_total_sek/);
 assert.match(source, /cost-history-bar-item\.estimated/);
 assert.match(source, /\.cost-history-bar \{ background: var\(--el-solar-color, #77C2A1\);/);
 assert.match(source, /\.cost-history-bar-item\.estimated \.cost-history-bar \{ border: 1px dashed var\(--el-solar-color, #77C2A1\);/);

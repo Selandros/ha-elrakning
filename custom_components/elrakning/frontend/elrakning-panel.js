@@ -143,6 +143,38 @@ export function buildProviderOnlyInvoiceEstimate(currentMonthCost, now = new Dat
   };
 }
 
+export function invoiceMonthDisplayValue(item) {
+  if (!item || item.coverage === "missing") return null;
+  const candidates = item.current && item.coverage !== "complete"
+    ? [item.known_amount_gross_sek, item.estimated_total_sek]
+    : item.current
+      ? [item.estimated_total_sek, item.known_amount_gross_sek]
+      : [item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek];
+  return candidates.map((value) => finiteCostNumber(value)).find((value) => value !== null) ?? null;
+}
+
+export function mergeKnownProviderGridCost(estimate, providerEstimate) {
+  if (!estimate || !providerEstimate?.grid) return estimate;
+  const currentGrid = estimate.grid && typeof estimate.grid === "object" ? estimate.grid : {};
+  const providerGrid = providerEstimate.grid;
+  const finiteOrNull = (value) => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+  const firstKnown = (...values) => values.map(finiteOrNull).find((value) => value !== null) ?? null;
+  const grid = {
+    ...currentGrid,
+    variable_cost_sek: firstKnown(currentGrid.variable_cost_sek, providerGrid.variable_cost_sek),
+    fixed_fee_sek: firstKnown(currentGrid.fixed_fee_sek, providerGrid.fixed_fee_sek),
+    booked_fixed_fee_sek: firstKnown(currentGrid.booked_fixed_fee_sek, providerGrid.booked_fixed_fee_sek),
+    accrued_fixed_fee_sek: firstKnown(currentGrid.accrued_fixed_fee_sek, providerGrid.accrued_fixed_fee_sek),
+    total_so_far_sek: firstKnown(currentGrid.total_so_far_sek, providerGrid.total_so_far_sek),
+  };
+  return {
+    ...estimate,
+    imported_kwh_so_far: firstKnown(estimate.imported_kwh_so_far, providerEstimate.imported_kwh_so_far),
+    grid,
+    provenance: estimate.provenance || providerEstimate.provenance,
+  };
+}
+
 export function resolveGreenelyActualInvoiceCost(providerState, month) {
   const invoices = Array.isArray(providerState?.invoice_history) ? providerState.invoice_history : [];
   const invoice = invoices.find((item) => normalizeInvoiceMonth(item?.month || item?.billing_period) === month);
@@ -10715,6 +10747,7 @@ class ElrakningPanel {
     );
     const monthlyForecast = billingHistory?.monthly_forecast;
     estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
+    estimate = mergeKnownProviderGridCost(estimate, providerOnlyEstimate);
     estimate = applyProviderMonthlyTrendEstimate(
       estimate,
       providerTrend,
@@ -10909,9 +10942,7 @@ class ElrakningPanel {
     const displayHistory = costHistoryDisplayOrder(monthHistory);
     card.hidden = !estimate;
     if (historyChart) {
-      const valueForItem = (item) => item.current
-        ? finiteCostNumber(item.estimated_total_sek ?? item.known_amount_gross_sek)
-        : finiteCostNumber(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
+      const valueForItem = invoiceMonthDisplayValue;
       const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(valueForItem(item)));
       const maxHistoryValue = Math.max(1, ...valuedHistory.map(valueForItem));
       historyChart.replaceChildren(...displayHistory.map((item) => {

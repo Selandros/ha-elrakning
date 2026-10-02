@@ -329,19 +329,21 @@ def _observation_known_at(storage: Any, row: dict[str, Any], decision_at: dateti
         return None
     start_us = int(start.timestamp() * 1_000_000)
     candidates: list[tuple[int, int]] = []
-    for table, priority in (("energy_observations", 1), ("historical_energy_observations", 0)):
-        result = storage._connection().execute(
-            f"SELECT known_at_us FROM {table} WHERE site_id=? AND logical_role=? AND interval_start_us=? AND known_at_us IS NOT NULL",
-            (row.get("site_id"), role, start_us),
-        ).fetchall()
+    with _connection_guard(storage):
+        connection = storage._connection()
         decision_us = int(decision_at.timestamp() * 1_000_000)
-        for item in result:
-            try:
-                known_at_us = int(item[0])
-            except (IndexError, TypeError, ValueError):
-                continue
-            if known_at_us <= decision_us:
-                candidates.append((known_at_us, priority))
+        for table, priority in (("energy_observations", 1), ("historical_energy_observations", 0)):
+            result = connection.execute(
+                f"SELECT known_at_us FROM {table} WHERE site_id=? AND logical_role=? AND interval_start_us=? AND known_at_us IS NOT NULL",
+                (row.get("site_id"), role, start_us),
+            ).fetchall()
+            for item in result:
+                try:
+                    known_at_us = int(item[0])
+                except (IndexError, TypeError, ValueError):
+                    continue
+                if known_at_us <= decision_us:
+                    candidates.append((known_at_us, priority))
     if not candidates:
         return None
     return datetime.fromtimestamp(max(candidates)[0] / 1_000_000, tz=UTC)
@@ -358,12 +360,14 @@ def _observation_observed_at(storage: Any, row: dict[str, Any], decision_at: dat
     start_us = int(start.timestamp() * 1_000_000)
     decision_us = int(decision_at.timestamp() * 1_000_000)
     values: list[int] = []
-    for table in ("energy_observations", "historical_energy_observations"):
-        rows = storage._connection().execute(
-            f"SELECT observed_at_us FROM {table} WHERE site_id=? AND logical_role=? AND source_generation_id=? AND interval_start_us=? AND known_at_us<=? AND observed_at_us IS NOT NULL",
-            (site_id, role, generation, start_us, decision_us),
-        ).fetchall()
-        values.extend(int(item[0]) for item in rows)
+    with _connection_guard(storage):
+        connection = storage._connection()
+        for table in ("energy_observations", "historical_energy_observations"):
+            rows = connection.execute(
+                f"SELECT observed_at_us FROM {table} WHERE site_id=? AND logical_role=? AND source_generation_id=? AND interval_start_us=? AND known_at_us<=? AND observed_at_us IS NOT NULL",
+                (site_id, role, generation, start_us, decision_us),
+            ).fetchall()
+            values.extend(int(item[0]) for item in rows)
     return datetime.fromtimestamp(max(values) / 1_000_000, tz=UTC) if values else None
 
 
