@@ -47,6 +47,16 @@ def test_app_source_collector_is_the_single_path_for_normal_and_raw_app_data():
     assert '"padded": False' in source
 
 
+def test_cached_provider_imports_are_recovered_after_canonical_storage_startup():
+    manager = manager_text()
+    init = (ROOT / "custom_components/elrakning/__init__.py").read_text()
+    assert "async def async_persist_cached_imports" in manager
+    assert "self.facility_states" in manager.split("async def async_persist_cached_imports", 1)[1].split("    def _active_site_id", 1)[0]
+    assert "async_persist_cached_imports" in init
+    assert "canonical_collector" in init
+    assert init.index("hass.data.setdefault(DOMAIN, {})[\"canonical_collector\"] = canonical_collector") < init.index("cached_import_recovery")
+
+
 def test_completed_backfill_without_retained_transfer_is_recoverable():
     source = manager_text()
     method = source.split("    async def _async_fetch_closed_day_backfill", 1)[1].split("    async def async_save_web_credentials", 1)[0]

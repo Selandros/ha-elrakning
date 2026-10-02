@@ -137,6 +137,12 @@ class EonGridManager:
             # live provider session is currently unset or unavailable.
         await self._async_capture_tariff_fact()
 
+    async def async_persist_cached_imports(self) -> None:
+        """Recover verified cached provider imports after canonical storage is ready."""
+        states = self.facility_states if isinstance(self.facility_states, dict) else {}
+        if states:
+            await self._async_persist_provider_imports(states)
+
     def _active_site_id(self) -> str | None:
         hass = getattr(self, "hass", None)
         site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager") if hass else None

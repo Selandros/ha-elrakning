@@ -675,6 +675,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     canonical_collector = CanonicalCollector(hass, site_identity_manager)
     await canonical_collector.async_start()
     hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
+    cached_import_recovery = getattr(getattr(grid_manager, "provider", None), "async_persist_cached_imports", None)
+    if callable(cached_import_recovery):
+        await cached_import_recovery()
     frontend_data["history_warmup_task"] = hass.async_create_task(
         _async_warm_history(power_manager, meter_manager)
     )
