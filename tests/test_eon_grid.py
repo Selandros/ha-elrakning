@@ -239,6 +239,7 @@ def test_hourly_transfer_keeps_actual_points_and_excludes_padded_points():
         "to": "2026-10-01T23:59:59.999+02:00",
         "transfer": [
             {"timestamp": "2026-10-01T18:00:00.000+02:00", "hasHigherResolutionData": True,
+            "temperature": 12.2, "ref": {"temperature": 10.1},
              "consumption": {"total": 2.105, "padded": False, "hasHigherResolutionData": True}},
             {"timestamp": "2026-10-01T19:00:00.000+02:00", "hasHigherResolutionData": False,
              "consumption": {"total": 0, "padded": True, "hasHigherResolutionData": False}},
@@ -250,6 +251,8 @@ def test_hourly_transfer_keeps_actual_points_and_excludes_padded_points():
     assert result["padded_count"] == 1
     assert result["actual_total_kwh"] == 2.105
     assert result["actual_points"][0]["timestamp"].endswith("+02:00")
+    assert result["actual_points"][0]["temperature_c"] == 12.2
+    assert result["actual_points"][0]["reference_temperature_c"] == 10.1
 
 
 def test_quarter_hour_transfer_sums_verified_hour_and_excludes_future_padded_points():

@@ -397,12 +397,20 @@ def parse_monthly_transfer(payload: Any, year: int, month: int) -> dict[str, Any
         consumption = item.get("consumption")
         if not isinstance(consumption, Mapping):
             return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "consumption_missing"}
+        temperature = item.get("temperature")
+        reference = item.get("ref")
+        result = {
+            "resolution": "Monthly", "year": year, "month": month,
+            "source_timestamp": item["timestamp"],
+            "temperature_c": float(temperature) if _is_number(temperature) else None,
+            "reference_temperature_c": float(reference["temperature"]) if isinstance(reference, Mapping) and _is_number(reference.get("temperature")) else None,
+        }
         if consumption.get("padded") is True:
-            return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "padded"}
+            return {"status": "missing", **result, "reason": "padded"}
         total = consumption.get("total")
         if not _is_number(total):
             return {"status": "unsupported", "resolution": "Monthly"}
-        return {"status": "ok", "resolution": "Monthly", "year": year, "month": month, "consumption_kwh": float(total)}
+        return {"status": "ok", **result, "consumption_kwh": float(total)}
     return {"status": "missing", "resolution": "Monthly", "year": year, "month": month, "reason": "month_missing"}
 
 
@@ -438,6 +446,11 @@ def parse_transfer_points(payload: Any, aggregation: str, target_date: date) -> 
             "padded": consumption.get("padded") is True,
             "has_higher_resolution_data": item.get("hasHigherResolutionData") is True,
         }
+        if _is_number(item.get("temperature")):
+            point["temperature_c"] = float(item["temperature"])
+        reference = item.get("ref")
+        if isinstance(reference, Mapping) and _is_number(reference.get("temperature")):
+            point["reference_temperature_c"] = float(reference["temperature"])
         (padded if point["padded"] else actual).append(point)
     if not actual and not padded:
         return {"status": "missing", "resolution": expected, "date": target_date.isoformat(), "reason": "date_missing"}
@@ -456,6 +469,8 @@ def parse_transfer_points(payload: Any, aggregation: str, target_date: date) -> 
         "padded_count": len(padded),
         "actual_total_kwh": sum(point["consumption_kwh"] for point in actual),
         "padded_excluded": True,
+        "actual_temperature_count": sum("temperature_c" in point for point in actual),
+        "padded_temperature_count": sum("temperature_c" in point for point in padded),
     }
 
 

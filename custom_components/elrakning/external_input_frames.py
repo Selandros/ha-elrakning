@@ -43,6 +43,8 @@ _FORECAST_SOLAR_TARGET_DAY_OFFSETS = {
 
 OPEN_METEO_DATASET = "open_meteo.manager_forecast.v1"
 OPEN_METEO_LOGICAL_ROLE = "solar.irradiance.forecast"
+EON_TRANSFER_TEMPERATURE_SCHEMA = "eon.transfer_temperature.v1"
+EON_TRANSFER_TEMPERATURE_ROLE = "weather.temperature.eon"
 
 
 def _smhi_identity(target: dict[str, Any], dataset: str) -> tuple[str, str]:
@@ -186,6 +188,151 @@ def persist_smhi_frames(
         result["written"] += int(inserted)
         result["unchanged"] += int(not inserted)
     return result
+
+
+def build_eon_transfer_temperature_frame(
+    site_id: str,
+    installation_identifier: str,
+    point_of_delivery_number: str | None,
+    aggregation: str,
+    points: list[dict[str, Any]],
+    captured_at: datetime,
+    known_at: datetime,
+    binding_fingerprint: str | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build a site-scoped immutable E.ON transfer-temperature frame.
+
+    Temperature is retained separately from grid energy. Padded provider points
+    remain auditable but are never represented as actual-quality points.
+    """
+    if not site_id or not installation_identifier or not points:
+        raise ValueError("eon_temperature_frame_inputs_missing")
+    captured_at = captured_at.astimezone(timezone.utc)
+    known_at = known_at.astimezone(timezone.utc)
+    if captured_at > known_at:
+        raise ValueError("eon_temperature_timestamp_order_invalid")
+    normalized: list[dict[str, Any]] = []
+    for point in points:
+        timestamp = point.get("valid_at")
+        temperature = point.get("temperature_c")
+        if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
+            continue
+        if not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)):
+            continue
+        normalized.append({
+            "valid_at": timestamp.astimezone(timezone.utc),
+            "temperature_c": float(temperature),
+            "reference_temperature_c": point.get("reference_temperature_c"),
+            "padded": point.get("padded") is True,
+            "source_timestamp": point.get("source_timestamp"),
+            "has_higher_resolution_data": point.get("has_higher_resolution_data") is True,
+        })
+    if not normalized:
+        raise ValueError("eon_temperature_points_missing")
+    normalized.sort(key=lambda point: point["valid_at"])
+    aggregation = str(aggregation).upper()
+    resolution_seconds = {"MONTH": None, "DAY": 86400, "HOUR": 3600, "QUARTER_HOUR": 900}.get(aggregation)
+    if aggregation not in {"MONTH", "DAY", "HOUR", "QUARTER_HOUR"}:
+        raise ValueError("eon_temperature_aggregation_unsupported")
+    identity = {
+        "provider": "eon", "dataset": "energy_transfer", "site_id": site_id,
+        "installation_identifier": installation_identifier,
+        "point_of_delivery_number": point_of_delivery_number,
+        "aggregation": aggregation, "binding_fingerprint": binding_fingerprint,
+    }
+    identity_key = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    generation_id = "eon-temp-" + hashlib.sha256(identity_key.encode()).hexdigest()[:32]
+    local_days = {point["valid_at"].astimezone(ZoneInfo("Europe/Stockholm")).date().isoformat() for point in normalized}
+    semantic_key = f"{EON_TRANSFER_TEMPERATURE_SCHEMA}|site:{site_id}|installation:{installation_identifier}|aggregation:{aggregation}|days:{','.join(sorted(local_days))}"
+    knowledge = [
+        {key: (value.isoformat() if isinstance(value, datetime) else value) for key, value in point.items()}
+        for point in normalized
+    ]
+    frame_id = "frame-" + hashlib.sha256(
+        (semantic_key + "|" + json.dumps(knowledge, sort_keys=True, separators=(",", ":"), ensure_ascii=True)).encode()
+    ).hexdigest()[:32]
+    valid_at = [point["valid_at"] for point in normalized]
+    actual_count = sum(not point["padded"] for point in normalized)
+    padded_count = len(normalized) - actual_count
+    if aggregation == "MONTH":
+        local = max(valid_at).astimezone(ZoneInfo("Europe/Stockholm"))
+        next_month = (local.replace(day=28) + timedelta(days=4)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        valid_to = next_month.astimezone(timezone.utc)
+    else:
+        valid_to = max(valid_at) + timedelta(seconds=resolution_seconds or 1)
+    frame = {
+        "frame_id": frame_id, "schema_version": SCHEMA_VERSION, "dataset_version": DATASET_VERSION,
+        "semantic_key": semantic_key, "revision": 1, "source_generation_id": generation_id,
+        "source_scope": "site", "site_id": site_id, "logical_role": EON_TRANSFER_TEMPERATURE_ROLE,
+        "classification": "measured", "published_at": None, "fetched_at": captured_at,
+        "known_at": known_at, "captured_at": captured_at, "valid_from": min(valid_at),
+        "valid_to": valid_to,
+        "quality_status": "good" if padded_count == 0 else "partial",
+        "quality": {"status": "good" if padded_count == 0 else "partial", "actual_points": actual_count, "padded_points": padded_count},
+        "provenance": {
+            "origin_type": "eon_energy_transfer", "provider": "eon", "dataset": "energy_transfer",
+            "site_id": site_id, "installation_identifier": installation_identifier,
+            "point_of_delivery_number": point_of_delivery_number, "aggregation": aggregation,
+            "resolution_seconds": resolution_seconds, "binding_fingerprint": binding_fingerprint,
+            "padded_points_excluded_from_actual": True,
+        },
+        "payload_schema": EON_TRANSFER_TEMPERATURE_SCHEMA,
+    }
+    frame_points = []
+    for index, point in enumerate(normalized, start=1):
+        point_json = {
+            "source_timestamp": point["source_timestamp"],
+            "consumption_padded": point["padded"],
+            "reference_temperature_c": point["reference_temperature_c"],
+            "has_higher_resolution_data": point["has_higher_resolution_data"],
+            "aggregation": aggregation,
+        }
+        frame_points.append({
+            "point_id": f"{frame_id}-p{index:03d}",
+            "point_key": point["valid_at"].isoformat(), "valid_at": point["valid_at"],
+            "value": point["temperature_c"], "unit": "°C",
+            "quality_status": "partial" if point["padded"] else "good", "point": point_json,
+        })
+    return frame, frame_points
+
+
+def persist_eon_transfer_temperature_frame(
+    storage: CanonicalStorage,
+    frame: dict[str, Any],
+    points: list[dict[str, Any]],
+    captured_at: datetime,
+) -> str:
+    """Persist one E.ON temperature frame with immutable revision semantics."""
+    storage.ensure_source_generation({
+        "site_id": frame["site_id"], "logical_role": frame["logical_role"],
+        "generation_id": frame["source_generation_id"],
+        "source_identity": {"identity_key": frame["provenance"]["installation_identifier"], "identity_strength": "strong", "identity_provenance": "eon_transfer_binding"},
+        "source_resolution_kind": "native_bucket", "source_resolution_seconds": frame["provenance"]["resolution_seconds"],
+        "timezone_state": "verified",
+    }, captured_at)
+    latest = storage.latest_external_frame(frame["semantic_key"])
+    if latest:
+        frame["revision"] = latest[1]
+        frame["frame_id"] = latest[0]
+        frame["supersedes_frame_id"] = latest[2]
+        try:
+            inserted = storage.insert_external_frame(frame, points)
+        except ValueError as error:
+            if str(error) != "canonical_frame_revision_conflict":
+                raise
+            frame["revision"] = latest[1] + 1
+            frame["supersedes_frame_id"] = latest[0]
+            frame["frame_id"] = "frame-" + hashlib.sha256(
+                (f"{frame['semantic_key']}|{frame['revision']}|" + json.dumps(
+                    [{key: value for key, value in point.items() if key != "point_id"} for point in points], sort_keys=True, default=str
+                )).encode()
+            ).hexdigest()[:32]
+            for index, point in enumerate(points, start=1):
+                point["point_id"] = f"{frame['frame_id']}-p{index:03d}"
+            inserted = storage.insert_external_frame(frame, points)
+    else:
+        inserted = storage.insert_external_frame(frame, points)
+    return "written" if inserted else "unchanged"
 
 
 def build_nord_pool_frame(

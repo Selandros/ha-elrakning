@@ -22,6 +22,8 @@ from custom_components.elrakning.external_input_frames import (
     build_smhi_current_frame,
     build_smhi_hourly_frame,
     persist_smhi_frames,
+    build_eon_transfer_temperature_frame,
+    persist_eon_transfer_temperature_frame,
 )
 
 
@@ -67,6 +69,38 @@ class ExternalInputFrameTests(unittest.TestCase):
         result = persist_smhi_frames(self.storage, [(current, current_points), (hourly, hourly_points)], captured)
         self.assertEqual(result["written"], 2)
         self.assertEqual(self.storage.count_external_frames(), 2)
+
+    def test_eon_transfer_temperature_is_site_scoped_and_preserves_padded_provenance(self):
+        captured = datetime(2026, 10, 2, 6, tzinfo=UTC)
+        points = [
+            {"valid_at": datetime(2026, 10, 1, 16, tzinfo=UTC), "temperature_c": 12.2,
+             "reference_temperature_c": 10.1, "padded": False,
+             "source_timestamp": "2026-10-01T18:00:00+02:00"},
+            {"valid_at": datetime(2026, 10, 1, 17, tzinfo=UTC), "temperature_c": 11.0,
+             "reference_temperature_c": 9.0, "padded": True,
+             "source_timestamp": "2026-10-01T19:00:00+02:00"},
+        ]
+        frame, frame_points = build_eon_transfer_temperature_frame(
+            "site-a", "40093679", "735999114000851039", "HOUR", points, captured, captured, "binding-a"
+        )
+        self.assertEqual(frame["site_id"], "site-a")
+        self.assertEqual(frame["payload_schema"], "eon.transfer_temperature.v1")
+        self.assertEqual([point["quality_status"] for point in frame_points], ["good", "partial"])
+        self.assertTrue(persist_eon_transfer_temperature_frame(self.storage, frame, frame_points, captured) == "written")
+        self.assertEqual(persist_eon_transfer_temperature_frame(self.storage, *build_eon_transfer_temperature_frame(
+            "site-a", "40093679", "735999114000851039", "HOUR", points, captured, captured, "binding-a"
+        ), captured), "unchanged")
+        visible = self.storage.read_external_input_frames(
+            captured + timedelta(minutes=1), source_scope="site", site_id="site-a",
+            logical_role="weather.temperature.eon",
+        )
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]["points"][0]["value"], 12.2)
+        self.assertEqual(visible[0]["points"][1]["quality_status"], "partial")
+        self.assertEqual(self.storage.read_external_input_frames(
+            captured + timedelta(minutes=1), source_scope="site", site_id="site-b",
+            logical_role="weather.temperature.eon",
+        ), [])
 
     def test_unrelated_dataset_does_not_ignore_provider_response_timestamp(self):
         target = {

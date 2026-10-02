@@ -15,6 +15,7 @@ from homeassistant.helpers.storage import Store
 
 from ..const import DOMAIN, EON_GRID_CONFIG_KEY, EON_GRID_PROVIDER, EON_GRID_UPDATE_EVENT, GRID_CONFIG_KEY
 from ..diagnostics import sanitize_source_data
+from ..external_input_frames import build_eon_transfer_temperature_frame, persist_eon_transfer_temperature_frame
 from .eon_auth import EonAppSession, EonAuthError, EonSession
 from .eon_client import EonAppClient, EonClient
 from .eon_models import (
@@ -790,7 +791,8 @@ class EonGridManager:
             if not installation_id:
                 continue
             batches = self._provider_import_batches(state)
-            if not batches:
+            temperature_points = self._provider_temperature_points(state, captured_at)
+            if not batches and not temperature_points:
                 continue
             for resolution, points in batches:
                 generation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"eon:grid.energy_import:{site_id}:{installation_id}:{resolution}"))
@@ -852,6 +854,23 @@ class EonGridManager:
                     })
                 storage.insert_historical_observations_atomic(observations)
                 storage.reconcile_grid_import(str(site_id), first_start, points[-1]["end"])
+            if temperature_points:
+                grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+                for point in temperature_points:
+                    local_day = point["valid_at"].astimezone(ZoneInfo("Europe/Stockholm")).date().isoformat()
+                    grouped.setdefault((point["aggregation"], local_day), []).append(point)
+                for (aggregation, _local_day), points in grouped.items():
+                    point_captured = [point["captured_at"] for point in points if point.get("captured_at")]
+                    point_known = [point["known_at"] for point in points if point.get("known_at")]
+                    frame_captured = max(point_captured, default=captured_at)
+                    frame_known = max(point_known, default=frame_captured)
+                    frame, frame_points = build_eon_transfer_temperature_frame(
+                        str(site_id), str(installation_id),
+                        (state.get("facility") or {}).get("point_of_delivery_number"),
+                        aggregation, points, frame_captured, frame_known,
+                        binding.get("binding_fingerprint"),
+                    )
+                    persist_eon_transfer_temperature_frame(storage, frame, frame_points, frame_captured)
 
     @staticmethod
     def _provider_import_points(state: dict[str, Any]) -> tuple[int, list[dict[str, Any]]] | None:
@@ -880,6 +899,73 @@ class EonGridManager:
             except (KeyError, TypeError, ValueError):
                 return None
         return None
+
+    @staticmethod
+    def _provider_temperature_points(state: dict[str, Any], fallback_at: datetime | None = None) -> list[dict[str, Any]]:
+        """Return verified E.ON transfer temperatures, retaining padded provenance."""
+        result: list[dict[str, Any]] = []
+        resolution_seconds = {"QUARTER_HOUR": 900, "HOUR": 3600, "DAY": 86400, "MONTH": None}
+        entries = state.get("backfill_transfer") if isinstance(state.get("backfill_transfer"), list) else []
+        sources: list[tuple[str, dict[str, Any], Any, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            resolution = str(entry.get("resolution") or "").upper()
+            parsed = entry.get("parsed")
+            if resolution in resolution_seconds and isinstance(parsed, dict):
+                sources.append((resolution, parsed, entry.get("captured_at"), entry.get("known_at")))
+        for resolution, seconds in resolution_seconds.items():
+            source_key = {"QUARTER_HOUR": "quarter_hour_consumption", "HOUR": "hourly_consumption", "DAY": "day_consumption"}.get(resolution)
+            parsed = state.get(source_key) if source_key else state.get("consumption")
+            if isinstance(parsed, dict):
+                sources.append((resolution, parsed, state.get("captured_at"), state.get("known_at")))
+        seen: set[tuple[str, str, bool]] = set()
+        for aggregation, parsed, captured_at, known_at in sources:
+            for padded in (False, True):
+                source_points = parsed.get("actual_points" if not padded else "padded_points") or []
+                if aggregation == "MONTH" and parsed.get("temperature_c") is not None and bool(parsed.get("status") == "ok") == (not padded):
+                    source_points = [{
+                        "timestamp": parsed.get("source_timestamp") or f"{int(parsed.get('year')):04d}-{int(parsed.get('month')):02d}-01T00:00:00+00:00",
+                        "temperature_c": parsed.get("temperature_c"),
+                        "reference_temperature_c": parsed.get("reference_temperature_c"),
+                        "padded": padded,
+                    }]
+                for point in source_points:
+                    temperature = point.get("temperature_c")
+                    if not isinstance(temperature, (int, float)):
+                        continue
+                    try:
+                        valid_at = datetime.fromisoformat(str(point["timestamp"]).replace("Z", "+00:00"))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if valid_at.tzinfo is None:
+                        continue
+                    valid_at = valid_at.astimezone(timezone.utc)
+                    key = (aggregation, valid_at.isoformat(), padded)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    def parse_capture(value: Any, fallback: datetime) -> datetime:
+                        if isinstance(value, datetime) and value.tzinfo is not None:
+                            return value.astimezone(timezone.utc)
+                        if isinstance(value, str):
+                            try:
+                                parsed_value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                                if parsed_value.tzinfo is not None:
+                                    return parsed_value.astimezone(timezone.utc)
+                            except ValueError:
+                                pass
+                        return fallback
+                    fallback = fallback_at.astimezone(timezone.utc) if isinstance(fallback_at, datetime) and fallback_at.tzinfo is not None else datetime.now(timezone.utc)
+                    result.append({
+                        "valid_at": valid_at, "temperature_c": float(temperature),
+                        "reference_temperature_c": point.get("reference_temperature_c"),
+                        "padded": padded, "source_timestamp": point.get("timestamp"),
+                        "has_higher_resolution_data": point.get("has_higher_resolution_data") is True,
+                        "aggregation": aggregation, "captured_at": parse_capture(captured_at, fallback),
+                        "known_at": parse_capture(known_at, parse_capture(captured_at, fallback)),
+                    })
+        return sorted(result, key=lambda point: (point["aggregation"], point["valid_at"], point["padded"]))
 
     @classmethod
     def _provider_import_batches(cls, state: dict[str, Any]) -> list[tuple[int, list[dict[str, Any]]]]:
