@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, finiteCostNumber, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -94,8 +94,8 @@ assert.deepEqual(buildProviderOnlyInvoiceEstimate({
   estimated_grid_month_total_sek: 272.0498,
   estimate_status: "provider_actual_only",
   rows: [],
-  trade: { variable_cost_sek: null, fixed_fee_sek: null, accrued_fixed_fee_sek: null, total_so_far_sek: null },
-  grid: { variable_cost_sek: 30.7998, fixed_fee_sek: 241.25, accrued_fixed_fee_sek: 241.25, total_so_far_sek: 272.0498 },
+  trade: { variable_cost_sek: null, fixed_fee_sek: null, booked_fixed_fee_sek: null, accrued_fixed_fee_sek: null, total_so_far_sek: null },
+  grid: { variable_cost_sek: 30.7998, fixed_fee_sek: 241.25, booked_fixed_fee_sek: 241.25, accrued_fixed_fee_sek: 241.25, total_so_far_sek: 272.0498 },
   provenance: { method: "eon_provider_current_month_cost_v1", source: "canonical_eon_grid_cost", actual_import_kwh: 21.69, actual_cost_to_date_sek: 272.0498 },
 });
 assert.equal(buildProviderOnlyInvoiceEstimate({ total_sek: null, variable_sek: null, imported_kwh: null }), null);
@@ -170,12 +170,12 @@ const costSeries = buildCostAnalysisSeries({
     { end: "2026-08-15T01:00:00+02:00", trade_cost_sek: 100, grid_cost_sek: 200 },
   ],
 }, { cumulative_points: [{ day: 1, value: 10 }, { day: 31, value: 640 }] }, new Date("2026-08-15T12:00:00+02:00"));
-assert.equal(costSeries.actual.at(-1).value, 356.61);
-assert.equal(costSeries.forecast[0].value, 356.61);
+assert.equal(costSeries.actual.at(-1).value, 330);
+assert.equal(costSeries.forecast[0].value, 330);
 assert.equal(costSeries.forecast.at(-1).value, 686.55);
 assert.deepEqual(costSeries.previous, [{ day: 1, value: 10 }, { day: 31, value: 640 }]);
-assert.equal(costSeries.method, "cumulative_observed_rows_with_time_allocated_fixed_fee_and_explicit_segments");
-assert.equal(costSeries.fixed_fee_allocation_method, "monthly_fixed_fee_accrued_by_elapsed_month_fraction");
+assert.equal(costSeries.method, "cumulative_observed_rows_with_explicit_variable_cost_segments");
+assert.equal(costSeries.fixed_fee_allocation_method, "monthly_summary_only");
 assert.equal(buildCostAnalysisSeries({ month: "2026-08", rows: [] }, null, new Date("2026-08-15")).forecast_available, false);
 const costEdgeSeries = buildCostAnalysisSeries({
   month: "2026-08",
@@ -193,10 +193,30 @@ const costEdgeSeries = buildCostAnalysisSeries({
 }, null, new Date("2026-08-31T12:00:00+02:00"));
 assert.equal(costEdgeSeries.actual.some((point) => point.day === 1 && point.value === 0), false);
 assert.equal(costEdgeSeries.estimated_past.length, 2);
-assert.equal(costEdgeSeries.actual.at(-1).value, 356.704232);
+assert.equal(costEdgeSeries.actual.at(-1).value, 90);
 assert.equal(costEdgeSeries.actual_display.at(-1).value > costEdgeSeries.actual.at(-1).value, true);
-assert.equal(costEdgeSeries.forecast_future.length, 0);
+assert.ok(costEdgeSeries.forecast_future.length > 0);
 assert.equal(costEdgeSeries.previous.length, 0);
+const greenelyWithoutInvoice = resolveGreenelyActualInvoiceCost({
+  provider: "greenely",
+  invoice_history: [],
+  source: { contracts: [{ price_group: { name: "Monthly fee - 69 SEK/month", fee_per_month: 69 }, promocode: "18månader" }] },
+}, "2026-10");
+assert.deepEqual(greenelyWithoutInvoice, { available: false, amount_sek: null, reason: "greenely_invoice_missing" });
+const greenelyInvoice = resolveGreenelyActualInvoiceCost({
+  provider: "greenely",
+  invoice_history: [{ month: "2026-10", amount_due_sek: 13.15, source: "greenely_invoice", _invoice_key: "invoice-1" }],
+}, "2026-10");
+assert.equal(greenelyInvoice.available, true);
+assert.equal(greenelyInvoice.amount_sek, 13.15);
+assert.equal(greenelyInvoice.source, "greenely_invoice");
+const dailyVariableOnly = buildDailyCostSeries([
+  { date: "2026-10-01", actual: { import_kwh: 13.508, total_variable_cost_sek: 23.5877863, fixed_fee_sek: 241.25, status: "actual" } },
+  { date: "2026-10-02", actual: { import_kwh: 1, total_variable_cost_sek: 2, fixed_fee_sek: 0, status: "actual" } },
+], "2026-10");
+assert.equal(dailyVariableOnly.days[0].total_variable_cost_sek, 23.5877863);
+assert.equal("fixed_fee_sek" in dailyVariableOnly.days[0], false);
+assert.equal(dailyVariableOnly.days[1].total_variable_cost_sek, 2);
 const eonPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(eonPanelSource, /data-card-source="price"/);
 assert.match(eonPanelSource, /_buildPriceSourceData\(\)/);
@@ -516,6 +536,17 @@ assert.ok(Math.abs(providerBucketEstimate.grid.variable_cost_sek - 1.68128) < 1e
 assert.ok(Math.abs(providerBucketEstimate.total_so_far_sek - 2.00808 - providerBucketEstimate.grid.accrued_fixed_fee_sek) < 1e-9);
 assert.equal(providerBucketEstimate.rows[0].import_kwh, 0.734);
 assert.equal(providerBucketEstimate.forecast_source, "unavailable");
+const octoberMonthlyEstimate = buildInvoiceEstimateFromEnergyBuckets(
+  [{ start: "2026-10-01T00:00:00+02:00", end: "2026-10-01T00:15:00+02:00", trade_customer_price_ore_per_kwh: 20 }],
+  [{ timestamp: "2026-10-01T00:00:00+02:00", end: "2026-10-01T00:15:00+02:00", import_kwh: 1 }],
+  activeGrid({ variable_total_ore_per_kwh_gross: 100, fixed_monthly_sek: 241.25 }),
+  null,
+  new Date("2026-10-02T12:00:00+02:00"),
+);
+assert.equal(octoberMonthlyEstimate.grid.fixed_fee_sek, 241.25);
+assert.equal(octoberMonthlyEstimate.grid.booked_fixed_fee_sek, 241.25);
+assert.equal(octoberMonthlyEstimate.grid.accrued_fixed_fee_sek, 241.25);
+assert.ok(Math.abs(octoberMonthlyEstimate.grid.total_so_far_sek - 242.25) < 1e-9);
 const trendEstimate = applyProviderMonthlyTrendEstimate(
   { ...providerBucketEstimate, imported_kwh_so_far: 6.926, grid: { variable_cost_sek: 9.835, total_so_far_sek: 16.47 } },
   { status: "ok", consumption_kwh: 215, estimate_provenance: { method: "provider_display_text_exact_v1" } },

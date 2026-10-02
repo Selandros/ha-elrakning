@@ -297,7 +297,8 @@ assert.match(source, /amount\.textContent = hasValue \? this\._formatSek\(value\
 assert.match(source, /itemElement\.append\(label, bar, amount\)/);
 assert.match(source, /const hasValue = item\.coverage !== "missing" && Number\.isFinite\(value\)/);
 assert.match(source, /const valueForItem = \(item\) => item\.current/);
-assert.match(source, /Number\(item\.estimated_total_sek\)/);
+assert.match(source, /finiteCostNumber\(item\.estimated_total_sek/);
+assert.match(source, /item\.known_amount_gross_sek/);
 assert.match(source, /cost-history-bar-item\.estimated/);
 assert.match(source, /\.cost-history-bar \{ background: var\(--el-solar-color, #77C2A1\);/);
 assert.match(source, /\.cost-history-bar-item\.estimated \.cost-history-bar \{ border: 1px dashed var\(--el-solar-color, #77C2A1\);/);
@@ -309,7 +310,7 @@ const costKpiRender = source.slice(source.indexOf("const currentRows ="), source
 assert.equal((costKpiRender.match(/\["(?:Beräknad månadskostnad|Kostnad hittills|Beräknat återstående)"/g) || []).length, 3);
 assert.match(source, /const currentRows = \[/);
 assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek \?\?/);
-assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek\]/);
+assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek \?\?/);
 assert.match(source, /\["Beräknat återstående", estimate\.forecast_remaining_total_sek\]/);
 assert.doesNotMatch(costKpiRender, /cost-kpi-secondary/);
 assert.doesNotMatch(source, /Prognos för hela innevarande månaden|Från månadens början till nu|Prognos från nu till månadens slut/);

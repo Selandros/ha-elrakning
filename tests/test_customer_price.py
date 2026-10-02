@@ -168,6 +168,22 @@ class CustomerPriceTests(unittest.TestCase):
         self.assertIsNone(data.electricity_cost_ex_vat)
         self.assertAlmostEqual(data.periods[0].customer_price, 0.374125)
 
+    def test_greenely_contract_fee_is_not_an_actual_cost_without_invoice(self) -> None:
+        state = {
+            "configured": True,
+            "provider": "greenely",
+            "facility_id": "facility-a",
+            "invoices": [],
+            "summary": None,
+            "source": {
+                "contracts": [{"_contract_id": "contract-a", "price_group": {"name": "Monthly fee - 69 SEK/month", "fee_per_month": 69}, "promocode": "18månader"}],
+            },
+        }
+        provider = provider_data_from_greenely_state(state)
+        self.assertIsNone(provider.tariff)
+        self.assertFalse(provider.active_data["customer_price_eligible"])
+        self.assertEqual(build_customer_price_data(_periods(), provider).mode, "spot_price")
+
     def test_grid_rate_uses_gross_variable_components_only(self) -> None:
         self.assertAlmostEqual(grid_variable_cost_ex_vat({
             "vat_included": True,

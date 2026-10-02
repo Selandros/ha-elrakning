@@ -283,10 +283,9 @@ def build_actual_priced_cost_to_date(
         trade += segment_import * trade_ore / 100
         grid += segment_import * grid_ore / 100
         priced_import += segment_import
-    elapsed = max(0.0, min(1.0, (now - month_start).total_seconds() / max(1.0, (now.replace(day=28) + timedelta(days=4)).replace(day=1).timestamp() - month_start.timestamp())))
     trade_fixed = _number(trade_fixed_fee_sek)
     grid_fixed = _number(grid_fixed_fee_sek)
-    fixed = (trade_fixed or 0.0) * elapsed + (grid_fixed or 0.0) * elapsed
+    fixed = (trade_fixed or 0.0) + (grid_fixed or 0.0)
     missing_past = max(0.0, actual_import - priced_import)
     return {
         "actual_import_to_date_kwh": actual_import,
@@ -295,6 +294,7 @@ def build_actual_priced_cost_to_date(
         "trade_variable_cost_sek": trade,
         "grid_variable_cost_sek": grid,
         "fixed_cost_to_date_sek": fixed,
+        "fixed_monthly_cost_sek": fixed,
         "actual_cost_to_date_sek": trade + grid + fixed,
         "price_coverage_complete": missing_past <= 1e-9,
         "provenance": {"method": "canonical_trapezoidal_import_with_complete_price_coverage", "missingPast_excluded_from_future": True},

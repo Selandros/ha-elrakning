@@ -200,31 +200,37 @@ def build_bucketed_actual_cost(
             p_end = _timestamp(period.get("end"))
             trade = _number(period.get("trade_customer_price_ore_per_kwh"))
             grid = _number(period.get("grid_variable_ore_per_kwh"))
-            if p_start and p_end and p_start <= start and p_end >= end and trade is not None and grid is not None:
+            if p_start and p_end and p_start <= start and p_end >= end and grid is not None:
                 matching.append((p_start, p_end, trade, grid))
         if len(matching) != 1:
             continue
         eligible.append((start, end, energy, matching[0], bucket))
     cursor = interval_start
     trade_total = grid_total = imported_total = 0.0
+    trade_complete = True
     for start, end, energy, (_p_start, _p_end, trade, grid), _bucket in sorted(eligible):
         if start != cursor:
             return None
         imported_total += energy
-        trade_total += energy * trade / 100
+        if trade is None:
+            trade_complete = False
+        else:
+            trade_total += energy * trade / 100
         grid_total += energy * grid / 100
         cursor = end
     if cursor < limit:
         return None
     return {
         "import_kwh": imported_total,
-        "elhandel_sek": trade_total,
+        "elhandel_sek": trade_total if trade_complete else None,
         "elnat_variable_sek": grid_total,
-        "total_variable_cost_sek": trade_total + grid_total,
-        "average_price_ore_per_kwh": (trade_total + grid_total) / imported_total * 100 if imported_total else None,
+        "total_variable_cost_sek": grid_total + (trade_total if trade_complete else 0.0),
+        "average_price_ore_per_kwh": (grid_total + (trade_total if trade_complete else 0.0)) / imported_total * 100 if imported_total else None,
         "status": "actual" if limit >= interval_end else "actual_to_date",
-        "quality": "qualified",
+        "quality": "qualified" if trade_complete else "partial",
         "method": "native_energy_bucket_by_effective_price_periods",
         "source": "reconciled_grid_import",
         "observed_until": limit.isoformat(),
+        "trade_cost_status": "verified" if trade_complete else "unavailable",
+        "unavailable_components": [] if trade_complete else ["elhandel_tariff"],
     }

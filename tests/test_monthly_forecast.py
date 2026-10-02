@@ -162,6 +162,20 @@ def test_actual_import_keeps_unpriced_energy_out_of_cost():
     assert result["actual_cost_to_date_sek"] == 0.75
 
 
+def test_fixed_monthly_cost_is_booked_once_in_monthly_actual_cost():
+    start = datetime(2026, 10, 1, tzinfo=UTC)
+    result = build_actual_priced_cost_to_date(
+        points=[],
+        price_periods=[],
+        month_start=start,
+        now=datetime(2026, 10, 2, tzinfo=UTC),
+        grid_fixed_fee_sek=241.25,
+    )
+    assert result["fixed_cost_to_date_sek"] == 241.25
+    assert result["fixed_monthly_cost_sek"] == 241.25
+    assert result["actual_cost_to_date_sek"] == 241.25
+
+
 def test_month_end_profile_is_not_blind_36h_repetition():
     decision = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
     rows = [{"logical_role": "grid.power/import", "interval_start": datetime(2026, 8, 25, 12, minute, tzinfo=UTC), "value": 4} for minute in (0, 15, 30, 45)]

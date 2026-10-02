@@ -14,6 +14,19 @@ build_bucketed_actual_cost = _MODULE.build_bucketed_actual_cost
 
 
 class InvoiceTodayCostTests(unittest.TestCase):
+    def test_provider_grid_cost_remains_available_without_greenely_tariff(self):
+        start = datetime.fromisoformat("2026-10-01T00:00:00+02:00")
+        end = datetime.fromisoformat("2026-10-01T00:15:00+02:00")
+        result = build_bucketed_actual_cost(
+            [{"timestamp": start.isoformat(), "end": end.isoformat(), "import_kwh": 1.0}],
+            [{"start": start.isoformat(), "end": end.isoformat(), "trade_customer_price_ore_per_kwh": None, "grid_variable_ore_per_kwh": 100}],
+            start, end,
+        )
+        self.assertEqual(result["elnat_variable_sek"], 1.0)
+        self.assertIsNone(result["elhandel_sek"])
+        self.assertEqual(result["quality"], "partial")
+        self.assertEqual(result["trade_cost_status"], "unavailable")
+
     def test_daily_actual_cost_is_componentized_and_excludes_fixed_fee(self):
         day_start = datetime.fromisoformat("2026-08-02T00:00:00+02:00")
         day_end = datetime.fromisoformat("2026-08-02T01:00:00+02:00")

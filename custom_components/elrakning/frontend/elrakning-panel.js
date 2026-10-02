@@ -98,7 +98,7 @@ export function buildGridSourceCost(estimate, fallback = null) {
   const existing = fallback && typeof fallback === "object" ? fallback : {};
   return {
     total_sek: grid.total_so_far_sek ?? null,
-    fixed_sek: grid.accrued_fixed_fee_sek ?? null,
+    fixed_sek: grid.booked_fixed_fee_sek ?? grid.accrued_fixed_fee_sek ?? null,
     variable_sek: grid.variable_cost_sek ?? null,
     imported_kwh: estimate.imported_kwh_so_far ?? null,
     subscription_sek_per_month: grid.fixed_fee_sek ?? existing.subscription_sek_per_month ?? null,
@@ -126,10 +126,11 @@ export function buildProviderOnlyInvoiceEstimate(currentMonthCost, now = new Dat
     estimated_grid_month_total_sek: total,
     estimate_status: "provider_actual_only",
     rows: [],
-    trade: { variable_cost_sek: null, fixed_fee_sek: null, accrued_fixed_fee_sek: null, total_so_far_sek: null },
+    trade: { variable_cost_sek: null, fixed_fee_sek: null, booked_fixed_fee_sek: null, accrued_fixed_fee_sek: null, total_so_far_sek: null },
     grid: {
       variable_cost_sek: variable,
       fixed_fee_sek: Number.isFinite(fixed) ? fixed : null,
+      booked_fixed_fee_sek: Number.isFinite(fixed) ? fixed : null,
       accrued_fixed_fee_sek: Number.isFinite(fixed) ? fixed : null,
       total_so_far_sek: total,
     },
@@ -139,6 +140,26 @@ export function buildProviderOnlyInvoiceEstimate(currentMonthCost, now = new Dat
       actual_import_kwh: imported,
       actual_cost_to_date_sek: total,
     },
+  };
+}
+
+export function resolveGreenelyActualInvoiceCost(providerState, month) {
+  const invoices = Array.isArray(providerState?.invoice_history) ? providerState.invoice_history : [];
+  const invoice = invoices.find((item) => normalizeInvoiceMonth(item?.month || item?.billing_period) === month);
+  if (!invoice) return { available: false, amount_sek: null, reason: "greenely_invoice_missing" };
+  const candidates = [
+    invoice.amount_due_sek,
+    invoice.gross_amount_sek,
+    invoice.amount_due_ore == null ? null : Number(invoice.amount_due_ore) / 100,
+    invoice.period_cost_before_credits_sek != null && invoice.vat_included === true ? invoice.period_cost_before_credits_sek : null,
+  ].map((value) => Number(value)).filter(Number.isFinite);
+  if (!candidates.length) return { available: false, amount_sek: null, reason: "greenely_invoice_amount_missing" };
+  return {
+    available: true,
+    amount_sek: candidates[0],
+    source: invoice.source || "greenely_invoice",
+    invoice_key: invoice._invoice_key || invoice.invoice_key || null,
+    billing_period: invoice.billing_period || invoice.month || month,
   };
 }
 
@@ -1659,7 +1680,9 @@ export function buildInvoiceEstimateFromEnergyBuckets(periods, energyBuckets, gr
     const matching = periods.filter((period) => {
       const start = new Date(period.start).getTime();
       const end = new Date(period.end).getTime();
-      const trade = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+      const trade = period.trade_cost_status === "unavailable"
+        ? NaN
+        : Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
       return Number.isFinite(start) && Number.isFinite(end) && end > start
         && start <= bucket.start && end >= bucket.end && Number.isFinite(trade) && Number.isFinite(gridGross)
         && period.forecast !== true;
@@ -1669,7 +1692,9 @@ export function buildInvoiceEstimateFromEnergyBuckets(periods, energyBuckets, gr
       continue;
     }
     const period = matching[0];
-    const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+    const tradeOre = period.trade_cost_status === "unavailable"
+      ? NaN
+      : Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
     rows.push({
       start: new Date(bucket.start).toISOString(),
       end: new Date(bucket.end).toISOString(),
@@ -1687,22 +1712,20 @@ export function buildInvoiceEstimateFromEnergyBuckets(periods, energyBuckets, gr
   const pricedKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
   const tradeVariable = rows.reduce((sum, row) => sum + row.trade_cost_sek, 0);
   const gridVariable = rows.reduce((sum, row) => sum + row.grid_cost_sek, 0);
-  const monthMs = nextMonth.getTime() - monthStart.getTime();
-  const elapsedRatio = Math.max(0, Math.min(1, (nowMs - monthStart.getTime()) / monthMs));
   const fixedTrade = tradeFixedFee != null && Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
   const fixedGrid = gridPriceApplicable && Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
-  const accruedTrade = fixedTrade == null ? null : fixedTrade * elapsedRatio;
-  const accruedGrid = fixedGrid == null ? null : fixedGrid * elapsedRatio;
+  const bookedTrade = fixedTrade;
+  const bookedGrid = fixedGrid;
   const variableTotal = rows.length ? tradeVariable + gridVariable : null;
-  const totalSoFar = variableTotal == null ? null : variableTotal + (accruedTrade || 0) + (accruedGrid || 0);
+  const totalSoFar = variableTotal == null ? null : variableTotal + (bookedTrade || 0) + (bookedGrid || 0);
   const tradeWeighted = pricedKwh > 0 ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / pricedKwh : null;
   return {
     month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
     imported_kwh_so_far: importedKwh,
     actual_imported_kwh_display: importedKwh,
     priced_imported_kwh: pricedKwh || null,
-    trade: { variable_cost_sek: rows.length ? tradeVariable : null, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTrade, total_so_far_sek: rows.length ? tradeVariable + (accruedTrade || 0) : null },
-    grid: { variable_cost_sek: rows.length ? gridVariable : null, fixed_fee_sek: fixedGrid, accrued_fixed_fee_sek: accruedGrid, total_so_far_sek: rows.length ? gridVariable + (accruedGrid || 0) : null },
+    trade: { variable_cost_sek: rows.length ? tradeVariable : null, fixed_fee_sek: fixedTrade, booked_fixed_fee_sek: bookedTrade, accrued_fixed_fee_sek: bookedTrade, total_so_far_sek: rows.length ? tradeVariable + (bookedTrade || 0) : null },
+    grid: { variable_cost_sek: rows.length ? gridVariable : null, fixed_fee_sek: fixedGrid, booked_fixed_fee_sek: bookedGrid, accrued_fixed_fee_sek: bookedGrid, total_so_far_sek: rows.length ? gridVariable + (bookedGrid || 0) : null },
     total_so_far_sek: totalSoFar,
     estimated_month_total_sek: null,
     forecast_import_kwh: null,
@@ -1784,7 +1807,9 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     }
     coveredEnergyPeriods += 1;
     coveredEnergyKwh += integration.kwh;
-    const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+    const tradeOre = period.trade_cost_status === "unavailable"
+      ? NaN
+      : Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
     if (!Number.isFinite(tradeOre) || !Number.isFinite(gridGross)) {
       missingPricePeriods += 1;
       continue;
@@ -1836,7 +1861,6 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const coveredStart = rows.length ? Math.min(...rows.map((row) => new Date(row.start).getTime())) : null;
   const coveredEnd = rows.length ? Math.max(...rows.map((row) => Math.min(new Date(row.end).getTime(), nowMs))) : null;
   const elapsedMs = Math.max(0, nowMs - monthStart.getTime());
-  const monthMs = nextMonth.getTime() - monthStart.getTime();
   const mergedCoveredSegments = coveredSegments.sort((left, right) => left.start - right.start).reduce((merged, segment) => {
     const previous = merged.at(-1);
     if (previous && segment.start <= previous.end) previous.end = Math.max(previous.end, segment.end);
@@ -1860,10 +1884,10 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const gridFixed = gridPriceApplicable && Number.isFinite(Number(gridPrice?.fixed_monthly_sek))
     ? Number(gridPrice.fixed_monthly_sek)
     : null;
-  const accruedGridFixed = gridFixed === null ? null : gridFixed * Math.min(1, elapsedMs / monthMs);
-  const accruedTradeFixed = fixedTrade === null ? null : fixedTrade * Math.min(1, elapsedMs / monthMs);
+  const bookedGridFixed = gridFixed;
+  const bookedTradeFixed = fixedTrade;
   const variableSoFarSek = tradeVariableSek === null || gridVariableSek === null ? null : tradeVariableSek + gridVariableSek;
-  const fixedSoFarSek = (accruedTradeFixed || 0) + (accruedGridFixed || 0);
+  const fixedSoFarSek = (bookedTradeFixed || 0) + (bookedGridFixed || 0);
   const missingPastDays = missingPastMs / 86400000;
   const forecastMissingPastKwh = observedDailyImportKwh === null ? null : observedDailyImportKwh * missingPastDays;
   const blendWeight = historicalBaselineDailyKwh !== null && observedDailyImportKwh !== null
@@ -1884,7 +1908,9 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
       const startMs = Math.max(nowMs, new Date(period.start).getTime(), monthStart.getTime());
       const endMs = Math.min(nextMonth.getTime(), new Date(period.end).getTime());
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) continue;
-      const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+      const tradeOre = period.trade_cost_status === "unavailable"
+        ? NaN
+        : Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
       if (!Number.isFinite(tradeOre) || !Number.isFinite(fallbackGridOre)) continue;
       const importKwh = forecastDailyKwh * ((endMs - startMs) / 86400000);
       knownFutureTradeSek += importKwh * tradeOre / 100;
@@ -1908,10 +1934,7 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
   const forecastVariableSek = variableSoFarSek === null || forecastTradeRemainingSek === null || forecastGridRemainingSek === null
     ? null : tradeVariableSek + gridVariableSek + forecastTradeRemainingSek + forecastGridRemainingSek;
   const totalSoFarSek = variableSoFarSek === null ? null : variableSoFarSek + fixedSoFarSek;
-  const forecastRemainingFixedSek = (fixedTrade === null && gridFixed === null)
-    ? 0
-    : (fixedTrade === null ? 0 : Math.max(0, fixedTrade - (accruedTradeFixed || 0)))
-      + (gridFixed === null ? 0 : Math.max(0, gridFixed - (accruedGridFixed || 0)));
+  const forecastRemainingFixedSek = 0;
   const forecastRemainingTotalSek = forecastVariableSek === null || !Number.isFinite(forecastRemainingFixedSek)
     ? null : forecastVariableSek - (tradeVariableSek || 0) - (gridVariableSek || 0) + forecastRemainingFixedSek;
   const estimatedMonthTotalSek = totalSoFarSek === null || forecastRemainingTotalSek === null
@@ -1921,8 +1944,8 @@ export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixed
     imported_kwh_so_far: actualImportedKwh,
     actual_imported_kwh_display: actualImportedKwh,
     priced_imported_kwh: rows.length ? pricedCostImportKwh : null,
-    trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTradeFixed, total_so_far_sek: tradeVariableSek === null ? null : tradeVariableSek + (accruedTradeFixed || 0) },
-    grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, accrued_fixed_fee_sek: accruedGridFixed, total_so_far_sek: gridVariableSek === null ? null : gridVariableSek + (accruedGridFixed || 0) },
+    trade: { variable_cost_sek: tradeVariableSek, fixed_fee_sek: fixedTrade, booked_fixed_fee_sek: bookedTradeFixed, accrued_fixed_fee_sek: bookedTradeFixed, total_so_far_sek: tradeVariableSek === null ? null : tradeVariableSek + (bookedTradeFixed || 0) },
+    grid: { variable_cost_sek: gridVariableSek, fixed_fee_sek: gridFixed, booked_fixed_fee_sek: bookedGridFixed, accrued_fixed_fee_sek: bookedGridFixed, total_so_far_sek: gridVariableSek === null ? null : gridVariableSek + (bookedGridFixed || 0) },
     total_so_far_sek: totalSoFarSek,
     estimated_month_total_sek: estimatedMonthTotalSek,
     forecast_import_kwh: forecastImportKwh,
@@ -2037,21 +2060,16 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const actualPoints = [];
   let cumulative = 0;
-  const tradeFixed = Number(estimate?.trade?.fixed_fee_sek);
-  const gridFixed = Number(estimate?.grid?.fixed_fee_sek);
-  const monthlyFixed = (Number.isFinite(tradeFixed) ? tradeFixed : 0) + (Number.isFinite(gridFixed) ? gridFixed : 0);
-  const monthStartMs = new Date(year, monthIndex, 1).getTime();
-  const monthEndMs = new Date(year, monthIndex + 1, 1).getTime();
-  const fixedAt = (timestamp) => monthlyFixed * Math.max(0, Math.min(1, (timestamp - monthStartMs) / (monthEndMs - monthStartMs)));
   for (const row of Array.isArray(estimate?.rows) ? [...estimate.rows].sort((left, right) => new Date(left.end).getTime() - new Date(right.end).getTime()) : []) {
     const timestamp = new Date(row.end || row.start).getTime();
     const value = Number(row.trade_cost_sek) + Number(row.grid_cost_sek);
     if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
     cumulative += value;
-    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, new Date(timestamp).getDate())), value: cumulative + fixedAt(timestamp) });
+    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, new Date(timestamp).getDate())), value: cumulative });
   }
-  if (Number.isFinite(Number(estimate?.total_so_far_sek))) {
-    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, current.getDate())), value: Number(estimate.total_so_far_sek) });
+  const variableSoFar = Number(estimate?.trade?.variable_cost_sek) + Number(estimate?.grid?.variable_cost_sek);
+  if (Number.isFinite(variableSoFar)) {
+    actualPoints.push({ day: Math.max(1, Math.min(daysInMonth, current.getDate())), value: variableSoFar });
   }
   const dedupe = (points) => [...new Map(points.map((point) => [point.day, point])).values()].sort((left, right) => left.day - right.day);
   const actual = dedupe(actualPoints);
@@ -2096,8 +2114,8 @@ export function buildCostAnalysisSeries(estimate, previousActual = null, now = n
     estimated_past_cost_sek: missingPastCost,
     forecast_available: forecast.length > 0,
     previous_available: previous.length > 0,
-    method: "cumulative_observed_rows_with_time_allocated_fixed_fee_and_explicit_segments",
-    fixed_fee_allocation_method: "monthly_fixed_fee_accrued_by_elapsed_month_fraction",
+    method: "cumulative_observed_rows_with_explicit_variable_cost_segments",
+    fixed_fee_allocation_method: "monthly_summary_only",
   };
 }
 
@@ -2542,9 +2560,13 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
         current: true,
         coverage: estimate?.forecast_confidence === "complete_available_data" ? "complete" : "partial",
         total_sek: Number.isFinite(Number(estimate?.total_so_far_sek)) ? Number(estimate.total_so_far_sek) : null,
+        known_amount_gross_sek: Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? Number(estimate.grid.total_so_far_sek) : null,
         estimated_total_sek: Number.isFinite(Number(estimate?.estimated_month_total_sek)) ? Number(estimate.estimated_month_total_sek) : null,
         trade_sek: Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? Number(estimate.trade.total_so_far_sek) : null,
         grid_sek: Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? Number(estimate.grid.total_so_far_sek) : null,
+        variable_actual_sek: Number.isFinite(Number(estimate?.grid?.variable_cost_sek)) ? Number(estimate.grid.variable_cost_sek) : null,
+        fixed_monthly_sek: Number.isFinite(Number(estimate?.grid?.fixed_fee_sek)) ? Number(estimate.grid.fixed_fee_sek) : null,
+        trade_invoice_actual_sek: Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? Number(estimate.trade.total_so_far_sek) : null,
       };
     }
     const actual = buildPreviousMonthActual(invoiceSources, nextCalendarMonth(month));
@@ -2704,7 +2726,7 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       imported_kwh: estimate.imported_kwh_so_far,
       trade_variable_sek: estimate.trade?.variable_cost_sek ?? null,
       grid_variable_sek: estimate.grid?.variable_cost_sek ?? null,
-      fixed_fee_accrual_sek: (estimate.trade?.accrued_fixed_fee_sek || 0) + (estimate.grid?.accrued_fixed_fee_sek || 0),
+      fixed_fee_monthly_sek: (estimate.trade?.booked_fixed_fee_sek || estimate.trade?.accrued_fixed_fee_sek || 0) + (estimate.grid?.booked_fixed_fee_sek || estimate.grid?.accrued_fixed_fee_sek || 0),
       total_sek: estimate.total_so_far_sek ?? null,
     },
     forecast_remaining: {
@@ -10698,6 +10720,55 @@ class ElrakningPanel {
       providerTrend,
       applicableGridPrice,
     );
+    const greenelyActual = resolveGreenelyActualInvoiceCost(
+      this._electricityProviderState,
+      estimate?.month || null,
+    );
+    if (estimate && !greenelyActual.available && this._electricityProviderState?.provider === "greenely") {
+      estimate = {
+        ...estimate,
+        trade: {
+          ...(estimate.trade || {}),
+          variable_cost_sek: null,
+          fixed_fee_sek: null,
+          booked_fixed_fee_sek: null,
+          accrued_fixed_fee_sek: null,
+          total_so_far_sek: null,
+          actual_status: "unavailable",
+          unavailable_reason: greenelyActual.reason,
+        },
+        total_so_far_sek: null,
+        estimated_month_total_sek: null,
+        forecast_remaining_total_sek: null,
+        estimate_status: "partial_missing_greenely_invoice",
+        estimate_provenance: {
+          ...(estimate.estimate_provenance || {}),
+          trade_actual: "greenely_invoice_required",
+          trade_actual_status: greenelyActual.reason,
+          spot_analysis_excluded_from_actual: true,
+        },
+      };
+    } else if (estimate && greenelyActual.available && this._electricityProviderState?.provider === "greenely") {
+      estimate.trade = {
+        ...(estimate.trade || {}),
+        variable_cost_sek: null,
+        fixed_fee_sek: null,
+        booked_fixed_fee_sek: null,
+        accrued_fixed_fee_sek: null,
+        total_so_far_sek: greenelyActual.amount_sek,
+        actual_status: "invoice",
+      };
+      const gridTotal = Number(estimate.grid?.total_so_far_sek);
+      estimate.total_so_far_sek = Number.isFinite(gridTotal) ? gridTotal + greenelyActual.amount_sek : greenelyActual.amount_sek;
+      estimate.estimated_month_total_sek = null;
+      estimate.forecast_remaining_total_sek = null;
+      estimate.estimate_provenance = {
+        ...(estimate.estimate_provenance || {}),
+        trade_actual: "greenely_invoice",
+        trade_invoice: greenelyActual,
+        spot_analysis_excluded_from_actual: true,
+      };
+    }
     const providerEnergyAvailable = nativeEnergyBuckets && billingHistory.energy_points.length > 0;
     const providerCostAvailable = Boolean(providerOnlyEstimate);
     const configured = this._meterState?.configured === true || providerEnergyAvailable || providerCostAvailable;
@@ -10839,7 +10910,7 @@ class ElrakningPanel {
     card.hidden = !estimate;
     if (historyChart) {
       const valueForItem = (item) => item.current
-        ? finiteCostNumber(item.estimated_total_sek)
+        ? finiteCostNumber(item.estimated_total_sek ?? item.known_amount_gross_sek)
         : finiteCostNumber(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
       const valuedHistory = monthHistory.filter((item) => item.coverage !== "missing" && Number.isFinite(valueForItem(item)));
       const maxHistoryValue = Math.max(1, ...valuedHistory.map(valueForItem));
@@ -10887,10 +10958,10 @@ class ElrakningPanel {
     const kpiComparisons = buildCostKpiComparisons(estimate, previous, estimate?.cost_comparison_checkpoints);
     const currentRows = [
       ["Beräknad månadskostnad", estimate.estimated_month_total_sek ?? (estimate.estimated_grid_month_total_sek != null ? `Nät ${this._formatSek(Number(estimate.estimated_grid_month_total_sek))}` : null)],
-      ["Kostnad hittills", estimate.total_so_far_sek],
+      ["Kostnad hittills", estimate.total_so_far_sek ?? (estimate.estimate_status === "partial_missing_greenely_invoice" ? "Ej jämförbart" : null)],
       ["Beräknat återstående", estimate.forecast_remaining_total_sek],
     ];
-    status.textContent = showingCurrent && (estimate.forecast_confidence === "partial_data" || estimate.estimate_status === "partial_provider_trend") ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
+    status.textContent = showingCurrent && (estimate.forecast_confidence === "partial_data" || estimate.estimate_status === "partial_provider_trend" || estimate.estimate_status === "partial_missing_greenely_invoice") ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
     kpis.replaceChildren(...currentRows.map(([label, value], index) => {
       const item = document.createElement("div");
       item.className = "cost-kpi";
@@ -10947,7 +11018,7 @@ class ElrakningPanel {
     const rows = showingCurrent ? [
       ["Elhandel", estimate.trade?.total_so_far_sek],
       ["Elnät", estimate.grid?.total_so_far_sek],
-      ["Fast kostnad", Number.isFinite(Number(estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
+      ["Fast kostnad", Number.isFinite(Number(estimate.trade?.booked_fixed_fee_sek ?? estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.booked_fixed_fee_sek ?? estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
       ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
       ["Import", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
       ["Beräknad import hela månaden", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],

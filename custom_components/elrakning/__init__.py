@@ -396,17 +396,13 @@ async def _async_capture_monthly_forecast_impl(hass, requested_site_id: str | No
         decision_at=now, month_end=month_end, near_term_points=near_term,
         historical_rows=rows, timezone_name=timezone_name, known_price_periods=price_periods,
     )
-    fixed_total = sum(value or 0.0 for value in (
-        trade_tariff.get("fixed_fee_incl_vat_per_month"),
-        applicable_grid_price.get("fixed_monthly_sek") if applicable_grid_price else None,
-    ))
     result = await manager.async_refresh(
         site_id=site_id, timezone_name=timezone_name, decision_at=now,
         target_month=target_month,
         actual_cost_to_date_sek=actual.get("actual_cost_to_date_sek"),
         actual_import_to_date_kwh=actual.get("actual_import_to_date_kwh"),
         future_points=slots.get("slots") or [], price_periods=price_periods,
-        remaining_fixed_cost_sek=fixed_total * max(0.0, (month_end - now).total_seconds() / max(1.0, (month_end - month_start).total_seconds())),
+        remaining_fixed_cost_sek=0.0,
         source_generations=sorted({
             str(row.get("source_generation_id"))
             for row in rows
