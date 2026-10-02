@@ -262,6 +262,7 @@ assert.match(costRender, /var\(--el-solar-color, #77C2A1\)/);
 assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
 assert.match(costRender, /buildCostChartGeometry\(width, plotWithAxisGutter, series\.days_in_month\)/);
 assert.match(costRender, /measuredPriceAxisGutter\(chart, axisLabels\)/);
+assert.match(costRender, /axisGutter \+ initialBarWidth \/ 2/);
 assert.match(costRender, /plotWithAxisGutter/);
 assert.match(costRender, /--cost-axis-left-gutter/);
 assert.match(source, /\.cost-chart-plot \{[\s\S]*--cost-axis-left-gutter: 48px;/);

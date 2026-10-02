@@ -10979,7 +10979,11 @@ class ElrakningPanel {
     const max = Math.max(1, ...all);
     const axisLabels = [0, max / 2, max].map((value) => `${this._formatNumber(value)} kr`);
     const axisGutter = measuredPriceAxisGutter(chart, axisLabels);
-    const plotWithAxisGutter = { ...plot, left: Math.max(plot.left, axisGutter) };
+    const initialBarWidth = Math.max(3, (width - axisGutter - plot.right) / Math.max(1, series.days_in_month) - 3);
+    const plotWithAxisGutter = {
+      ...plot,
+      left: Math.max(plot.left, axisGutter + initialBarWidth / 2),
+    };
     const { x } = buildCostChartGeometry(width, plotWithAxisGutter, series.days_in_month);
     const y = (value) => plotWithAxisGutter.top + (1 - value / max) * (height - plotWithAxisGutter.top - plotWithAxisGutter.bottom);
     const grid = [0, .5, 1].map((ratio) => {
