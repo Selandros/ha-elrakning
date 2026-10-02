@@ -636,6 +636,22 @@ const canonicalZeroEstimate = applyCanonicalMonthlyForecast(
 assert.equal(canonicalZeroEstimate.total_so_far_sek, 0);
 assert.equal(canonicalZeroEstimate.estimated_month_total_sek, 0);
 assert.equal(canonicalZeroEstimate.forecast_remaining_total_sek, 0);
+const providerActualWinsOverStaleForecast = applyCanonicalMonthlyForecast(
+  {
+    imported_kwh_so_far: 28.611,
+    total_so_far_sek: 67.48,
+    trade: { total_so_far_sek: 13.15 },
+    grid: { total_so_far_sek: 54.33 },
+  },
+  {
+    actual_cost_to_date_sek: 12.711319752,
+    actual_import_to_date_kwh: 0,
+    estimated_month_total_sek: null,
+    expected_future_cost_sek: null,
+  },
+);
+assert.equal(providerActualWinsOverStaleForecast.total_so_far_sek, 67.48);
+assert.equal(providerActualWinsOverStaleForecast.imported_kwh_so_far, 28.611);
 assert.equal(previousCalendarMonth("2026-08"), "2026-07");
 assert.equal(previousCalendarMonth("2027-01"), "2026-12");
 const previousActual = buildPreviousMonthActual({

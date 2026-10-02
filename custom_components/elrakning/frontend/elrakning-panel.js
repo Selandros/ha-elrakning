@@ -1977,12 +1977,18 @@ export function applyCanonicalMonthlyForecast(estimate, monthlyForecast) {
   const actualImportToDate = canonicalField("actual_import_to_date_kwh");
   const estimatedMonthImport = canonicalField("estimated_month_import_kwh");
   const expectedFutureImport = canonicalField("expected_future_import_kwh");
+  const tradeActual = finiteCostNumber(estimate?.trade?.total_so_far_sek);
+  const gridActual = finiteCostNumber(estimate?.grid?.total_so_far_sek);
+  const hasQualifiedComponentTotals = tradeActual !== null && gridActual !== null;
+  const hasQualifiedActualImport = finiteCostNumber(estimate?.imported_kwh_so_far) !== null;
   return {
     ...estimate,
     ...(estimatedMonthTotal !== undefined ? { estimated_month_total_sek: estimatedMonthTotal } : {}),
-    ...(actualCostToDate !== undefined ? { total_so_far_sek: actualCostToDate } : {}),
+    ...(hasQualifiedComponentTotals
+      ? { total_so_far_sek: tradeActual + gridActual }
+      : actualCostToDate !== undefined ? { total_so_far_sek: actualCostToDate } : {}),
     ...(expectedFutureCost !== undefined ? { forecast_remaining_total_sek: expectedFutureCost } : {}),
-    ...(actualImportToDate !== undefined ? { imported_kwh_so_far: actualImportToDate } : {}),
+    ...(hasQualifiedActualImport ? {} : actualImportToDate !== undefined ? { imported_kwh_so_far: actualImportToDate } : {}),
     ...(estimatedMonthImport !== undefined ? { forecast_import_kwh: estimatedMonthImport } : {}),
     ...(expectedFutureImport !== undefined ? { forecast_remaining_kwh: expectedFutureImport } : {}),
     forecast_method: monthlyForecast.forecast_method || estimate?.forecast_method,
