@@ -606,13 +606,14 @@ def build_forecast_solar_frames(
 
 def _points_with_stored_ids(storage: CanonicalStorage, frame_id: str, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Align a recapture with stored point IDs without changing C.1 matching."""
-    connection = storage.connection
-    if connection is None:
-        raise RuntimeError("canonical_storage_not_open")
-    stored = connection.execute(
-        "SELECT point_key, point_id FROM external_input_points WHERE frame_id = ?",
-        (frame_id,),
-    ).fetchall()
+    with storage.connection_lock():
+        connection = storage.connection
+        if connection is None:
+            raise RuntimeError("canonical_storage_not_open")
+        stored = connection.execute(
+            "SELECT point_key, point_id FROM external_input_points WHERE frame_id = ?",
+            (frame_id,),
+        ).fetchall()
     stored_ids = {str(point_key): str(point_id) for point_key, point_id in stored}
     if len(stored_ids) != len(points) or {point["point_key"] for point in points} != set(stored_ids):
         return points

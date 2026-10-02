@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,17 @@ HISTORY_NONE = "NO_HISTORY"
 HISTORY_UNKNOWN = "UNKNOWN"
 QUARTER_SECONDS = 900
 SCHEMA_PATH = Path(__file__).with_name("p0_storage_schema_v1.sql")
+
+
+def _serialized(method):
+    """Serialize operations that share the process-local SQLite connection."""
+    def wrapped(self, *args, **kwargs):
+        with self._connection_lock:
+            return method(self, *args, **kwargs)
+
+    wrapped.__name__ = method.__name__
+    wrapped.__doc__ = method.__doc__
+    return wrapped
 
 
 def timestamp_us(value: datetime) -> int:
@@ -59,6 +71,7 @@ class CanonicalStorage:
         self.path = Path(path)
         self.schema_path = Path(schema_path)
         self.connection: sqlite3.Connection | None = None
+        self._connection_lock = threading.RLock()
 
     def open(self) -> None:
         """Open and initialize the store with the selected durability profile."""
@@ -180,11 +193,17 @@ class CanonicalStorage:
         connection.execute("PRAGMA busy_timeout=5000")
 
     def close(self) -> None:
-        if self.connection is not None:
-            self.connection.commit()
-            self.connection.close()
-            self.connection = None
+        with self._connection_lock:
+            if self.connection is not None:
+                self.connection.commit()
+                self.connection.close()
+                self.connection = None
 
+    def connection_lock(self):
+        """Return the lock for callers that must use the raw connection."""
+        return self._connection_lock
+
+    @_serialized
     def integrity_check(self) -> str:
         return str(self._connection().execute("PRAGMA integrity_check").fetchone()[0])
 
@@ -193,6 +212,7 @@ class CanonicalStorage:
             raise RuntimeError("canonical_storage_not_open")
         return self.connection
 
+    @_serialized
     def ensure_source_generation(self, target: dict[str, Any], now: datetime) -> None:
         connection = self._connection()
         identity = target.get("source_identity") or {}
@@ -228,6 +248,7 @@ class CanonicalStorage:
             ),
         )
 
+    @_serialized
     def recanonicalize_source_generation(
         self,
         site_id: str,
@@ -346,6 +367,7 @@ class CanonicalStorage:
             raise
         return len(observations)
 
+    @_serialized
     def ensure_global_source_generation(self, target: dict[str, Any], now: datetime) -> None:
         """Ensure one deterministic global external-source generation exists."""
         identity = target.get("source_identity") or {}
@@ -375,6 +397,7 @@ class CanonicalStorage:
             ),
         )
 
+    @_serialized
     def insert_external_frame(self, frame: dict[str, Any], points: list[dict[str, Any]]) -> bool:
         """Insert an immutable external frame and its points atomically."""
         connection = self._connection()
@@ -461,6 +484,7 @@ class CanonicalStorage:
             connection.rollback()
             raise
 
+    @_serialized
     def latest_external_frame(self, semantic_key: str) -> tuple[str, int, str | None] | None:
         """Return the newest immutable revision for one semantic frame."""
         return self._connection().execute(
@@ -468,6 +492,7 @@ class CanonicalStorage:
             (semantic_key,),
         ).fetchone()
 
+    @_serialized
     def latest_external_frame_snapshot(self, semantic_key: str) -> dict[str, Any] | None:
         """Return the latest frame and point payload for deterministic deduplication."""
         row = self._connection().execute(
@@ -495,6 +520,7 @@ class CanonicalStorage:
         )
         return {"frame": dict(zip(keys, row)), "points": [dict(zip(("point_id", "point_key", "valid_at_us", "value", "unit", "quality_status", "point_json"), item)) for item in points]}
 
+    @_serialized
     def external_history_status_for_identity_domain(self, dataset: str, identity_domain_id: str) -> str:
         """Classify dependent history without requiring the current secret key."""
         if not dataset or not identity_domain_id:
@@ -533,6 +559,7 @@ class CanonicalStorage:
             raise RuntimeError("external_history_unknown")
         return status == HISTORY_FOUND
 
+    @_serialized
     def read_external_input_frames(
         self,
         decision_at: datetime,
@@ -721,9 +748,11 @@ class CanonicalStorage:
         )
         return stored == expected_points
 
+    @_serialized
     def count_external_frames(self) -> int:
         return int(self._connection().execute("SELECT COUNT(*) FROM external_input_frames").fetchone()[0])
 
+    @_serialized
     def insert_observation(self, observation: dict[str, Any]) -> bool:
         """Insert one immutable revision; return false for an exact replay."""
         connection = self._connection()
@@ -735,6 +764,7 @@ class CanonicalStorage:
             connection.rollback()
             raise
 
+    @_serialized
     def insert_observations_atomic(self, observations: list[dict[str, Any]]) -> int:
         """Insert a finalized quarter batch in one durable transaction."""
         connection = self._connection()
@@ -748,6 +778,7 @@ class CanonicalStorage:
             connection.rollback()
             raise
 
+    @_serialized
     def insert_historical_observations_atomic(self, observations: list[dict[str, Any]]) -> int:
         """Insert immutable provider observations with their native resolution."""
         connection = self._connection()
@@ -979,9 +1010,11 @@ class CanonicalStorage:
             for row in sorted(latest.values(), key=lambda item: (item[3], item[1], item[2]))
         ]
 
+    @_serialized
     def count_observations(self) -> int:
         return int(self._connection().execute("SELECT COUNT(*) FROM energy_observations").fetchone()[0])
 
+    @_serialized
     def reconcile_grid_import(self, site_id: str, start: datetime, end: datetime) -> int:
         """Persist the derived view while leaving raw rows immutable."""
         from .grid_reconciliation import reconcile_grid_import
@@ -1011,6 +1044,7 @@ class CanonicalStorage:
         connection.commit()
         return len(derived)
 
+    @_serialized
     def read_reconciled_grid_import(self, site_id: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
         """Read the derived site-scoped grid-import series."""
         rows = self._connection().execute(
@@ -1033,12 +1067,14 @@ class CanonicalStorage:
             "provenance": json.loads(row[12]) if row[12] else {},
         } for row in rows]
 
+    @_serialized
     def observation_exists(self, semantic_key: str, revision: int = 1) -> bool:
         return self._connection().execute(
             "SELECT 1 FROM energy_observations WHERE semantic_key = ? AND revision = ?",
             (semantic_key, revision),
         ).fetchone() is not None
 
+    @_serialized
     def existing_observation_keys(self, semantic_keys: list[str]) -> set[str]:
         if not semantic_keys:
             return set()

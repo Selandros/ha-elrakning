@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 import hashlib
@@ -35,6 +36,11 @@ REQUIRED_ESS_KEYS = {
     "capacity_kwh", "reserve_soc_fraction", "max_charge_kw", "max_discharge_kw",
     "planning_charge_efficiency", "planning_discharge_efficiency",
 }
+
+
+def _connection_guard(storage: Any):
+    lock_factory = getattr(storage, "connection_lock", None)
+    return lock_factory() if callable(lock_factory) else nullcontext()
 
 
 def _economics_is_causal(economics: dict[str, Any], decision_at: datetime) -> bool:
@@ -76,9 +82,10 @@ def _iso_us(value: int) -> str:
 
 
 def _frame_rows(storage: Any, site_id: str, role: str, decision_us: int, global_scope: bool = False) -> list[tuple[Any, ...]]:
-    connection = storage._connection()
-    return connection.execute(
-        """SELECT f.frame_id, f.schema_version, f.dataset_version, f.semantic_key,
+    with _connection_guard(storage):
+        connection = storage._connection()
+        return connection.execute(
+            """SELECT f.frame_id, f.schema_version, f.dataset_version, f.semantic_key,
                   f.revision, f.source_generation_id, f.source_scope, f.site_id,
                   f.logical_role, f.classification, f.published_at_us, f.fetched_at_us,
                   f.known_at_us, f.captured_at_us, f.valid_from_us, f.valid_to_us,
@@ -88,15 +95,16 @@ def _frame_rows(storage: Any, site_id: str, role: str, decision_us: int, global_
             WHERE f.logical_role=? AND f.known_at_us <= ? AND g.created_at_us <= ?
               AND ((f.site_id=? AND ?=0) OR (f.site_id IS NULL AND ?=1))
             ORDER BY f.known_at_us DESC, f.revision DESC, f.frame_id DESC""",
-        (role, decision_us, decision_us, site_id, int(global_scope), int(global_scope)),
-    ).fetchall()
+            (role, decision_us, decision_us, site_id, int(global_scope), int(global_scope)),
+        ).fetchall()
 
 
 def _frame_points(storage: Any, frame_id: str) -> list[dict[str, Any]]:
-    rows = storage._connection().execute(
-        "SELECT valid_at_us, value, unit, quality_status, point_json FROM external_input_points WHERE frame_id=? ORDER BY valid_at_us",
-        (frame_id,),
-    ).fetchall()
+    with _connection_guard(storage):
+        rows = storage._connection().execute(
+            "SELECT valid_at_us, value, unit, quality_status, point_json FROM external_input_points WHERE frame_id=? ORDER BY valid_at_us",
+            (frame_id,),
+        ).fetchall()
     points = []
     for row in rows:
         if len(row) < 5 or row[0] is None or row[1] is None or not isinstance(row[3], str):
