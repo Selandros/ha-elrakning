@@ -678,6 +678,17 @@ assert.equal(canonicalProviderOnlyEstimate.rows[0].total_variable_cost_sek, 40.6
 assert.equal(canonicalProviderOnlyEstimate.rows[0].trade_cost_sek, null);
 assert.equal(Object.keys(canonicalProviderOnlyEstimate.forecast || {}).includes("actual_cost_to_date_sek"), false);
 assert.equal(buildCostAnalysisSeries(canonicalProviderOnlyEstimate, null, new Date("2026-10-02T12:00:00+02:00")).actual.at(-1).value, 40.626);
+const canonicalGridOnlyForecast = applyProviderMonthlyTrendEstimate(
+  canonicalProviderOnlyEstimate,
+  { status: "ok", consumption_kwh: 887, provenance: { source: "eon_provider_trend" } },
+  activeGrid({ variable_total_ore_per_kwh_gross: 142, fixed_monthly_sek: 241.25 }),
+);
+assert.equal(canonicalGridOnlyForecast.estimate_status, "partial_missing_greenely_invoice");
+assert.equal(canonicalGridOnlyForecast.forecast_import_kwh, 887);
+assert.ok(Math.abs(canonicalGridOnlyForecast.estimated_grid_month_total_sek - 1500.78838) < 1e-9);
+assert.equal(canonicalGridOnlyForecast.grid.total_so_far_sek, 281.876);
+assert.equal(canonicalGridOnlyForecast.trade.total_so_far_sek, null);
+assert.equal(canonicalGridOnlyForecast.estimate_provenance.grid_forecast.provider_month_kwh, 887);
 const canonicalUnavailableEstimate = applyCanonicalMonthlyForecast(
   { estimated_month_total_sek: 999, total_so_far_sek: 888, forecast_remaining_total_sek: 111 },
   {

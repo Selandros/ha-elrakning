@@ -2152,23 +2152,27 @@ export function applyProviderMonthlyTrendEstimate(estimate, providerEstimate, gr
   const estimatedGridMonthTotal = Number.isFinite(actualGridVariable)
     ? actualGridVariable + remainingGridVariable + (Number.isFinite(gridFixed) ? gridFixed : 0)
     : null;
+  const gridForecastProvenance = {
+    method: "eon_provider_trend_monthly_volume_v1",
+    actual_source: "reconciled_grid_import",
+    provider_estimate: providerEstimate.provenance || providerEstimate.estimate_provenance || null,
+    trade_future_cost: "unavailable_without_verified_future_trade_prices",
+    grid_tariff_source: "active_effective_grid_tariff",
+    actual_import_kwh: actualKwh,
+    provider_month_kwh: providerKwh,
+    remaining_import_kwh: remainingKwh,
+  };
+  const canonical = estimate?.canonical_cost?.schema === "elrakning.canonical_cost.v1";
   return {
     ...estimate,
     forecast_import_kwh: providerKwh,
     forecast_remaining_kwh: remainingKwh,
     forecast_remaining_grid_variable_sek: remainingGridVariable,
     estimated_grid_month_total_sek: estimatedGridMonthTotal,
-    estimate_status: "partial_provider_trend",
-    estimate_provenance: {
-      method: "eon_provider_trend_monthly_volume_v1",
-      actual_source: "reconciled_grid_import",
-      provider_estimate: providerEstimate.provenance || providerEstimate.estimate_provenance || null,
-      trade_future_cost: "unavailable_without_verified_future_trade_prices",
-      grid_tariff_source: "active_effective_grid_tariff",
-      actual_import_kwh: actualKwh,
-      provider_month_kwh: providerKwh,
-      remaining_import_kwh: remainingKwh,
-    },
+    estimate_status: canonical ? estimate.estimate_status : "partial_provider_trend",
+    estimate_provenance: canonical
+      ? { ...(estimate.estimate_provenance || {}), grid_forecast: gridForecastProvenance }
+      : gridForecastProvenance,
   };
 }
 
@@ -10808,7 +10812,7 @@ class ElrakningPanel {
       || this._eonGridState?.grid_price
       || this._eonGridState?.tariff?.grid_price
       || null;
-    const providerTrend = canonicalEstimate ? null : this._eonGridState?.provider_monthly_estimate
+    const providerTrend = this._eonGridState?.provider_monthly_estimate
       || (() => {
         const trend = this._eonGridState?.provider_trend;
         const value = Number(trend?.estimated_month_consumption_kwh);
@@ -10843,12 +10847,8 @@ class ElrakningPanel {
       const monthlyForecast = billingHistory?.monthly_forecast;
       estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
       estimate = mergeKnownProviderGridCost(estimate, providerOnlyEstimate);
-      estimate = applyProviderMonthlyTrendEstimate(
-        estimate,
-        providerTrend,
-        applicableGridPrice,
-      );
     }
+    estimate = applyProviderMonthlyTrendEstimate(estimate, providerTrend, applicableGridPrice);
     const greenelyActual = canonicalEstimate
       ? { available: canonicalEstimate.trade?.actual_status === "invoice", amount_sek: canonicalEstimate.trade?.total_so_far_sek }
       : resolveGreenelyActualInvoiceCost(
