@@ -104,6 +104,39 @@ export function buildGridSourceCost(estimate, fallback = null) {
   };
 }
 
+export function buildProviderOnlyInvoiceEstimate(currentMonthCost, now = new Date()) {
+  if (!currentMonthCost || typeof currentMonthCost !== "object") return null;
+  const total = Number(currentMonthCost.total_sek);
+  const variable = Number(currentMonthCost.variable_sek);
+  const fixed = Number(currentMonthCost.fixed_sek);
+  const imported = Number(currentMonthCost.imported_kwh);
+  if (currentMonthCost.total_sek == null || currentMonthCost.variable_sek == null || currentMonthCost.imported_kwh == null
+    || !Number.isFinite(total) || !Number.isFinite(variable) || !Number.isFinite(imported)) return null;
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return {
+    month,
+    imported_kwh_so_far: imported,
+    actual_cost_to_date_sek: total,
+    estimated_month_total_sek: null,
+    estimated_grid_month_total_sek: total,
+    estimate_status: "provider_actual_only",
+    rows: [],
+    trade: { variable_cost_sek: null, fixed_fee_sek: null, accrued_fixed_fee_sek: null, total_so_far_sek: null },
+    grid: {
+      variable_cost_sek: variable,
+      fixed_fee_sek: Number.isFinite(fixed) ? fixed : null,
+      accrued_fixed_fee_sek: Number.isFinite(fixed) ? fixed : null,
+      total_so_far_sek: total,
+    },
+    provenance: {
+      method: "eon_provider_current_month_cost_v1",
+      source: currentMonthCost.source || "canonical_eon_grid_cost",
+      actual_import_kwh: imported,
+      actual_cost_to_date_sek: total,
+    },
+  };
+}
+
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -10598,11 +10631,30 @@ class ElrakningPanel {
     const today = this.host.querySelector("[data-invoice-estimate-today]");
     const estimateStatus = this.host.querySelector("[data-invoice-estimate-status]");
     if (!card || !month || !total || !today) return;
-    const billingHistory = this._billingHistory;
-    const applicableGridPrice = billingHistory?.grid_price || null;
+    const billingHistory = this._billingHistory || {};
+    const providerOnlyEstimate = buildProviderOnlyInvoiceEstimate(
+      this._eonGridState?.current_month_cost,
+      new Date(),
+    );
+    const applicableGridPrice = billingHistory.grid_price
+      || this._eonGridState?.grid_price
+      || this._eonGridState?.tariff?.grid_price
+      || null;
+    const providerTrend = this._eonGridState?.provider_monthly_estimate
+      || (() => {
+        const trend = this._eonGridState?.provider_trend;
+        const value = Number(trend?.estimated_month_consumption_kwh);
+        return Number.isFinite(value) ? {
+          status: "ok",
+          consumption_kwh: value,
+          provenance: trend?.estimate_provenance || trend?.provenance || null,
+        } : null;
+      })();
     const nativeEnergyBuckets = billingHistory?.energy_source?.method === "native_reconciled_energy_buckets"
       && Array.isArray(billingHistory?.energy_points);
-    let estimate = nativeEnergyBuckets
+    let estimate = !this._billingHistory && providerOnlyEstimate
+      ? providerOnlyEstimate
+      : nativeEnergyBuckets
       ? buildInvoiceEstimateFromEnergyBuckets(
         billingHistory?.price_periods,
         billingHistory?.energy_points,
@@ -10622,13 +10674,14 @@ class ElrakningPanel {
     estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
     estimate = applyProviderMonthlyTrendEstimate(
       estimate,
-      this._eonGridState?.provider_monthly_estimate,
+      providerTrend,
       applicableGridPrice,
     );
     const providerEnergyAvailable = nativeEnergyBuckets && billingHistory.energy_points.length > 0;
-    const configured = this._meterState?.configured === true || providerEnergyAvailable;
+    const providerCostAvailable = Boolean(providerOnlyEstimate);
+    const configured = this._meterState?.configured === true || providerEnergyAvailable || providerCostAvailable;
     card.hidden = false;
-    if (!configured || !billingHistory) {
+    if (!configured || (!this._billingHistory && !providerCostAvailable)) {
       total.textContent = "Ej tillgängligt";
       month.textContent = "";
       if (estimateStatus) {
@@ -10666,6 +10719,8 @@ class ElrakningPanel {
       ? this._formatSek(Number(estimate.estimated_month_total_sek))
       : estimate.estimated_grid_month_total_sek != null && Number.isFinite(Number(estimate.estimated_grid_month_total_sek))
         ? `Nät ${this._formatSek(Number(estimate.estimated_grid_month_total_sek))}`
+        : estimate.grid?.total_so_far_sek != null && Number.isFinite(Number(estimate.grid.total_so_far_sek))
+          ? `Faktiskt ${this._formatSek(Number(estimate.grid.total_so_far_sek))}`
         : "–";
     const todayVariableCostSek = Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
     today.hidden = !Number.isFinite(todayVariableCostSek);
@@ -10706,13 +10761,19 @@ class ElrakningPanel {
 
   _renderInvoiceCardCosts() {
     const estimate = this._invoiceEstimateRaw;
-    for (const [provider, value] of [["elhandel", estimate?.trade?.total_so_far_sek], ["elnet", estimate?.grid?.total_so_far_sek]]) {
+    const values = [
+      ["elhandel", estimate?.trade?.total_so_far_sek, this._electricityProviderState?.configured === true],
+      ["elnet", estimate?.grid?.total_so_far_sek ?? this._eonGridState?.current_month_cost?.total_sek, this._eonGridState?.configured === true],
+    ];
+    for (const [provider, value, configured] of values) {
       const element = this.host.querySelector(`[data-provider-invoice-cost="${provider}"]`);
       if (!element) continue;
       const output = element.querySelector("strong");
       const available = value != null && Number.isFinite(Number(value));
-      if (output) output.textContent = available ? this._formatSek(Number(value)) : "";
-      element.hidden = !available;
+      if (output) output.textContent = available
+        ? this._formatSek(Number(value))
+        : configured ? "Ej tillgängligt · Kostnadsdata saknas" : "";
+      element.hidden = !configured;
     }
     this._renderCostCard();
     this._renderDashboardCardVisibility();
