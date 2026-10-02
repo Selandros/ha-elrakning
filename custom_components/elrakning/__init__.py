@@ -1028,9 +1028,17 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     # Run one deterministic startup capture after setup returns so bootstrap timeouts
     # from unrelated replay work cannot cancel the persistence path.
-    frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
-        _async_capture_monthly_forecast(hass)
-    )
+    monthly_forecast_startup = _async_capture_monthly_forecast(hass)
+    create_background_task = getattr(hass, "async_create_background_task", None)
+    if callable(create_background_task):
+        frontend_data["monthly_forecast_startup_task"] = create_background_task(
+            monthly_forecast_startup,
+            name="elrakning_monthly_forecast_startup",
+        )
+    else:
+        frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
+            monthly_forecast_startup
+        )
     return True
 
 
