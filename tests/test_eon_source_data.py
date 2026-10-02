@@ -52,6 +52,7 @@ def test_cached_provider_imports_are_recovered_after_canonical_storage_startup()
     init = (ROOT / "custom_components/elrakning/__init__.py").read_text()
     assert "async def async_persist_cached_imports" in manager
     assert "self.facility_states" in manager.split("async def async_persist_cached_imports", 1)[1].split("    def _active_site_id", 1)[0]
+    assert "cached_state.get(\"facility\")" in manager
     assert "async_persist_cached_imports" in init
     assert "canonical_collector" in init
     assert init.index("async_register_eon_handoff_views(hass)") < init.index("cached_import_recovery")

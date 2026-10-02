@@ -139,7 +139,12 @@ class EonGridManager:
 
     async def async_persist_cached_imports(self) -> None:
         """Recover verified cached provider imports after canonical storage is ready."""
-        states = self.facility_states if isinstance(self.facility_states, dict) else {}
+        states = dict(self.facility_states) if isinstance(self.facility_states, dict) else {}
+        cached_state = self.state if isinstance(self.state, dict) else {}
+        cached_facility = cached_state.get("facility")
+        cached_identity = facility_identity(cached_facility)
+        if cached_identity and cached_identity not in states:
+            states[cached_identity] = cached_state
         if states:
             await self._async_persist_provider_imports(states)
 
