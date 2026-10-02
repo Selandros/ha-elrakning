@@ -11750,11 +11750,7 @@ class ElrakningPanel {
         ? "Driftstörning"
         : outage.status === "no_known_outage"
           ? "Ingen känd driftstörning"
-          : agreement.status === "future"
-            ? "Konfigurerad"
-            : agreement.status === "active"
-              ? "Konfigurerad"
-              : "Ej aktivt"
+          : "Konfigurerad"
       : "Ej konfigurerad";
     status.hidden = false;
     remove && (remove.hidden = !configured);

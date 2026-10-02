@@ -2029,6 +2029,8 @@ assert.match(panelSource, /data-price-layer="grid"/);
 assert.match(panelSource, /_hasTradePriceData\(\)/);
 assert.match(panelSource, /electricity: this\._hasTradePriceData\(\)/);
 assert.match(panelSource, /grid: this\._eonGridState\?\.configured === true && this\._hasGridPriceData\(\)/);
+assert.match(panelSource, /status\.textContent = configured[\s\S]*: "Konfigurerad"[\s\S]*: "Ej konfigurerad"/);
+assert.doesNotMatch(panelSource, /agreement\.status === "active"[\s\S]*Ej aktivt/);
 assert.match(panelSource, /input\.disabled = !available/);
 assert.match(panelSource, /control\.classList\.toggle\("is-disabled", !available\)/);
 assert.match(panelSource, /data-invoice-estimate-card/);
