@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyCanonicalMonthlyForecast, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -471,6 +471,25 @@ assert.equal(invoiceEstimate.grid.fixed_fee_sek, 226.25);
 assert.equal(invoiceEstimate.trade_weighted_average_ore_per_kwh, 32);
 assert.equal(invoiceEstimate.grid_weighted_average_ore_per_kwh, 100);
 assert.equal(invoiceEstimate.completeness.export_credit, false);
+const providerBucketEstimate = buildInvoiceEstimateFromEnergyBuckets(
+  [
+    { start: "2026-10-01T18:00:00Z", end: "2026-10-01T18:15:00Z", trade_customer_price_ore_per_kwh: 20 },
+    { start: "2026-10-01T18:15:00Z", end: "2026-10-01T18:30:00Z", trade_customer_price_ore_per_kwh: 40 },
+  ],
+  [
+    { timestamp: "2026-10-01T18:00:00Z", end: "2026-10-01T18:15:00Z", import_kwh: 0.734 },
+    { timestamp: "2026-10-01T18:15:00Z", end: "2026-10-01T18:30:00Z", import_kwh: 0.450 },
+  ],
+  activeGrid({ variable_total_ore_per_kwh_gross: 142, fixed_monthly_sek: 241.25 }),
+  null,
+  new Date("2026-10-01T18:30:00Z"),
+);
+assert.ok(Math.abs(providerBucketEstimate.imported_kwh_so_far - 1.184) < 1e-12);
+assert.ok(Math.abs(providerBucketEstimate.trade.variable_cost_sek - 0.3268) < 1e-12);
+assert.ok(Math.abs(providerBucketEstimate.grid.variable_cost_sek - 1.68128) < 1e-12);
+assert.ok(Math.abs(providerBucketEstimate.total_so_far_sek - 2.00808 - providerBucketEstimate.grid.accrued_fixed_fee_sek) < 1e-9);
+assert.equal(providerBucketEstimate.rows[0].import_kwh, 0.734);
+assert.equal(providerBucketEstimate.forecast_source, "unavailable");
 const constantPoints = (start, hours, value) => Array.from({ length: Math.round(hours * 12) + 1 }, (_, index) => ({
   timestamp: new Date(new Date(start).getTime() + index * 5 * 60 * 1000).toISOString(),
   import_kw: value,

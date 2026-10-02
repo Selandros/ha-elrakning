@@ -1302,7 +1302,7 @@ async def websocket_meter_power_history(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_billing_history(hass, connection, msg):
     """Return canonical current-month meter and price history for billing."""
-    if not _site_is_configured(hass):
+    if not (_site_is_configured(hass) or _site_binding_is_configured(hass, "grid")):
         connection.send_result(msg["id"], {"success": False, "error": "site_unconfigured", "points": []})
         return
     meter = _meter_manager(hass)

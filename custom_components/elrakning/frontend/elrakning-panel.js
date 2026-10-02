@@ -1590,6 +1590,91 @@ export function recomputeDailyEnergyState(powerState, powerHistory, meterPowerHi
   };
 }
 
+export function buildInvoiceEstimateFromEnergyBuckets(periods, energyBuckets, gridPrice, tradeFixedFee = null, now = new Date()) {
+  const current = new Date(now);
+  const nowMs = current.getTime();
+  if (!Array.isArray(periods) || !periods.length || !Array.isArray(energyBuckets)) return null;
+  const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
+  const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+  const gridPriceApplicable = gridPrice?.contract_source_status === "ACTIVE"
+    || gridPrice?._effective_dated_applicable === true;
+  const gridGross = gridPriceApplicable ? Number(gridPrice?.variable_total_ore_per_kwh_gross) : NaN;
+  const buckets = energyBuckets.map((bucket) => ({
+    start: new Date(bucket.timestamp).getTime(),
+    end: new Date(bucket.end).getTime(),
+    importKwh: Number(bucket.import_kwh),
+  })).filter((bucket) => Number.isFinite(bucket.start) && Number.isFinite(bucket.end)
+    && bucket.end > bucket.start && bucket.end <= nowMs && bucket.start >= monthStart.getTime()
+    && bucket.importKwh >= 0 && Number.isFinite(bucket.importKwh))
+    .sort((left, right) => left.start - right.start);
+  const rows = [];
+  let missingPricePeriods = 0;
+  for (const bucket of buckets) {
+    const matching = periods.filter((period) => {
+      const start = new Date(period.start).getTime();
+      const end = new Date(period.end).getTime();
+      const trade = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+      return Number.isFinite(start) && Number.isFinite(end) && end > start
+        && start <= bucket.start && end >= bucket.end && Number.isFinite(trade) && Number.isFinite(gridGross)
+        && period.forecast !== true;
+    });
+    if (matching.length !== 1) {
+      missingPricePeriods += 1;
+      continue;
+    }
+    const period = matching[0];
+    const tradeOre = Number(period.trade_customer_price_ore_per_kwh ?? Number(period.customer_price) * 100);
+    rows.push({
+      start: new Date(bucket.start).toISOString(),
+      end: new Date(bucket.end).toISOString(),
+      import_kwh: bucket.importKwh,
+      spot_price_ex_vat_ore_per_kwh: Number.isFinite(Number(period.spot_price_ex_vat)) ? Number(period.spot_price_ex_vat) * 100 : null,
+      electricity_cost_ex_vat_ore_per_kwh: Number.isFinite(Number(period.electricity_cost_ex_vat)) ? Number(period.electricity_cost_ex_vat) * 100 : null,
+      vat_ore_per_kwh: Number.isFinite(Number(period.vat)) ? Number(period.vat) * 100 : null,
+      trade_price_ore_per_kwh_gross: tradeOre,
+      grid_price_ore_per_kwh_gross: gridGross,
+      trade_cost_sek: bucket.importKwh * tradeOre / 100,
+      grid_cost_sek: bucket.importKwh * gridGross / 100,
+    });
+  }
+  const importedKwh = buckets.reduce((sum, bucket) => sum + bucket.importKwh, 0);
+  const pricedKwh = rows.reduce((sum, row) => sum + row.import_kwh, 0);
+  const tradeVariable = rows.reduce((sum, row) => sum + row.trade_cost_sek, 0);
+  const gridVariable = rows.reduce((sum, row) => sum + row.grid_cost_sek, 0);
+  const monthMs = nextMonth.getTime() - monthStart.getTime();
+  const elapsedRatio = Math.max(0, Math.min(1, (nowMs - monthStart.getTime()) / monthMs));
+  const fixedTrade = tradeFixedFee != null && Number.isFinite(Number(tradeFixedFee)) ? Number(tradeFixedFee) : null;
+  const fixedGrid = gridPriceApplicable && Number.isFinite(Number(gridPrice?.fixed_monthly_sek)) ? Number(gridPrice.fixed_monthly_sek) : null;
+  const accruedTrade = fixedTrade == null ? null : fixedTrade * elapsedRatio;
+  const accruedGrid = fixedGrid == null ? null : fixedGrid * elapsedRatio;
+  const variableTotal = rows.length ? tradeVariable + gridVariable : null;
+  const totalSoFar = variableTotal == null ? null : variableTotal + (accruedTrade || 0) + (accruedGrid || 0);
+  const tradeWeighted = pricedKwh > 0 ? rows.reduce((sum, row) => sum + row.import_kwh * row.trade_price_ore_per_kwh_gross, 0) / pricedKwh : null;
+  return {
+    month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`,
+    imported_kwh_so_far: importedKwh,
+    actual_imported_kwh_display: importedKwh,
+    priced_imported_kwh: pricedKwh || null,
+    trade: { variable_cost_sek: rows.length ? tradeVariable : null, fixed_fee_sek: fixedTrade, accrued_fixed_fee_sek: accruedTrade, total_so_far_sek: rows.length ? tradeVariable + (accruedTrade || 0) : null },
+    grid: { variable_cost_sek: rows.length ? gridVariable : null, fixed_fee_sek: fixedGrid, accrued_fixed_fee_sek: accruedGrid, total_so_far_sek: rows.length ? gridVariable + (accruedGrid || 0) : null },
+    total_so_far_sek: totalSoFar,
+    estimated_month_total_sek: null,
+    forecast_import_kwh: null,
+    forecast_remaining_kwh: null,
+    forecast_remaining_total_sek: null,
+    forecast_source: "unavailable",
+    forecast_method: "native_verified_energy_buckets; no future energy fabricated",
+    data_coverage: { period_count: rows.length, observed_periods: rows.length, covered_energy_periods: rows.length, missing_price_periods: missingPricePeriods, missing_energy_periods: 0, coverage_percent: buckets.length ? rows.length / buckets.length * 100 : 0 },
+    trade_weighted_average_ore_per_kwh: tradeWeighted,
+    grid_weighted_average_ore_per_kwh: pricedKwh > 0 ? gridGross : null,
+    total_weighted_average_ore_per_kwh: tradeWeighted == null || !Number.isFinite(gridGross) ? null : tradeWeighted + gridGross,
+    completeness: { trade_variable: rows.length > 0, trade_fixed: fixedTrade !== null, grid_variable: rows.length > 0 && Number.isFinite(gridGross), grid_fixed: fixedGrid !== null, export_credit: false },
+    export_energy_kwh: null,
+    rows,
+    trade_fixed_fee_source: fixedTrade !== null ? "provider_summary.tariff.fixed_fee_incl_vat_per_month" : null,
+  };
+}
+
 export function buildInvoiceEstimate(periods, meterPoints, gridPrice, tradeFixedFee = null, now = new Date(), historicalMeterPoints = []) {
   const current = new Date(now);
   const nowMs = current.getTime();
@@ -10477,24 +10562,37 @@ class ElrakningPanel {
     if (!card || !month || !total || !today) return;
     const billingHistory = this._billingHistory;
     const applicableGridPrice = billingHistory?.grid_price || null;
-    let estimate = buildInvoiceEstimate(
-      billingHistory?.price_periods,
-      billingHistory?.energy_points,
-      applicableGridPrice,
-      this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
-      new Date(),
-      billingHistory?.baseline_energy_points,
-    );
+    const nativeEnergyBuckets = billingHistory?.energy_source?.method === "native_reconciled_energy_buckets"
+      && Array.isArray(billingHistory?.energy_points);
+    let estimate = nativeEnergyBuckets
+      ? buildInvoiceEstimateFromEnergyBuckets(
+        billingHistory?.price_periods,
+        billingHistory?.energy_points,
+        applicableGridPrice,
+        this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
+        new Date(),
+      )
+      : buildInvoiceEstimate(
+        billingHistory?.price_periods,
+        billingHistory?.energy_points,
+        applicableGridPrice,
+        this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
+        new Date(),
+        billingHistory?.baseline_energy_points,
+      );
     const monthlyForecast = billingHistory?.monthly_forecast;
     estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
-    const configured = this._meterState?.configured === true;
+    const providerEnergyAvailable = nativeEnergyBuckets && billingHistory.energy_points.length > 0;
+    const configured = this._meterState?.configured === true || providerEnergyAvailable;
     card.hidden = false;
     if (!configured || !billingHistory) {
       total.textContent = "Ej tillgängligt";
       month.textContent = "";
       if (estimateStatus) {
         estimateStatus.hidden = false;
-        estimateStatus.textContent = this._costUnavailableReason === "meter_not_configured" ? "Sensor saknas: Elmätarens effekt (kW)" : "Historik saknas för Elmätarens effekt (kW)";
+        estimateStatus.textContent = this._eonGridState?.configured === true
+          ? "Ingen verifierad E.ON-förbrukning"
+          : this._costUnavailableReason === "meter_not_configured" ? "Sensor saknas: Elmätarens effekt (kW)" : "Historik saknas för Elmätarens effekt (kW)";
       }
       today.hidden = true;
       today.textContent = "";

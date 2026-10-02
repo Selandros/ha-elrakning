@@ -40,5 +40,6 @@ assert.equal((frontend.match(/this\._powerHistoryRequestToken \+= 1/g) || []).le
 assert.match(backend, /async def websocket_solar_evidence_state[\s\S]*?_site_is_configured\(hass\)/);
 assert.match(backend, /async def websocket_solar_forecast_state[\s\S]*?_site_is_configured\(hass\)/);
 assert.match(backend, /async def websocket_billing_history[\s\S]*?_site_is_configured\(hass\)/);
+assert.match(backend, /async def websocket_billing_history[\s\S]*?_site_binding_is_configured\(hass, "grid"\)/);
 
 console.log("frontend site-scoped startup gating contract: ok");
