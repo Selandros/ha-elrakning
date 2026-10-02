@@ -25,6 +25,18 @@ HISTORY_NONE = "NO_HISTORY"
 HISTORY_UNKNOWN = "UNKNOWN"
 QUARTER_SECONDS = 900
 SCHEMA_PATH = Path(__file__).with_name("p0_storage_schema_v1.sql")
+_PATH_LOCKS: dict[str, threading.RLock] = {}
+_PATH_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for_path(path: Path) -> threading.RLock:
+    key = str(path.resolve())
+    with _PATH_LOCKS_GUARD:
+        lock = _PATH_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _PATH_LOCKS[key] = lock
+        return lock
 
 
 def _serialized(method):
@@ -71,8 +83,9 @@ class CanonicalStorage:
         self.path = Path(path)
         self.schema_path = Path(schema_path)
         self.connection: sqlite3.Connection | None = None
-        self._connection_lock = threading.RLock()
+        self._connection_lock = _lock_for_path(self.path)
 
+    @_serialized
     def open(self) -> None:
         """Open and initialize the store with the selected durability profile."""
         self.path.parent.mkdir(parents=True, exist_ok=True)

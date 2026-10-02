@@ -143,6 +143,21 @@ class CanonicalStorageConcurrencyTests(unittest.TestCase):
                     self.assertEqual(storage.count_observations(), 0)
             storage.close()
 
+    def test_separate_storage_instances_share_one_path_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "canonical.sqlite"
+            first = CanonicalStorage(path)
+            second = CanonicalStorage(path)
+            self.assertIs(first.connection_lock(), second.connection_lock())
+            first.open()
+            second.open()
+            try:
+                self.assertEqual(first.integrity_check(), "ok")
+                self.assertEqual(second.integrity_check(), "ok")
+            finally:
+                second.close()
+                first.close()
+
     def test_revision_conflict_remains_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             storage = CanonicalStorage(Path(directory) / "canonical.sqlite")
