@@ -49,6 +49,17 @@ def test_optional_endpoint_failure_does_not_abort_cached_cost_state():
     assert 'hourly_status.append({"status": "failed"' in collector
     assert 'quarter_hour_status.append({"status": "failed"' in collector
     assert 'trend_status.append({"status": "failed"' in collector
+    assert '"includeElectricityCost": "false"' in collector
+    assert "_current_month_trend_cache" in collector
+    assert '"status": "stale_cached"' in collector
+
+
+def test_trend_request_uses_verified_non_cost_request_shape():
+    source = (ROOT / "custom_components/elrakning/elnat/eon_client.py").read_text()
+    method = source.split("    async def async_get_trend", 1)[1].split("    async def", 1)[0]
+    assert '"installations": f"{installation_identifier}:ELECTRICITY:GRID:false"' in method
+    assert '"includeElectricityCost": "false"' in method
+    assert '"language": "sv"' in method
 
 
 def test_source_redaction_covers_credentials_and_account_identifiers():

@@ -423,6 +423,7 @@ class EonGridManager:
                 except Exception:
                     quarter_hour_status.append({"status": "failed", "error": "api_error"})
             if trend_request is not None:
+                cached_trend = self._current_month_trend_cache(installation_id)
                 try:
                     captured_at = datetime.now(timezone.utc).isoformat()
                     trend = await trend_request(installation_id)
@@ -436,18 +437,37 @@ class EonGridManager:
                             "path": "/energy/trend",
                             "params": {
                                 "installations": f"{installation_id}:ELECTRICITY:GRID:false",
-                                "includeElectricityCost": "true",
+                                "includeElectricityCost": "false",
                                 "language": "sv",
                             },
                         },
+                        "trend_month": datetime.now(ZoneInfo("Europe/Stockholm")).strftime("%Y-%m"),
                     })
                     trend_status.append({"status": "ok"})
                 except EonAuthError as err:
                     if getattr(err, "code", None) == "reauth_required":
                         raise
-                    trend_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
+                    if cached_trend is not None:
+                        sources["trend"].append({
+                            "installation_id": installation_id,
+                            "cached_state": cached_trend,
+                            "stale": True,
+                            "stale_reason": getattr(err, "code", "api_error"),
+                        })
+                        trend_status.append({"status": "stale_cached", "error": getattr(err, "code", "api_error")})
+                    else:
+                        trend_status.append({"status": "failed", "error": getattr(err, "code", "api_error")})
                 except Exception:
-                    trend_status.append({"status": "failed", "error": "api_error"})
+                    if cached_trend is not None:
+                        sources["trend"].append({
+                            "installation_id": installation_id,
+                            "cached_state": cached_trend,
+                            "stale": True,
+                            "stale_reason": "api_error",
+                        })
+                        trend_status.append({"status": "stale_cached", "error": "api_error"})
+                    else:
+                        trend_status.append({"status": "failed", "error": "api_error"})
             pod = installation["point_of_delivery_number"]
             try:
                 outage = await client.async_get_outages(pod)
@@ -664,13 +684,20 @@ class EonGridManager:
             day_consumption = parse_transfer_points(day, "DAY", local_day) if day is not None else {"status": "missing", "resolution": "DAY", "date": local_day.isoformat(), "reason": "not_fetched"}
             hourly_consumption = parse_transfer_points(hourly, "HOUR", local_day) if hourly is not None else {"status": "missing", "resolution": "HOUR", "date": local_day.isoformat(), "reason": "not_fetched"}
             quarter_hour_consumption = parse_transfer_points(quarter_hour, "QUARTER_HOUR", local_day) if quarter_hour is not None else {"status": "missing", "resolution": "QUARTER_HOUR", "date": local_day.isoformat(), "reason": "not_fetched"}
-            provider_trend = parse_provider_trend(
-                trend.get("payload") if trend else None,
-                trend.get("captured_at") if trend else None,
-                trend.get("known_at") if trend else None,
-                installation_id,
-                trend.get("request") if trend else None,
-            )
+            if trend and isinstance(trend.get("cached_state"), dict):
+                provider_trend = deepcopy(trend["cached_state"])
+                provider_trend["status"] = "stale"
+                provider_trend["stale"] = True
+                provider_trend["stale_reason"] = trend.get("stale_reason", "refresh_failed")
+            else:
+                provider_trend = parse_provider_trend(
+                    trend.get("payload") if trend else None,
+                    trend.get("captured_at") if trend else None,
+                    trend.get("known_at") if trend else None,
+                    installation_id,
+                    trend.get("request") if trend else None,
+                    trend.get("trend_month") if trend else None,
+                )
             agreement = selected["agreement"] if selected else {
                 "status": "future" if installation.get("is_future") is True else "configured",
                 "type": "ELECTRICITY_CONS_GRID",
@@ -1201,6 +1228,37 @@ class EonGridManager:
             "app_authenticated": False,
             "facility_states": {},
         }
+
+    def _current_month_trend_cache(self, installation_identifier: str) -> dict[str, Any] | None:
+        """Return only a valid current-month trend for the exact installation."""
+        candidates = list(self.facility_states.values())
+        if isinstance(self.state, dict):
+            candidates.append(self.state)
+        current_month = datetime.now(ZoneInfo("Europe/Stockholm")).strftime("%Y-%m")
+        for state in candidates:
+            if not isinstance(state, dict):
+                continue
+            facility = state.get("facility")
+            if not isinstance(facility, dict) or facility.get("installation_identifier") != installation_identifier:
+                continue
+            trend = state.get("provider_trend")
+            if not isinstance(trend, dict) or trend.get("status") not in {"ok", "stale"}:
+                continue
+            if trend.get("estimated_month_consumption_kwh") is None:
+                continue
+            trend_month = trend.get("trend_month")
+            if not isinstance(trend_month, str):
+                timestamp = trend.get("timestamp")
+                try:
+                    trend_month = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).astimezone(
+                        ZoneInfo("Europe/Stockholm")
+                    ).strftime("%Y-%m")
+                except (TypeError, ValueError):
+                    continue
+            if trend_month != current_month:
+                continue
+            return deepcopy(trend)
+        return None
 
 
 def _redact_source_data(value: Any) -> Any:

@@ -465,6 +465,7 @@ def parse_provider_trend(
     known_at: str | None,
     installation_identifier: str,
     request: Mapping[str, Any] | None = None,
+    trend_month: str | None = None,
 ) -> dict[str, Any]:
     """Normalize E.ON trend metadata without promoting it to actual history."""
     base = {
@@ -498,6 +499,7 @@ def parse_provider_trend(
         "timestamp": consumption.get("timestamp"),
         "compare_percentage": consumption.get("comparePercentage"),
         "dialog_copy": item.get("dialogCopy"),
+        "trend_month": trend_month,
     }
     text = result.get("text")
     if isinstance(text, str):

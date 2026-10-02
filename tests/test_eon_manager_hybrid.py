@@ -3,7 +3,9 @@ import importlib.util
 import sys
 import threading
 import types
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).parents[1]
@@ -317,6 +319,64 @@ def test_eon_binding_cache_survives_unavailable_provider_state():
     assert state["tariff"]["subscription_fee_sek_per_month"] == 226.25
     assert state["grid_price"]["variable_total_ore_per_kwh_gross"] == 142.0
     assert state["consumption"] is None
+
+
+def test_trend_cache_is_current_month_and_installation_scoped():
+    manager = object.__new__(manager_module.EonGridManager)
+    current_month = datetime.now(ZoneInfo("Europe/Stockholm")).strftime("%Y-%m")
+    cached = {
+        "status": "ok",
+        "trend_month": current_month,
+        "estimated_month_consumption_kwh": 215.0,
+        "captured_at": f"{current_month}-02T08:00:00+00:00",
+        "known_at": f"{current_month}-02T08:00:00+00:00",
+    }
+    manager.state = {}
+    manager.facility_states = {
+        "installation:40093679": {
+            "facility": {"installation_identifier": "40093679"},
+            "provider_trend": cached,
+        },
+        "installation:other": {
+            "facility": {"installation_identifier": "other"},
+            "provider_trend": cached,
+        },
+    }
+    assert manager._current_month_trend_cache("40093679")["estimated_month_consumption_kwh"] == 215.0
+    assert manager._current_month_trend_cache("unknown") is None
+    manager.facility_states["installation:40093679"]["provider_trend"]["trend_month"] = "2000-01"
+    assert manager._current_month_trend_cache("40093679") is None
+
+
+def test_stale_cached_trend_remains_separate_from_actual_consumption():
+    manager = object.__new__(manager_module.EonGridManager)
+    current_month = datetime.now(ZoneInfo("Europe/Stockholm")).strftime("%Y-%m")
+    state = manager._build_app_states(
+        {
+            "grouped_contracts": [],
+            "monthly_transfer": [],
+            "day_transfer": [],
+            "hourly_transfer": [],
+            "quarter_hour_transfer": [],
+            "trend": [{
+                "installation_id": "40093679",
+                "cached_state": {
+                    "status": "ok",
+                    "trend_month": current_month,
+                    "estimated_month_consumption_kwh": 215.0,
+                    "usable_as_actual": False,
+                    "usable_as_forecast_input": False,
+                },
+                "stale_reason": "api_error",
+            }],
+            "outages": [],
+        },
+        [{"installation_identifier": "40093679", "point_of_delivery_number": "pod", "production": False}],
+    )["installation:40093679"]
+    assert state["provider_trend"]["status"] == "stale"
+    assert state["provider_trend"]["stale_reason"] == "api_error"
+    assert state["provider_trend"]["estimated_month_consumption_kwh"] == 215.0
+    assert state["provider_trend"]["usable_as_actual"] is False
 
 
 def test_provider_backfill_batch_identity_is_idempotent():
