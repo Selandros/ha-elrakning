@@ -25,6 +25,7 @@ assert.match(applySource, /if \(fuseChanged\) this\._renderPhaseHistoryCard\(\);
 assert.match(applySource, /\["Förbrukning hittills",/);
 assert.doesNotMatch(applySource, /\["E\.ON-kostnad",/);
 assert.match(applySource, /agreement\.name\.replace\(\/\^\\d\+\\s\*A/);
+assert.match(applySource, /replace\(\/\\\.\\s\*Elnätsområde/);
 assert.doesNotMatch(applySource, /\["Avtal från", agreement\.start_date\]/);
 assert.doesNotMatch(applySource, /\["Nätområde", facility\.grid_area\]/);
 assert.doesNotMatch(applySource, /\["Adress", facility\.address\?\.street\]/);

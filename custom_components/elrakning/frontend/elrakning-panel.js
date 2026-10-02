@@ -11992,7 +11992,7 @@ class ElrakningPanel {
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     const rows = [];
     const agreementName = typeof agreement.name === "string"
-      ? agreement.name.replace(/^\d+\s*A,\s*/i, "")
+      ? agreement.name.replace(/^\d+\s*A,\s*/i, "").replace(/\.\s*Elnätsområde.*$/i, "")
       : agreement.name;
     if (agreementName) rows.push(["Avtal", agreementName]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
