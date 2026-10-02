@@ -24,5 +24,9 @@ assert.match(applySource, /const fuseAmpere = resolveFuseAmpere\(this\._meterSta
 assert.match(applySource, /if \(fuseChanged\) this\._renderPhaseHistoryCard\(\);/);
 assert.match(applySource, /\["Förbrukning hittills",/);
 assert.doesNotMatch(applySource, /\["E\.ON-kostnad",/);
+assert.match(applySource, /agreement\.name\.replace\(\/\^\\d\+\\s\*A/);
+assert.doesNotMatch(applySource, /\["Avtal från", agreement\.start_date\]/);
+assert.doesNotMatch(applySource, /\["Nätområde", facility\.grid_area\]/);
+assert.doesNotMatch(applySource, /\["Adress", facility\.address\?\.street\]/);
 
 console.log("passed E.ON fuse phase-history invalidation test");

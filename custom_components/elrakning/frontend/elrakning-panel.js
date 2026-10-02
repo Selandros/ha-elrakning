@@ -11991,12 +11991,12 @@ class ElrakningPanel {
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     const rows = [];
-    if (agreement.name) rows.push(["Avtal", agreement.name]);
-    if (agreement.start_date) rows.push(["Avtal från", agreement.start_date]);
-    if (facility.address?.street) rows.push(["Adress", facility.address.street]);
+    const agreementName = typeof agreement.name === "string"
+      ? agreement.name.replace(/^\d+\s*A,\s*/i, "")
+      : agreement.name;
+    if (agreementName) rows.push(["Avtal", agreementName]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
     if (facility.price_area) rows.push(["Elområde", facility.price_area]);
-    if (facility.grid_area) rows.push(["Nätområde", facility.grid_area]);
     if (Number.isFinite(dailyMaxPhaseCurrentA)) {
       const phaseLabel = dailyMaxPhase?.phase ? `${dailyMaxPhase.phase.toUpperCase()} · ` : "";
       const fuseLabel = Number.isFinite(Number(dailyMaxPhase?.fuse_ampere ?? fuseAmpere))
