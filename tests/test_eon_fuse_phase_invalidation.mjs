@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolveFuseAmpere } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { gridAgreementDisplayName, resolveFuseAmpere } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const source = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const applyStart = source.indexOf("  _applyEonGridState(state)");
@@ -17,6 +17,8 @@ assert.equal(resolvedFuseChanged({ facility: { fuse_ampere: 16 } }, { facility: 
 assert.equal(resolvedFuseChanged(null, {}, { facility: { fuse_ampere: 16 } }), true);
 assert.equal(resolvedFuseChanged(null, { facility: { fuse_ampere: 16 } }, {}), true);
 assert.equal(resolvedFuseChanged(null, { unrelated: "old" }, { unrelated: "new" }), false);
+assert.equal(gridAgreementDisplayName("16 A, upp till 8000 kWh/år. Elnätsområde Nord"), "upp till 8000 kWh/år");
+assert.equal(gridAgreementDisplayName("Specialavtal 8000 kWh/år"), "Specialavtal 8000 kWh/år");
 
 assert.match(applySource, /const previousFuseAmpere = resolveFuseAmpere\(this\._meterState, this\._eonGridState\);/);
 assert.match(applySource, /this\._eonGridState = state;/);
@@ -24,8 +26,9 @@ assert.match(applySource, /const fuseAmpere = resolveFuseAmpere\(this\._meterSta
 assert.match(applySource, /if \(fuseChanged\) this\._renderPhaseHistoryCard\(\);/);
 assert.match(applySource, /\["Förbrukning hittills",/);
 assert.doesNotMatch(applySource, /\["E\.ON-kostnad",/);
-assert.match(applySource, /agreement\.name\.replace\(\/\^\\d\+\\s\*A/);
-assert.match(applySource, /replace\(\/\\\.\\s\*Elnätsområde/);
+assert.match(source, /export function gridAgreementDisplayName\(name\)/);
+assert.match(source, /name\.replace\(\/\^\\d\+\\s\*A/);
+assert.match(source, /replace\(\/\\\.\\s\*Elnätsområde/);
 assert.doesNotMatch(applySource, /\["Avtal från", agreement\.start_date\]/);
 assert.doesNotMatch(applySource, /\["Nätområde", facility\.grid_area\]/);
 assert.doesNotMatch(applySource, /\["Adress", facility\.address\?\.street\]/);

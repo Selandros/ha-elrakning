@@ -78,6 +78,11 @@ export function providerLabel(providerName, agreementName) {
     .join(" · ");
 }
 
+export function gridAgreementDisplayName(name) {
+  if (typeof name !== "string") return name;
+  return name.replace(/^\d+\s*A,\s*/i, "").replace(/\.\s*Elnätsområde.*$/i, "");
+}
+
 export function invoicePeriodLabel(invoice) {
   if (!invoice || typeof invoice !== "object") return null;
   for (const key of ["month", "billing_period"]) {
@@ -11991,9 +11996,7 @@ class ElrakningPanel {
     remove && (remove.hidden = !configured);
     if (sourceButton) sourceButton.hidden = !this._debugEnabled || !configured;
     const rows = [];
-    const agreementName = typeof agreement.name === "string"
-      ? agreement.name.replace(/^\d+\s*A,\s*/i, "").replace(/\.\s*Elnätsområde.*$/i, "")
-      : agreement.name;
+    const agreementName = gridAgreementDisplayName(agreement.name);
     if (agreementName) rows.push(["Avtal", agreementName]);
     if (facility.fuse_ampere != null) rows.push(["Säkring", `${this._formatNumber(facility.fuse_ampere)} A`]);
     if (facility.price_area) rows.push(["Elområde", facility.price_area]);
