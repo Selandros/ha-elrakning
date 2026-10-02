@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalMonthlyForecast, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
@@ -490,6 +490,23 @@ assert.ok(Math.abs(providerBucketEstimate.grid.variable_cost_sek - 1.68128) < 1e
 assert.ok(Math.abs(providerBucketEstimate.total_so_far_sek - 2.00808 - providerBucketEstimate.grid.accrued_fixed_fee_sek) < 1e-9);
 assert.equal(providerBucketEstimate.rows[0].import_kwh, 0.734);
 assert.equal(providerBucketEstimate.forecast_source, "unavailable");
+const trendEstimate = applyProviderMonthlyTrendEstimate(
+  { ...providerBucketEstimate, imported_kwh_so_far: 6.926, grid: { variable_cost_sek: 9.835, total_so_far_sek: 16.47 } },
+  { status: "ok", consumption_kwh: 215, estimate_provenance: { method: "provider_display_text_exact_v1" } },
+  activeGrid({ variable_total_ore_per_kwh_gross: 142, fixed_monthly_sek: 241.25 }),
+);
+assert.equal(trendEstimate.forecast_import_kwh, 215);
+assert.equal(trendEstimate.forecast_remaining_kwh, 208.074);
+assert.equal(trendEstimate.estimate_status, "partial_provider_trend");
+assert.equal(trendEstimate.estimate_provenance.actual_source, "reconciled_grid_import");
+assert.equal(trendEstimate.estimated_month_total_sek, null);
+const trendBelowActual = applyProviderMonthlyTrendEstimate(
+  { ...providerBucketEstimate, imported_kwh_so_far: 220, grid: { variable_cost_sek: 312.4 } },
+  { status: "ok", consumption_kwh: 215 },
+  activeGrid({ variable_total_ore_per_kwh_gross: 142, fixed_monthly_sek: 241.25 }),
+);
+assert.equal(trendBelowActual.forecast_remaining_kwh, 0);
+assert.equal(trendBelowActual.forecast_remaining_grid_variable_sek, 0);
 const constantPoints = (start, hours, value) => Array.from({ length: Math.round(hours * 12) + 1 }, (_, index) => ({
   timestamp: new Date(new Date(start).getTime() + index * 5 * 60 * 1000).toISOString(),
   import_kw: value,

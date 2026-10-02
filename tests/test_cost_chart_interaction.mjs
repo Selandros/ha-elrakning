@@ -302,7 +302,7 @@ assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kost
 const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("const series =", source.indexOf("const currentRows =")));
 assert.equal((costKpiRender.match(/\["(?:Beräknad månadskostnad|Kostnad hittills|Beräknat återstående)"/g) || []).length, 3);
 assert.match(source, /const currentRows = \[/);
-assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek\]/);
+assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek \?\?/);
 assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek\]/);
 assert.match(source, /\["Beräknat återstående", estimate\.forecast_remaining_total_sek\]/);
 assert.doesNotMatch(costKpiRender, /cost-kpi-secondary/);

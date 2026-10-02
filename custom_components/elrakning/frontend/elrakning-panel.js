@@ -1944,6 +1944,40 @@ export function applyCanonicalMonthlyForecast(estimate, monthlyForecast) {
   };
 }
 
+export function applyProviderMonthlyTrendEstimate(estimate, providerEstimate, gridPrice) {
+  if (!estimate || !providerEstimate || providerEstimate.status !== "ok") return estimate;
+  const providerKwh = Number(providerEstimate.consumption_kwh);
+  const actualKwh = Number(estimate.imported_kwh_so_far);
+  const gridOre = Number(gridPrice?.variable_total_ore_per_kwh_gross);
+  const gridFixed = Number(gridPrice?.fixed_monthly_sek);
+  if (!Number.isFinite(providerKwh) || providerKwh < 0 || !Number.isFinite(actualKwh) || actualKwh < 0
+    || !Number.isFinite(gridOre) || gridPrice?.contract_source_status !== "ACTIVE") return estimate;
+  const remainingKwh = Math.max(0, providerKwh - actualKwh);
+  const actualGridVariable = Number(estimate.grid?.variable_cost_sek);
+  const remainingGridVariable = remainingKwh * gridOre / 100;
+  const estimatedGridMonthTotal = Number.isFinite(actualGridVariable)
+    ? actualGridVariable + remainingGridVariable + (Number.isFinite(gridFixed) ? gridFixed : 0)
+    : null;
+  return {
+    ...estimate,
+    forecast_import_kwh: providerKwh,
+    forecast_remaining_kwh: remainingKwh,
+    forecast_remaining_grid_variable_sek: remainingGridVariable,
+    estimated_grid_month_total_sek: estimatedGridMonthTotal,
+    estimate_status: "partial_provider_trend",
+    estimate_provenance: {
+      method: "eon_provider_trend_monthly_volume_v1",
+      actual_source: "reconciled_grid_import",
+      provider_estimate: providerEstimate.provenance || providerEstimate.estimate_provenance || null,
+      trade_future_cost: "unavailable_without_verified_future_trade_prices",
+      grid_tariff_source: "active_effective_grid_tariff",
+      actual_import_kwh: actualKwh,
+      provider_month_kwh: providerKwh,
+      remaining_import_kwh: remainingKwh,
+    },
+  };
+}
+
 export function buildCostAnalysisSeries(estimate, previousActual = null, now = new Date()) {
   const current = new Date(now);
   const year = current.getFullYear();
@@ -2638,6 +2672,9 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       forecast_daily_kwh: estimate.forecast_daily_kwh ?? null,
       source: estimate.forecast_source || null,
       fallback: estimate.forecast_fallback || null,
+      provider_trend: estimate.estimate_provenance?.method === "eon_provider_trend_monthly_volume_v1"
+        ? estimate.estimate_provenance
+        : null,
       actual_so_far_sek: estimate.actual_so_far_sek ?? null,
       remaining_estimated_sek: estimate.remaining_estimated_sek ?? null,
       spot_price_source: billingHistory.spot_price_source || null,
@@ -2651,6 +2688,7 @@ export function buildInvoiceProvenance(estimate, billingHistory = {}) {
       trade_monthly_fee_sek: tradeFixed,
       grid_monthly_fee_sek: gridFixed,
       estimated_total_sek: estimate.estimated_month_total_sek,
+      estimated_grid_month_total_sek: estimate.estimated_grid_month_total_sek ?? null,
     },
     calculation: {
       trade_variable_actual_sek: estimate.trade?.variable_cost_sek ?? null,
@@ -10579,9 +10617,14 @@ class ElrakningPanel {
         this._electricityProviderState?.summary?.tariff?.fixed_fee_incl_vat_per_month,
         new Date(),
         billingHistory?.baseline_energy_points,
-      );
+    );
     const monthlyForecast = billingHistory?.monthly_forecast;
     estimate = applyCanonicalMonthlyForecast(estimate, monthlyForecast);
+    estimate = applyProviderMonthlyTrendEstimate(
+      estimate,
+      this._eonGridState?.provider_monthly_estimate,
+      applicableGridPrice,
+    );
     const providerEnergyAvailable = nativeEnergyBuckets && billingHistory.energy_points.length > 0;
     const configured = this._meterState?.configured === true || providerEnergyAvailable;
     card.hidden = false;
@@ -10602,7 +10645,12 @@ class ElrakningPanel {
       return;
     }
     month.textContent = estimate?.month ? this._formatInvoiceMonth(estimate.month).split(" ")[0] : "";
-    if (estimateStatus) estimateStatus.hidden = true;
+    if (estimateStatus) {
+      estimateStatus.hidden = estimate?.estimate_status !== "partial_provider_trend";
+      estimateStatus.textContent = estimate?.estimate_status === "partial_provider_trend"
+        ? `Delvis · E.ON-prognos ${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh · handel saknas`
+        : "";
+    }
     if (!estimate) {
       card.hidden = false;
       total.textContent = "–";
@@ -10614,9 +10662,11 @@ class ElrakningPanel {
       this._renderInvoiceCardCosts();
       return;
     }
-    total.textContent = estimate.estimated_month_total_sek == null || !Number.isFinite(Number(estimate.estimated_month_total_sek))
-      ? "–"
-      : this._formatSek(Number(estimate.estimated_month_total_sek));
+    total.textContent = estimate.estimated_month_total_sek != null && Number.isFinite(Number(estimate.estimated_month_total_sek))
+      ? this._formatSek(Number(estimate.estimated_month_total_sek))
+      : estimate.estimated_grid_month_total_sek != null && Number.isFinite(Number(estimate.estimated_grid_month_total_sek))
+        ? `Nät ${this._formatSek(Number(estimate.estimated_grid_month_total_sek))}`
+        : "–";
     const todayVariableCostSek = Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
     today.hidden = !Number.isFinite(todayVariableCostSek);
     today.textContent = today.hidden ? "" : `+${this._formatSek(todayVariableCostSek)} idag`;
@@ -10754,11 +10804,11 @@ class ElrakningPanel {
     const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
     const kpiComparisons = buildCostKpiComparisons(estimate, previous, estimate?.cost_comparison_checkpoints);
     const currentRows = [
-      ["Beräknad månadskostnad", estimate.estimated_month_total_sek],
+      ["Beräknad månadskostnad", estimate.estimated_month_total_sek ?? (estimate.estimated_grid_month_total_sek != null ? `Nät ${this._formatSek(Number(estimate.estimated_grid_month_total_sek))}` : null)],
       ["Kostnad hittills", estimate.total_so_far_sek],
       ["Beräknat återstående", estimate.forecast_remaining_total_sek],
     ];
-    status.textContent = showingCurrent && estimate.forecast_confidence === "partial_data" ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
+    status.textContent = showingCurrent && (estimate.forecast_confidence === "partial_data" || estimate.estimate_status === "partial_provider_trend") ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
     kpis.replaceChildren(...currentRows.map(([label, value], index) => {
       const item = document.createElement("div");
       item.className = "cost-kpi";
@@ -10819,6 +10869,8 @@ class ElrakningPanel {
       ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
       ["Import", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
       ["Beräknad import hela månaden", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
+      ["E.ON prognos import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
+      ["E.ON nätprognos hela månaden", Number.isFinite(Number(estimate.estimated_grid_month_total_sek)) ? this._formatSek(Number(estimate.estimated_grid_month_total_sek)) : null],
       ["Snittpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
     ] : selectedRecord ? [
       ["Elhandel", selectedRecord.trade_sek == null ? "Saknas" : selectedRecord.trade_sek],
