@@ -513,12 +513,13 @@ class EonGridManager:
                 installation_id = installation["installation_identifier"]
                 date_key = f"{installation_id}|{target_date.isoformat()}"
                 previous = attempts.get(date_key) if isinstance(attempts.get(date_key), dict) else {}
-                if completed.get(date_key) is True and date_key in retained_transfer_dates:
+                completed_without_payload = completed.get(date_key) is True and date_key not in retained_transfer_dates
+                if completed.get(date_key) is True and not completed_without_payload:
                     continue
                 last_attempt = previous.get("at")
                 if last_attempt:
                     try:
-                        if now - datetime.fromisoformat(str(last_attempt).replace("Z", "+00:00")) < timedelta(hours=EON_BACKFILL_RETRY_HOURS):
+                        if not completed_without_payload and now - datetime.fromisoformat(str(last_attempt).replace("Z", "+00:00")) < timedelta(hours=EON_BACKFILL_RETRY_HOURS):
                             continue
                     except ValueError:
                         pass

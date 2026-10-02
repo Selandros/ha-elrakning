@@ -48,7 +48,8 @@ def test_completed_backfill_without_retained_transfer_is_recoverable():
     source = manager_text()
     method = source.split("    async def _async_fetch_closed_day_backfill", 1)[1].split("    async def async_save_web_credentials", 1)[0]
     assert "retained_transfer_dates" in method
-    assert "completed.get(date_key) is True and date_key in retained_transfer_dates" in method
+    assert "completed_without_payload" in method
+    assert "not completed_without_payload" in method
 
 
 def test_optional_endpoint_failure_does_not_abort_cached_cost_state():
