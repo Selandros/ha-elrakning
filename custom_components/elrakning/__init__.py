@@ -442,15 +442,70 @@ def _schedule_load_forecast_capture(hass, site_identity_manager, canonical_colle
     )
 
 
-def _schedule_monthly_forecast_capture(hass):
-    """Schedule a single bounded monthly forecast refresh."""
-    data = hass.data.setdefault(DOMAIN, {})
-    task = data.get("monthly_forecast_capture_task")
-    if task is not None and not task.done():
+class _MonthlyForecastTaskOwner:
+    """Own one coalesced monthly forecast task for the config entry."""
+
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self.task = None
+        self.pending = False
+        self.closed = False
+
+    def _create_task(self):
+        coroutine = _async_capture_monthly_forecast(self.hass)
+        create_background_task = getattr(self.entry, "async_create_background_task", None)
+        if callable(create_background_task):
+            return create_background_task(
+                self.hass,
+                coroutine,
+                name="elrakning_monthly_forecast",
+            )
+        create_background_task = getattr(self.hass, "async_create_background_task", None)
+        if callable(create_background_task):
+            return create_background_task(coroutine, name="elrakning_monthly_forecast")
+        return self.hass.async_create_task(coroutine)
+
+    def schedule(self):
+        if self.closed:
+            return None
+        if self.task is not None and not self.task.done():
+            self.pending = True
+            return self.task
+        self.pending = False
+        self.task = self._create_task()
+        self.task.add_done_callback(self._task_done)
+        self.hass.data.setdefault(DOMAIN, {})["monthly_forecast_capture_task"] = self.task
+        return self.task
+
+    def _task_done(self, task):
+        if task is not self.task:
+            return
+        self.task = None
+        self.hass.data.setdefault(DOMAIN, {})["monthly_forecast_capture_task"] = None
+        if self.closed or not self.pending:
+            self.pending = False
+            return
+        self.pending = False
+        self.schedule()
+
+    def close(self):
+        self.closed = True
+        self.pending = False
+        task = self.task
+        if task is not None and not task.done():
+            task.cancel()
         return task
-    task = hass.create_task(_async_capture_monthly_forecast(hass))
-    data["monthly_forecast_capture_task"] = task
-    return task
+
+
+def _schedule_monthly_forecast_capture(hass):
+    """Schedule one coalesced monthly forecast refresh."""
+    data = hass.data.setdefault(DOMAIN, {})
+    owner = data.get("monthly_forecast_task_owner")
+    if owner is None:
+        owner = _MonthlyForecastTaskOwner(hass, data.get("config_entry"))
+        data["monthly_forecast_task_owner"] = owner
+    return owner.schedule()
 
 
 class _ReplayTaskProxy:
@@ -1026,27 +1081,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         json.dumps({"source": "startup", "scheduled_at": dt_util.now().astimezone(timezone.utc).isoformat()}, separators=(",", ":")),
     )
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
-    # Run one deterministic startup capture after setup returns so bootstrap timeouts
-    # from unrelated replay work cannot cancel the persistence path.
-    monthly_forecast_startup = _async_capture_monthly_forecast(hass)
-    create_background_task = getattr(entry, "async_create_background_task", None)
-    if callable(create_background_task):
-        frontend_data["monthly_forecast_startup_task"] = create_background_task(
-            hass,
-            monthly_forecast_startup,
-            name="elrakning_monthly_forecast_startup",
-        )
-    else:
-        create_background_task = getattr(hass, "async_create_background_task", None)
-        if callable(create_background_task):
-            frontend_data["monthly_forecast_startup_task"] = create_background_task(
-                monthly_forecast_startup,
-                name="elrakning_monthly_forecast_startup",
-            )
-        else:
-            frontend_data["monthly_forecast_startup_task"] = hass.async_create_task(
-                monthly_forecast_startup
-            )
+    owner = _MonthlyForecastTaskOwner(hass, entry)
+    frontend_data["monthly_forecast_task_owner"] = owner
+    frontend_data["monthly_forecast_startup_task"] = owner.schedule()
     return True
 
 
@@ -1078,10 +1115,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsubscribe()
     for unsubscribe in frontend_data.pop("forecast_view_cache_unsubs", []):
         unsubscribe()
-    if refresh_task := frontend_data.pop("monthly_forecast_capture_task", None):
-        refresh_task.cancel()
-    if startup_task := frontend_data.pop("monthly_forecast_startup_task", None):
-        startup_task.cancel()
+    monthly_forecast_owner = frontend_data.pop("monthly_forecast_task_owner", None)
+    monthly_forecast_task = monthly_forecast_owner.close() if monthly_forecast_owner else None
+    frontend_data.pop("monthly_forecast_capture_task", None)
+    frontend_data.pop("monthly_forecast_startup_task", None)
+    if startup_task := monthly_forecast_task:
         try:
             await startup_task
         except asyncio.CancelledError:

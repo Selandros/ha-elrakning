@@ -434,7 +434,7 @@ def test_monthly_forecast_startup_capture_is_scheduled_after_source_event_listen
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
     listeners = source.index('frontend_data["monthly_forecast_event_unsubs"] = [')
-    startup = source.index('monthly_forecast_startup = _async_capture_monthly_forecast(hass)')
+    startup = source.index('frontend_data["monthly_forecast_task_owner"] = owner')
     assert listeners < startup
     assert 'hass.bus.async_listen("elrakning_load_forecast_update"' in source[listeners:startup]
     assert 'hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT' in source[listeners:startup]
@@ -456,20 +456,124 @@ def test_monthly_forecast_startup_capture_runs_after_ready_event():
     source = source_path.read_text(encoding="utf-8")
     ready = source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
     return_statement = source.index("    return True", ready)
-    assert 'monthly_forecast_startup = _async_capture_monthly_forecast(hass)' in source[ready:return_statement]
-    assert 'getattr(entry, "async_create_background_task", None)' in source[ready:return_statement]
-    assert 'create_background_task(\n            hass,' in source[ready:return_statement]
-    assert 'async_create_background_task' in source[ready:return_statement]
-    assert 'name="elrakning_monthly_forecast_startup"' in source[ready:return_statement]
-    assert "_async_capture_monthly_forecast(hass)" in source[ready:return_statement]
+    startup = source[ready:return_statement]
+    assert 'frontend_data["monthly_forecast_task_owner"] = owner' in startup
+    assert 'frontend_data["monthly_forecast_startup_task"] = owner.schedule()' in startup
+    assert "_MonthlyForecastTaskOwner(hass, entry)" in startup
 
 
 def test_monthly_forecast_startup_capture_is_owned_for_unload_cancellation():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
     assert 'frontend_data["monthly_forecast_startup_task"]' in source
-    assert 'async_create_background_task' in source
+    assert 'frontend_data.pop("monthly_forecast_task_owner", None)' in source
+    assert "monthly_forecast_owner.close()" in source
     assert 'frontend_data.pop("monthly_forecast_startup_task", None)' in source
+
+
+def _load_monthly_forecast_task_owner(capture):
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_MonthlyForecastTaskOwner")
+    namespace = {
+        "asyncio": asyncio,
+        "DOMAIN": "elrakning",
+        "_async_capture_monthly_forecast": capture,
+    }
+    exec(compile(ast.Module(body=[class_node], type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["_MonthlyForecastTaskOwner"]
+
+
+class _MonthlyForecastEntry:
+    def async_create_background_task(self, _hass, coroutine, *, name):
+        return asyncio.create_task(coroutine, name=name)
+
+
+class _MonthlyForecastHass:
+    def __init__(self):
+        self.data = {"elrakning": {}}
+
+
+def test_monthly_forecast_single_flight_coalesces_triggers_into_one_rerun():
+    async def exercise():
+        started = []
+        releases = []
+
+        async def capture(_hass):
+            started.append(True)
+            release = asyncio.Event()
+            releases.append(release)
+            await release.wait()
+
+        owner_class = _load_monthly_forecast_task_owner(capture)
+        hass = _MonthlyForecastHass()
+        owner = owner_class(hass, _MonthlyForecastEntry())
+        first = owner.schedule()
+        assert owner.schedule() is first
+        assert owner.schedule() is first
+        await asyncio.sleep(0)
+        assert len(started) == 1
+        releases[0].set()
+        await first
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert len(started) == 2
+        releases[1].set()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert owner.task is None
+        assert owner.pending is False
+
+    asyncio.run(exercise())
+
+
+def test_monthly_forecast_single_flight_does_not_rerun_without_pending_trigger():
+    async def exercise():
+        release = asyncio.Event()
+        started = 0
+
+        async def capture(_hass):
+            nonlocal started
+            started += 1
+            await release.wait()
+
+        owner_class = _load_monthly_forecast_task_owner(capture)
+        hass = _MonthlyForecastHass()
+        owner = owner_class(hass, _MonthlyForecastEntry())
+        task = owner.schedule()
+        await asyncio.sleep(0)
+        release.set()
+        await task
+        await asyncio.sleep(0)
+        assert started == 1
+        assert owner.task is None
+
+    asyncio.run(exercise())
+
+
+def test_monthly_forecast_single_flight_close_cancels_task_and_pending_state():
+    async def exercise():
+        release = asyncio.Event()
+
+        async def capture(_hass):
+            await release.wait()
+
+        owner_class = _load_monthly_forecast_task_owner(capture)
+        hass = _MonthlyForecastHass()
+        owner = owner_class(hass, _MonthlyForecastEntry())
+        task = owner.schedule()
+        owner.schedule()
+        closed_task = owner.close()
+        assert closed_task is task
+        assert owner.closed is True
+        assert owner.pending is False
+        assert task.cancelled() is False
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(exercise())
 
 
 def test_monthly_forecast_uses_persisted_power_snapshot_during_startup_race():
