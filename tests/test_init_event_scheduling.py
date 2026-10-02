@@ -457,6 +457,8 @@ def test_monthly_forecast_startup_capture_runs_after_ready_event():
     ready = source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
     return_statement = source.index("    return True", ready)
     assert 'monthly_forecast_startup = _async_capture_monthly_forecast(hass)' in source[ready:return_statement]
+    assert 'getattr(entry, "async_create_background_task", None)' in source[ready:return_statement]
+    assert 'create_background_task(\n            hass,' in source[ready:return_statement]
     assert 'async_create_background_task' in source[ready:return_statement]
     assert 'name="elrakning_monthly_forecast_startup"' in source[ready:return_statement]
     assert "_async_capture_monthly_forecast(hass)" in source[ready:return_statement]
