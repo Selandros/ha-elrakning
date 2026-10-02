@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, finiteCostNumber } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
@@ -99,6 +99,11 @@ assert.deepEqual(buildProviderOnlyInvoiceEstimate({
   provenance: { method: "eon_provider_current_month_cost_v1", source: "canonical_eon_grid_cost", actual_import_kwh: 21.69, actual_cost_to_date_sek: 272.0498 },
 });
 assert.equal(buildProviderOnlyInvoiceEstimate({ total_sek: null, variable_sek: null, imported_kwh: null }), null);
+assert.equal(billingHistoryHasEnergyEvidence({ success: true, points: [] }), false);
+assert.equal(billingHistoryHasEnergyEvidence({ success: true, energy_points: [] }), false);
+assert.equal(billingHistoryHasEnergyEvidence({ success: true, points: [{ timestamp: "2026-10-02T00:00:00Z", import_kw: 1 }] }), true);
+assert.equal(billingHistoryHasEnergyEvidence({ success: true, energy_points: [{ timestamp: "2026-10-02T00:00:00Z", import_kwh: 0.5 }] }), true);
+assert.equal(billingHistoryHasEnergyEvidence({ success: true, invoice_estimate: { today: { variable_cost_sek: 1.2 } } }), true);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker/);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");

@@ -137,6 +137,14 @@ export function buildProviderOnlyInvoiceEstimate(currentMonthCost, now = new Dat
   };
 }
 
+export function billingHistoryHasEnergyEvidence(history) {
+  if (!history || typeof history !== "object") return false;
+  const hasPoints = (value) => Array.isArray(value) && value.length > 0;
+  return hasPoints(history.energy_points)
+    || hasPoints(history.points)
+    || Number.isFinite(Number(history.invoice_estimate?.today?.variable_cost_sek));
+}
+
 export function priceColorBands(prices) {
   const validPrices = prices.filter(Number.isFinite);
   const sorted = validPrices.sort((left, right) => left - right);
@@ -10652,7 +10660,8 @@ class ElrakningPanel {
       })();
     const nativeEnergyBuckets = billingHistory?.energy_source?.method === "native_reconciled_energy_buckets"
       && Array.isArray(billingHistory?.energy_points);
-    let estimate = !this._billingHistory && providerOnlyEstimate
+    const hasBillingEnergyEvidence = billingHistoryHasEnergyEvidence(billingHistory);
+    let estimate = !hasBillingEnergyEvidence && providerOnlyEstimate
       ? providerOnlyEstimate
       : nativeEnergyBuckets
       ? buildInvoiceEstimateFromEnergyBuckets(
@@ -10681,7 +10690,7 @@ class ElrakningPanel {
     const providerCostAvailable = Boolean(providerOnlyEstimate);
     const configured = this._meterState?.configured === true || providerEnergyAvailable || providerCostAvailable;
     card.hidden = false;
-    if (!configured || (!this._billingHistory && !providerCostAvailable)) {
+    if (!configured || (!hasBillingEnergyEvidence && !providerCostAvailable)) {
       total.textContent = "Ej tillgängligt";
       month.textContent = "";
       if (estimateStatus) {
