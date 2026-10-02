@@ -54,7 +54,8 @@ def test_cached_provider_imports_are_recovered_after_canonical_storage_startup()
     assert "self.facility_states" in manager.split("async def async_persist_cached_imports", 1)[1].split("    def _active_site_id", 1)[0]
     assert "async_persist_cached_imports" in init
     assert "canonical_collector" in init
-    assert init.index("hass.data.setdefault(DOMAIN, {})[\"canonical_collector\"] = canonical_collector") < init.index("cached_import_recovery")
+    assert init.index("async_register_eon_handoff_views(hass)") < init.index("cached_import_recovery")
+    assert init.index("cached_import_recovery") < init.index("grid_manager.async_start_refresh()")
 
 
 def test_completed_backfill_without_retained_transfer_is_recoverable():
