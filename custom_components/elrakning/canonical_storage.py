@@ -40,6 +40,18 @@ def quarter_start(value: datetime) -> datetime:
     return utc.replace(minute=minute, second=0, microsecond=0)
 
 
+def _is_provenance_enrichment(existing_json: str, incoming_json: str) -> bool:
+    """Accept only additive provenance changes for the same immutable fact."""
+    try:
+        existing = json.loads(existing_json) if existing_json else {}
+        incoming = json.loads(incoming_json) if incoming_json else {}
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(existing, dict) or not isinstance(incoming, dict) or len(incoming) <= len(existing):
+        return False
+    return all(incoming.get(key) == value for key, value in existing.items())
+
+
 class CanonicalStorage:
     """Own a durable, immutable SQLite P0 observation store."""
 
@@ -792,7 +804,7 @@ class CanonicalStorage:
             if "historical_energy_observations.semantic_key, historical_energy_observations.revision" not in str(error):
                 raise
             existing = connection.execute(
-                """SELECT site_id, logical_role, source_generation_id, interval_start_us, interval_end_us,
+                """SELECT record_id, site_id, logical_role, source_generation_id, interval_start_us, interval_end_us,
                           resolution_seconds, source_resolution_kind, source_resolution_seconds, observed_at_us,
                           value, unit, sign_convention, quality_status, coverage_ratio, gap_status,
                           quality_json, provenance_json
@@ -809,8 +821,41 @@ class CanonicalStorage:
                 json.dumps(observation.get("quality", {}), sort_keys=True),
                 json.dumps(observation.get("provenance", {}), sort_keys=True),
             )
-            if existing == expected:
+            if existing is None:
+                raise
+            if existing[1:] == expected:
                 return False
+            if (
+                existing[1:16] == expected[:15]
+                and existing[16] == expected[15]
+                and _is_provenance_enrichment(existing[17], expected[16])
+            ):
+                latest = connection.execute(
+                    """SELECT record_id, revision, site_id, logical_role, source_generation_id,
+                              interval_start_us, interval_end_us, resolution_seconds,
+                              source_resolution_kind, source_resolution_seconds, observed_at_us,
+                              value, unit, sign_convention, quality_status, coverage_ratio, gap_status,
+                              quality_json, provenance_json
+                         FROM historical_energy_observations
+                        WHERE semantic_key = ? ORDER BY revision DESC LIMIT 1""",
+                    (observation["semantic_key"],),
+                ).fetchone()
+                if latest is None or latest[2:17] != expected[:15] or latest[17] != expected[15]:
+                    raise ValueError("canonical_historical_revision_conflict") from error
+                if latest[18] == expected[16]:
+                    return False
+                if not _is_provenance_enrichment(latest[18], expected[16]):
+                    raise ValueError("canonical_historical_revision_conflict") from error
+                revision = int(latest[1]) + 1
+                revision_values = list(values)
+                revision_values[0] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{observation['semantic_key']}|revision={revision}"))
+                revision_values[4] = revision
+                revision_values[5] = latest[0]
+                connection.execute(
+                    f"INSERT INTO historical_energy_observations({columns}) VALUES ({','.join('?' for _ in revision_values)})",
+                    tuple(revision_values),
+                )
+                return True
             raise ValueError("canonical_historical_revision_conflict") from error
         return cursor.rowcount == 1
 

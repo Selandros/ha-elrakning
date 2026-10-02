@@ -6,6 +6,21 @@ Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
 
+## 0.0.962 canonical historical revision checkpoint
+
+- CORRECTED/TESTED: Immutable provider observations now append a new canonical
+  revision for strictly additive provenance enrichment when the immutable site,
+  role, source generation, interval, resolution, value, quality and units are
+  unchanged. Repeated enrichment is idempotent.
+- PRESERVED: Value, interval, site, source-generation, quality and semantic
+  changes remain fail-closed as `canonical_historical_revision_conflict`.
+  Historical rows are never updated or deleted; readers select the latest
+  revision for the semantic observation.
+- RUNTIME ROOT CAUSE: 0.0.961 startup cached-import recovery encountered an
+  E.ON `grid.energy_import` revision-1 collision where the existing 2 October
+  buckets had the same actual kWh facts but older provenance omitted `padded`
+  and `provider_actual`. No temperature-frame conflict was involved.
+
 ## 0.0.932 E.ON DAY and provider-trend checkpoint
 
 - IMPLEMENTED/TESTED: The E.ON adapter now collects and normalizes verified
