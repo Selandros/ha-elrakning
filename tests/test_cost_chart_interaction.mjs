@@ -267,6 +267,33 @@ const unavailableMonth = buildDailyCostSeries([], "2026-08");
 assert.equal(unavailableMonth.days.length, 31);
 assert.equal(unavailableMonth.days.every((day) => day.status === "unavailable" && !day.available), true);
 
+const greenelyProviderState = {
+  provider: "greenely",
+  analysis: {
+    consumption_cost: {
+      schema: "greenely.consumption_cost.v1",
+      available: true,
+      samples: [
+        { localtime: "2026-10-01 19:00", cost_sek: 0.84047 },
+        { localtime: "2026-10-01 20:00", cost_sek: 6.58818 },
+      ],
+    },
+  },
+};
+const providerDailyBars = buildDailyCostSeries([
+  { date: "2026-10-01", actual: { import_kwh: 13.508, elnat_variable_sek: 19.18136, total_variable_cost_sek: 19.18136, status: "actual", source: "reconciled_grid_import" } },
+], "2026-10", greenelyProviderState);
+assert.ok(Math.abs(providerDailyBars.days[0].elhandel_sek - 7.42865) < 1e-9);
+assert.ok(Math.abs(providerDailyBars.days[0].total_variable_cost_sek - 26.61001) < 1e-9);
+assert.ok(Math.abs(providerDailyBars.days[0].average_price_ore_per_kwh - 196.994447735) < 1e-6);
+assert.equal(buildDailyCostTooltipFields(providerDailyBars.days[0])[1].value, "7,43 kr");
+assert.equal(buildDailyCostTooltipFields(providerDailyBars.days[0])[3].value, "26,61 kr");
+const missingGreenelyCost = buildDailyCostSeries([
+  { date: "2026-10-01", actual: { import_kwh: 13.508, elnat_variable_sek: 19.18136, total_variable_cost_sek: 19.18136, status: "actual" } },
+], "2026-10", { provider: "greenely", analysis: { consumption_cost: { schema: "greenely.consumption_cost.v1", available: false, samples: [] } } });
+assert.equal(missingGreenelyCost.days[0].elhandel_sek, null);
+assert.equal(missingGreenelyCost.days[0].total_variable_cost_sek, 19.18136);
+
 const source = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series)"), source.indexOf("  _bindCostCard()"));
 

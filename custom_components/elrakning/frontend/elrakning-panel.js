@@ -2274,18 +2274,43 @@ export function buildCostChartTooltipFields({ estimated = null, actual = null, f
   return fields;
 }
 
-export function buildDailyCostSeries(dailyBreakdown, month) {
+export function buildGreenelyDailyProviderCosts(providerState, month) {
+  if (providerState?.provider !== "greenely") return new Map();
+  const consumptionCost = providerState?.analysis?.consumption_cost;
+  if (consumptionCost?.schema !== "greenely.consumption_cost.v1" || consumptionCost.available !== true) return new Map();
+  const totals = new Map();
+  for (const sample of Array.isArray(consumptionCost.samples) ? consumptionCost.samples : []) {
+    const date = typeof sample?.localtime === "string" ? sample.localtime.slice(0, 10) : null;
+    const cost = Number(sample?.cost_sek);
+    if (!date || !date.startsWith(`${month}-`) || !Number.isFinite(cost) || cost < 0) continue;
+    totals.set(date, (totals.get(date) || 0) + cost);
+  }
+  return totals;
+}
+
+export function buildDailyCostSeries(dailyBreakdown, month, providerState = null) {
   const normalizedMonth = typeof month === "string" && /^\d{4}-\d{2}$/.test(month) ? month : null;
   if (!normalizedMonth) return { month: null, days_in_month: 0, days: [], available: false };
   const [year, monthNumber] = normalizedMonth.split("-").map(Number);
   const daysInMonth = new Date(year, monthNumber, 0).getDate();
   const byDate = new Map((Array.isArray(dailyBreakdown) ? dailyBreakdown : []).map((item) => [item?.date, item]));
+  const providerTradeByDate = buildGreenelyDailyProviderCosts(providerState, normalizedMonth);
   const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
   const sum = (left, right) => finite(left) === null || finite(right) === null ? null : finite(left) + finite(right);
   const days = Array.from({ length: daysInMonth }, (_, index) => {
     const date = `${normalizedMonth}-${String(index + 1).padStart(2, "0")}`;
     const source = byDate.get(date) || {};
-    const actual = source.actual && typeof source.actual === "object" ? source.actual : null;
+    const sourceActual = source.actual && typeof source.actual === "object" ? source.actual : null;
+    const providerTrade = sourceActual && providerTradeByDate.has(date) ? providerTradeByDate.get(date) : null;
+    const actual = sourceActual && providerTrade !== null
+      ? {
+        ...sourceActual,
+        elhandel_sek: providerTrade,
+        total_variable_cost_sek: finite(sourceActual.elnat_variable_sek) === null
+          ? sourceActual.total_variable_cost_sek
+          : finite(sourceActual.elnat_variable_sek) + providerTrade,
+      }
+      : sourceActual;
     const forecast = source.forecast && typeof source.forecast === "object" ? source.forecast : null;
     const actualImport = finite(actual?.import_kwh);
     const forecastImport = finite(forecast?.import_kwh);
@@ -11167,7 +11192,7 @@ class ElrakningPanel {
       return item;
     }));
     const dailyBreakdown = this._billingDailyByMonth.get(selectedMonth) || [];
-    const series = buildDailyCostSeries(dailyBreakdown, selectedMonth);
+    const series = buildDailyCostSeries(dailyBreakdown, selectedMonth, this._electricityProviderState);
     this._renderCostChart(chart, series);
     comparisonElement.replaceChildren();
     comparisonElement.append(...comparisons.map((comparison) => {
