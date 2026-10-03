@@ -44,6 +44,7 @@ const greenelyProjection = buildGreenelyMonthlyProjection(greenelyProjectionStat
 assert.equal(greenelyProjection.completed_local_days, 2);
 assert.equal(greenelyProjection.days_in_month, 31);
 assert.ok(Math.abs(greenelyProjection.estimated_cost_sek - 483.956965) < 1e-9);
+assert.equal(greenelyProjection.estimated_cost_display_sek, 484);
 assert.ok(Math.abs(greenelyProjection.estimated_kwh - 659.1995) < 1e-9);
 assert.equal(greenelyProjection.estimated_kwh_display, 660);
 assert.equal(greenelyProjection.canonical_cost, undefined);

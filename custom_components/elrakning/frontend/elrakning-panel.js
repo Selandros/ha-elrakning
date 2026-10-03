@@ -232,6 +232,7 @@ export function buildGreenelyMonthlyProjection(providerState, now = new Date()) 
     completed_local_days: completedLocalDays,
     days_in_month: daysInMonth,
     estimated_cost_sek: monthToDateCostSek / completedLocalDays * daysInMonth,
+    estimated_cost_display_sek: Math.round(monthToDateCostSek / completedLocalDays * daysInMonth),
     estimated_kwh: monthToDateKwh / completedLocalDays * daysInMonth,
     estimated_kwh_display: Math.round((monthToDateKwh / completedLocalDays * daysInMonth) / 10) * 10,
     source: "greenely_provider_mtd_local_projection",
@@ -10857,7 +10858,7 @@ class ElrakningPanel {
     }
     const greenelyProjection = buildGreenelyMonthlyProjection(response, new Date());
     if (greenelyProjection) {
-      rows.push(["Greenely-prognos", `${this._formatSek(greenelyProjection.estimated_cost_sek)} · ${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh`]);
+      rows.push(["Greenely-prognos", `${this._formatNumber(greenelyProjection.estimated_cost_display_sek)} kr · ${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh`]);
     }
     if (latestDistribution && analysis.cost_distribution?.unit_status === "percentage_verified") {
       const score = latestDistribution.energy_score;
