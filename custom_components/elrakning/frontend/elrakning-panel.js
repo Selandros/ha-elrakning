@@ -5240,7 +5240,7 @@ class ElrakningPanel {
         .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
         .cost-history-bar-item.estimated .cost-history-bar { border: 1px dashed var(--el-solar-color, #77C2A1); box-sizing: border-box; opacity: .82; }
-        .cost-history-bar { background: var(--el-solar-color, #77C2A1); border-radius: 4px 4px 0 0; min-height: 3px; opacity: .75; width: 100%; }
+        .cost-history-bar { align-self: center; background: var(--el-solar-color, #77C2A1); border-radius: 4px 4px 0 0; box-sizing: border-box; max-width: 50px; min-height: 3px; opacity: .75; width: 100%; }
         .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
         .cost-history-bar-item.partial .cost-history-bar { border: 1px dashed var(--el-solar-color, #77C2A1); box-sizing: border-box; opacity: .82; }
         .cost-history-bar-item.unavailable .cost-history-bar { background: var(--divider-color); height: 3px !important; opacity: 1; }
