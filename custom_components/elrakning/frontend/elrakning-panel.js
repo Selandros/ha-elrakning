@@ -853,6 +853,14 @@ export function isHoverPowerValue(value) {
   return Number(value) !== 0;
 }
 
+export function chartResourceSeriesVisible(key, dashboardCardVisibility = {}, configured = {}) {
+  if (key === "solar") return dashboardCardVisibility.solar !== "hidden" && configured.solar === true;
+  if (key === "charging" || key === "discharging") {
+    return dashboardCardVisibility.battery !== "hidden" && configured.battery === true;
+  }
+  return true;
+}
+
 export function displayPowerValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -7716,9 +7724,24 @@ class ElrakningPanel {
     };
   }
 
+  _resourceChartLayerVisible(key) {
+    return chartResourceSeriesVisible(key, this._dashboardCardVisibility, {
+      solar: this._dashboardCardIsConfigured("solar"),
+      battery: this._dashboardCardIsConfigured("battery"),
+    });
+  }
+
   _effectiveChartLayerState() {
     const layers = this._chartLayerState();
-    if (this._soloChartLayer) return Object.fromEntries(Object.keys(layers).map((key) => [key, key === this._soloChartLayer]));
+    if (this._soloChartLayer) {
+      return Object.fromEntries(Object.keys(layers).map((key) => [
+        key,
+        key === this._soloChartLayer && this._resourceChartLayerVisible(key),
+      ]));
+    }
+    for (const key of ["solar", "charging", "discharging"]) {
+      if (!this._resourceChartLayerVisible(key)) layers[key] = false;
+    }
     return layers;
   }
 
@@ -7818,6 +7841,11 @@ class ElrakningPanel {
       toggle.hidden = !this._configurationCardsVisible;
       if (input && key in this._dashboardCardVisibility) input.checked = this._dashboardCardVisibility[key] !== "hidden";
     }
+    this._syncChartLayerButtons();
+    if (this.host.querySelector(".price-chart")) {
+      this._priceChartRenderCacheKey = null;
+      this.renderPriceChart();
+    }
   }
 
   _applyChartLayerState(layers) {
@@ -7881,6 +7909,11 @@ class ElrakningPanel {
       button.classList.toggle("active", value);
       button.classList.toggle("solo-active", this._soloChartLayer === button.dataset.previewLayer);
       button.setAttribute("aria-pressed", String(value));
+    }
+    for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
+      const key = button.dataset.previewLayer;
+      const resourceVisible = this._resourceChartLayerVisible(key);
+      button.hidden = !resourceVisible;
     }
   }
 
