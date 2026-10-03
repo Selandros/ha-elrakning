@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -479,6 +479,13 @@ assert.equal(isChartPowerValue(0.22), true);
 assert.equal(isChartPowerValue(0), true);
 assert.equal(isChartPowerValue(null), false);
 assert.equal(isChartPowerValue(Number.NaN), false);
+assert.equal(isHoverPowerValue(0), false);
+assert.equal(isHoverPowerValue(-0), false);
+assert.equal(isHoverPowerValue(0.22), true);
+assert.equal(isHoverPowerValue(-0.01), true);
+assert.equal(isHoverPowerValue(0.001), true);
+assert.equal(isHoverPowerValue(null), false);
+assert.equal(isHoverPowerValue(Number.NaN), false);
 const phaseMaxima = mergeDailyPhaseMaxima({}, { l1: -12, l2: 7, l3: 9 }, "2026-08-30T12:00:00Z");
 assert.deepEqual(phaseMaxima, {
   l1: { ampere: 12, raw_value: -12, timestamp: "2026-08-30T12:00:00.000Z" },
@@ -2374,8 +2381,8 @@ assert.match(panelSource, /const displaySource = useHistoricalPower/);
 assert.match(panelSource, /powerDisplayPoints\[key\] = displaySource\.map/);
 assert.match(panelSource, /energyIntervalsToCurvePoints\(energyHistory\?\.series\?\.\[key\]\)/);
 assert.match(panelSource, /meterDisplayPoints\.flatMap/);
-assert.match(panelSource, /isChartPowerValue\(details\?\.import_kw\)/);
-assert.match(panelSource, /isChartPowerValue\(details\?\.export_kw\)/);
+assert.match(panelSource, /isHoverPowerValue\(details\?\.import_kw\)/);
+assert.match(panelSource, /isHoverPowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /isChartPowerValue\(value\)/);
 assert.match(panelSource, /buildThresholdClippedSegments\(points, key, \{ thresholded: false \}\)/);
 assert.match(panelSource, /latestByTimestamp = new Map\(\)/);
@@ -2568,7 +2575,7 @@ assert.match(panelSource, /return start <= tooltipTimestamp && tooltipTimestamp 
 assert.match(panelSource, /const time = this\.formatTime\(new Date\(tooltipTimestamp\)\)/);
 assert.match(panelSource, /nearestMeterPoint\(this\._meterTooltipPoints, timestamp\)/);
 assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
-assert.match(panelSource, /const value = visibleLayers\.spot && Number\.isFinite\(comparisonPrice\)/);
+assert.match(panelSource, /const value = visibleLayers\.spot && isHoverPowerValue\(comparisonPrice\)/);
 assert.doesNotMatch(panelSource, /data-tooltip=/);
 assert.match(panelSource, />Sol\s*</);
 assert.match(panelSource, /data-preview-layer="consumption"[\s\S]*>Last/);
@@ -2656,8 +2663,8 @@ assert.match(panelSource, /function positionChartTooltip\(chart, tooltip, client
 assert.match(panelSource, /const angleStep = Math\.PI \/ 45/);
 assert.match(panelSource, /const obstacleRects = obstacles\.map/);
 assert.match(panelSource, /querySelectorAll\("\.chart-hover-marker"\)/);
-assert.match(panelSource, /isChartPowerValue\(details\?\.import_kw\)/);
-assert.match(panelSource, /isChartPowerValue\(details\?\.export_kw\)/);
+assert.match(panelSource, /isHoverPowerValue\(details\?\.import_kw\)/);
+assert.match(panelSource, /isHoverPowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /const hoverSnapshot = \{[\s\S]*hoverTime: tooltipTimestamp/);
 assert.match(panelSource, /const canonicalMeterPoint = this\._meterCanonicalPointAt\(tooltipTimestamp\)/);
 assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
@@ -2666,8 +2673,8 @@ assert.match(panelSource, /energyHistoryIntervalValueAt\(this\.priceSnapshot\?\.
 assert.match(panelSource, /priceBarValue: barPrice \?\? null/);
 assert.match(panelSource, /importValue: meterValue\("import_kw"\)/);
 assert.match(panelSource, /exportValue: meterValue\("export_kw"\)/);
-assert.match(panelSource, /isChartPowerValue\(hoverSnapshot\.importValue\)/);
-assert.match(panelSource, /isChartPowerValue\(hoverSnapshot\.exportValue\)/);
+assert.match(panelSource, /isHoverPowerValue\(hoverSnapshot\.importValue\)/);
+assert.match(panelSource, /isHoverPowerValue\(hoverSnapshot\.exportValue\)/);
 assert.match(panelSource, /_buildVisibleTooltipFields\(comparisonPrice, \{[\s\S]*hoverSnapshot\.importValue/);
 assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /buildMeterDisplayCoordinates\(segment, key, x, meterY\)/);
@@ -2741,10 +2748,10 @@ assert.doesNotMatch(panelSource, /#56C7A0|#FF6363|#A55E63|#EF5C83|#984C5A|#D6536
 assert.doesNotMatch(panelSource, /chart-legend-preview\.charging\.active/);
 assert.doesNotMatch(panelSource, /chart-legend-preview\.charging:not\(\.active\)/);
 assert.match(panelSource, /height: 7px;\n\s+width: 7px;/);
-assert.match(panelSource, /visibleLayers\.spot && Number\.isFinite\(comparisonPrice\)/);
+assert.match(panelSource, /visibleLayers\.spot && isHoverPowerValue\(comparisonPrice\)/);
 assert.match(panelSource, /this\._chartBarPrices = prices/);
 assert.match(panelSource, /const barPrice = this\._chartBarPrices\?\.\[index\]/);
-assert.match(panelSource, /visibleLayers\.spot && Number\.isFinite\(hoverSnapshot\.priceBarValue\)/);
+assert.match(panelSource, /visibleLayers\.spot && isHoverPowerValue\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /hoverGeometry\.y\(hoverSnapshot\.priceBarValue\)/);
 assert.match(panelSource, /this\._priceComparisonVisible\.grid/);
 assert.match(panelSource, /this\._priceComparisonVisible\.electricity/);
@@ -2754,8 +2761,8 @@ assert.match(panelSource, /\.chart-tooltip \{[\s\S]*pointer-events: none;/);
 assert.match(panelSource, /\.chart-tooltip\.debug-tooltip \{[\s\S]*pointer-events: none;/);
 assert.doesNotMatch(panelSource, /const label = tradeVisible && gridVisible[\s\S]*\? "Totalpris"[\s\S]*\? "Elnät"[\s\S]*: "Elhandel"/);
 assert.doesNotMatch(panelSource, /add\("Överföring"/);
-assert.match(panelSource, /layers\.import && isChartPowerValue\(details\?\.import_kw\)/);
-assert.match(panelSource, /layers\.export && isChartPowerValue\(details\?\.export_kw\)/);
+assert.match(panelSource, /layers\.import && isHoverPowerValue\(details\?\.import_kw\)/);
+assert.match(panelSource, /layers\.export && isHoverPowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /tooltip-meter-import/);
 assert.match(panelSource, /tooltip-meter-export/);
 assert.match(panelSource, /renderSharedTooltip\(tooltip/);

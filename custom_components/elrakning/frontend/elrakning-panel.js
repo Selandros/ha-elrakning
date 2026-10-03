@@ -848,6 +848,11 @@ export function isChartPowerValue(value) {
   return Number.isFinite(numeric);
 }
 
+export function isHoverPowerValue(value) {
+  if (!isChartPowerValue(value)) return false;
+  return Number(value) !== 0;
+}
+
 export function displayPowerValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -13709,20 +13714,20 @@ class ElrakningPanel {
   _buildVisibleTooltipFields(comparisonPrice, details, layers = this._chartLayerState()) {
     const fields = [];
     const add = (label, value, formatted, className = "") => {
-      if (tooltipValueIsPresent(value)) fields.push({ label, value, formatted, className });
+      if (isHoverPowerValue(value)) fields.push({ label, value, formatted, className });
     };
     const gridVisible = this._priceComparisonVisible.grid && this._eonGridPrice && this._hasGridPriceData();
-    if (layers.spot && Number.isFinite(comparisonPrice)) {
+    if (layers.spot && isHoverPowerValue(comparisonPrice)) {
       const label = "Spotpris";
       const value = gridVisible && !this._priceComparisonVisible.electricity
         ? Number(this._eonGridPrice.variable_total_ore_per_kwh_gross)
         : comparisonPrice;
-      if (Number.isFinite(value)) add(label, value, this.formatPrice(value));
+      if (isHoverPowerValue(value)) add(label, value, this.formatPrice(value));
     }
-    if (layers.import && isChartPowerValue(details?.import_kw)) {
+    if (layers.import && isHoverPowerValue(details?.import_kw)) {
       add("Import", details.import_kw, `${this._formatNumber(details.import_kw)} kW`, "tooltip-meter-import");
     }
-    if (layers.export && isChartPowerValue(details?.export_kw)) {
+    if (layers.export && isHoverPowerValue(details?.export_kw)) {
       add("Export", details.export_kw, `${this._formatNumber(details.export_kw)} kW`, "tooltip-meter-export");
     }
     const powerRows = [
@@ -13732,7 +13737,7 @@ class ElrakningPanel {
       ["discharging", "Urladdning", "tooltip-power-discharging"],
     ];
     for (const [key, label, className] of powerRows) {
-      if (layers[key] && isChartPowerValue(details?.[`${key}_kw`])) {
+      if (layers[key] && isHoverPowerValue(details?.[`${key}_kw`])) {
         add(label, details[`${key}_kw`], `${this._formatNumber(details[`${key}_kw`])} kW`, className);
       }
     }
@@ -13787,7 +13792,7 @@ class ElrakningPanel {
       const visibleLayers = this._effectiveChartLayerState();
       const time = this.formatTime(new Date(tooltipTimestamp));
       const comparisonPrice = this._comparisonPrice(period);
-      const value = visibleLayers.spot && Number.isFinite(comparisonPrice)
+      const value = visibleLayers.spot && isHoverPowerValue(comparisonPrice)
         ? `${this.formatPrice(comparisonPrice)} öre/kWh`
         : "";
       const index = chartPeriods.indexOf(period);
@@ -13856,19 +13861,19 @@ class ElrakningPanel {
           ? hoverGeometry.x(hoverSnapshot.meterSampleTime)
           : null;
         const markers = [];
-        if (visibleLayers.spot && Number.isFinite(hoverSnapshot.priceBarValue)) {
+        if (visibleLayers.spot && isHoverPowerValue(hoverSnapshot.priceBarValue)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" fill="${chartColor("neutral")}" cx="${priceMarkerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
         }
         const importDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.meterSampleTime);
-        if (visibleLayers.import && meterMarkerX !== null && isChartPowerValue(hoverSnapshot.importValue)) {
+        if (visibleLayers.import && meterMarkerX !== null && isHoverPowerValue(hoverSnapshot.importValue)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" fill="${chartColor("import")}" cx="${meterMarkerX}" cy="${Number.isFinite(importDisplayY) ? importDisplayY : hoverGeometry.meterY(hoverSnapshot.importValue)}" r="4" />`);
         }
         const exportDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.meterSampleTime);
-        if (visibleLayers.export && meterMarkerX !== null && isChartPowerValue(hoverSnapshot.exportValue)) {
+        if (visibleLayers.export && meterMarkerX !== null && isHoverPowerValue(hoverSnapshot.exportValue)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" fill="${chartColor("export")}" cx="${meterMarkerX}" cy="${Number.isFinite(exportDisplayY) ? exportDisplayY : hoverGeometry.meterY(hoverSnapshot.exportValue)}" r="4" />`);
         }
         const powerMarkers = [
@@ -13879,7 +13884,7 @@ class ElrakningPanel {
         ];
         for (const [key, snapshotKey, className] of powerMarkers) {
           const value = hoverSnapshot[snapshotKey];
-          if (!visibleLayers[key] || !isChartPowerValue(value)) continue;
+          if (!visibleLayers[key] || !isHoverPowerValue(value)) continue;
           const displayY = hoverGeometry.powerDisplayY?.(key, hoverSnapshot.hoverTime);
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" fill="${chartColor(className)}" cx="${priceMarkerX}" cy="${Number.isFinite(displayY) ? displayY : hoverGeometry.meterY(value)}" r="4" />`);
         }
