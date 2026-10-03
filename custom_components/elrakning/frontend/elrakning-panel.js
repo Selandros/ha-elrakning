@@ -205,6 +205,39 @@ export function resolveGreenelyActualInvoiceCost(providerState, month) {
   };
 }
 
+export function buildGreenelyMonthlyProjection(providerState, now = new Date()) {
+  if (providerState?.provider !== "greenely") return null;
+  const consumption = providerState?.consumption || {};
+  const consumptionCost = providerState?.analysis?.consumption_cost;
+  if (consumptionCost?.schema !== "greenely.consumption_cost.v1" || consumptionCost.available !== true) return null;
+  const month = typeof consumption.month === "string"
+    ? consumption.month
+    : typeof consumptionCost.period?.from === "string"
+      ? consumptionCost.period.from.slice(0, 7)
+      : null;
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  if (!/^\d{4}-\d{2}$/.test(month || "") || month !== currentMonth) return null;
+  const completedLocalDays = now.getDate() - 1;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const rawMonthToDateCostSek = consumptionCost.month_to_date_cost_sek;
+  const rawMonthToDateKwh = consumption.month_to_date_kwh;
+  const monthToDateCostSek = Number(rawMonthToDateCostSek);
+  const monthToDateKwh = Number(rawMonthToDateKwh);
+  if (completedLocalDays < 1 || rawMonthToDateCostSek == null || rawMonthToDateCostSek === ""
+    || rawMonthToDateKwh == null || rawMonthToDateKwh === ""
+    || !Number.isFinite(monthToDateCostSek) || monthToDateCostSek < 0
+    || !Number.isFinite(monthToDateKwh) || monthToDateKwh < 0) return null;
+  return {
+    month,
+    completed_local_days: completedLocalDays,
+    days_in_month: daysInMonth,
+    estimated_cost_sek: monthToDateCostSek / completedLocalDays * daysInMonth,
+    estimated_kwh: monthToDateKwh / completedLocalDays * daysInMonth,
+    estimated_kwh_display: Math.round((monthToDateKwh / completedLocalDays * daysInMonth) / 10) * 10,
+    source: "greenely_provider_mtd_local_projection",
+  };
+}
+
 export function billingHistoryHasEnergyEvidence(history) {
   if (!history || typeof history !== "object") return false;
   const hasPoints = (value) => Array.isArray(value) && value.length > 0;
@@ -10821,6 +10854,10 @@ class ElrakningPanel {
     }
     if (consumptionCostAvailable && consumptionCost.average_price_ore_per_kwh != null) {
       rows.push(["Snittpris · providerdata", `${this._formatNumber(consumptionCost.average_price_ore_per_kwh)} öre/kWh`]);
+    }
+    const greenelyProjection = buildGreenelyMonthlyProjection(response, new Date());
+    if (greenelyProjection) {
+      rows.push(["Greenely-prognos", `${this._formatSek(greenelyProjection.estimated_cost_sek)} · ${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh`]);
     }
     if (latestDistribution && analysis.cost_distribution?.unit_status === "percentage_verified") {
       const score = latestDistribution.energy_score;

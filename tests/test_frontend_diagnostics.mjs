@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
@@ -28,6 +28,30 @@ assert.equal(formatGreenelySpotObservation(
   { available: true, unit_status: "unit_verified", unit: "sek_per_kwh" },
   { price_provider: 82267 },
 ), "Tillgängligt · pris saknas");
+const greenelyProjectionState = {
+  provider: "greenely",
+  consumption: { month: "2026-10", month_to_date_kwh: 42.529 },
+  analysis: {
+    consumption_cost: {
+      schema: "greenely.consumption_cost.v1",
+      available: true,
+      month_to_date_cost_sek: 31.22303,
+      period: { from: "2026-10-01", to: "2026-10-04" },
+    },
+  },
+};
+const greenelyProjection = buildGreenelyMonthlyProjection(greenelyProjectionState, new Date(2026, 9, 3, 12, 0));
+assert.equal(greenelyProjection.completed_local_days, 2);
+assert.equal(greenelyProjection.days_in_month, 31);
+assert.ok(Math.abs(greenelyProjection.estimated_cost_sek - 483.956965) < 1e-9);
+assert.ok(Math.abs(greenelyProjection.estimated_kwh - 659.1995) < 1e-9);
+assert.equal(greenelyProjection.estimated_kwh_display, 660);
+assert.equal(greenelyProjection.canonical_cost, undefined);
+assert.equal(greenelyProjection.trade_invoice_actual, undefined);
+assert.equal(buildGreenelyMonthlyProjection(greenelyProjectionState, new Date(2026, 9, 1, 12, 0)), null);
+assert.equal(buildGreenelyMonthlyProjection({ ...greenelyProjectionState, consumption: { month: "2026-09", month_to_date_kwh: 42.529 } }, new Date(2026, 9, 3)), null);
+assert.equal(buildGreenelyMonthlyProjection({ ...greenelyProjectionState, analysis: { consumption_cost: { ...greenelyProjectionState.analysis.consumption_cost, month_to_date_cost_sek: null } } }, new Date(2026, 9, 3)), null);
+assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /rows\.push\(\["Greenely-prognos"/);
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Jul 2026" }), "Jul 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Feb 2026-mar 2026" }), "Feb 2026-mar 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "2026-07" }), "2026-07");
