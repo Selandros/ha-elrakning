@@ -2680,6 +2680,8 @@ assert.match(panelSource, /hoverGeometry\.meterDisplayY\("import_kw", hoverSnaps
 assert.match(panelSource, /hoverGeometry\.meterDisplayY\("export_kw", hoverSnapshot\.meterSampleTime\)/);
 assert.match(panelSource, /Number\.isFinite\(importDisplayY\)/);
 assert.match(panelSource, /Number\.isFinite\(exportDisplayY\)/);
+assert.match(panelSource, /Number\.isFinite\(importDisplayY\) \? importDisplayY : hoverGeometry\.meterY\(hoverSnapshot\.importValue\)/);
+assert.match(panelSource, /Number\.isFinite\(exportDisplayY\) \? exportDisplayY : hoverGeometry\.meterY\(hoverSnapshot\.exportValue\)/);
 assert.match(panelSource, /chart-legend-preview\.solar/);
 assert.match(panelSource, /chart-legend-preview\.consumption/);
 assert.match(panelSource, /chart-legend-preview\.charging/);
