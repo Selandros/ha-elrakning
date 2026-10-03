@@ -7,9 +7,14 @@ assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
 assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}">/);
 assert.match(panelSource, /stop-color="var\(--el-price-cheap-color\)"/);
-assert.match(panelSource, /stop offset="32%" stop-color="#E4B84A"/);
-assert.match(panelSource, /stop offset="68%" stop-color="#E4B84A"/);
-assert.match(panelSource, /stop offset="100%" stop-color="#F25F67"/);
+assert.match(panelSource, /stop offset="30%" stop-color="#F2C94C"/);
+assert.match(panelSource, /stop offset="48%" stop-color="#F2C94C"/);
+assert.match(panelSource, /stop offset="55%" stop-color="#EF4444"/);
+assert.match(panelSource, /stop offset="100%" stop-color="#EF4444"/);
+const currentDayGradientPositions = [16.8, 40.7, 65.2].map((price) => ((price - 16.8) / (65.2 - 16.8)) * 100);
+assert.equal(currentDayGradientPositions[0], 0);
+assert.ok(currentDayGradientPositions[1] < 55, "mean price must remain below the red transition");
+assert.equal(currentDayGradientPositions[2], 100);
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill: url\(#price-level-gradient\);/);
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill-opacity: \.28;/);
 assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke: url\(#price-level-gradient\);/);
