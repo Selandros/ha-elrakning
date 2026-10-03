@@ -13587,7 +13587,7 @@ class ElrakningPanel {
       ? buildPriceStepAreaPaths(periods, prices, (timestamp) => x(timestamp), y, plot.top + plotHeight)
         .map((path) => `<path class="price-step-area" d="${path}" />`).join("")
       : "";
-    const priceLevelGradient = `<defs><linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="${plot.top + plotHeight}" x2="0" y2="${plot.top}"><stop offset="0%" stop-color="#22C55E" /><stop offset="30%" stop-color="#FBBF24" /><stop offset="48%" stop-color="#FBBF24" /><stop offset="55%" stop-color="#EF4444" /><stop offset="100%" stop-color="#EF4444" /></linearGradient></defs>`;
+    const priceLevelGradient = `<defs><linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="${plot.top + plotHeight}" x2="0" y2="${plot.top}"><stop offset="0%" stop-color="#22C55E" /><stop offset="18%" stop-color="#22C55E" /><stop offset="30%" stop-color="#FBBF24" /><stop offset="42%" stop-color="#FBBF24" /><stop offset="48%" stop-color="#F59E0B" /><stop offset="58%" stop-color="#EF4444" /><stop offset="100%" stop-color="#EF4444" /></linearGradient></defs>`;
     const nowTimestamp = Date.now();
     const nowMarker = localDateKey(dayStart) === localDateKey(now)
       && nowTimestamp >= dayStart.getTime() && nowTimestamp <= selectedDayEnd.getTime()

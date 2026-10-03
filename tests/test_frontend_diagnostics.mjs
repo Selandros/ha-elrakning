@@ -2448,7 +2448,9 @@ assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUni
 assert.match(panelSource, /x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}"/);
 assert.match(panelSource, /stop offset="0%" stop-color="#22C55E"/);
 assert.match(panelSource, /stop offset="30%" stop-color="#FBBF24"/);
-assert.match(panelSource, /stop offset="55%" stop-color="#EF4444"/);
+assert.match(panelSource, /stop offset="48%" stop-color="#F59E0B"/);
+assert.match(panelSource, /stop offset="58%" stop-color="#EF4444"/);
+assert.equal((panelSource.match(/<stop offset="[^\"]+%" stop-color=/g) || []).length >= 7, true);
 assert.match(panelSource, /fill: url\(#price-level-gradient\)/);
 assert.match(panelSource, /stroke: url\(#price-level-gradient\)/);
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill-opacity: \.28;/);
