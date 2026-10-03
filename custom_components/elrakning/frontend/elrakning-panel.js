@@ -10801,9 +10801,6 @@ class ElrakningPanel {
     const distributionDays = Array.isArray(analysis.cost_distribution?.days)
       ? analysis.cost_distribution.days : [];
     const latestDistribution = distributionDays.at(-1);
-    const spotObservations = Array.isArray(analysis.spot_price?.observations)
-      ? analysis.spot_price.observations : [];
-    const latestSpot = spotObservations.at(-1);
     const consumptionCost = analysis.consumption_cost || {};
     const consumptionCostAvailable = consumptionCost.available === true;
     const latest = response.latest_invoice;
@@ -10822,15 +10819,8 @@ class ElrakningPanel {
       const reason = response.consumption_error ? "Saknas · providerförbrukning unavailable" : "Saknas · ingen verifierad förbrukning";
       rows.push(["Förbrukning", reason]);
     }
-    if (latestSpot && analysis.spot_price?.available) {
-      const spotText = formatGreenelySpotObservation(analysis.spot_price, latestSpot);
-      rows.push([`Spotpris ${latestSpot.localtime?.slice(0, 10) || ""}`.trim(), spotText]);
-    }
-    if (consumptionCostAvailable && consumptionCost.month_to_date_cost_sek != null) {
-      rows.push(["Elkostnad hittills · providerdata", `${this._formatSek(consumptionCost.month_to_date_cost_sek)}`]);
-      if (consumptionCost.average_price_ore_per_kwh != null) {
-        rows.push(["Snittpris · providerdata", `${this._formatNumber(consumptionCost.average_price_ore_per_kwh)} öre/kWh`]);
-      }
+    if (consumptionCostAvailable && consumptionCost.average_price_ore_per_kwh != null) {
+      rows.push(["Snittpris · providerdata", `${this._formatNumber(consumptionCost.average_price_ore_per_kwh)} öre/kWh`]);
     }
     if (latestDistribution && analysis.cost_distribution?.unit_status === "percentage_verified") {
       const score = latestDistribution.energy_score;
@@ -11055,7 +11045,7 @@ class ElrakningPanel {
   _renderInvoiceCardCosts() {
     const estimate = this._invoiceEstimateRaw;
     const values = [
-      ["elhandel", estimate?.trade?.total_so_far_sek, this._electricityProviderState?.configured === true],
+      ["elhandel", estimate?.trade?.total_so_far_sek ?? (this._electricityProviderState?.analysis?.consumption_cost?.available === true ? this._electricityProviderState.analysis.consumption_cost.month_to_date_cost_sek : null), this._electricityProviderState?.configured === true],
       ["elnet", estimate?.grid?.total_so_far_sek ?? this._eonGridState?.current_month_cost?.total_sek, this._eonGridState?.configured === true],
     ];
     for (const [provider, value, configured] of values) {

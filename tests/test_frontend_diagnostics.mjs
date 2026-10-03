@@ -1798,6 +1798,8 @@ assert.match(panelSource, /response\.analysis/);
 assert.match(panelSource, /formatGreenelySpotObservation/);
 assert.match(panelSource, /analysis\.consumption_cost/);
 assert.match(panelSource, /month_to_date_cost_sek/);
+assert.match(panelSource, /\["elhandel", estimate\?\.trade\?\.total_so_far_sek \?\? \(this\._electricityProviderState\?\.analysis\?\.consumption_cost\?\.available === true/);
+assert.doesNotMatch(panelSource, /rows\.push\(\[`Spotpris/);
 assert.match(panelSource, /average_price_ore_per_kwh/);
 assert.match(panelSource, /percentage_verified/);
 assert.match(panelSource, /unit_status !== "unit_verified"/);
