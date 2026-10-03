@@ -6687,20 +6687,19 @@ class ElrakningPanel {
         .price-chart-legend {
           align-items: center;
           display: flex;
-          flex-wrap: nowrap;
+          flex-wrap: wrap;
           font-size: var(--card-legend-size);
+          gap: 4px 12px;
           min-height: 14px;
-          justify-content: space-between;
+          justify-content: center;
           margin-top: 0;
-          margin-left: 0;
-          margin-right: 0;
-          max-width: none;
+          margin-inline: auto;
+          max-width: 100%;
           width: 100%;
         }
 
         .price-chart-legend .chart-legend-toggle {
-          flex: 0 1 auto;
-          min-width: 0;
+          flex: 0 0 auto;
           white-space: nowrap;
         }
 
