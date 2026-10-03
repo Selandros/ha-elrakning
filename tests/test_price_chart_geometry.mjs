@@ -7,10 +7,11 @@ assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
 assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}">/);
 assert.match(panelSource, /stop-color="var\(--el-price-cheap-color\)"/);
-assert.match(panelSource, /stop-color="var\(--el-price-normal-color\)"/);
-assert.match(panelSource, /stop-color="var\(--el-price-expensive-color\)"/);
+assert.match(panelSource, /stop offset="32%" stop-color="#E4B84A"/);
+assert.match(panelSource, /stop offset="68%" stop-color="#E4B84A"/);
+assert.match(panelSource, /stop offset="100%" stop-color="#F25F67"/);
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill: url\(#price-level-gradient\);/);
-assert.match(panelSource, /\.price-step-area \{[\s\S]*fill-opacity: \.24;/);
+assert.match(panelSource, /\.price-step-area \{[\s\S]*fill-opacity: \.28;/);
 assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke: url\(#price-level-gradient\);/);
 assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke-width: \.8;[\s\S]*opacity: \.32;/);
 assert.doesNotMatch(panelSource, /\.price-step-line\.(?:cheap|normal|expensive) \{/);
