@@ -321,7 +321,7 @@ def _valid_namespace(facility_id: Any, provider: Any) -> bool:
 def _sanitize_storage_state(state: dict[str, Any]) -> dict[str, Any]:
     allowed = (
         "configured", "provider", "source_type", "provider_name", "device_name", "facility_id",
-        "facility_name", "invoices", "summary", "processing", "consumption", "consumption_error",
+        "facility_name", "invoices", "summary", "processing", "consumption", "analysis", "consumption_error",
         "source", "last_update", "error", "_new_invoice_keys",
     )
     result = {key: state.get(key) for key in allowed}

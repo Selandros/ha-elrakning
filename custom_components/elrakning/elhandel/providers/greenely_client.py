@@ -16,6 +16,7 @@ LOGIN_URL = "https://api2.greenely.com/v1/login"
 CHECKAUTH_URL = "https://api2.greenely.com/v1/checkauth"
 FACILITIES_URL = "https://api2.greenely.com/v1/facilities/"
 BACKEND_BASE_URL = "https://backend.greenely.com/v1"
+BACKEND_FACILITIES_URL = f"{BACKEND_BASE_URL}/facilities/"
 
 
 class GreenelyError(Exception):
@@ -95,7 +96,7 @@ class GreenelyClient:
         """Fetch a small read-only consumption discovery response."""
         if not self._jwt:
             raise GreenelyError("invalid_auth")
-        url = f"{FACILITIES_URL}{facility_id}/consumption"
+        url = f"{BACKEND_FACILITIES_URL}{facility_id}/consumption"
         try:
             async with self._session.get(
                 url,

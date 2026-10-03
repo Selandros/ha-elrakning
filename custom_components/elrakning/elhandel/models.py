@@ -137,6 +137,6 @@ def _public_provider_analysis(analysis: Any) -> dict[str, Any]:
         return {}
     return {
         name: dict(value)
-        for name in ("cost_distribution", "spot_price")
+        for name in ("cost_distribution", "spot_price", "consumption_cost")
         if isinstance(value := analysis.get(name), Mapping)
     }

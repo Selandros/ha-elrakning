@@ -21,9 +21,13 @@ assert.doesNotMatch(formatGreenelySpotObservation(
   { price_provider: 82267 },
 ), /82267/);
 assert.equal(formatGreenelySpotObservation(
-  { available: true, unit_status: "unit_verified", unit: "ore_per_kwh" },
-  { price_provider: 82.267 },
-), "82,267 öre/kWh");
+  { available: true, unit_status: "unit_verified", unit: "sek_per_kwh" },
+  { price_provider: 82267, price_sek_per_kwh: 0.82267 },
+), "0,823 kr/kWh");
+assert.equal(formatGreenelySpotObservation(
+  { available: true, unit_status: "unit_verified", unit: "sek_per_kwh" },
+  { price_provider: 82267 },
+), "Tillgängligt · pris saknas");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Jul 2026" }), "Jul 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Feb 2026-mar 2026" }), "Feb 2026-mar 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "2026-07" }), "2026-07");
@@ -1792,6 +1796,10 @@ assert.match(panelSource, /data-electricity-provider/);
 assert.match(panelSource, /elrakning\/electricity_provider_state/);
 assert.match(panelSource, /response\.analysis/);
 assert.match(panelSource, /formatGreenelySpotObservation/);
+assert.match(panelSource, /analysis\.consumption_cost/);
+assert.match(panelSource, /month_to_date_cost_sek/);
+assert.match(panelSource, /average_price_ore_per_kwh/);
+assert.match(panelSource, /percentage_verified/);
 assert.match(panelSource, /unit_status !== "unit_verified"/);
 assert.match(panelSource, /Kostnadsfördelning/);
 assert.match(panelSource, /Spotpris/);

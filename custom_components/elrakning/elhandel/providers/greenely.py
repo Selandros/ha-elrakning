@@ -14,7 +14,7 @@ from .greenely_consumption import (
 from .greenely_source import sanitize_greenely_source
 from .greenely_client import GreenelyClient, GreenelyError
 from .greenely_invoice import GreenelyInvoiceError, GreenelyInvoiceProcessor
-from .greenely_insights import normalize_cost_distribution, normalize_spot_price
+from .greenely_insights import normalize_consumption_cost, normalize_cost_distribution, normalize_spot_price
 
 
 class GreenelyProvider:
@@ -124,6 +124,25 @@ class GreenelyProvider:
                 greenely_consumption_payload_shape(payload, month),
             )
         analysis: dict[str, Any] = {}
+        try:
+            currency_payload = await self.async_get_consumption(
+                facility_id, start_date, end_date, resolution="hourly", unit="currency"
+            )
+            analysis["consumption_cost"] = normalize_consumption_cost(
+                currency_payload,
+                start_date,
+                end_date,
+                summary.get("month_to_date_kwh"),
+            )
+        except GreenelyError as err:
+            analysis["consumption_cost"] = {
+                "schema": "greenely.consumption_cost.v1",
+                "available": False,
+                "status": "unavailable",
+                "source": "greenely_consumption_currency",
+                "error": err.code,
+                "period": {"from": start_date.isoformat(), "to": end_date.isoformat(), "resolution": "hourly"},
+            }
         for key, fetch, normalize in (
             ("cost_distribution", getattr(self._client, "async_get_cost_distribution", None), normalize_cost_distribution),
             ("spot_price", getattr(self._client, "async_get_spot_price", None), normalize_spot_price),
@@ -181,12 +200,14 @@ class GreenelyProvider:
         start_date: date,
         end_date: date,
         resolution: str = "hourly",
+        unit: str = "usage",
     ) -> Any:
         return await self._client.async_get_consumption(
             facility_id,
             start_date,
             end_date,
             resolution,
+            unit,
         )
 
     async def async_get_invoice_pdf(self, contract_id: str, invoice_key: str) -> bytes:

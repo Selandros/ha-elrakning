@@ -134,6 +134,24 @@ class GreenelyClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload, {"data": []})
         self.assertIsNone(_summarize_consumption(payload))
 
+    async def test_consumption_uses_backend_currency_contract(self):
+        client = object.__new__(GreenelyClient)
+        client._jwt = "jwt"
+        session = _ConsumptionSession(_Response(200, {"data": []}))
+        client._session = session
+        await client.async_get_consumption(
+            "facility", date(2026, 10, 1), date(2026, 11, 1), "hourly", "currency"
+        )
+        args, kwargs = session.calls[0]
+        url = args[0]
+        self.assertEqual(url, "https://backend.greenely.com/v1/facilities/facility/consumption")
+        self.assertEqual(kwargs["params"], {
+            "from": "2026-10-01",
+            "to": "2026-11-01",
+            "resolution": "hourly",
+            "unit": "currency",
+        })
+
     async def test_consumption_rejects_401_and_403(self):
         for status in (401, 403):
             client = object.__new__(GreenelyClient)
@@ -178,11 +196,14 @@ class GreenelyConsumptionDiagnosticsTests(unittest.TestCase):
 
 class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_reads_analysis_endpoints_without_creating_invoice_cost(self):
+        async def consumption(*args, **kwargs):
+            if kwargs.get("unit") == "currency" or args[-1:] == ("currency",):
+                return {"data": {"1": {"usage": 1479, "cost": 84047, "localtime": "2026-10-01 19:00"}}}
+            return {"data": {"1": {"usage": 1000, "localtime": "2026-10-01 01:00"}}}
+
         client = SimpleNamespace(
             async_login=AsyncMock(),
-            async_get_consumption=AsyncMock(return_value={
-                "data": {"1": {"usage": 1000, "localtime": "2026-10-01 01:00"}}
-            }),
+            async_get_consumption=AsyncMock(side_effect=consumption),
             async_get_cost_distribution=AsyncMock(return_value={
                 "data": {"2026-10-01": {"cheap": {"usage": 100, "total_cost": 200}, "energy_score": 50}}
             }),
@@ -200,7 +221,9 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result["analysis"]["cost_distribution"]["days"][0]["energy_score"], 50)
         self.assertEqual(result["analysis"]["spot_price"]["observations"][0]["price_provider"], 55369)
-        self.assertEqual(result["analysis"]["spot_price"]["unit_status"], "provider_unit_unverified")
+        self.assertEqual(result["analysis"]["spot_price"]["unit_status"], "unit_verified")
+        self.assertAlmostEqual(result["analysis"]["consumption_cost"]["month_to_date_cost_sek"], 0.84047)
+        self.assertAlmostEqual(result["analysis"]["consumption_cost"]["average_price_ore_per_kwh"], 84.047)
         self.assertNotIn("invoice", result)
 
     async def test_provider_creates_config_for_selected_facility(self):
@@ -333,7 +356,7 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
 
         client.async_login.assert_awaited_once_with("user@example.test", "password")
         client.async_get_consumption.assert_awaited_once_with(
-            "facility-1", date(2026, 8, 1), date(2026, 8, 2), "hourly"
+            "facility-1", date(2026, 8, 1), date(2026, 8, 2), "hourly", "usage"
         )
 
     async def test_provider_preserves_client_errors(self):
@@ -402,7 +425,12 @@ class GreenelyInvoiceProcessorTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _ConsumptionSession(_Session):
+    def __init__(self, response):
+        super().__init__(response)
+        self.calls = []
+
     def get(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         return self.response
 
 
@@ -833,11 +861,13 @@ def test_cached_state_contains_no_credentials_or_raw_invoice_fields():
             "facility_id": "facility-1",
             "greenely_password": "secret",
             "jwt": "token",
+            "analysis": {"consumption_cost": {"month_to_date_cost_sek": 31.22303}},
             "invoices": [{"amount_due_ore": 0, "pdf_url": "signed", "ocr_number": "hidden"}],
         }
     )
     assert state["provider"] == "greenely"
     assert state["invoices"] == [{"amount_due_ore": 0}]
+    assert state["analysis"]["consumption_cost"]["month_to_date_cost_sek"] == 31.22303
     assert "greenely_password" not in state
     assert "jwt" not in state
 

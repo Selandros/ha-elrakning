@@ -82,9 +82,8 @@ export function formatGreenelySpotObservation(spotPrice, observation) {
   if (!spotPrice?.available || !observation || spotPrice.unit_status !== "unit_verified") {
     return "Tillgängligt · enhet ej verifierad";
   }
-  const value = Number(observation.price_provider);
+  const value = Number(observation.price_sek_per_kwh);
   if (!Number.isFinite(value)) return "Tillgängligt · pris saknas";
-  if (spotPrice.unit === "ore_per_kwh") return `${value.toLocaleString("sv-SE")} öre/kWh`;
   if (spotPrice.unit === "sek_per_kwh") return `${value.toLocaleString("sv-SE")} kr/kWh`;
   return "Tillgängligt · enhet ej verifierad";
 }
@@ -10780,6 +10779,8 @@ class ElrakningPanel {
     const spotObservations = Array.isArray(analysis.spot_price?.observations)
       ? analysis.spot_price.observations : [];
     const latestSpot = spotObservations.at(-1);
+    const consumptionCost = analysis.consumption_cost || {};
+    const consumptionCostAvailable = consumptionCost.available === true;
     const latest = response.latest_invoice;
     const rows = [];
     if (tariff.variable_cost_ore_per_kwh_incl_vat != null) rows.push(["Rörlig kostnad", `${this._formatNumber(tariff.variable_cost_ore_per_kwh_incl_vat)} öre/kWh`]);
@@ -10800,11 +10801,22 @@ class ElrakningPanel {
       const spotText = formatGreenelySpotObservation(analysis.spot_price, latestSpot);
       rows.push([`Spotpris ${latestSpot.localtime?.slice(0, 10) || ""}`.trim(), spotText]);
     }
-    if (latestDistribution && analysis.cost_distribution?.unit_status === "provider_units_unverified") {
+    if (consumptionCostAvailable && consumptionCost.month_to_date_cost_sek != null) {
+      rows.push(["Elkostnad hittills · providerdata", `${this._formatSek(consumptionCost.month_to_date_cost_sek)}`]);
+      if (consumptionCost.average_price_ore_per_kwh != null) {
+        rows.push(["Snittpris · providerdata", `${this._formatNumber(consumptionCost.average_price_ore_per_kwh)} öre/kWh`]);
+      }
+    }
+    if (latestDistribution && analysis.cost_distribution?.unit_status === "percentage_verified") {
       const score = latestDistribution.energy_score;
-      rows.push([`Kostnadsfördelning ${latestDistribution.date}`, score == null
-        ? "Provideranalys · värdenhet ej verifierad"
-        : `Provideranalys · energipoäng ${this._formatNumber(score)}`]);
+      const categories = latestDistribution.categories || {};
+      const distribution = [
+        ["Lågt", categories.cheap?.daily_rate_percent],
+        ["Medel", categories.middle?.daily_rate_percent],
+        ["Högt", categories.expensive?.daily_rate_percent],
+      ].filter(([, value]) => value != null).map(([label, value]) => `${label} ${this._formatNumber(value)} %`);
+      const scoreText = score == null ? "" : ` · energipoäng ${this._formatNumber(score)}`;
+      rows.push([`Kostnadsfördelning ${latestDistribution.date}`, `${distribution.join(" · ")}${scoreText}`.trim()]);
     }
     if (!latest && Number(response.invoice_count || 0) === 0) rows.push(["Faktura", "Saknas · ingen faktura tillgänglig"]);
     if (tariff.variable_cost_ore_per_kwh_incl_vat == null && tariff.fixed_fee_incl_vat_per_month == null) rows.push(["Prisdata", "Saknas · tariffdata unavailable"]);

@@ -24,8 +24,10 @@ class GreenelyInsightsTests(unittest.TestCase):
         }
         result = module.normalize_cost_distribution(payload, date(2026, 10, 1), date(2026, 10, 2))
         self.assertTrue(result["available"])
-        self.assertEqual(result["unit_status"], "provider_units_unverified")
+        self.assertEqual(result["unit_status"], "percentage_verified")
+        self.assertEqual(result["unit"], "percent")
         self.assertEqual(result["days"][0]["categories"]["cheap"]["usage_provider"], 5827.0)
+        self.assertEqual(result["days"][0]["categories"]["cheap"]["daily_rate_percent"], 43.0)
         self.assertEqual(result["days"][0]["energy_score"], 56)
 
     def test_spot_price_preserves_completion_and_provider_unit(self):
@@ -35,9 +37,26 @@ class GreenelyInsightsTests(unittest.TestCase):
         }}}
         result = module.normalize_spot_price(payload, date(2026, 10, 1), date(2026, 10, 1))
         self.assertTrue(result["available"])
-        self.assertEqual(result["unit_status"], "provider_unit_unverified")
+        self.assertEqual(result["unit_status"], "unit_verified")
+        self.assertEqual(result["unit"], "sek_per_kwh")
         self.assertEqual(result["observations"][0]["price_provider"], 55369)
+        self.assertAlmostEqual(result["observations"][0]["price_sek_per_kwh"], 0.55369)
         self.assertTrue(result["observations"][0]["is_complete"])
+
+    def test_currency_cost_normalizes_scale_and_average_without_billing_semantics(self):
+        payload = {"data": {
+            "1790805600": {"localtime": "2026-10-01 19:00", "usage": 1479, "cost": 84047},
+            "1790809200": {"localtime": "2026-10-01 20:00", "usage": 1000, "cost": 56827},
+        }}
+        result = module.normalize_consumption_cost(
+            payload, date(2026, 10, 1), date(2026, 10, 2), 2.479
+        )
+        self.assertTrue(result["available"])
+        self.assertEqual(result["scale"], 100000)
+        self.assertAlmostEqual(result["samples"][0]["cost_sek"], 0.84047)
+        self.assertAlmostEqual(result["month_to_date_cost_sek"], 1.40874)
+        self.assertAlmostEqual(result["average_price_ore_per_kwh"], 56.8269463)
+        self.assertNotIn("total_cost_sek", result)
 
     def test_invalid_or_out_of_period_data_is_unavailable(self):
         self.assertFalse(module.normalize_spot_price(
