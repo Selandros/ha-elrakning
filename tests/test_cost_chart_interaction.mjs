@@ -310,6 +310,7 @@ assert.match(source, /itemElement.setAttribute\("aria-selected", String\(item.mo
 assert.match(source, /itemElement.dataset.costMonth = item.month/);
 assert.match(source, /document.createElement\("button"\)/);
 assert.match(source, /cost-history-bar-item\.selected/);
+assert.match(source, /cost-history-bar-item\.selected \.cost-history-bar \{ box-shadow: 0 0 0 1px color-mix\(/);
 assert.match(source, /cost-history-bar-value/);
 assert.match(source, /amount\.textContent = hasValue \? this\._formatSek\(value\) : "–"/);
 assert.match(source, /itemElement\.append\(label, bar, amount\)/);

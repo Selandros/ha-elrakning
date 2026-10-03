@@ -5249,7 +5249,8 @@ class ElrakningPanel {
         .cost-history-chart { align-items: end; display: flex; gap: 6px; height: 92px; overflow-x: auto; }
         .cost-history-bar-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: inherit; cursor: pointer; display: flex; flex: 1 0 34px; flex-direction: column; font: inherit; gap: 3px; height: 100%; justify-content: end; min-width: 34px; padding: 3px 3px 2px; }
         .cost-history-bar-item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-        .cost-history-bar-item.selected { border-color: color-mix(in srgb, var(--primary-color) 70%, transparent); }
+        .cost-history-bar-item.selected { border-color: transparent; }
+        .cost-history-bar-item.selected .cost-history-bar { box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-color) 70%, transparent); }
         .cost-history-bar-item.estimated .cost-history-bar { border: 1px dashed var(--el-solar-color, #77C2A1); box-sizing: border-box; opacity: .82; }
         .cost-history-bar { align-self: center; background: var(--el-solar-color, #77C2A1); border-radius: 4px 4px 0 0; box-sizing: border-box; max-width: 50px; min-height: 3px; opacity: .75; width: 100%; }
         .cost-history-bar-item.selected .cost-history-bar { opacity: 1; }
