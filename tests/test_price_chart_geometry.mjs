@@ -5,6 +5,13 @@ import { axisCollisionInset, buildHourlyBarEdges, buildHourlyBoundaryHours, buil
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}" role="img" aria-label="Elpris/);
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
+assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}">/);
+assert.match(panelSource, /stop-color="var\(--el-price-cheap-color\)"/);
+assert.match(panelSource, /stop-color="var\(--el-price-normal-color\)"/);
+assert.match(panelSource, /stop-color="var\(--el-price-expensive-color\)"/);
+assert.match(panelSource, /\.price-step-area \{[\s\S]*fill: url\(#price-level-gradient\);/);
+assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke: url\(#price-level-gradient\);/);
+assert.doesNotMatch(panelSource, /\.price-step-line\.(?:cheap|normal|expensive) \{/);
 assert.match(panelSource, /data-price-now-marker/);
 
 const hourly = buildPriceChartGeometry(960, 350, { containerWidth: 960, rightAxisGutter: 0 });

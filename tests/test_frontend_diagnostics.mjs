@@ -2444,6 +2444,10 @@ assert.match(panelSource, /priceCategory\(prices\[currentIndex\], colorBands\)/)
 assert.match(panelSource, /buildPriceStepSegments\(periods, prices/);
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
 assert.match(panelSource, /class="price-step-area"/);
+assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse"/);
+assert.match(panelSource, /x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}"/);
+assert.match(panelSource, /fill: url\(#price-level-gradient\)/);
+assert.match(panelSource, /stroke: url\(#price-level-gradient\)/);
 assert.match(panelSource, /data-price-now-marker/);
 assert.match(panelSource, /\.chart-bar\.cheap \{\s*fill: #67C98C;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.normal \{\s*fill: #B9A05D;\s*fill-opacity: \.32;/);

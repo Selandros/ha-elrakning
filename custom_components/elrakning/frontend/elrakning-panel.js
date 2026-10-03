@@ -6937,23 +6937,20 @@ class ElrakningPanel {
         }
 
         .price-step-area {
-          fill: var(--el-price-normal-color);
-          fill-opacity: .1;
+          fill: url(#price-level-gradient);
+          fill-opacity: .16;
           pointer-events: none;
           stroke: none;
         }
 
         .price-step-line {
           fill: none;
+          stroke: url(#price-level-gradient);
           stroke-linecap: round;
           stroke-linejoin: round;
           stroke-width: 2.2;
           vector-effect: non-scaling-stroke;
         }
-
-        .price-step-line.cheap { stroke: var(--el-price-cheap-color); }
-        .price-step-line.normal { stroke: var(--el-price-normal-color); }
-        .price-step-line.expensive { stroke: var(--el-price-expensive-color); }
 
         .chart-now-marker {
           stroke: var(--primary-text-color);
@@ -13589,12 +13586,13 @@ class ElrakningPanel {
       ? buildPriceStepAreaPaths(periods, prices, (timestamp) => x(timestamp), y, plot.top + plotHeight)
         .map((path) => `<path class="price-step-area" d="${path}" />`).join("")
       : "";
+    const priceLevelGradient = `<defs><linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="${plot.top + plotHeight}" x2="0" y2="${plot.top}"><stop offset="0%" stop-color="var(--el-price-cheap-color)" /><stop offset="50%" stop-color="var(--el-price-normal-color)" /><stop offset="100%" stop-color="var(--el-price-expensive-color)" /></linearGradient></defs>`;
     const nowTimestamp = Date.now();
     const nowMarker = localDateKey(dayStart) === localDateKey(now)
       && nowTimestamp >= dayStart.getTime() && nowTimestamp <= selectedDayEnd.getTime()
       ? `<line class="chart-now-marker" data-price-now-marker x1="${x(nowTimestamp)}" y1="${plot.top}" x2="${x(nowTimestamp)}" y2="${plot.top + plotHeight}" />`
       : "";
-    const priceMarkup = `${priceStepAreas}${priceStepLines}${nowMarker}`;
+    const priceMarkup = `${priceLevelGradient}${priceStepAreas}${priceStepLines}${nowMarker}`;
     const hourLabels = buildHourlyBoundaryHours(renderedWidth).map((hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
