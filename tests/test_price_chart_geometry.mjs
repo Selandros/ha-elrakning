@@ -6,9 +6,9 @@ const panelSource = readFileSync(new URL("../custom_components/elrakning/fronten
 assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}" role="img" aria-label="Elpris/);
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
 assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}">/);
-assert.match(panelSource, /stop-color="var\(--el-price-cheap-color\)"/);
-assert.match(panelSource, /stop offset="30%" stop-color="#F2C94C"/);
-assert.match(panelSource, /stop offset="48%" stop-color="#F2C94C"/);
+assert.match(panelSource, /stop offset="0%" stop-color="#22C55E"/);
+assert.match(panelSource, /stop offset="30%" stop-color="#FBBF24"/);
+assert.match(panelSource, /stop offset="48%" stop-color="#FBBF24"/);
 assert.match(panelSource, /stop offset="55%" stop-color="#EF4444"/);
 assert.match(panelSource, /stop offset="100%" stop-color="#EF4444"/);
 const currentDayGradientPositions = [16.8, 40.7, 65.2].map((price) => ((price - 16.8) / (65.2 - 16.8)) * 100);
