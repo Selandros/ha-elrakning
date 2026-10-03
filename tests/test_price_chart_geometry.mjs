@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { axisCollisionInset, buildHourlyBarEdges, buildHourlyBoundaryHours, buildPriceCategoryBands, buildPriceChartGeometry, buildPriceStepAreaPaths, buildPriceStepSegments, priceAxisGutter, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { axisCollisionInset, buildHourlyBarEdges, buildHourlyBoundaryHours, buildPriceCategoryBands, buildPriceChartGeometry, buildPriceLocalAreaSegments, buildPriceStepAreaPaths, buildPriceStepSegments, priceAxisGutter, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}" role="img" aria-label="Elpris/);
@@ -17,8 +17,21 @@ const currentDayGradientPositions = [16.8, 40.7, 65.2].map((price) => ((price - 
 assert.equal(currentDayGradientPositions[0], 0);
 assert.ok(currentDayGradientPositions[1] < 55, "mean price must remain below the red transition");
 assert.equal(currentDayGradientPositions[2], 100);
+
+const localAreaSegments = buildPriceLocalAreaSegments(
+  [{ start: "2026-10-03T00:00:00+02:00", end: "2026-10-03T01:00:00+02:00" }],
+  [65.2],
+  (timestamp) => timestamp / 3600000,
+  (value) => 100 - value,
+  100,
+  () => "#EF4444",
+);
+assert.equal(localAreaSegments.length, 1);
+assert.match(localAreaSegments[0].path, /M .* 100 L .* 34\.8 L .* 34\.8 L .* 100 Z/);
+assert.equal(localAreaSegments[0].color, "#EF4444");
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill: url\(#price-level-gradient\);/);
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill-opacity: \.28;/);
+assert.match(panelSource, /price-local-gradient-\$\{index\}/);
 assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke: url\(#price-level-gradient\);/);
 assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke-width: \.8;[\s\S]*opacity: \.32;/);
 assert.doesNotMatch(panelSource, /\.price-step-line\.(?:cheap|normal|expensive) \{/);

@@ -2444,6 +2444,8 @@ assert.match(panelSource, /priceCategory\(prices\[currentIndex\], colorBands\)/)
 assert.match(panelSource, /buildPriceStepSegments\(periods, prices/);
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
 assert.match(panelSource, /class="price-step-area"/);
+assert.match(panelSource, /buildPriceLocalAreaSegments\(/);
+assert.match(panelSource, /price-local-gradient-\$\{index\}/);
 assert.match(panelSource, /<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse"/);
 assert.match(panelSource, /x1="0" y1="\$\{plot\.top \+ plotHeight\}" x2="0" y2="\$\{plot\.top\}"/);
 assert.match(panelSource, /stop offset="0%" stop-color="#22C55E"/);

@@ -368,6 +368,25 @@ export function buildPriceStepAreaPaths(periods, values, x, y, baselineY) {
   return paths;
 }
 
+export function buildPriceLocalAreaSegments(periods, values, x, y, baselineY, colorForValue) {
+  return (Array.isArray(periods) ? periods : []).flatMap((period, index) => {
+    const value = Number(values?.[index]);
+    const start = new Date(period?.start).getTime();
+    const end = new Date(period?.end).getTime();
+    if (![value, start, end].every(Number.isFinite) || end <= start) return [];
+    const startX = x(start);
+    const endX = x(end);
+    const topY = y(value);
+    const color = colorForValue(value);
+    if (!color || ![startX, endX, topY].every(Number.isFinite)) return [];
+    return [{
+      index,
+      color,
+      path: `M ${startX} ${baselineY} L ${startX} ${topY} L ${endX} ${topY} L ${endX} ${baselineY} Z`,
+    }];
+  });
+}
+
 export function createPriceDebugText(priceData) {
   const lines = [priceData.time, priceData.value];
   if (priceData.details) lines.push("", JSON.stringify(priceData.details, null, 2));
@@ -13583,11 +13602,25 @@ class ElrakningPanel {
     const priceStepLines = priceStepSegments.map(({ category, path }) => (
       `<path class="price-step-line ${category}" data-price-category="${category}" d="${path}" />`
     )).join("");
-    const priceStepAreas = visibleLayers.spot
-      ? buildPriceStepAreaPaths(periods, prices, (timestamp) => x(timestamp), y, plot.top + plotHeight)
-        .map((path) => `<path class="price-step-area" d="${path}" />`).join("")
-      : "";
-    const priceLevelGradient = `<defs><linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="${plot.top + plotHeight}" x2="0" y2="${plot.top}"><stop offset="0%" stop-color="#22C55E" /><stop offset="18%" stop-color="#22C55E" /><stop offset="30%" stop-color="#FBBF24" /><stop offset="42%" stop-color="#FBBF24" /><stop offset="48%" stop-color="#F59E0B" /><stop offset="58%" stop-color="#EF4444" /><stop offset="100%" stop-color="#EF4444" /></linearGradient></defs>`;
+    const localAreaSegments = visibleLayers.spot
+      ? buildPriceLocalAreaSegments(
+        periods,
+        prices,
+        (timestamp) => x(timestamp),
+        y,
+        plot.top + plotHeight,
+        (price) => {
+          const category = priceCategory(price, colorBands);
+          return category === "cheap" ? "#22C55E" : category === "expensive" ? "#EF4444" : "#FBBF24";
+        },
+      )
+      : [];
+    const priceAreaGradients = localAreaSegments.map(({ index, color }) => (
+      `<linearGradient id="price-local-gradient-${index}" gradientUnits="objectBoundingBox" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#22C55E" /><stop offset="62%" stop-color="#FBBF24" /><stop offset="100%" stop-color="${color}" /></linearGradient>`
+    )).join("");
+    const priceStepAreas = localAreaSegments
+      .map(({ index, path }) => `<path class="price-step-area" fill="url(#price-local-gradient-${index})" d="${path}" />`).join("");
+    const priceLevelGradient = `<defs>${priceAreaGradients}<linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="${plot.top + plotHeight}" x2="0" y2="${plot.top}"><stop offset="0%" stop-color="#22C55E" /><stop offset="18%" stop-color="#22C55E" /><stop offset="30%" stop-color="#FBBF24" /><stop offset="42%" stop-color="#FBBF24" /><stop offset="48%" stop-color="#F59E0B" /><stop offset="58%" stop-color="#EF4444" /><stop offset="100%" stop-color="#EF4444" /></linearGradient></defs>`;
     const nowTimestamp = Date.now();
     const nowMarker = localDateKey(dayStart) === localDateKey(now)
       && nowTimestamp >= dayStart.getTime() && nowTimestamp <= selectedDayEnd.getTime()
