@@ -309,6 +309,65 @@ export function priceColorDetails(price, bands, rank, periodCount) {
   };
 }
 
+export function buildPriceStepSegments(periods, values, x, y, categoryForValue) {
+  const segments = new Map();
+  let previous = null;
+  (Array.isArray(periods) ? periods : []).forEach((period, index) => {
+    const value = Number(values?.[index]);
+    const start = new Date(period?.start).getTime();
+    const end = new Date(period?.end).getTime();
+    if (![value, start, end].every(Number.isFinite) || end <= start) {
+      previous = null;
+      return;
+    }
+    const category = categoryForValue(value);
+    const startX = x(start);
+    const endX = x(end);
+    const currentY = y(value);
+    const path = previous && previous.end === start
+      ? `M ${startX} ${previous.y} L ${startX} ${currentY} M ${startX} ${currentY} L ${endX} ${currentY}`
+      : `M ${startX} ${currentY} L ${endX} ${currentY}`;
+    segments.set(category, `${segments.get(category) || ""}${path} `);
+    previous = { end, y: currentY };
+  });
+  return [...segments.entries()].map(([category, path]) => ({ category, path: path.trim() }));
+}
+
+export function buildPriceStepAreaPaths(periods, values, x, y, baselineY) {
+  const paths = [];
+  let group = [];
+  let previousEnd = null;
+  const flush = () => {
+    if (!group.length) return;
+    const first = group[0];
+    const last = group[group.length - 1];
+    const commands = [`M ${x(first.start)} ${baselineY}`, `L ${x(first.start)} ${y(first.value)}`];
+    group.forEach((item, index) => {
+      commands.push(`L ${x(item.end)} ${y(item.value)}`);
+      const next = group[index + 1];
+      if (next) commands.push(`L ${x(next.start)} ${y(next.value)}`);
+    });
+    commands.push(`L ${x(last.end)} ${baselineY} Z`);
+    paths.push(commands.join(" "));
+    group = [];
+  };
+  (Array.isArray(periods) ? periods : []).forEach((period, index) => {
+    const value = Number(values?.[index]);
+    const start = new Date(period?.start).getTime();
+    const end = new Date(period?.end).getTime();
+    if (![value, start, end].every(Number.isFinite) || end <= start) {
+      flush();
+      previousEnd = null;
+      return;
+    }
+    if (previousEnd !== null && previousEnd !== start) flush();
+    group.push({ start, end, value });
+    previousEnd = end;
+  });
+  flush();
+  return paths;
+}
+
 export function createPriceDebugText(priceData) {
   const lines = [priceData.time, priceData.value];
   if (priceData.details) lines.push("", JSON.stringify(priceData.details, null, 2));
@@ -1092,11 +1151,12 @@ function measuredPriceAxisLabelGutter(chart, labels, gap = 8) {
   return Math.ceil(axisCollisionInset(measuredWidth, gap));
 }
 
-export function buildHourlyBoundaryHours(containerWidth = 960) {
+export function buildHourlyBoundaryHours(containerWidth = 960, dayCount = 1) {
   const width = Number(containerWidth) || 960;
   const step = width >= 760 ? 1 : width >= 480 ? 3 : 6;
-  return Array.from({ length: 25 }, (_, hour) => hour)
-    .filter((hour) => hour === 0 || hour === 24 || hour % step === 0);
+  const days = Math.max(1, Math.floor(Number(dayCount) || 1));
+  return Array.from({ length: days * 24 + 1 }, (_, hour) => hour)
+    .filter((hour) => hour === 0 || hour === days * 24 || hour % step === 0);
 }
 
 export function buildHourlyBarEdges(periodStart, periodEnd, dayStart, dayEnd, plotLeft, plotRight) {
@@ -2491,6 +2551,20 @@ export function selectHourlyPricePeriods(periods, selectedDate = new Date()) {
   });
 }
 
+export function selectHourlyPriceTimeline(periods, selectedDate = new Date(), includeNextDay = false) {
+  const selected = new Date(selectedDate);
+  if (!Number.isFinite(selected.getTime())) return [];
+  const start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate());
+  const end = new Date(start);
+  end.setDate(end.getDate() + (includeNextDay ? 2 : 1));
+  return (Array.isArray(periods) ? periods : [])
+    .filter((period) => {
+      const timestamp = new Date(period?.start).getTime();
+      return Number.isFinite(timestamp) && timestamp >= start.getTime() && timestamp < end.getTime();
+    })
+    .sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime());
+}
+
 export function aggregatedPriceGroupIndex(viewX, plotLeft, plotWidth, groupCount) {
   if (!Number.isFinite(viewX) || !Number.isFinite(plotLeft) || !Number.isFinite(plotWidth) || !Number.isInteger(groupCount) || groupCount < 1) return -1;
   if (viewX < plotLeft || viewX > plotLeft + plotWidth) return -1;
@@ -3706,6 +3780,8 @@ class ElrakningPanel {
       periods: [],
       error: "missing_integration",
     };
+    this._tomorrowPriceData = null;
+    this._priceDataRequestToken = 0;
   }
 
   render() {
@@ -6873,6 +6949,47 @@ class ElrakningPanel {
           stroke: var(--el-price-normal-color);
           stroke-dasharray: 5 4;
           stroke-width: 1.5;
+        }
+
+        .price-step-area {
+          fill: var(--el-price-normal-color);
+          fill-opacity: .1;
+          pointer-events: none;
+          stroke: none;
+        }
+
+        .price-step-line {
+          fill: none;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: 2.2;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .price-step-line.cheap { stroke: var(--el-price-cheap-color); }
+        .price-step-line.normal { stroke: var(--el-price-normal-color); }
+        .price-step-line.expensive { stroke: var(--el-price-expensive-color); }
+
+        .chart-now-marker {
+          stroke: var(--primary-text-color);
+          stroke-dasharray: 3 3;
+          stroke-width: 1.5;
+          opacity: .85;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .chart-day-boundary {
+          stroke: var(--secondary-text-color);
+          stroke-dasharray: 2 4;
+          stroke-width: 1;
+          opacity: .7;
+          vector-effect: non-scaling-stroke;
+        }
+
+        .chart-day-boundary-label {
+          color: var(--secondary-text-color);
+          font-size: .85em;
+          transform: translateX(-50%);
         }
 
         .chart-meter-gridline {
@@ -11795,17 +11912,35 @@ class ElrakningPanel {
 
   async loadPriceData(selectedDate = null) {
     if (!this.hass?.callWS) return;
-    try {
+    const requestToken = ++this._priceDataRequestToken;
+    this._tomorrowPriceData = null;
+    const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed || new Date();
+    const requestDate = (date) => {
       const request = { type: "elrakning/price_data" };
-      const requestedDate = selectedDate instanceof Date ? selectedDate : null;
-      if (requestedDate instanceof Date && Number.isFinite(requestedDate.getTime())) {
-        request.date = `${requestedDate.getFullYear()}-${String(requestedDate.getMonth() + 1).padStart(2, "0")}-${String(requestedDate.getDate()).padStart(2, "0")}`;
+      if (date instanceof Date && Number.isFinite(date.getTime())) {
+        request.date = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
       }
-      const response = await this.hass.callWS(request);
+      return request;
+    };
+    let response;
+    try {
+      response = await this.hass.callWS(requestDate(requestedDate));
+      if (requestToken !== this._priceDataRequestToken) return;
       if (response?.error === "integration_unavailable") return;
       this.priceSnapshot = response;
     } catch {
       return;
+    }
+    const tomorrow = new Date(requestedDate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    try {
+      const tomorrowResponse = await this.hass.callWS(requestDate(tomorrow));
+      if (requestToken !== this._priceDataRequestToken) return;
+      this._tomorrowPriceData = Array.isArray(tomorrowResponse?.periods) && tomorrowResponse.periods.length
+        ? tomorrowResponse
+        : null;
+    } catch {
+      this._tomorrowPriceData = null;
     }
     this.priceData = {
       source: "nord_pool",
@@ -12822,6 +12957,7 @@ class ElrakningPanel {
 
   _getPriceChartLiveSignature() {
     const periods = this.priceData?.periods || [];
+    const tomorrowPeriods = this._tomorrowPriceData?.periods || [];
     if (!periods.length) return JSON.stringify({ periods: 0 });
     const firstTimestamp = new Date(periods[0].start).getTime();
     if (!Number.isFinite(firstTimestamp)) return JSON.stringify({ periods: periods.length });
@@ -12857,6 +12993,8 @@ class ElrakningPanel {
     return JSON.stringify({
       date: new Date(dayStartMs).toISOString().slice(0, 10),
       periods: periods.length,
+      tomorrow_periods: tomorrowPeriods.length,
+      tomorrow_end: tomorrowPeriods.at(-1)?.end || null,
       slot: slotTimestamp,
       meter: pointSignature(meterPoints, ["import_kw", "export_kw"]),
       power,
@@ -12889,6 +13027,7 @@ class ElrakningPanel {
         ? [this._ellaSelection.id, this._ellaSelection.start, this._ellaSelection.end, this._ellaSelection.revision]
         : null,
       periods: [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
+      tomorrow_periods: [this._tomorrowPriceData?.periods?.length || 0, this._tomorrowPriceData?.periods?.[0]?.start || null, this._tomorrowPriceData?.periods?.at(-1)?.end || null],
       layers: this._effectiveChartLayerState(),
       series,
       forecast,
@@ -13177,9 +13316,17 @@ class ElrakningPanel {
       return;
     }
 
-    const periods = this._periodPickerState?.mode === "hour"
-      ? selectHourlyPricePeriods(this.priceData.periods, this._periodPickerState.confirmed)
+    const selectedDate = this._periodPickerState?.confirmed || new Date();
+    const selectedPeriods = this._periodPickerState?.mode === "hour"
+      ? selectHourlyPricePeriods(this.priceData.periods, selectedDate)
       : this.priceData.periods;
+    const tomorrowPeriods = this._periodPickerState?.mode === "hour"
+      ? selectHourlyPricePeriods(
+        this._tomorrowPriceData?.periods,
+        new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1),
+      )
+      : [];
+    const periods = tomorrowPeriods.length ? [...selectedPeriods, ...tomorrowPeriods] : selectedPeriods;
     if (!periods.length) {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       const legend = this.host.querySelector("[data-meter-legend]");
@@ -13187,6 +13334,7 @@ class ElrakningPanel {
       chart.innerHTML = "<div class=\"empty-chart\"><strong>Ingen prisdata för vald dag.</strong></div>";
       return;
     }
+    this._hourlyChartPeriods = periods;
     const visibleLayers = this._effectiveChartLayerState();
     this._updatePriceComparisonControls();
     const prices = periods.map((period) => this._periodCustomerPrice(period));
@@ -13220,9 +13368,11 @@ class ElrakningPanel {
     const zeroY = Math.max(plot.top, Math.min(plot.top + plotHeight, y(0)));
     const firstStart = new Date(periods[0].start);
     const dayStart = new Date(firstStart.getFullYear(), firstStart.getMonth(), firstStart.getDate());
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    const dayDuration = dayEnd.getTime() - dayStart.getTime();
+    const selectedDayEnd = new Date(dayStart);
+    selectedDayEnd.setDate(selectedDayEnd.getDate() + 1);
+    const timelineEnd = new Date(dayStart);
+    timelineEnd.setDate(timelineEnd.getDate() + (tomorrowPeriods.length ? 2 : 1));
+    const dayDuration = timelineEnd.getTime() - dayStart.getTime();
     this._chartGeometry = {
       ...geometry,
       dayStartMs: dayStart.getTime(),
@@ -13231,7 +13381,7 @@ class ElrakningPanel {
     const now = new Date();
     const actualDayEnd = localDateKey(dayStart) === localDateKey(now)
       ? now.getTime()
-      : dayEnd.getTime();
+      : selectedDayEnd.getTime();
     const currentPeriod = periods.find((period) => {
       const start = new Date(period.start);
       const end = new Date(period.end);
@@ -13254,7 +13404,7 @@ class ElrakningPanel {
     this._meterTooltipPoints = meterPoints;
     const meterCanonicalPoints = useHistoricalMeter
       ? meterPoints
-      : this.buildCanonicalMeterPoints(meterPoints, dayStart, dayEnd);
+      : this.buildCanonicalMeterPoints(meterPoints, dayStart, selectedDayEnd);
     this._meterCanonicalPoints = meterCanonicalPoints;
     this._meterCanonicalPointMap = new Map(
       meterCanonicalPoints
@@ -13274,7 +13424,7 @@ class ElrakningPanel {
         targetPoints: renderBudget,
         valueKeys: ["import_kw", "export_kw"],
       }))
-      : this.prepareMeterDisplayPoints(this.buildCanonicalMeterPoints(meterRenderPoints, dayStart, dayEnd));
+      : this.prepareMeterDisplayPoints(this.buildCanonicalMeterPoints(meterRenderPoints, dayStart, selectedDayEnd));
     const powerCanonicalPoints = {};
     const powerDisplayPoints = {};
     const powerDisplayGeometry = {};
@@ -13296,7 +13446,7 @@ class ElrakningPanel {
       });
       powerCanonicalPoints[key] = useHistoricalPower
         ? historicalPoints
-        : this.buildCanonicalPowerPoints(renderRawPoints, dayStart, dayEnd);
+        : this.buildCanonicalPowerPoints(renderRawPoints, dayStart, selectedDayEnd);
       const historicalPowerDisplayPoints = energyIntervalsToCurvePoints(energyHistory?.series?.[key]).filter((point) => (
         point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
       ));
@@ -13482,23 +13632,36 @@ class ElrakningPanel {
         } : {}),
       });
     });
-    const bars = visibleLayers.spot ? periods.map((period, index) => {
-      const price = prices[index];
-      const top = price >= 0 ? y(price) : zeroY;
-      const bottom = price >= 0 ? zeroY : y(price);
-      const category = priceCategory(price, colorBands);
-      const edges = buildHourlyBarEdges(period.start, period.end, dayStart, dayEnd, plot.left, width - plot.right);
-      if (!edges) return "";
-      const barColor = chartColor(category === "cheap" ? "priceCheap" : category === "expensive" ? "priceExpensive" : "priceNormal");
-      return `<rect class="chart-bar ${category}" fill="${barColor}" data-index="${index}" x="${edges.left}" y="${top}" width="${Math.max(1, edges.right - edges.left)}" height="${Math.max(1, bottom - top)}" rx="1" />`;
-    }).join("") : "";
-    const hourLabels = buildHourlyBoundaryHours(renderedWidth).map((hour) => {
+    const priceCategoryFor = (price) => priceCategory(price, colorBands);
+    const priceStepSegments = visibleLayers.spot
+      ? buildPriceStepSegments(periods, prices, (timestamp) => x(timestamp), y, priceCategoryFor)
+      : [];
+    const priceStepLines = priceStepSegments.map(({ category, path }) => (
+      `<path class="price-step-line ${category}" data-price-category="${category}" d="${path}" />`
+    )).join("");
+    const priceStepAreas = visibleLayers.spot
+      ? buildPriceStepAreaPaths(periods, prices, (timestamp) => x(timestamp), y, plot.top + plotHeight)
+        .map((path) => `<path class="price-step-area" d="${path}" />`).join("")
+      : "";
+    const nowTimestamp = Date.now();
+    const nowMarker = nowTimestamp >= dayStart.getTime() && nowTimestamp <= timelineEnd.getTime()
+      ? `<line class="chart-now-marker" data-price-now-marker x1="${x(nowTimestamp)}" y1="${plot.top}" x2="${x(nowTimestamp)}" y2="${plot.top + plotHeight}" />`
+      : "";
+    const dayBoundary = tomorrowPeriods.length
+      ? `<line class="chart-day-boundary" data-price-day-boundary x1="${x(selectedDayEnd.getTime())}" y1="${plot.top}" x2="${x(selectedDayEnd.getTime())}" y2="${plot.top + plotHeight}" />`
+      : "";
+    const priceMarkup = `${priceStepAreas}${priceStepLines}${dayBoundary}${nowMarker}`;
+    const timelineDayCount = tomorrowPeriods.length ? 2 : 1;
+    const hourLabels = buildHourlyBoundaryHours(renderedWidth, timelineDayCount).map((hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
-      const edge = hour === 0 ? " edge-start" : hour === 24 ? " edge-end" : "";
+      const edge = hour === 0 ? " edge-start" : hour === timelineDayCount * 24 ? " edge-end" : "";
       return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
     }).join("");
-    const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}</div>`;
+    const dayBoundaryLabel = tomorrowPeriods.length
+      ? `<span class="chart-axis-overlay-label chart-day-boundary-label" style="left:${(x(selectedDayEnd.getTime()) / width) * 100}%">Imorgon</span>`
+      : "";
+    const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}${dayBoundaryLabel}</div>`;
     const legend = this.host.querySelector("[data-meter-legend]");
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
     this._chartHoverGeometry = {
@@ -13510,12 +13673,14 @@ class ElrakningPanel {
     };
     const dynamicChartMarkup = {
       grid: meterGrid,
+      price: priceMarkup,
       areas: meterAreas,
       lines: meterLines,
     };
     const existingSvg = liveUpdate ? chart.querySelector(".chart-svg") : null;
     if (existingSvg
       && existingSvg.querySelector('[data-price-dynamic="grid"]')
+      && existingSvg.querySelector('[data-price-dynamic="price"]')
       && existingSvg.querySelector('[data-price-dynamic="areas"]')
       && existingSvg.querySelector('[data-price-dynamic="lines"]')) {
       for (const [key, markup] of Object.entries(dynamicChartMarkup)) {
@@ -13527,12 +13692,12 @@ class ElrakningPanel {
       this._priceChartRenderCacheKey = renderCacheKey;
       return;
     }
-    chart.innerHTML = `<svg class="chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dagens elpris i 15-minutersperioder">
+    chart.innerHTML = `<svg class="chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Elpris i 15-minutersperioder">
       <line class="chart-axis" x1="${plot.left}" y1="${zeroY}" x2="${width - plot.right}" y2="${zeroY}" />
       <g data-price-dynamic="grid">${meterGrid}</g>
-      ${bars}
+      <g data-price-dynamic="price">${priceMarkup}</g>
       <g data-price-dynamic="areas">${meterAreas}</g>
-      <g data-price-dynamic="lines">${this._ellaSelectionBandMarkup(x, plot, dayStart.getTime(), dayEnd.getTime())}${meterLines}</g>
+      <g data-price-dynamic="lines">${this._ellaSelectionBandMarkup(x, plot, dayStart.getTime(), selectedDayEnd.getTime())}${meterLines}</g>
       ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
     </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;
@@ -13608,6 +13773,7 @@ class ElrakningPanel {
     const svg = this.host.querySelector(".chart-svg");
     const tooltip = this.host.querySelector(".chart-tooltip");
     if (!chart || !svg || !tooltip || !this._chartGeometry) return;
+    const chartPeriods = this._hourlyChartPeriods || this.priceData.periods;
     const periodAt = (clientX) => {
       const geometry = this._chartGeometry;
       const bounds = svg.getBoundingClientRect();
@@ -13620,12 +13786,12 @@ class ElrakningPanel {
         geometry.dayStartMs,
         geometry.dayStartMs + geometry.dayDuration,
       );
-      const index = this.priceData.periods.findIndex((period) => {
+      const index = chartPeriods.findIndex((period) => {
         const start = new Date(period.start).getTime();
         const end = new Date(period.end).getTime();
         return start <= tooltipTimestamp && tooltipTimestamp < end;
       });
-      return index < 0 ? null : { period: this.priceData.periods[index], index, tooltipTimestamp };
+      return index < 0 ? null : { period: chartPeriods[index], index, tooltipTimestamp };
     };
     const insidePlot = (clientX, clientY) => {
       const geometry = this._chartGeometry;
@@ -13644,7 +13810,7 @@ class ElrakningPanel {
       const value = visibleLayers.spot && Number.isFinite(comparisonPrice)
         ? `${this.formatPrice(comparisonPrice)} öre/kWh`
         : "";
-      const index = this.priceData.periods.indexOf(period);
+      const index = chartPeriods.indexOf(period);
       const canonicalMeterPoint = this._meterCanonicalPointAt(tooltipTimestamp);
       const rawMeterPoint = this._meterPointAtNearest(tooltipTimestamp);
       const meterSeries = { import_kw: "import", export_kw: "export" };

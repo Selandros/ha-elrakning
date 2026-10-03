@@ -94,7 +94,7 @@ assert.match(
 );
 assert.match(
   hourlyRender,
-  /const actualDayEnd = localDateKey\(dayStart\) === localDateKey\(now\)[\s\S]*?now\.getTime\(\)[\s\S]*?dayEnd\.getTime\(\)/,
+  /const actualDayEnd = localDateKey\(dayStart\) === localDateKey\(now\)[\s\S]*?now\.getTime\(\)[\s\S]*?selectedDayEnd\.getTime\(\)/,
   "actual power must be bounded by now on the current local day",
 );
 assert.match(

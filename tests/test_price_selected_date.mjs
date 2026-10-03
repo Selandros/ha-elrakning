@@ -71,9 +71,12 @@ assert.deepEqual(september.map((period) => period.price), [300]);
 assert.ok(september.every((period) => new Date(period.start).getDate() === 1));
 assert.notDeepEqual(august, september);
 
-assert.match(panelSource, /selectHourlyPricePeriods\(this\.priceData\.periods, this\._periodPickerState\.confirmed\)/);
-assert.match(panelSource, /request\.date = `\$\{requestedDate\.getFullYear\(\)\}/);
-assert.match(panelSource, /const requestedDate = selectedDate instanceof Date \? selectedDate : null;/);
+assert.match(panelSource, /selectHourlyPricePeriods\(this\.priceData\.periods, selectedDate\)/);
+assert.match(panelSource, /selectHourlyPricePeriods\(\s*this\._tomorrowPriceData\?\.periods,/);
+assert.match(panelSource, /const requestDate = \(date\) =>/);
+assert.match(panelSource, /request\.date = `\$\{date\.getFullYear\(\)\}/);
+assert.match(panelSource, /const requestedDate = selectedDate instanceof Date \? selectedDate : this\._periodPickerState\?\.confirmed \|\| new Date\(\);/);
+assert.match(panelSource, /const tomorrow = new Date\(requestedDate\);/);
 assert.match(panelSource, /const applySelectedHourDate = async \(date\) =>/);
 assert.match(panelSource, /await applySelectedHourDate\(date\)/);
 assert.match(panelSource, /applySelectedHourDate\(this\._periodPickerState\.draft\)/);

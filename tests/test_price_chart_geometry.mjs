@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { axisCollisionInset, buildHourlyBarEdges, buildPriceCategoryBands, buildPriceChartGeometry, priceAxisGutter } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { axisCollisionInset, buildHourlyBarEdges, buildHourlyBoundaryHours, buildPriceCategoryBands, buildPriceChartGeometry, buildPriceStepAreaPaths, buildPriceStepSegments, priceAxisGutter, selectHourlyPriceTimeline } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
-assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}" role="img" aria-label="Dagens elpris/);
+assert.match(panelSource, /preserveAspectRatio="none" viewBox="0 0 \$\{width\} \$\{height\}" role="img" aria-label="Elpris/);
+assert.match(panelSource, /class="price-step-line \$\{category\}"/);
+assert.match(panelSource, /data-price-now-marker/);
+assert.match(panelSource, /data-price-day-boundary/);
 
 const hourly = buildPriceChartGeometry(960, 350, { containerWidth: 960, rightAxisGutter: 0 });
 const hourStart = hourly.plot.left;
@@ -89,5 +92,25 @@ const wideRightLabels = buildPriceChartGeometry(960, 350, {
 assert.equal(wideRightLabels.rightInset, 120);
 assert.equal(wideRightLabels.plotRight, 960 - 120);
 assert.ok(wideRightLabels.plotWidth < narrowLabels.plotWidth);
+
+const stepPeriods = [
+  { start: "2026-10-03T00:00:00+02:00", end: "2026-10-03T01:00:00+02:00" },
+  { start: "2026-10-03T01:00:00+02:00", end: "2026-10-03T02:00:00+02:00" },
+  { start: "2026-10-04T00:00:00+02:00", end: "2026-10-04T01:00:00+02:00" },
+];
+const stepBase = new Date(stepPeriods[0].start).getTime();
+const stepSegments = buildPriceStepSegments(
+  stepPeriods,
+  [10, 20, 30],
+  (timestamp) => (timestamp - stepBase) / 3600000,
+  (value) => value,
+  (value) => value < 15 ? "cheap" : value > 25 ? "expensive" : "normal",
+);
+assert.deepEqual(stepSegments.map((item) => item.category), ["cheap", "normal", "expensive"]);
+assert.match(stepSegments.find((item) => item.category === "normal").path, /M 1 10 L 1 20 M 1 20 L 2 20/);
+assert.equal(buildPriceStepAreaPaths(stepPeriods, [10, 20, 30], (timestamp) => (timestamp - stepBase) / 3600000, (value) => value, 0).length, 2);
+assert.deepEqual(buildHourlyBoundaryHours(960, 2).slice(-3), [46, 47, 48]);
+assert.equal(selectHourlyPriceTimeline(stepPeriods, new Date("2026-10-03T12:00:00+02:00"), true).length, 3);
+assert.equal(selectHourlyPriceTimeline(stepPeriods, new Date("2026-10-03T12:00:00+02:00"), false).length, 2);
 
 console.log("price chart geometry tests passed");
