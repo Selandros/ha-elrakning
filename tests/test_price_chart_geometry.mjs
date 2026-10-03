@@ -10,7 +10,9 @@ assert.match(panelSource, /stop-color="var\(--el-price-cheap-color\)"/);
 assert.match(panelSource, /stop-color="var\(--el-price-normal-color\)"/);
 assert.match(panelSource, /stop-color="var\(--el-price-expensive-color\)"/);
 assert.match(panelSource, /\.price-step-area \{[\s\S]*fill: url\(#price-level-gradient\);/);
+assert.match(panelSource, /\.price-step-area \{[\s\S]*fill-opacity: \.24;/);
 assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke: url\(#price-level-gradient\);/);
+assert.match(panelSource, /\.price-step-line \{[\s\S]*stroke-width: \.8;[\s\S]*opacity: \.32;/);
 assert.doesNotMatch(panelSource, /\.price-step-line\.(?:cheap|normal|expensive) \{/);
 assert.match(panelSource, /data-price-now-marker/);
 

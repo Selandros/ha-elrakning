@@ -6938,7 +6938,7 @@ class ElrakningPanel {
 
         .price-step-area {
           fill: url(#price-level-gradient);
-          fill-opacity: .16;
+          fill-opacity: .24;
           pointer-events: none;
           stroke: none;
         }
@@ -6948,7 +6948,8 @@ class ElrakningPanel {
           stroke: url(#price-level-gradient);
           stroke-linecap: round;
           stroke-linejoin: round;
-          stroke-width: 2.2;
+          stroke-width: .8;
+          opacity: .32;
           vector-effect: non-scaling-stroke;
         }
 
