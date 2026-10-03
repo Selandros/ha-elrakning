@@ -70,13 +70,21 @@ const september = selectHourlyPricePeriods(periods, new Date(2026, 8, 1));
 assert.deepEqual(september.map((period) => period.price), [300]);
 assert.ok(september.every((period) => new Date(period.start).getDate() === 1));
 assert.notDeepEqual(august, september);
+const adjacentDays = [
+  { start: "2026-10-03T23:00:00+02:00", end: "2026-10-04T00:00:00+02:00", price: 10 },
+  { start: "2026-10-04T00:00:00+02:00", end: "2026-10-04T01:00:00+02:00", price: 20 },
+];
+assert.deepEqual(selectHourlyPricePeriods(adjacentDays, new Date("2026-10-03T12:00:00+02:00")).map((period) => period.price), [10]);
+assert.deepEqual(selectHourlyPricePeriods(adjacentDays, new Date("2026-10-04T12:00:00+02:00")).map((period) => period.price), [20]);
 
 assert.match(panelSource, /selectHourlyPricePeriods\(this\.priceData\.periods, selectedDate\)/);
-assert.match(panelSource, /selectHourlyPricePeriods\(\s*this\._tomorrowPriceData\?\.periods,/);
+assert.doesNotMatch(panelSource, /_tomorrowPriceData|tomorrowPeriods|timelineDayCount/);
+assert.match(panelSource, /const periods = this\._periodPickerState\?\.mode === "hour"/);
+assert.doesNotMatch(panelSource, /await this\.hass\.callWS\(requestDate\(tomorrow\)\)/);
 assert.match(panelSource, /const requestDate = \(date\) =>/);
 assert.match(panelSource, /request\.date = `\$\{date\.getFullYear\(\)\}/);
 assert.match(panelSource, /const requestedDate = selectedDate instanceof Date \? selectedDate : this\._periodPickerState\?\.confirmed \|\| new Date\(\);/);
-assert.match(panelSource, /const tomorrow = new Date\(requestedDate\);/);
+assert.doesNotMatch(panelSource, /const tomorrow = new Date\(requestedDate\);/);
 assert.match(panelSource, /const applySelectedHourDate = async \(date\) =>/);
 assert.match(panelSource, /await applySelectedHourDate\(date\)/);
 assert.match(panelSource, /applySelectedHourDate\(this\._periodPickerState\.draft\)/);

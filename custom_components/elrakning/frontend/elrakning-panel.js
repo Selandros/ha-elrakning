@@ -2551,20 +2551,6 @@ export function selectHourlyPricePeriods(periods, selectedDate = new Date()) {
   });
 }
 
-export function selectHourlyPriceTimeline(periods, selectedDate = new Date(), includeNextDay = false) {
-  const selected = new Date(selectedDate);
-  if (!Number.isFinite(selected.getTime())) return [];
-  const start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate());
-  const end = new Date(start);
-  end.setDate(end.getDate() + (includeNextDay ? 2 : 1));
-  return (Array.isArray(periods) ? periods : [])
-    .filter((period) => {
-      const timestamp = new Date(period?.start).getTime();
-      return Number.isFinite(timestamp) && timestamp >= start.getTime() && timestamp < end.getTime();
-    })
-    .sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime());
-}
-
 export function aggregatedPriceGroupIndex(viewX, plotLeft, plotWidth, groupCount) {
   if (!Number.isFinite(viewX) || !Number.isFinite(plotLeft) || !Number.isFinite(plotWidth) || !Number.isInteger(groupCount) || groupCount < 1) return -1;
   if (viewX < plotLeft || viewX > plotLeft + plotWidth) return -1;
@@ -3780,7 +3766,6 @@ class ElrakningPanel {
       periods: [],
       error: "missing_integration",
     };
-    this._tomorrowPriceData = null;
     this._priceDataRequestToken = 0;
   }
 
@@ -6976,20 +6961,6 @@ class ElrakningPanel {
           stroke-width: 1.5;
           opacity: .85;
           vector-effect: non-scaling-stroke;
-        }
-
-        .chart-day-boundary {
-          stroke: var(--secondary-text-color);
-          stroke-dasharray: 2 4;
-          stroke-width: 1;
-          opacity: .7;
-          vector-effect: non-scaling-stroke;
-        }
-
-        .chart-day-boundary-label {
-          color: var(--secondary-text-color);
-          font-size: .85em;
-          transform: translateX(-50%);
         }
 
         .chart-meter-gridline {
@@ -11913,7 +11884,6 @@ class ElrakningPanel {
   async loadPriceData(selectedDate = null) {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._priceDataRequestToken;
-    this._tomorrowPriceData = null;
     const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed || new Date();
     const requestDate = (date) => {
       const request = { type: "elrakning/price_data" };
@@ -11930,17 +11900,6 @@ class ElrakningPanel {
       this.priceSnapshot = response;
     } catch {
       return;
-    }
-    const tomorrow = new Date(requestedDate);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    try {
-      const tomorrowResponse = await this.hass.callWS(requestDate(tomorrow));
-      if (requestToken !== this._priceDataRequestToken) return;
-      this._tomorrowPriceData = Array.isArray(tomorrowResponse?.periods) && tomorrowResponse.periods.length
-        ? tomorrowResponse
-        : null;
-    } catch {
-      this._tomorrowPriceData = null;
     }
     this.priceData = {
       source: "nord_pool",
@@ -12957,7 +12916,6 @@ class ElrakningPanel {
 
   _getPriceChartLiveSignature() {
     const periods = this.priceData?.periods || [];
-    const tomorrowPeriods = this._tomorrowPriceData?.periods || [];
     if (!periods.length) return JSON.stringify({ periods: 0 });
     const firstTimestamp = new Date(periods[0].start).getTime();
     if (!Number.isFinite(firstTimestamp)) return JSON.stringify({ periods: periods.length });
@@ -12993,8 +12951,6 @@ class ElrakningPanel {
     return JSON.stringify({
       date: new Date(dayStartMs).toISOString().slice(0, 10),
       periods: periods.length,
-      tomorrow_periods: tomorrowPeriods.length,
-      tomorrow_end: tomorrowPeriods.at(-1)?.end || null,
       slot: slotTimestamp,
       meter: pointSignature(meterPoints, ["import_kw", "export_kw"]),
       power,
@@ -13027,7 +12983,6 @@ class ElrakningPanel {
         ? [this._ellaSelection.id, this._ellaSelection.start, this._ellaSelection.end, this._ellaSelection.revision]
         : null,
       periods: [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
-      tomorrow_periods: [this._tomorrowPriceData?.periods?.length || 0, this._tomorrowPriceData?.periods?.[0]?.start || null, this._tomorrowPriceData?.periods?.at(-1)?.end || null],
       layers: this._effectiveChartLayerState(),
       series,
       forecast,
@@ -13317,16 +13272,9 @@ class ElrakningPanel {
     }
 
     const selectedDate = this._periodPickerState?.confirmed || new Date();
-    const selectedPeriods = this._periodPickerState?.mode === "hour"
+    const periods = this._periodPickerState?.mode === "hour"
       ? selectHourlyPricePeriods(this.priceData.periods, selectedDate)
       : this.priceData.periods;
-    const tomorrowPeriods = this._periodPickerState?.mode === "hour"
-      ? selectHourlyPricePeriods(
-        this._tomorrowPriceData?.periods,
-        new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1),
-      )
-      : [];
-    const periods = tomorrowPeriods.length ? [...selectedPeriods, ...tomorrowPeriods] : selectedPeriods;
     if (!periods.length) {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       const legend = this.host.querySelector("[data-meter-legend]");
@@ -13370,9 +13318,7 @@ class ElrakningPanel {
     const dayStart = new Date(firstStart.getFullYear(), firstStart.getMonth(), firstStart.getDate());
     const selectedDayEnd = new Date(dayStart);
     selectedDayEnd.setDate(selectedDayEnd.getDate() + 1);
-    const timelineEnd = new Date(dayStart);
-    timelineEnd.setDate(timelineEnd.getDate() + (tomorrowPeriods.length ? 2 : 1));
-    const dayDuration = timelineEnd.getTime() - dayStart.getTime();
+    const dayDuration = selectedDayEnd.getTime() - dayStart.getTime();
     this._chartGeometry = {
       ...geometry,
       dayStartMs: dayStart.getTime(),
@@ -13644,24 +13590,18 @@ class ElrakningPanel {
         .map((path) => `<path class="price-step-area" d="${path}" />`).join("")
       : "";
     const nowTimestamp = Date.now();
-    const nowMarker = nowTimestamp >= dayStart.getTime() && nowTimestamp <= timelineEnd.getTime()
+    const nowMarker = localDateKey(dayStart) === localDateKey(now)
+      && nowTimestamp >= dayStart.getTime() && nowTimestamp <= selectedDayEnd.getTime()
       ? `<line class="chart-now-marker" data-price-now-marker x1="${x(nowTimestamp)}" y1="${plot.top}" x2="${x(nowTimestamp)}" y2="${plot.top + plotHeight}" />`
       : "";
-    const dayBoundary = tomorrowPeriods.length
-      ? `<line class="chart-day-boundary" data-price-day-boundary x1="${x(selectedDayEnd.getTime())}" y1="${plot.top}" x2="${x(selectedDayEnd.getTime())}" y2="${plot.top + plotHeight}" />`
-      : "";
-    const priceMarkup = `${priceStepAreas}${priceStepLines}${dayBoundary}${nowMarker}`;
-    const timelineDayCount = tomorrowPeriods.length ? 2 : 1;
-    const hourLabels = buildHourlyBoundaryHours(renderedWidth, timelineDayCount).map((hour) => {
+    const priceMarkup = `${priceStepAreas}${priceStepLines}${nowMarker}`;
+    const hourLabels = buildHourlyBoundaryHours(renderedWidth).map((hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
-      const edge = hour === 0 ? " edge-start" : hour === timelineDayCount * 24 ? " edge-end" : "";
+      const edge = hour === 0 ? " edge-start" : hour === 24 ? " edge-end" : "";
       return `<span class="chart-axis-overlay-label chart-axis-overlay-x${edge}" style="left:${(x(hourDate) / width) * 100}%">${String(hour).padStart(2, "0")}</span>`;
     }).join("");
-    const dayBoundaryLabel = tomorrowPeriods.length
-      ? `<span class="chart-axis-overlay-label chart-day-boundary-label" style="left:${(x(selectedDayEnd.getTime()) / width) * 100}%">Imorgon</span>`
-      : "";
-    const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}${dayBoundaryLabel}</div>`;
+    const axisOverlayMarkup = `<div class="chart-axis-overlay">${meterVisible ? meterGridLevels.map((level) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(meterY(level) / height) * 100}%">${this._formatNumber(level)} kW</span>`).join("") : ""}${hourLabels}</div>`;
     const legend = this.host.querySelector("[data-meter-legend]");
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
     this._chartHoverGeometry = {

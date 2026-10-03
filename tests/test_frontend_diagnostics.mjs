@@ -1373,7 +1373,6 @@ assert.equal(dualPriceGeometry.plotLeft, priceAxisGutter(["0 kW", "5 kW", "10 kW
 assert.equal(dualPriceGeometry.plotRight, 960 - priceAxisGutter(["0 öre/kWh", "100 öre/kWh"]));
 assert.ok(priceAxisGutter(["0", "21,12", "42,24"]) < priceAxisGutter(["0 kWh", "21,12 kWh", "42,24 kWh"]));
 assert.deepEqual(buildHourlyBoundaryHours(960), Array.from({ length: 25 }, (_, hour) => hour));
-assert.deepEqual(buildHourlyBoundaryHours(960, 2), Array.from({ length: 49 }, (_, hour) => hour));
 assert.deepEqual(buildHourlyBoundaryHours(600), [0, 3, 6, 9, 12, 15, 18, 21, 24]);
 assert.deepEqual(buildHourlyBoundaryHours(390), [0, 6, 12, 18, 24]);
 assert.equal(buildPriceChartGeometry(960, 350, { containerWidth: 960 }).plot.left, priceAxisGutter(["0 kW", "5 kW", "10 kW"]));
@@ -2446,7 +2445,6 @@ assert.match(panelSource, /buildPriceStepSegments\(periods, prices/);
 assert.match(panelSource, /class="price-step-line \$\{category\}"/);
 assert.match(panelSource, /class="price-step-area"/);
 assert.match(panelSource, /data-price-now-marker/);
-assert.match(panelSource, /data-price-day-boundary/);
 assert.match(panelSource, /\.chart-bar\.cheap \{\s*fill: #67C98C;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.normal \{\s*fill: #B9A05D;\s*fill-opacity: \.32;/);
 assert.match(panelSource, /\.chart-bar\.expensive \{\s*fill: #E4687D;\s*fill-opacity: \.32;/);
