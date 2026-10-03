@@ -842,6 +842,12 @@ export function isVisiblePowerValue(value) {
   return Number.isFinite(numeric) && numeric > POWER_DISPLAY_THRESHOLD_KW;
 }
 
+export function isChartPowerValue(value) {
+  if (value === null || value === undefined || value === "") return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric);
+}
+
 export function displayPowerValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -3274,7 +3280,9 @@ export function buildEnergyBalance(totalKwh, externalKwh) {
   };
 }
 
-export function buildThresholdClippedSegments(points, key) {
+export function buildThresholdClippedSegments(points, key, options = {}) {
+  const thresholded = options.thresholded !== false;
+  const visible = (value) => thresholded ? isVisiblePowerValue(value) : isChartPowerValue(value);
   const segments = [];
   let segment = [];
   const appendSegment = () => {
@@ -3331,11 +3339,11 @@ export function buildThresholdClippedSegments(points, key) {
         || continuousHistoryCurve);
     if (!contiguous) {
       appendSegment();
-      if (isVisiblePowerValue(value)) segment.push(point);
+      if (visible(value)) segment.push(point);
       return;
     }
-    const previousVisible = isVisiblePowerValue(previousValue);
-    const currentVisible = isVisiblePowerValue(value);
+    const previousVisible = visible(previousValue);
+    const currentVisible = visible(value);
     if (currentVisible) {
       if (!previousVisible) {
         const crossing = crossingPoint(previous, point);
@@ -3358,7 +3366,7 @@ export function buildContinuousGapPairs(points, key) {
   for (const point of Array.isArray(points) ? points : []) {
     const timestamp = new Date(point?.timestamp).getTime();
     const value = normalizeMeterValue(point?.[key]);
-    if (!Number.isFinite(timestamp) || !Number.isFinite(value)) continue;
+    if (!Number.isFinite(timestamp) || !isChartPowerValue(value)) continue;
     if (previous && timestamp - previous.timestamp > 5 * 60 * 1000) {
       gaps.push([previous.point, point]);
     }
@@ -13007,7 +13015,7 @@ class ElrakningPanel {
   }
 
   buildMeterDisplaySegments(points, key) {
-    return this.buildThresholdClippedSegments(points, key);
+    return buildThresholdClippedSegments(points, key, { thresholded: false });
   }
 
   buildThresholdClippedSegments(points, key) {
@@ -13089,7 +13097,7 @@ class ElrakningPanel {
       return `<path class="${className}" fill="none" stroke="${color}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
     }).join("");
     const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
-      if (!isVisiblePowerValue(from?.[key]) || !isVisiblePowerValue(to?.[key])) return "";
+      if (!isChartPowerValue(from?.[key]) || !isChartPowerValue(to?.[key])) return "";
       return `<path class="${className} chart-interpolated-line" fill="none" stroke="${color}" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
     }).join("");
     return `${segments}${interpolated}`;
@@ -13114,7 +13122,7 @@ class ElrakningPanel {
       return `<path class="${className}" fill="${color}" d="M ${firstX} ${baselineY} L ${firstX} ${meterY(first[key])} ${this.buildSmoothMeterPath(segment, key, x, meterY).slice(1)} L ${lastX} ${baselineY} Z" />`;
     }).join("");
     const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
-      if (!isVisiblePowerValue(from?.[key]) || !isVisiblePowerValue(to?.[key])) return "";
+      if (!isChartPowerValue(from?.[key]) || !isChartPowerValue(to?.[key])) return "";
       const baselineY = meterY(0);
       return `<path class="${className} chart-interpolated-area" fill="${color}" d="M ${x(from.timestamp)} ${baselineY} L ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])} L ${x(to.timestamp)} ${baselineY} Z" />`;
     }).join("");
@@ -13551,10 +13559,10 @@ class ElrakningPanel {
         ? this.buildMeterDisplayAreaMarkup(powerDisplayPoints.discharging, "value_kw", "chart-power-area chart-power-area-discharging", x, meterY)
         : "",
     ].join("");
-    const meterVisible = (meterDisplayPoints.some((point) => isVisiblePowerValue(point.import_kw) || isVisiblePowerValue(point.export_kw))
+    const meterVisible = (meterDisplayPoints.some((point) => isChartPowerValue(point.import_kw) || isChartPowerValue(point.export_kw))
       && (visibleLayers.import || visibleLayers.export))
       || Object.entries(powerDisplayPoints).some(([key, points]) => visibleLayers[key]
-        && points.some((point) => isVisiblePowerValue(point.value_kw)));
+        && points.some((point) => isChartPowerValue(point.value_kw)));
     const meterGridLevels = Array.from({ length: Math.round(meterRange / meterStep) + 1 }, (_, index) => index * meterStep);
     const meterGrid = meterVisible
       ? meterGridLevels.map((level) => `<line class="chart-meter-gridline" x1="${plot.left}" y1="${meterY(level)}" x2="${width - plot.right}" y2="${meterY(level)}" />`).join("")
@@ -13711,10 +13719,10 @@ class ElrakningPanel {
         : comparisonPrice;
       if (Number.isFinite(value)) add(label, value, this.formatPrice(value));
     }
-    if (layers.import && isVisiblePowerValue(details?.import_kw)) {
+    if (layers.import && isChartPowerValue(details?.import_kw)) {
       add("Import", details.import_kw, `${this._formatNumber(details.import_kw)} kW`, "tooltip-meter-import");
     }
-    if (layers.export && isVisiblePowerValue(details?.export_kw)) {
+    if (layers.export && isChartPowerValue(details?.export_kw)) {
       add("Export", details.export_kw, `${this._formatNumber(details.export_kw)} kW`, "tooltip-meter-export");
     }
     const powerRows = [
@@ -13724,7 +13732,7 @@ class ElrakningPanel {
       ["discharging", "Urladdning", "tooltip-power-discharging"],
     ];
     for (const [key, label, className] of powerRows) {
-      if (layers[key] && isVisiblePowerValue(details?.[`${key}_kw`])) {
+      if (layers[key] && isChartPowerValue(details?.[`${key}_kw`])) {
         add(label, details[`${key}_kw`], `${this._formatNumber(details[`${key}_kw`])} kW`, className);
       }
     }
@@ -13854,13 +13862,13 @@ class ElrakningPanel {
         const importDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.meterSampleTime);
-        if (visibleLayers.import && meterMarkerX !== null && isVisiblePowerValue(hoverSnapshot.importValue)) {
+        if (visibleLayers.import && meterMarkerX !== null && isChartPowerValue(hoverSnapshot.importValue)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-import" fill="${chartColor("import")}" cx="${meterMarkerX}" cy="${Number.isFinite(importDisplayY) ? importDisplayY : hoverGeometry.meterY(hoverSnapshot.importValue)}" r="4" />`);
         }
         const exportDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("export_kw", hoverSnapshot.meterSampleTime);
-        if (visibleLayers.export && meterMarkerX !== null && isVisiblePowerValue(hoverSnapshot.exportValue)) {
+        if (visibleLayers.export && meterMarkerX !== null && isChartPowerValue(hoverSnapshot.exportValue)) {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-export" fill="${chartColor("export")}" cx="${meterMarkerX}" cy="${Number.isFinite(exportDisplayY) ? exportDisplayY : hoverGeometry.meterY(hoverSnapshot.exportValue)}" r="4" />`);
         }
         const powerMarkers = [
@@ -13871,7 +13879,7 @@ class ElrakningPanel {
         ];
         for (const [key, snapshotKey, className] of powerMarkers) {
           const value = hoverSnapshot[snapshotKey];
-          if (!visibleLayers[key] || !isVisiblePowerValue(value)) continue;
+          if (!visibleLayers[key] || !isChartPowerValue(value)) continue;
           const displayY = hoverGeometry.powerDisplayY?.(key, hoverSnapshot.hoverTime);
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" fill="${chartColor(className)}" cx="${priceMarkerX}" cy="${Number.isFinite(displayY) ? displayY : hoverGeometry.meterY(value)}" r="4" />`);
         }
