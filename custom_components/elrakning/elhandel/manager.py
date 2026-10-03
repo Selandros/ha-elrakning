@@ -103,6 +103,7 @@ class ElhandelManager:
                 "last_error_at": None,
             },
             "consumption": None,
+            "analysis": {},
             "consumption_error": None,
             "source": {"facility": None, "contracts": [], "invoices": [], "consumption": {"samples": []}},
             "last_update": None,
@@ -190,6 +191,7 @@ class ElhandelManager:
             "invoices": [],
             "summary": None,
             "consumption": None,
+            "analysis": {},
             "consumption_error": None,
             "source": {"facility": None, "contracts": [], "invoices": [], "consumption": {"samples": []}},
             "error": None,
@@ -399,7 +401,9 @@ class ElhandelManager:
             if not self.lifecycle.is_current(refresh_generation):
                 return
             self.state["consumption"] = summary
+            self.state["analysis"] = consumption_data.get("analysis", {})
             source = self.state.setdefault("source", {"facility": None, "contracts": [], "invoices": [], "consumption": {"samples": []}})
+            source["analysis"] = self.state["analysis"]
             consumption_source = source.setdefault("consumption", {"samples": []})
             consumption_source["samples"] = merge_consumption_samples(consumption_source.get("samples", []), samples)
             self.state["consumption_error"] = None
@@ -451,8 +455,6 @@ class ElhandelManager:
         source["facility"] = refresh_data["facility"]
         source["contracts"] = refresh_data["contracts"]
         source["invoices"] = refresh_data["invoices"]
-        if not refresh_data["invoices"]:
-            source["consumption"] = {"samples": []}
         await self.async_diagnostic("INFO", "source", "source_facility_loaded", "Facility loaded")
         await self.async_diagnostic("INFO", "source", "source_contracts_loaded", f"Contracts loaded: {len(refresh_data['contracts'])}")
         await self.async_diagnostic("INFO", "source", "source_invoices_loaded", f"Invoices loaded: {len(refresh_data['invoices'])}")
@@ -470,6 +472,7 @@ class ElhandelManager:
             "summary": self.state.get("summary") if refresh_data["invoices"] and _summary_has_attribution(self.state) else None,
             "processing": self.state.get("processing", self._empty_processing()),
             "consumption": self.state.get("consumption"),
+            "analysis": self.state.get("analysis", {}),
             "consumption_error": self.state.get("consumption_error"),
             "source": source,
             "_new_invoice_keys": self.storage.new_invoice_keys(previous_invoices, refresh_data["invoices"]),
@@ -527,6 +530,7 @@ class ElhandelManager:
             "summary": None if facility_changed else self.state.get("summary"),
             "processing": self._empty_processing() if facility_changed else self.state.get("processing", self._empty_processing()),
             "consumption": None if facility_changed else self.state.get("consumption"),
+            "analysis": {} if facility_changed else self.state.get("analysis", {}),
             "consumption_error": None if facility_changed else self.state.get("consumption_error"),
             "source": {"facility": sanitize_provider_source(GREENELY_PROVIDER, selected), "contracts": [], "invoices": [], "consumption": {"samples": []}} if facility_changed else source,
             "_new_invoice_keys": [],
@@ -640,6 +644,7 @@ class ElhandelManager:
             "summary": None,
             "processing": self._empty_processing(),
             "consumption": None,
+            "analysis": {},
             "consumption_error": None,
             "source": {"facility": None, "contracts": [], "invoices": [], "consumption": {"samples": []}},
             "last_update": None,

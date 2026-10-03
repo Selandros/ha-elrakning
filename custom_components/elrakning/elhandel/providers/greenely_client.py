@@ -90,6 +90,7 @@ class GreenelyClient:
         start_date: date,
         end_date: date,
         resolution: str = "hourly",
+        unit: str = "usage",
     ) -> Any:
         """Fetch a small read-only consumption discovery response."""
         if not self._jwt:
@@ -103,6 +104,7 @@ class GreenelyClient:
                     "from": start_date.isoformat(),
                     "to": end_date.isoformat(),
                     "resolution": resolution,
+                    "unit": unit,
                 },
                 timeout=15,
             ) as response:
@@ -199,7 +201,25 @@ class GreenelyClient:
         invoices.sort(key=lambda item: item.get("invoice_date") or "", reverse=True)
         return {"contracts": contract_results, "invoices": invoices, "failed_contracts": errors}
 
-    async def _async_get_json(self, url: str) -> Any:
+    async def async_get_cost_distribution(
+        self, facility_id: str, start_date: date, end_date: date
+    ) -> Any:
+        """Fetch provider analysis data without treating it as billing."""
+        return await self._async_get_json(
+            f"{BACKEND_BASE_URL}/facilities/{facility_id}/consumption-cost-distribution",
+            {"from": start_date.isoformat(), "to": end_date.isoformat(), "resolution": "daily"},
+        )
+
+    async def async_get_spot_price(
+        self, facility_id: str, start_date: date, end_date: date
+    ) -> Any:
+        """Fetch provider spot observations without assigning a local price unit."""
+        return await self._async_get_json(
+            f"{BACKEND_BASE_URL}/facilities/{facility_id}/spot-price",
+            {"from": start_date.isoformat(), "to": end_date.isoformat(), "resolution": "daily"},
+        )
+
+    async def _async_get_json(self, url: str, params: dict[str, str] | None = None) -> Any:
         """GET JSON from Greenely's backend using the in-memory JWT."""
         if not self._jwt:
             raise GreenelyError("invalid_auth")
@@ -207,6 +227,7 @@ class GreenelyClient:
             async with self._session.get(
                 url,
                 headers={"Authorization": f"JWT {self._jwt}"},
+                params=params,
                 timeout=15,
             ) as response:
                 if response.status in (401, 403):

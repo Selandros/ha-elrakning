@@ -13,6 +13,7 @@ def provider_data_from_greenely_state(state: Mapping[str, Any]) -> ProviderData:
     """Build ProviderData from the current in-memory Greenely state."""
     source = _mapping(state.get("source"))
     source_consumption = _mapping(source.get("consumption"))
+    analysis = _mapping(state.get("analysis"))
     facility = _facility(state, source)
     invoices = _list_of_mappings(state.get("invoices"))
     consumption_state = _mapping(state.get("consumption"))
@@ -57,6 +58,7 @@ def provider_data_from_greenely_state(state: Mapping[str, Any]) -> ProviderData:
         active_data=active_data,
         invoices=invoices,
         consumption=consumption,
+        analysis=analysis,
         tariff=_mapping(summary.get("tariff")) or None,
         error=_error_state(state),
     )

@@ -14,6 +14,7 @@ from .greenely_consumption import (
 from .greenely_source import sanitize_greenely_source
 from .greenely_client import GreenelyClient, GreenelyError
 from .greenely_invoice import GreenelyInvoiceError, GreenelyInvoiceProcessor
+from .greenely_insights import normalize_cost_distribution, normalize_spot_price
 
 
 class GreenelyProvider:
@@ -122,7 +123,26 @@ class GreenelyProvider:
                 "no_consumption",
                 greenely_consumption_payload_shape(payload, month),
             )
-        return {"samples": samples, "summary": summary}
+        analysis: dict[str, Any] = {}
+        for key, fetch, normalize in (
+            ("cost_distribution", getattr(self._client, "async_get_cost_distribution", None), normalize_cost_distribution),
+            ("spot_price", getattr(self._client, "async_get_spot_price", None), normalize_spot_price),
+        ):
+            if fetch is None:
+                continue
+            try:
+                analysis[key] = normalize(
+                    await fetch(facility_id, start_date, end_date), start_date, end_date
+                )
+            except GreenelyError as err:
+                analysis[key] = {
+                    "schema": f"greenely.{key}.v1",
+                    "available": False,
+                    "status": "unavailable",
+                    "error": err.code,
+                    "period": {"from": start_date.isoformat(), "to": end_date.isoformat(), "resolution": "daily"},
+                }
+        return {"samples": samples, "summary": summary, "analysis": analysis}
 
     async def async_process_invoice(
         self,

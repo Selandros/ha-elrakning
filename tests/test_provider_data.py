@@ -10,6 +10,7 @@ def test_provider_data_defines_only_the_provider_neutral_contract():
         "active_data",
         "invoices",
         "consumption",
+        "analysis",
         "tariff",
         "error",
     ]

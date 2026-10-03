@@ -10761,6 +10761,13 @@ class ElrakningPanel {
     const tariff = response.summary?.tariff || {};
     const period = response.summary?.latest_period || {};
     const consumption = response.consumption;
+    const analysis = response.analysis || {};
+    const distributionDays = Array.isArray(analysis.cost_distribution?.days)
+      ? analysis.cost_distribution.days : [];
+    const latestDistribution = distributionDays.at(-1);
+    const spotObservations = Array.isArray(analysis.spot_price?.observations)
+      ? analysis.spot_price.observations : [];
+    const latestSpot = spotObservations.at(-1);
     const latest = response.latest_invoice;
     const rows = [];
     if (tariff.variable_cost_ore_per_kwh_incl_vat != null) rows.push(["Rörlig kostnad", `${this._formatNumber(tariff.variable_cost_ore_per_kwh_incl_vat)} öre/kWh`]);
@@ -10776,6 +10783,19 @@ class ElrakningPanel {
     if (consumption?.month_to_date_kwh == null) {
       const reason = response.consumption_error ? "Saknas · providerförbrukning unavailable" : "Saknas · ingen verifierad förbrukning";
       rows.push(["Förbrukning", reason]);
+    }
+    if (latestSpot && analysis.spot_price?.unit_status === "provider_unit_unverified") {
+      const spotValue = latestSpot.price_provider;
+      const spotText = spotValue == null
+        ? "Providerdata · värde saknas"
+        : `${this._formatNumber(spotValue)} · providerenhet ej verifierad`;
+      rows.push([`Spotpris ${latestSpot.localtime?.slice(0, 10) || ""}`.trim(), spotText]);
+    }
+    if (latestDistribution && analysis.cost_distribution?.unit_status === "provider_units_unverified") {
+      const score = latestDistribution.energy_score;
+      rows.push([`Kostnadsfördelning ${latestDistribution.date}`, score == null
+        ? "Provideranalys · värdenhet ej verifierad"
+        : `Provideranalys · energipoäng ${this._formatNumber(score)}`]);
     }
     if (!latest && Number(response.invoice_count || 0) === 0) rows.push(["Faktura", "Saknas · ingen faktura tillgänglig"]);
     if (tariff.variable_cost_ore_per_kwh_incl_vat == null && tariff.fixed_fee_incl_vat_per_month == null) rows.push(["Prisdata", "Saknas · tariffdata unavailable"]);

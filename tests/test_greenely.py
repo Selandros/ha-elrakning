@@ -177,6 +177,32 @@ class GreenelyConsumptionDiagnosticsTests(unittest.TestCase):
 
 
 class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_reads_analysis_endpoints_without_creating_invoice_cost(self):
+        client = SimpleNamespace(
+            async_login=AsyncMock(),
+            async_get_consumption=AsyncMock(return_value={
+                "data": {"1": {"usage": 1000, "localtime": "2026-10-01 01:00"}}
+            }),
+            async_get_cost_distribution=AsyncMock(return_value={
+                "data": {"2026-10-01": {"cheap": {"usage": 100, "total_cost": 200}, "energy_score": 50}}
+            }),
+            async_get_spot_price=AsyncMock(return_value={
+                "data": {"1": {"localtime": "2026-10-01 00:00", "price": 55369, "is_complete": True}}
+            }),
+        )
+        with patch(
+            "custom_components.elrakning.elhandel.providers.greenely.GreenelyClient",
+            return_value=client,
+        ):
+            result = await GreenelyProvider(_Hass()).async_get_consumption_data(
+                {"email": "user@example.test", "password": "password", "facility_id": "facility-1"},
+                date(2026, 10, 1), date(2026, 10, 2), "2026-10",
+            )
+        self.assertEqual(result["analysis"]["cost_distribution"]["days"][0]["energy_score"], 50)
+        self.assertEqual(result["analysis"]["spot_price"]["observations"][0]["price_provider"], 55369)
+        self.assertEqual(result["analysis"]["spot_price"]["unit_status"], "provider_unit_unverified")
+        self.assertNotIn("invoice", result)
+
     async def test_provider_creates_config_for_selected_facility(self):
         client = SimpleNamespace(
             async_login=AsyncMock(),
@@ -1281,7 +1307,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {
                 "configured", "provider", "source_type", "provider_name", "device_name",
                 "facility_name", "invoice_count", "invoice_history", "latest_invoice", "last_update", "error",
-                "summary", "processing_status", "consumption", "consumption_error",
+                "summary", "processing_status", "consumption", "analysis", "consumption_error",
             },
         )
         self.assertEqual(state["configured"], False)

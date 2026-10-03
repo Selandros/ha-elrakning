@@ -15,6 +15,7 @@ class ProviderData:
     active_data: dict[str, Any] = field(default_factory=dict)
     invoices: list[dict[str, Any]] = field(default_factory=list)
     consumption: dict[str, Any] | None = None
+    analysis: dict[str, Any] = field(default_factory=dict)
     tariff: dict[str, Any] | None = None
     error: str | dict[str, Any] | None = None
 
@@ -43,6 +44,7 @@ def serialize_provider_state(
             "summary": None,
             "processing_status": {"error": False, "stage": None, "last_attempt": None},
             "consumption": None,
+            "analysis": {},
             "consumption_error": False,
         }
 
@@ -72,6 +74,7 @@ def serialize_provider_state(
         "summary": _public_provider_summary(provider_data),
         "processing_status": _public_processing_status(processing),
         "consumption": _public_provider_consumption(provider_data),
+        "analysis": _public_provider_analysis(provider_data.analysis),
         "consumption_error": bool(error.get("consumption")) if isinstance(error, dict) else False,
     }
 
@@ -127,3 +130,13 @@ def _public_consumption(consumption: Any) -> dict[str, Any] | None:
     if not isinstance(consumption, dict):
         return None
     return {key: consumption.get(key) for key in ("month", "month_to_date_kwh", "latest_sample_at", "last_update")}
+
+
+def _public_provider_analysis(analysis: Any) -> dict[str, Any]:
+    if not isinstance(analysis, Mapping):
+        return {}
+    return {
+        name: dict(value)
+        for name in ("cost_distribution", "spot_price")
+        if isinstance(value := analysis.get(name), Mapping)
+    }
