@@ -434,7 +434,7 @@ def test_monthly_forecast_startup_capture_is_scheduled_after_source_event_listen
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
     listeners = source.index('frontend_data["monthly_forecast_event_unsubs"] = [')
-    startup = source.index('frontend_data["monthly_forecast_task_owner"] = owner')
+    startup = source.index('owner = _get_monthly_forecast_task_owner(hass, entry)')
     assert listeners < startup
     assert 'hass.bus.async_listen("elrakning_load_forecast_update"' in source[listeners:startup]
     assert 'hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT' in source[listeners:startup]
@@ -457,9 +457,9 @@ def test_monthly_forecast_startup_capture_runs_after_ready_event():
     ready = source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
     return_statement = source.index("    return True", ready)
     startup = source[ready:return_statement]
-    assert 'frontend_data["monthly_forecast_task_owner"] = owner' in startup
+    assert 'owner = _get_monthly_forecast_task_owner(hass, entry)' in startup
     assert 'frontend_data["monthly_forecast_startup_task"] = owner.schedule()' in startup
-    assert "_MonthlyForecastTaskOwner(hass, entry)" in startup
+    assert "_get_monthly_forecast_task_owner(hass, entry)" in startup
 
 
 def test_monthly_forecast_startup_capture_is_owned_for_unload_cancellation():
@@ -469,6 +469,35 @@ def test_monthly_forecast_startup_capture_is_owned_for_unload_cancellation():
     assert 'frontend_data.pop("monthly_forecast_task_owner", None)' in source
     assert "monthly_forecast_owner.close()" in source
     assert 'frontend_data.pop("monthly_forecast_startup_task", None)' in source
+
+
+def test_monthly_forecast_startup_reuses_owner_created_by_early_event():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    nodes = [
+        node for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef))
+        and node.name in {"_MonthlyForecastTaskOwner", "_get_monthly_forecast_task_owner"}
+    ]
+    namespace = {"asyncio": asyncio, "DOMAIN": "elrakning", "_async_capture_monthly_forecast": lambda _hass: _capture()}
+
+    async def _capture():
+        await asyncio.Event().wait()
+
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
+    owner_factory = namespace["_get_monthly_forecast_task_owner"]
+
+    async def exercise():
+        hass = _MonthlyForecastHass()
+        first = owner_factory(hass, _MonthlyForecastEntry())
+        task = first.schedule()
+        second = owner_factory(hass, _MonthlyForecastEntry())
+        assert second is first
+        assert second.task is task
+        first.close()
+        await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
 
 
 def _load_monthly_forecast_task_owner(capture):

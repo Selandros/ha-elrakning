@@ -6,6 +6,21 @@ Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.
 
+## 0.0.990 replay/monthly-forecast lifecycle correction
+
+- ROOT CAUSE VERIFIED: monthly-forecast event listeners were active before the
+  setup path assigned the shared task owner. An event in that setup window
+  created an owner/task which was then overwritten by setup, leaving the task
+  without a strong owner reference. HA subsequently reported
+  `Task was destroyed but it is pending` for `elrakning_monthly_forecast`.
+- CORRECTED/TESTED: setup and event scheduling now use one shared owner factory
+  and preserve an owner created by an early event. Existing coalescing,
+  cancellation, fail-closed forecast behavior and read-only semantics are
+  unchanged.
+- RUNTIME GATE: the pre-fix 0.0.989 HA log contains three pending-task errors
+  at 19:05:50, 19:06:15 and 19:15:42 on 2026-10-03. Post-deploy absence of
+  new replay/monthly-forecast pending-task errors remains required for closure.
+
 ## 0.0.962 canonical historical revision checkpoint
 
 - CORRECTED/TESTED: Immutable provider observations now append a new canonical

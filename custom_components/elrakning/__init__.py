@@ -498,14 +498,19 @@ class _MonthlyForecastTaskOwner:
         return task
 
 
-def _schedule_monthly_forecast_capture(hass):
-    """Schedule one coalesced monthly forecast refresh."""
+def _get_monthly_forecast_task_owner(hass, entry=None):
+    """Return the shared owner, including during setup event races."""
     data = hass.data.setdefault(DOMAIN, {})
     owner = data.get("monthly_forecast_task_owner")
     if owner is None:
-        owner = _MonthlyForecastTaskOwner(hass, data.get("config_entry"))
+        owner = _MonthlyForecastTaskOwner(hass, entry or data.get("config_entry"))
         data["monthly_forecast_task_owner"] = owner
-    return owner.schedule()
+    return owner
+
+
+def _schedule_monthly_forecast_capture(hass):
+    """Schedule one coalesced monthly forecast refresh."""
+    return _get_monthly_forecast_task_owner(hass).schedule()
 
 
 class _ReplayTaskProxy:
@@ -1081,8 +1086,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         json.dumps({"source": "startup", "scheduled_at": dt_util.now().astimezone(timezone.utc).isoformat()}, separators=(",", ":")),
     )
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
-    owner = _MonthlyForecastTaskOwner(hass, entry)
-    frontend_data["monthly_forecast_task_owner"] = owner
+    owner = _get_monthly_forecast_task_owner(hass, entry)
     frontend_data["monthly_forecast_startup_task"] = owner.schedule()
     return True
 
