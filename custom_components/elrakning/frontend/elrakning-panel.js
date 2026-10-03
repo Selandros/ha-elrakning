@@ -867,6 +867,10 @@ export function chartResourceLegendVisible(key, dashboardCardVisibility = {}) {
   return true;
 }
 
+export function normalizeDashboardCardVisibility(preferences = {}) {
+  return { ...preferences, house: "always", grid: "always" };
+}
+
 export function displayPowerValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -3796,7 +3800,7 @@ class ElrakningPanel {
     this._costUnavailableReason = "billing_history_missing";
     this._billingDailyByMonth = new Map();
     this._costSelectedMonth = null;
-    this._dashboardCardVisibility = { house: "always", solar: "config_only", grid: "config_only", battery: "config_only", invoice: "always" };
+    this._dashboardCardVisibility = { house: "always", solar: "config_only", grid: "always", battery: "config_only", invoice: "always" };
     const pickerNow = new Date();
     this._periodPickerState = {
       mode: "hour",
@@ -3837,7 +3841,7 @@ class ElrakningPanel {
         <div class="dashboard-card-stack">
         <section class="live-power-row" data-live-power-row aria-label="Aktuell effekt">
           <article class="live-power-tile" data-live-power-tile="house">
-            <div class="live-power-heading"><span class="live-power-title">Hus</span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button><label class="dashboard-card-toggle" data-dashboard-card-toggle="house" aria-label="Visa Hus-kort"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></span></div>
+            <div class="live-power-heading"><span class="live-power-title">Hus</span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-meter-configure="house_load" hidden>Konfigurera</button></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -3855,7 +3859,7 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="solar" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile" data-live-power-tile="grid">
-            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button><label class="dashboard-card-toggle" data-dashboard-card-toggle="grid" aria-label="Visa Nät-kort"><input type="checkbox"><span class="main-card-track" aria-hidden="true"></span></label></span></div>
+            <div class="live-power-heading"><span class="live-power-title">Nät</span><span class="live-power-grid-meta" data-live-power-grid-meta hidden></span><span class="live-power-card-actions"><button type="button" class="configuration-control live-power-configure" data-meter-configure="meter" hidden>Konfigurera</button></span></div>
             <strong class="live-power-value" data-live-power-value>–</strong>
             <span class="live-power-status" data-live-power-status>Ej tillgängligt</span>
             <div class="live-power-bar" aria-hidden="true"><span data-live-power-fill></span></div>
@@ -7818,8 +7822,9 @@ class ElrakningPanel {
 
   _applyDashboardCardVisibility(preferences) {
     if (!preferences || typeof preferences !== "object") return;
+    const normalizedPreferences = normalizeDashboardCardVisibility(preferences);
     for (const key of Object.keys(this._dashboardCardVisibility)) {
-      if (["always", "config_only", "hidden"].includes(preferences[key])) this._dashboardCardVisibility[key] = preferences[key];
+      if (["always", "config_only", "hidden"].includes(normalizedPreferences[key])) this._dashboardCardVisibility[key] = normalizedPreferences[key];
     }
     this._renderDashboardCardVisibility();
   }

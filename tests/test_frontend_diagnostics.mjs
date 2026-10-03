@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -499,6 +499,9 @@ assert.equal(chartResourceLegendVisible("charging", { battery: "hidden" }), fals
 assert.equal(chartResourceLegendVisible("discharging", { battery: "hidden" }), false);
 assert.equal(chartResourceLegendVisible("charging", { battery: "always" }), true);
 assert.equal(chartResourceLegendVisible("discharging", { battery: "always" }), true);
+assert.deepEqual(normalizeDashboardCardVisibility({ house: "hidden", grid: "hidden", solar: "always", battery: "hidden" }), {
+  house: "always", grid: "always", solar: "always", battery: "hidden",
+});
 const phaseMaxima = mergeDailyPhaseMaxima({}, { l1: -12, l2: 7, l3: 9 }, "2026-08-30T12:00:00Z");
 assert.deepEqual(phaseMaxima, {
   l1: { ampere: 12, raw_value: -12, timestamp: "2026-08-30T12:00:00.000Z" },
@@ -1938,10 +1941,10 @@ assert.match(panelSource, /always.*config_only.*hidden/);
 assert.match(panelSource, /Sensor saknas: Elmätarens effekt \(kW\)/);
 assert.match(panelSource, /Historik saknas för Elmätarens effekt \(kW\)/);
 assert.match(panelSource, /Prisdata saknas/);
-assert.equal((panelSource.match(/data-dashboard-card-toggle=/g) || []).length, 4);
-assert.match(panelSource, /live-power-card-actions[\s\S]*data-dashboard-card-toggle="house"/);
+assert.equal((panelSource.match(/data-dashboard-card-toggle=/g) || []).length, 2);
+assert.doesNotMatch(panelSource, /data-dashboard-card-toggle="house"/);
 assert.match(panelSource, /live-power-card-actions[\s\S]*data-dashboard-card-toggle="solar"/);
-assert.match(panelSource, /live-power-card-actions[\s\S]*data-dashboard-card-toggle="grid"/);
+assert.doesNotMatch(panelSource, /data-dashboard-card-toggle="grid"/);
 assert.match(panelSource, /live-power-card-actions[\s\S]*data-dashboard-card-toggle="battery"/);
 const siteSettingsMarkup = panelSource.slice(panelSource.indexOf('data-site-settings-dialog'), panelSource.indexOf('data-meter-dialog'));
 assert.doesNotMatch(siteSettingsMarkup, /data-dashboard-card-toggle/);
@@ -2401,6 +2404,7 @@ assert.match(panelSource, /chartResourceSeriesVisible\(key, this\._dashboardCard
 assert.match(panelSource, /_resourceChartLegendVisible\(key\)/);
 assert.match(panelSource, /chartResourceLegendVisible\(key, this\._dashboardCardVisibility\)/);
 assert.match(panelSource, /button\.hidden = !this\._resourceChartLegendVisible\(key\)/);
+assert.match(panelSource, /normalizeDashboardCardVisibility\(preferences\)/);
 assert.match(panelSource, /\.price-chart-legend \[data-preview-layer\]\[hidden\] \{[\s\S]*display: none !important/);
 assert.match(panelSource, /this\._priceChartRenderCacheKey = null;[\s\S]*?this\.renderPriceChart\(\)/);
 assert.match(panelSource, /isChartPowerValue\(value\)/);
