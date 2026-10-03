@@ -78,6 +78,17 @@ export function providerLabel(providerName, agreementName) {
     .join(" · ");
 }
 
+export function formatGreenelySpotObservation(spotPrice, observation) {
+  if (!spotPrice?.available || !observation || spotPrice.unit_status !== "unit_verified") {
+    return "Tillgängligt · enhet ej verifierad";
+  }
+  const value = Number(observation.price_provider);
+  if (!Number.isFinite(value)) return "Tillgängligt · pris saknas";
+  if (spotPrice.unit === "ore_per_kwh") return `${value.toLocaleString("sv-SE")} öre/kWh`;
+  if (spotPrice.unit === "sek_per_kwh") return `${value.toLocaleString("sv-SE")} kr/kWh`;
+  return "Tillgängligt · enhet ej verifierad";
+}
+
 export function gridAgreementDisplayName(name) {
   if (typeof name !== "string") return name;
   return name.replace(/^\d+\s*A,\s*/i, "").replace(/\.\s*Elnätsområde.*$/i, "");
@@ -10784,11 +10795,8 @@ class ElrakningPanel {
       const reason = response.consumption_error ? "Saknas · providerförbrukning unavailable" : "Saknas · ingen verifierad förbrukning";
       rows.push(["Förbrukning", reason]);
     }
-    if (latestSpot && analysis.spot_price?.unit_status === "provider_unit_unverified") {
-      const spotValue = latestSpot.price_provider;
-      const spotText = spotValue == null
-        ? "Providerdata · värde saknas"
-        : `${this._formatNumber(spotValue)} · providerenhet ej verifierad`;
+    if (latestSpot && analysis.spot_price?.available) {
+      const spotText = formatGreenelySpotObservation(analysis.spot_price, latestSpot);
       rows.push([`Spotpris ${latestSpot.localtime?.slice(0, 10) || ""}`.trim(), spotText]);
     }
     if (latestDistribution && analysis.cost_distribution?.unit_status === "provider_units_unverified") {

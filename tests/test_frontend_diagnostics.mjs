@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, finiteCostNumber, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
@@ -12,6 +12,18 @@ const output = formatDiagnosticsText([
     message: "Loading source data",
   },
 ], "0.0.64");
+assert.equal(formatGreenelySpotObservation(
+  { available: true, unit_status: "provider_unit_unverified" },
+  { price_provider: 82267 },
+), "Tillgängligt · enhet ej verifierad");
+assert.doesNotMatch(formatGreenelySpotObservation(
+  { available: true, unit_status: "provider_unit_unverified" },
+  { price_provider: 82267 },
+), /82267/);
+assert.equal(formatGreenelySpotObservation(
+  { available: true, unit_status: "unit_verified", unit: "ore_per_kwh" },
+  { price_provider: 82.267 },
+), "82,267 öre/kWh");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Jul 2026" }), "Jul 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Feb 2026-mar 2026" }), "Feb 2026-mar 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "2026-07" }), "2026-07");
@@ -1779,7 +1791,8 @@ assert.match(panelSource, /data-electricity-configure/);
 assert.match(panelSource, /data-electricity-provider/);
 assert.match(panelSource, /elrakning\/electricity_provider_state/);
 assert.match(panelSource, /response\.analysis/);
-assert.match(panelSource, /unit_status === "provider_unit_unverified"/);
+assert.match(panelSource, /formatGreenelySpotObservation/);
+assert.match(panelSource, /unit_status !== "unit_verified"/);
 assert.match(panelSource, /Kostnadsfördelning/);
 assert.match(panelSource, /Spotpris/);
 assert.match(panelSource, /elrakning\/electricity_provider_remove/);
