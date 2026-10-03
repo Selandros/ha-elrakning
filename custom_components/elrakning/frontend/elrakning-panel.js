@@ -861,6 +861,12 @@ export function chartResourceSeriesVisible(key, dashboardCardVisibility = {}, co
   return true;
 }
 
+export function chartResourceLegendVisible(key, dashboardCardVisibility = {}) {
+  if (key === "solar") return dashboardCardVisibility.solar !== "hidden";
+  if (key === "charging" || key === "discharging") return dashboardCardVisibility.battery !== "hidden";
+  return true;
+}
+
 export function displayPowerValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -7734,6 +7740,10 @@ class ElrakningPanel {
     });
   }
 
+  _resourceChartLegendVisible(key) {
+    return chartResourceLegendVisible(key, this._dashboardCardVisibility);
+  }
+
   _effectiveChartLayerState() {
     const layers = this._chartLayerState();
     if (this._soloChartLayer) {
@@ -7915,8 +7925,7 @@ class ElrakningPanel {
     }
     for (const button of this.host.querySelectorAll("[data-preview-layer]")) {
       const key = button.dataset.previewLayer;
-      const resourceVisible = this._resourceChartLayerVisible(key);
-      button.hidden = !resourceVisible;
+      button.hidden = !this._resourceChartLegendVisible(key);
     }
   }
 
