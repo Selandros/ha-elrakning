@@ -368,212 +368,6 @@ export function buildPriceStepAreaPaths(periods, values, x, y, baselineY) {
   return paths;
 }
 
-function medianValue(values) {
-  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
-  if (!sorted.length) return null;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
-function percentileValue(values, percentile) {
-  const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
-  if (!sorted.length) return null;
-  const position = (sorted.length - 1) * percentile;
-  const lower = Math.floor(position);
-  const upper = Math.ceil(position);
-  if (lower === upper) return sorted[lower];
-  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
-}
-
-function localDateStartFor(value) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function localWallClockBucket(value, bucketMinutes = 15) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime()) || !Number.isFinite(bucketMinutes) || bucketMinutes <= 0) return null;
-  const minutes = date.getHours() * 60 + date.getMinutes();
-  return Math.floor(minutes / bucketMinutes);
-}
-
-function pointLoadKw(point) {
-  const importKw = Number(point?.import_kw);
-  if (Number.isFinite(importKw)) return Math.max(0, importKw);
-  const valueKw = Number(point?.value_kw);
-  if (Number.isFinite(valueKw)) return Math.max(0, valueKw);
-  const importedKwh = Number(point?.import_kwh);
-  const start = new Date(point?.timestamp).getTime();
-  const end = new Date(point?.end).getTime();
-  const durationHours = (end - start) / 3600000;
-  return Number.isFinite(importedKwh) && importedKwh >= 0 && durationHours > 0
-    ? importedKwh / durationHours
-    : null;
-}
-
-export function buildNormalLoadProfile(points, selectedDate = new Date(), {
-  siteId = null,
-  historySiteId = null,
-  minObservations = 7,
-  minFallbackObservations = 3,
-  minCurrentObservations = 3,
-  bucketMinutes = 15,
-  now = null,
-} = {}) {
-  if (!siteId || (historySiteId && historySiteId !== siteId)) {
-    return { available: false, reason: historySiteId ? "site_mismatch" : "site_unavailable", samples: {}, observation_counts: {} };
-  }
-  const selectedStart = localDateStartFor(selectedDate);
-  if (!selectedStart) return { available: false, reason: "selected_date_invalid", samples: {}, observation_counts: {} };
-  const windowStart = new Date(selectedStart);
-  windowStart.setDate(windowStart.getDate() - 28);
-  const byDay = new Map();
-  const priorLoads = [];
-  const currentDayLoads = [];
-  const currentNow = new Date(now || new Date());
-  const selectedIsToday = localDateKey(selectedStart) === localDateKey(currentNow);
-  for (const point of Array.isArray(points) ? points : []) {
-    const timestamp = new Date(point?.timestamp);
-    const day = localDateStartFor(timestamp);
-    const bucket = localWallClockBucket(timestamp, bucketMinutes);
-    const loadKw = pointLoadKw(point);
-    if (!day || bucket === null || loadKw === null) continue;
-    if (day.getTime() === selectedStart.getTime()) {
-      if (selectedIsToday && timestamp.getTime() <= currentNow.getTime()) currentDayLoads.push(loadKw);
-      continue;
-    }
-    if (day < windowStart || day >= selectedStart) continue;
-    priorLoads.push(loadKw);
-    const dayKey = localDateKey(day);
-    const dayBuckets = byDay.get(dayKey) || new Map();
-    const values = dayBuckets.get(bucket) || [];
-    values.push(loadKw);
-    dayBuckets.set(bucket, values);
-    byDay.set(dayKey, dayBuckets);
-  }
-  const observations = new Map();
-  for (const dayBuckets of byDay.values()) {
-    for (const [bucket, values] of dayBuckets.entries()) {
-      const representative = medianValue(values);
-      if (representative === null) continue;
-      const bucketValues = observations.get(bucket) || [];
-      bucketValues.push(representative);
-      observations.set(bucket, bucketValues);
-    }
-  }
-  const samples = {};
-  const observationCounts = {};
-  for (const [bucket, values] of observations.entries()) {
-    observationCounts[bucket] = values.length;
-    if (values.length >= minObservations) samples[bucket] = medianValue(values);
-  }
-  const priorMedian = priorLoads.length >= minFallbackObservations ? medianValue(priorLoads) : null;
-  const currentMedian = selectedIsToday && currentDayLoads.length >= minCurrentObservations
-    ? medianValue(currentDayLoads)
-    : null;
-  const fallbackLoadKw = priorMedian ?? currentMedian;
-  const fallbackSource = priorMedian !== null ? "tier_b_all_prior_observations" : currentMedian !== null ? "tier_c_selected_day_to_now" : null;
-  const tier = Object.keys(samples).length > 0
-    ? (fallbackLoadKw === null ? "A" : "A+B")
-    : (priorMedian !== null ? "B" : currentMedian !== null ? "C" : null);
-  return {
-    available: Object.keys(samples).length > 0 || fallbackLoadKw !== null,
-    reason: Object.keys(samples).length > 0 || fallbackLoadKw !== null ? null : "insufficient_history",
-    samples,
-    fallback_load_kw: fallbackLoadKw,
-    fallback_source: fallbackSource,
-    tier,
-    observation_counts: observationCounts,
-    prior_observation_count: priorLoads.length,
-    current_observation_count: currentDayLoads.length,
-    window_start: localDateKey(windowStart),
-    window_end_exclusive: localDateKey(selectedStart),
-    site_id: siteId,
-    bucket_minutes: bucketMinutes,
-  };
-}
-
-export function buildCostFieldModel(periods, effectivePriceOre, normalLoadProfile, meterRange) {
-  const safeRange = Number(meterRange);
-  const samples = normalLoadProfile?.samples || {};
-  if (!Array.isArray(periods) || !periods.length || !Number.isFinite(safeRange) || safeRange <= 0 || !normalLoadProfile?.available) {
-    return { available: false, reason: "insufficient_history", entries: [], p50: null, p80: null };
-  }
-  const entries = periods.map((period, index) => {
-    const bucket = localWallClockBucket(period?.start);
-    const priceOre = Number(effectivePriceOre?.[index]);
-    const bucketLoad = bucket === null ? null : samples[bucket];
-    const normalLoadKw = Number.isFinite(Number(bucketLoad))
-      ? Number(bucketLoad)
-      : Number(normalLoadProfile?.fallback_load_kw);
-    if (bucket === null || !Number.isFinite(priceOre) || !Number.isFinite(normalLoadKw) || normalLoadKw < 0) return null;
-    const priceSekPerKwh = Math.max(priceOre, 0) / 100;
-    return {
-      period,
-      bucket,
-      price_ore_per_kwh: priceOre,
-      price_sek_per_kwh: priceSekPerKwh,
-      normal_load_kw: normalLoadKw,
-      normal_load_source: Number.isFinite(Number(bucketLoad)) ? "tier_a_same_bucket" : normalLoadProfile.fallback_source,
-      expected_cost_rate_sek_per_hour: priceSekPerKwh * normalLoadKw,
-    };
-  });
-  if (entries.some((entry) => entry === null)) return { available: false, reason: "insufficient_history", entries: [], p50: null, p80: null };
-  const rates = entries.map((entry) => entry.expected_cost_rate_sek_per_hour);
-  const p50 = percentileValue(rates, 0.5);
-  const p80 = percentileValue(rates, 0.8);
-  if (![p50, p80].every((value) => Number.isFinite(value))) return { available: false, reason: "insufficient_history", entries: [], p50: null, p80: null };
-  return {
-    available: true,
-    reason: null,
-    entries,
-    p50,
-    p80,
-    meter_range_kw: safeRange,
-    tier: normalLoadProfile.tier || null,
-    fallback_source: normalLoadProfile.fallback_source || null,
-  };
-}
-
-export function buildCostFieldMarkup(periods, effectivePriceOre, normalLoadProfile, meterRange, plot, plotWidth, plotHeight, x) {
-  const model = buildCostFieldModel(periods, effectivePriceOre, normalLoadProfile, meterRange);
-  const bottom = plot.top + plotHeight;
-  if (!model.available) {
-    return {
-      model,
-      markup: `<rect class="price-cost-field price-cost-field-unavailable" data-cost-field-status="insufficient_history" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" /><text class="price-cost-field-status" x="${plot.left + plotWidth / 2}" y="${plot.top + plotHeight / 2}" text-anchor="middle">Kostnadsfält ej tillgängligt · ingen verklig lastdata</text>`,
-    };
-  }
-  const gradients = [];
-  const rects = [];
-  model.entries.forEach((entry, index) => {
-    const price = entry.price_sek_per_kwh;
-    const solidGreen = price <= 0 || model.p80 <= 0;
-    const greenKw = price > 0 ? Math.min(model.meter_range_kw, model.p50 / price) : model.meter_range_kw;
-    const redKw = price > 0 ? Math.min(model.meter_range_kw, model.p80 / price) : model.meter_range_kw;
-    const greenOffset = Math.max(0, Math.min(100, greenKw / model.meter_range_kw * 100));
-    const redOffset = Math.max(greenOffset, Math.min(100, redKw / model.meter_range_kw * 100));
-    const gradientId = `cost-field-gradient-${index}`;
-    const gradientStops = solidGreen
-      ? `<stop offset="0%" stop-color="#22C55E" /><stop offset="100%" stop-color="#22C55E" />`
-      : `<stop offset="0%" stop-color="#22C55E" /><stop offset="${greenOffset}%" stop-color="#FBBF24" /><stop offset="${redOffset}%" stop-color="#EF4444" /><stop offset="100%" stop-color="#EF4444" />`;
-    gradients.push(`<linearGradient id="${gradientId}" gradientUnits="userSpaceOnUse" x1="0" y1="${bottom}" x2="0" y2="${plot.top}">${gradientStops}</linearGradient>`);
-    const start = new Date(entry.period.start).getTime();
-    const end = new Date(entry.period.end).getTime();
-    const left = x(start);
-    const right = x(end);
-    if (Number.isFinite(start) && Number.isFinite(end) && right > left) {
-      rects.push(`<rect class="price-cost-field" data-cost-field="available" data-cost-field-period="${index}" x="${left}" y="${plot.top}" width="${right - left}" height="${plotHeight}" fill="url(#${gradientId})" />`);
-    }
-  });
-  const fallbackLabel = model.tier && model.tier !== "A"
-    ? `<text class="price-cost-field-status price-cost-field-status-fallback" data-cost-field-status="fallback" x="${plot.left + 6}" y="${plot.top + 18}">Kostnadsfält · preliminärt</text>`
-    : "";
-  return { model, markup: `${fallbackLabel}<defs>${gradients.join("")}</defs>${rects.join("")}` };
-}
-
 export function createPriceDebugText(priceData) {
   const lines = [priceData.time, priceData.value];
   if (priceData.details) lines.push("", JSON.stringify(priceData.details, null, 2));
@@ -3952,7 +3746,6 @@ class ElrakningPanel {
     this._providerConfigured = false;
     this._electricityProviderState = null;
     this._billingHistory = null;
-    this._billingHistorySiteId = null;
     this._billingHistoryStatus = null;
     this._costUnavailableReason = "billing_history_missing";
     this._billingDailyByMonth = new Map();
@@ -7137,20 +6930,27 @@ class ElrakningPanel {
           opacity: var(--chart-axis-opacity);
         }
 
-        .price-cost-field {
-          opacity: .34;
-          pointer-events: none;
+        .chart-average {
+          stroke: var(--el-price-normal-color);
+          stroke-dasharray: 5 4;
+          stroke-width: 1.5;
         }
 
-        .price-cost-field-unavailable {
-          fill: var(--divider-color);
-          opacity: .18;
+        .price-step-area {
+          fill: url(#price-level-gradient);
+          fill-opacity: .28;
+          pointer-events: none;
+          stroke: none;
         }
 
-        .price-cost-field-status {
-          fill: var(--secondary-text-color);
-          font-size: 14px;
-          pointer-events: none;
+        .price-step-line {
+          fill: none;
+          stroke: url(#price-level-gradient);
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-width: .8;
+          opacity: .32;
+          vector-effect: non-scaling-stroke;
         }
 
         .chart-now-marker {
@@ -8281,8 +8081,6 @@ class ElrakningPanel {
       this._benchmarkEvidence = { schema: "ella_replay_benchmark_evidence.v1", site_id: state?.current_site?.site_id || state?.site_id || null, available: false, status: "unavailable", blocker: "site_changed" };
       this._pricePlanContextKey = reconciled.changed ? null : this._pricePlanContextKey;
       this._ellaSelection = reconciled.ellaSelection;
-      this._billingHistory = null;
-      this._billingHistorySiteId = null;
     }
     this._siteState = state;
     this._renderSiteSettings();
@@ -12487,7 +12285,6 @@ class ElrakningPanel {
       }
       if (!targetMonth) {
         this._billingHistory = response?.success === true ? response : null;
-        this._billingHistorySiteId = response?.success === true ? siteId : null;
         this._billingHistoryStatus = response?.success === true ? null : response?.error || "billing_history_unavailable";
         this._costUnavailableReason = this._billingHistoryStatus === "site_unconfigured"
           ? "meter_not_configured"
@@ -12500,7 +12297,6 @@ class ElrakningPanel {
       }
     } catch {
       this._billingHistory = null;
-      this._billingHistorySiteId = null;
       this._billingHistoryStatus = "billing_history_unavailable";
       this._costUnavailableReason = "billing_history_unavailable";
     }
@@ -13185,13 +12981,6 @@ class ElrakningPanel {
         ? [this._ellaSelection.id, this._ellaSelection.start, this._ellaSelection.end, this._ellaSelection.revision]
         : null,
       periods: [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
-      billing_history: [
-        this._billingHistorySiteId,
-        this._billingHistory?.baseline_energy_points?.length || 0,
-        this._billingHistory?.energy_points?.length || 0,
-        this._billingHistory?.baseline_energy_points?.[0]?.timestamp || null,
-        this._billingHistory?.energy_points?.at(-1)?.timestamp || null,
-      ],
       layers: this._effectiveChartLayerState(),
       series,
       forecast,
@@ -13321,7 +13110,7 @@ class ElrakningPanel {
       return;
     }
     const averageToggle = this.host.querySelector('[data-meter-legend] [data-chart-layer="average"]');
-    if (averageToggle) averageToggle.hidden = true;
+    if (averageToggle) averageToggle.hidden = false;
     this._renderHourlyPriceChart(options);
     this._recordSlowRender("price-chart", performance.now() - started);
   }
@@ -13496,6 +13285,13 @@ class ElrakningPanel {
     this._updatePriceComparisonControls();
     const prices = periods.map((period) => this._periodCustomerPrice(period));
     this._chartBarPrices = prices;
+    const average = prices.length
+      ? prices.reduce((sum, price) => sum + price, 0) / prices.length
+      : 0;
+    const finitePrices = prices.filter(Number.isFinite);
+    const minimum = finitePrices.length ? Math.min(...finitePrices) : 0;
+    const maximum = finitePrices.length ? Math.max(...finitePrices) : 0;
+    const range = maximum - minimum;
     const colorBands = priceColorBands(prices);
     const priceRanks = new Map();
     colorBands?.sorted.forEach((price, index) => priceRanks.set(price, index + 1));
@@ -13513,7 +13309,9 @@ class ElrakningPanel {
     chart.style.setProperty("--price-axis-left-gutter", `${(geometry.leftInset / width) * 100}%`);
     chart.style.setProperty("--price-axis-right-gutter", `${(geometry.rightInset / width) * 100}%`);
     const { plot, plotWidth, plotHeight } = geometry;
-    const zeroY = plot.top + plotHeight;
+    const valueRange = range || 1;
+    const y = (price) => plot.top + ((maximum - price) / valueRange) * plotHeight;
+    const zeroY = Math.max(plot.top, Math.min(plot.top + plotHeight, y(0)));
     const firstStart = new Date(periods[0].start);
     const dayStart = new Date(firstStart.getFullYear(), firstStart.getMonth(), firstStart.getDate());
     const selectedDayEnd = new Date(dayStart);
@@ -13747,6 +13545,7 @@ class ElrakningPanel {
     ), null);
     periods.forEach((period, index) => {
       const price = prices[index];
+      const category = priceCategory(price, colorBands);
       const colorDetails = priceColorDetails(
         price,
         colorBands,
@@ -13777,27 +13576,24 @@ class ElrakningPanel {
         } : {}),
       });
     });
-    const normalLoadProfile = buildNormalLoadProfile(
-      [
-        ...(Array.isArray(this._billingHistory?.baseline_energy_points) ? this._billingHistory.baseline_energy_points : []),
-        ...(Array.isArray(this._billingHistory?.energy_points) ? this._billingHistory.energy_points : []),
-      ],
-      dayStart,
-      {
-        siteId: this._siteState?.site_id || this._siteState?.current_site?.site_id,
-        historySiteId: this._billingHistorySiteId,
-        now,
-      },
-    );
-    const costField = visibleLayers.spot
-      ? buildCostFieldMarkup(periods, prices, normalLoadProfile, meterRange, plot, plotWidth, plotHeight, x)
-      : { model: { available: false, reason: "price_layer_hidden" }, markup: "" };
+    const priceCategoryFor = (price) => priceCategory(price, colorBands);
+    const priceStepSegments = visibleLayers.spot
+      ? buildPriceStepSegments(periods, prices, (timestamp) => x(timestamp), y, priceCategoryFor)
+      : [];
+    const priceStepLines = priceStepSegments.map(({ category, path }) => (
+      `<path class="price-step-line ${category}" data-price-category="${category}" d="${path}" />`
+    )).join("");
+    const priceStepAreas = visibleLayers.spot
+      ? buildPriceStepAreaPaths(periods, prices, (timestamp) => x(timestamp), y, plot.top + plotHeight)
+        .map((path) => `<path class="price-step-area" d="${path}" />`).join("")
+      : "";
+    const priceLevelGradient = `<defs><linearGradient id="price-level-gradient" gradientUnits="userSpaceOnUse" x1="0" y1="${plot.top + plotHeight}" x2="0" y2="${plot.top}"><stop offset="0%" stop-color="#22C55E" /><stop offset="30%" stop-color="#FBBF24" /><stop offset="48%" stop-color="#FBBF24" /><stop offset="55%" stop-color="#EF4444" /><stop offset="100%" stop-color="#EF4444" /></linearGradient></defs>`;
     const nowTimestamp = Date.now();
     const nowMarker = localDateKey(dayStart) === localDateKey(now)
       && nowTimestamp >= dayStart.getTime() && nowTimestamp <= selectedDayEnd.getTime()
       ? `<line class="chart-now-marker" data-price-now-marker x1="${x(nowTimestamp)}" y1="${plot.top}" x2="${x(nowTimestamp)}" y2="${plot.top + plotHeight}" />`
       : "";
-    const priceMarkup = `${costField.markup}${nowMarker}`;
+    const priceMarkup = `${priceLevelGradient}${priceStepAreas}${priceStepLines}${nowMarker}`;
     const hourLabels = buildHourlyBoundaryHours(renderedWidth).map((hour) => {
       const hourDate = new Date(dayStart);
       hourDate.setHours(hourDate.getHours() + hour);
@@ -13809,6 +13605,7 @@ class ElrakningPanel {
     if (legend) legend.hidden = periods.length === 0 && meterPoints.length === 0;
     this._chartHoverGeometry = {
       x,
+      y,
       meterY,
       meterDisplayY: (key, timestamp) => this.meterDisplayYAt(meterDisplayGeometry[key], timestamp, x),
       powerDisplayY: (key, timestamp) => this.meterDisplayYAt(powerDisplayGeometry[key], timestamp, x),
@@ -13840,6 +13637,7 @@ class ElrakningPanel {
       <g data-price-dynamic="price">${priceMarkup}</g>
       <g data-price-dynamic="areas">${meterAreas}</g>
       <g data-price-dynamic="lines">${this._ellaSelectionBandMarkup(x, plot, dayStart.getTime(), selectedDayEnd.getTime())}${meterLines}</g>
+      ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
     </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;
     this.bindChartTooltips();
@@ -14017,6 +13815,9 @@ class ElrakningPanel {
           ? hoverGeometry.x(hoverSnapshot.meterSampleTime)
           : null;
         const markers = [];
+        if (visibleLayers.spot && Number.isFinite(hoverSnapshot.priceBarValue)) {
+          markers.push(`<circle class="chart-hover-marker chart-hover-marker-spot" fill="${chartColor("neutral")}" cx="${priceMarkerX}" cy="${hoverGeometry.y(hoverSnapshot.priceBarValue)}" r="4" />`);
+        }
         const importDisplayY = meterMarkerX === null
           ? null
           : hoverGeometry.meterDisplayY("import_kw", hoverSnapshot.meterSampleTime);
