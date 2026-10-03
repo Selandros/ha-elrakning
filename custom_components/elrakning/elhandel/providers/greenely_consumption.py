@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 
@@ -34,10 +34,16 @@ def normalize_greenely_consumption(payload: Any) -> list[dict[str, Any]]:
     return result
 
 
-def summarize_greenely_consumption(payload: Any, month: str) -> dict[str, Any] | None:
+def summarize_greenely_consumption(
+    payload: Any, month: str, end_date: date | None = None
+) -> dict[str, Any] | None:
     """Summarize normalized samples for one local calendar month."""
     samples = normalize_greenely_consumption(payload)
-    selected = [item for item in samples if item["localtime"][:7] == month]
+    selected = [
+        item for item in samples
+        if item["localtime"][:7] == month
+        and (end_date is None or item["localtime"][:10] < end_date.isoformat())
+    ]
     if not selected:
         return None
     return {

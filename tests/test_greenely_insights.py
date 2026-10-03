@@ -49,7 +49,7 @@ class GreenelyInsightsTests(unittest.TestCase):
             "1790809200": {"localtime": "2026-10-01 20:00", "usage": 1000, "cost": 56827},
         }}
         result = module.normalize_consumption_cost(
-            payload, date(2026, 10, 1), date(2026, 10, 2), 2.479
+            payload, date(2026, 10, 1), date(2026, 10, 2), 2.479, "2026-10"
         )
         self.assertTrue(result["available"])
         self.assertEqual(result["scale"], 100000)

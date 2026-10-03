@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
+from homeassistant.util import dt as dt_util
 
 from ..const import (
     DOMAIN,
@@ -384,9 +385,9 @@ class ElhandelManager:
         config = self._runtime_config()
         if not GreenelyProvider.is_configured(config):
             return
-        today = datetime.now().date()
+        today = dt_util.as_local(dt_util.now()).date()
         month_start = today.replace(day=1)
-        month_end = today
+        month_end = today + timedelta(days=1)
         await self.async_diagnostic("INFO", "consumption", "consumption_refresh_start", f"Consumption refresh started · Provider: {GREENELY_PROVIDER} · Reason: {reason}")
         try:
             provider = GreenelyProvider(self.hass)
@@ -450,6 +451,10 @@ class ElhandelManager:
         if not self.lifecycle.is_current(refresh_generation):
             return self.public_state()
         previous_invoices = self.state.get("invoices", [])
+        previous_processing = self.state.get("processing") or self._empty_processing()
+        processing = dict(previous_processing)
+        if not refresh_data["failed_contracts"] and processing.get("last_error_stage") == "refresh":
+            processing.update({"last_error": None, "last_error_stage": None, "last_error_at": None})
         source = self.state.get("source") or {}
         facility_id = refresh_data["facility_id"]
         source["facility"] = refresh_data["facility"]
@@ -470,14 +475,16 @@ class ElhandelManager:
             "invoice_count": len(invoices),
             "invoices": invoices,
             "summary": self.state.get("summary") if refresh_data["invoices"] and _summary_has_attribution(self.state) else None,
-            "processing": self.state.get("processing", self._empty_processing()),
+            "processing": processing,
             "consumption": self.state.get("consumption"),
             "analysis": self.state.get("analysis", {}),
             "consumption_error": self.state.get("consumption_error"),
             "source": source,
             "_new_invoice_keys": self.storage.new_invoice_keys(previous_invoices, refresh_data["invoices"]),
             "last_update": datetime.now(timezone.utc).isoformat(),
-            "error": "partial_update" if refresh_data["failed_contracts"] else None,
+            "error": "partial_update" if refresh_data["failed_contracts"] else (
+                "processing_failed" if self.state.get("error") == "processing_failed" else None
+            ),
         }
         await self.storage.async_save(self.state)
         self.hass.bus.async_fire(ELECTRICITY_PROVIDER_UPDATE_EVENT)

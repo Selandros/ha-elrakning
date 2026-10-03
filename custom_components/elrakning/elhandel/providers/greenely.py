@@ -116,8 +116,12 @@ class GreenelyProvider:
         facility_id = self.facility_id(config)
         await self.async_login(config[GREENELY_EMAIL], config[GREENELY_PASSWORD])
         payload = await self.async_get_consumption(facility_id, start_date, end_date)
-        samples = normalize_greenely_consumption(payload)
-        summary = summarize_greenely_consumption(payload, month)
+        samples = [
+            sample for sample in normalize_greenely_consumption(payload)
+            if sample.get("localtime", "")[:7] == month
+            and sample.get("localtime", "")[:10] < end_date.isoformat()
+        ]
+        summary = summarize_greenely_consumption(payload, month, end_date)
         if summary is None:
             raise GreenelyError(
                 "no_consumption",
@@ -133,6 +137,7 @@ class GreenelyProvider:
                 start_date,
                 end_date,
                 summary.get("month_to_date_kwh"),
+                month,
             )
         except GreenelyError as err:
             analysis["consumption_cost"] = {

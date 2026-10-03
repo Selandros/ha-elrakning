@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -198,8 +198,14 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_reads_analysis_endpoints_without_creating_invoice_cost(self):
         async def consumption(*args, **kwargs):
             if kwargs.get("unit") == "currency" or args[-1:] == ("currency",):
-                return {"data": {"1": {"usage": 1479, "cost": 84047, "localtime": "2026-10-01 19:00"}}}
-            return {"data": {"1": {"usage": 1000, "localtime": "2026-10-01 01:00"}}}
+                return {"data": {
+                    "1": {"usage": 1479, "cost": 84047, "localtime": "2026-10-01 19:00"},
+                    "2": {"usage": 2000, "cost": 100000, "localtime": "2026-10-03 00:00"},
+                }}
+            return {"data": {
+                "1": {"usage": 1000, "localtime": "2026-10-01 01:00"},
+                "2": {"usage": 2000, "localtime": "2026-10-03 00:00"},
+            }}
 
         client = SimpleNamespace(
             async_login=AsyncMock(),
@@ -224,6 +230,8 @@ class GreenelyProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["analysis"]["spot_price"]["unit_status"], "unit_verified")
         self.assertAlmostEqual(result["analysis"]["consumption_cost"]["month_to_date_cost_sek"], 0.84047)
         self.assertAlmostEqual(result["analysis"]["consumption_cost"]["average_price_ore_per_kwh"], 84.047)
+        self.assertEqual(len(result["samples"]), 1)
+        self.assertEqual(len(result["analysis"]["consumption_cost"]["samples"]), 1)
         self.assertNotIn("invoice", result)
 
     async def test_provider_creates_config_for_selected_facility(self):
@@ -1231,7 +1239,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["invoice_count"], 0)
         self.assertIsNone(state["latest_invoice"])
 
-    async def test_consumption_refresh_never_queries_future_end_date(self):
+    async def test_consumption_refresh_queries_next_local_date_as_exclusive_end(self):
         manager = _manager()
         provider = SimpleNamespace(
             async_get_consumption_data=AsyncMock(return_value={
@@ -1254,7 +1262,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         queried_start, queried_end, queried_month = args[1], args[2], args[3]
         today = date.today()
         self.assertEqual(queried_start, today.replace(day=1))
-        self.assertEqual(queried_end, today)
+        self.assertEqual(queried_end, today + timedelta(days=1))
         self.assertEqual(queried_month, today.strftime("%Y-%m"))
 
     async def test_refresh_uses_active_site_binding_facility_over_global_config(self):
@@ -1325,6 +1333,27 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["invoice_count"], 1)
         self.assertEqual(manager.state["invoices"][0]["_invoice_key"], "invoice-1")
         self.assertIn("elrakning_electricity_provider_update", manager.hass.bus.events)
+
+    async def test_successful_refresh_clears_stale_refresh_status(self):
+        manager = _manager()
+        manager.state["error"] = "timeout"
+        manager.state["processing"].update({
+            "last_error": "timeout",
+            "last_error_stage": "refresh",
+            "last_error_at": "2026-10-02T10:00:00+00:00",
+        })
+        manager.async_process_latest_invoice_if_needed = AsyncMock()
+        manager.async_refresh_consumption = AsyncMock()
+
+        with patch(
+            "custom_components.elrakning.elhandel.manager.GreenelyProvider",
+            return_value=_RefreshClient(),
+        ):
+            await manager.async_refresh("test")
+
+        self.assertIsNone(manager.state["processing"]["last_error"])
+        self.assertIsNone(manager.state["processing"]["last_error_stage"])
+        self.assertIsNone(manager.state["error"])
 
     async def test_public_state_has_exact_empty_shape_without_provider(self):
         manager = _manager()

@@ -77,6 +77,7 @@ def normalize_consumption_cost(
     start_date: date,
     end_date: date,
     month_to_date_kwh: float | None = None,
+    month: str | None = None,
 ) -> dict[str, Any]:
     """Normalize verified hourly currency samples without creating billing actuals."""
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -95,6 +96,8 @@ def normalize_consumption_cost(
         if not isinstance(localtime, str) or not localtime or cost_sek is None:
             continue
         if not _date_in_range(localtime[:10], start_date, end_date):
+            continue
+        if month is not None and localtime[:7] != month:
             continue
         sample = {
             "source_timestamp": source_timestamp,
