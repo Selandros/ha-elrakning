@@ -6704,6 +6704,10 @@ class ElrakningPanel {
           white-space: nowrap;
         }
 
+        .price-chart-legend [data-preview-layer][hidden] {
+          display: none !important;
+        }
+
         .price-comparison-controls {
           align-items: center;
           display: flex;

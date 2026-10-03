@@ -2393,6 +2393,7 @@ assert.match(panelSource, /isHoverPowerValue\(details\?\.export_kw\)/);
 assert.match(panelSource, /_resourceChartLayerVisible\(key\)/);
 assert.match(panelSource, /chartResourceSeriesVisible\(key, this\._dashboardCardVisibility/);
 assert.match(panelSource, /button\.hidden = !resourceVisible/);
+assert.match(panelSource, /\.price-chart-legend \[data-preview-layer\]\[hidden\] \{[\s\S]*display: none !important/);
 assert.match(panelSource, /this\._priceChartRenderCacheKey = null;[\s\S]*?this\.renderPriceChart\(\)/);
 assert.match(panelSource, /isChartPowerValue\(value\)/);
 assert.match(panelSource, /buildThresholdClippedSegments\(points, key, \{ thresholded: false \}\)/);
