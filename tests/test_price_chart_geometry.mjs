@@ -30,6 +30,31 @@ assert.equal(loadProfile.observation_counts[40], 7);
 assertClose(loadProfile.samples[40], 2.4);
 assert.equal(buildNormalLoadProfile(history, selectedDate, { siteId: "site-a", historySiteId: "site-b" }).reason, "site_mismatch");
 assert.equal(buildNormalLoadProfile(history, selectedDate, { siteId: "site-a", historySiteId: "site-a" }).samples[40], 2.4);
+const fallbackHistory = [
+  { timestamp: "2026-10-01T02:00:00+02:00", import_kw: 1 },
+  { timestamp: "2026-10-02T06:00:00+02:00", import_kw: 2 },
+  { timestamp: "2026-10-02T18:00:00+02:00", import_kw: 10 },
+];
+const tierBProfile = buildNormalLoadProfile(fallbackHistory, selectedDate, { siteId: "site-a", historySiteId: "site-a" });
+assert.equal(tierBProfile.available, true);
+assert.equal(tierBProfile.tier, "B");
+assert.equal(tierBProfile.fallback_source, "tier_b_all_prior_observations");
+assertClose(tierBProfile.fallback_load_kw, 2);
+const tierCProfile = buildNormalLoadProfile([
+  { timestamp: "2026-10-03T08:00:00+02:00", import_kw: 1 },
+  { timestamp: "2026-10-03T09:00:00+02:00", import_kw: 3 },
+  { timestamp: "2026-10-03T10:00:00+02:00", import_kw: 5 },
+  { timestamp: "2026-10-03T13:00:00+02:00", import_kw: 99 },
+], selectedDate, { siteId: "site-a", historySiteId: "site-a", now: new Date("2026-10-03T12:00:00+02:00") });
+assert.equal(tierCProfile.available, true);
+assert.equal(tierCProfile.tier, "C");
+assert.equal(tierCProfile.fallback_source, "tier_c_selected_day_to_now");
+assertClose(tierCProfile.fallback_load_kw, 3);
+assert.equal(buildNormalLoadProfile(
+  [{ timestamp: "2026-10-02T23:00:00+02:00", import_kw: 99 }],
+  new Date("2026-10-02T12:00:00+02:00"),
+  { siteId: "site-a", historySiteId: "site-a", now: new Date("2026-10-03T12:00:00+02:00") },
+).available, false);
 
 const costPeriods = [
   { start: "2026-10-03T10:00:00+02:00", end: "2026-10-03T11:00:00+02:00" },
@@ -44,6 +69,8 @@ assert.equal(costModel.entries[0].price_sek_per_kwh, 0.1);
 assert.equal(buildCostFieldModel([costPeriods[0]], [0], costProfile, 10).entries[0].price_sek_per_kwh, 0);
 const neutralField = buildCostFieldMarkup(costPeriods, [10], { available: false }, 10, { left: 10, top: 5 }, 100, 100, (timestamp) => timestamp);
 assert.match(neutralField.markup, /insufficient_history/);
+const fallbackField = buildCostFieldMarkup(costPeriods, [10, 100], tierBProfile, 10, { left: 10, top: 5 }, 100, 100, (timestamp) => new Date(timestamp).getTime());
+assert.match(fallbackField.markup, /data-cost-field-status="fallback"/);
 const costField = buildCostFieldMarkup(costPeriods, [10, 100], costProfile, 10, { left: 10, top: 5 }, 100, 100, (timestamp) => new Date(timestamp).getTime());
 assert.match(costField.markup, /data-cost-field="available"/);
 assert.match(costField.markup, /stop-color="#22C55E"/);

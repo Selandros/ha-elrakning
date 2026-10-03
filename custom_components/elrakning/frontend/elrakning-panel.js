@@ -417,7 +417,10 @@ export function buildNormalLoadProfile(points, selectedDate = new Date(), {
   siteId = null,
   historySiteId = null,
   minObservations = 7,
+  minFallbackObservations = 3,
+  minCurrentObservations = 3,
   bucketMinutes = 15,
+  now = null,
 } = {}) {
   if (!siteId || (historySiteId && historySiteId !== siteId)) {
     return { available: false, reason: historySiteId ? "site_mismatch" : "site_unavailable", samples: {}, observation_counts: {} };
@@ -427,12 +430,22 @@ export function buildNormalLoadProfile(points, selectedDate = new Date(), {
   const windowStart = new Date(selectedStart);
   windowStart.setDate(windowStart.getDate() - 28);
   const byDay = new Map();
+  const priorLoads = [];
+  const currentDayLoads = [];
+  const currentNow = new Date(now || new Date());
+  const selectedIsToday = localDateKey(selectedStart) === localDateKey(currentNow);
   for (const point of Array.isArray(points) ? points : []) {
     const timestamp = new Date(point?.timestamp);
     const day = localDateStartFor(timestamp);
     const bucket = localWallClockBucket(timestamp, bucketMinutes);
     const loadKw = pointLoadKw(point);
-    if (!day || bucket === null || loadKw === null || day < windowStart || day >= selectedStart) continue;
+    if (!day || bucket === null || loadKw === null) continue;
+    if (day.getTime() === selectedStart.getTime()) {
+      if (selectedIsToday && timestamp.getTime() <= currentNow.getTime()) currentDayLoads.push(loadKw);
+      continue;
+    }
+    if (day < windowStart || day >= selectedStart) continue;
+    priorLoads.push(loadKw);
     const dayKey = localDateKey(day);
     const dayBuckets = byDay.get(dayKey) || new Map();
     const values = dayBuckets.get(bucket) || [];
@@ -456,11 +469,25 @@ export function buildNormalLoadProfile(points, selectedDate = new Date(), {
     observationCounts[bucket] = values.length;
     if (values.length >= minObservations) samples[bucket] = medianValue(values);
   }
+  const priorMedian = priorLoads.length >= minFallbackObservations ? medianValue(priorLoads) : null;
+  const currentMedian = selectedIsToday && currentDayLoads.length >= minCurrentObservations
+    ? medianValue(currentDayLoads)
+    : null;
+  const fallbackLoadKw = priorMedian ?? currentMedian;
+  const fallbackSource = priorMedian !== null ? "tier_b_all_prior_observations" : currentMedian !== null ? "tier_c_selected_day_to_now" : null;
+  const tier = Object.keys(samples).length > 0
+    ? (fallbackLoadKw === null ? "A" : "A+B")
+    : (priorMedian !== null ? "B" : currentMedian !== null ? "C" : null);
   return {
-    available: Object.keys(samples).length > 0,
-    reason: Object.keys(samples).length > 0 ? null : "insufficient_history",
+    available: Object.keys(samples).length > 0 || fallbackLoadKw !== null,
+    reason: Object.keys(samples).length > 0 || fallbackLoadKw !== null ? null : "insufficient_history",
     samples,
+    fallback_load_kw: fallbackLoadKw,
+    fallback_source: fallbackSource,
+    tier,
     observation_counts: observationCounts,
+    prior_observation_count: priorLoads.length,
+    current_observation_count: currentDayLoads.length,
     window_start: localDateKey(windowStart),
     window_end_exclusive: localDateKey(selectedStart),
     site_id: siteId,
@@ -477,7 +504,10 @@ export function buildCostFieldModel(periods, effectivePriceOre, normalLoadProfil
   const entries = periods.map((period, index) => {
     const bucket = localWallClockBucket(period?.start);
     const priceOre = Number(effectivePriceOre?.[index]);
-    const normalLoadKw = bucket === null ? null : Number(samples[bucket]);
+    const bucketLoad = bucket === null ? null : samples[bucket];
+    const normalLoadKw = Number.isFinite(Number(bucketLoad))
+      ? Number(bucketLoad)
+      : Number(normalLoadProfile?.fallback_load_kw);
     if (bucket === null || !Number.isFinite(priceOre) || !Number.isFinite(normalLoadKw) || normalLoadKw < 0) return null;
     const priceSekPerKwh = Math.max(priceOre, 0) / 100;
     return {
@@ -486,6 +516,7 @@ export function buildCostFieldModel(periods, effectivePriceOre, normalLoadProfil
       price_ore_per_kwh: priceOre,
       price_sek_per_kwh: priceSekPerKwh,
       normal_load_kw: normalLoadKw,
+      normal_load_source: Number.isFinite(Number(bucketLoad)) ? "tier_a_same_bucket" : normalLoadProfile.fallback_source,
       expected_cost_rate_sek_per_hour: priceSekPerKwh * normalLoadKw,
     };
   });
@@ -501,6 +532,8 @@ export function buildCostFieldModel(periods, effectivePriceOre, normalLoadProfil
     p50,
     p80,
     meter_range_kw: safeRange,
+    tier: normalLoadProfile.tier || null,
+    fallback_source: normalLoadProfile.fallback_source || null,
   };
 }
 
@@ -510,7 +543,7 @@ export function buildCostFieldMarkup(periods, effectivePriceOre, normalLoadProfi
   if (!model.available) {
     return {
       model,
-      markup: `<rect class="price-cost-field price-cost-field-unavailable" data-cost-field-status="insufficient_history" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" /><text class="price-cost-field-status" x="${plot.left + plotWidth / 2}" y="${plot.top + plotHeight / 2}" text-anchor="middle">Kostnadsfält ej tillgängligt · otillräcklig historik</text>`,
+      markup: `<rect class="price-cost-field price-cost-field-unavailable" data-cost-field-status="insufficient_history" x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}" /><text class="price-cost-field-status" x="${plot.left + plotWidth / 2}" y="${plot.top + plotHeight / 2}" text-anchor="middle">Kostnadsfält ej tillgängligt · ingen verklig lastdata</text>`,
     };
   }
   const gradients = [];
@@ -535,7 +568,10 @@ export function buildCostFieldMarkup(periods, effectivePriceOre, normalLoadProfi
       rects.push(`<rect class="price-cost-field" data-cost-field="available" data-cost-field-period="${index}" x="${left}" y="${plot.top}" width="${right - left}" height="${plotHeight}" fill="url(#${gradientId})" />`);
     }
   });
-  return { model, markup: `<defs>${gradients.join("")}</defs>${rects.join("")}` };
+  const fallbackLabel = model.tier && model.tier !== "A"
+    ? `<text class="price-cost-field-status price-cost-field-status-fallback" data-cost-field-status="fallback" x="${plot.left + 6}" y="${plot.top + 18}">Kostnadsfält · preliminärt</text>`
+    : "";
+  return { model, markup: `${fallbackLabel}<defs>${gradients.join("")}</defs>${rects.join("")}` };
 }
 
 export function createPriceDebugText(priceData) {
@@ -13750,6 +13786,7 @@ class ElrakningPanel {
       {
         siteId: this._siteState?.site_id || this._siteState?.current_site?.site_id,
         historySiteId: this._billingHistorySiteId,
+        now,
       },
     );
     const costField = visibleLayers.spot
