@@ -60,8 +60,12 @@ def _plan(site="site-a", resource="load-a"):
         "site_id": site,
         "plan_id": "plan-1",
         "revision": 1,
+        "execution_eligible": True,
+        "actuator_writes_enabled": True,
         "plan_blocks": [{
             "plan_block_id": "block-1",
+            "execution_eligible": True,
+            "constraints": {"actuator_writes_enabled": True},
             "actions": [{"code": "schedule", "load_id": resource}],
         }],
     }
@@ -85,6 +89,25 @@ def test_default_permissions_are_off_and_missing_adapter_is_zero_write(monkeypat
     assert result["failure_class"] == "permission_disabled"
     assert result["actuator_writes_enabled"] is False
     assert manager.permission("site-a", "load-a")["armed"] is False
+
+
+def test_shadow_plan_is_rejected_before_adapter_dispatch(monkeypatch):
+    manager = _manager(monkeypatch)
+    asyncio.run(manager.async_set_permission(_permission()))
+    adapter = FakeAdapter()
+    manager.register_adapter("site-a", "load-a", adapter)
+    shadow_plan = _plan()
+    shadow_plan["execution_eligible"] = False
+    shadow_plan["actuator_writes_enabled"] = False
+    shadow_plan["plan_blocks"][0]["execution_eligible"] = False
+    shadow_plan["plan_blocks"][0]["constraints"]["actuator_writes_enabled"] = False
+    result = asyncio.run(manager.async_dispatch({
+        "site_id": "site-a", "resource_id": "load-a", "idempotency_key": "shadow",
+        "plan_id": "plan-1", "revision": 1, "plan_block_id": "block-1",
+    }, shadow_plan))
+    assert result["failure_class"] == "execution_not_eligible"
+    assert result["actuator_writes_enabled"] is False
+    assert adapter.calls == []
 
 
 def test_permission_requires_explicit_confirmation_and_wrong_site_is_rejected(monkeypatch):

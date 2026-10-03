@@ -26,6 +26,7 @@ FAILURE_CLASSES = frozenset({
     "permission_denied", "wrong_site", "stale_plan", "outside_window",
     "adapter_unavailable", "rate_limited", "circuit_open", "timeout",
     "ack_missing", "readback_mismatch", "adapter_error", "rolled_back",
+    "execution_not_eligible",
 })
 
 
@@ -195,6 +196,14 @@ class EllaExecutionStore:
             return await self._record_rejection(site_id, command_id, resource_id, reason, request, now_value)
         if block is None:
             return await self._record_rejection(site_id, command_id, resource_id, "stale_plan", request, now_value)
+        # Shadow and advisory plans must never reach an actuator adapter.
+        if (
+            plan.get("execution_eligible") is not True
+            or plan.get("actuator_writes_enabled") is not True
+            or block.get("execution_eligible") is not True
+            or block.get("constraints", {}).get("actuator_writes_enabled") is not True
+        ):
+            return await self._record_rejection(site_id, command_id, resource_id, "execution_not_eligible", request, now_value)
         if block.get("elapsed") is True:
             return await self._record_rejection(site_id, command_id, resource_id, "outside_window", request, now_value)
         action = _find_action(block, resource_id)
