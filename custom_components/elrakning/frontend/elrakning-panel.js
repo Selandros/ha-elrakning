@@ -5629,17 +5629,13 @@ class ElrakningPanel {
           grid-template-columns: minmax(68px, auto) repeat(2, minmax(0, 1fr));
         }
 
-        .cost-detail-row-short .cost-detail strong {
-          white-space: nowrap;
-        }
-
         .cost-detail-row-label {
           color: var(--secondary-text-color);
           font-weight: 500;
           padding-top: 2px;
         }
 
-        .cost-detail strong { font-weight: 500; }
+        .cost-detail strong { font-weight: 500; white-space: nowrap; }
 
         .cost-summary {
           display: grid;

@@ -363,7 +363,7 @@ assert.match(source, /\.cost-chart \{[\s\S]*min-height: 144px;/);
 assert.match(source, /\.cost-details \{[\s\S]*display: grid;[\s\S]*margin-top: 12px;/);
 assert.match(source, /\.cost-detail-row \{[\s\S]*grid-template-columns: minmax\(68px, auto\) repeat\(3, minmax\(0, 1fr\)\);/);
 assert.match(source, /\.cost-detail-row-short \{[\s\S]*grid-template-columns: minmax\(68px, auto\) repeat\(2, minmax\(0, 1fr\)\);/);
-assert.match(source, /\.cost-detail-row-short \.cost-detail strong \{[\s\S]*white-space: nowrap;/);
+assert.match(source, /\.cost-detail strong \{ font-weight: 500; white-space: nowrap; \}/);
 assert.match(source, /row\.className = `cost-detail-row\$\{cells\.length === 2 \? " cost-detail-row-short" : ""\}`/);
 assert.match(source, /cells\.length === 2 \? " cost-detail-row-short"/);
 assert.match(source, /@container \(max-width: 600px\) \{[\s\S]*\.cost-detail-row \{ grid-template-columns: minmax\(60px, auto\) repeat\(2, minmax\(0, 1fr\)\); \}/);
