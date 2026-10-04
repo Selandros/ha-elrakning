@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostKpiTotals, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, buildTodayCostValue, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostKpiTotals, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, buildTodayCostFromMeterAndPrices, buildTodayCostValue, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -293,6 +293,15 @@ assert.equal(buildTodayCostValue([
   analysis: { consumption_cost: { schema: "greenely.consumption_cost.v1", available: true, samples: [{ localtime: "2026-10-04 12:00", cost_sek: 1 }] } },
 }, new Date("2026-10-04T16:00:00+02:00")), 50);
 assert.equal(buildTodayCostValue([], "2026-10", null, new Date("2026-10-04T16:00:00+02:00")), null);
+assert.equal(buildTodayCostFromMeterAndPrices([
+  { start: "2026-10-04T03:00:00+02:00", end: "2026-10-04T04:00:00+02:00" },
+], [
+  { timestamp: "2026-10-04T02:00:00+02:00", import_kw: 0.5 },
+  { timestamp: "2026-10-04T02:30:00+02:00", import_kw: 0.5 },
+  { timestamp: "2026-10-04T03:00:00+02:00", import_kw: 0.5 },
+  { timestamp: "2026-10-04T03:30:00+02:00", import_kw: 0.5 },
+  { timestamp: "2026-10-04T04:00:00+02:00", import_kw: 0.5 },
+], () => 100, new Date("2026-10-04T16:00:00+02:00")), 0.5);
 const unavailableMonth = buildDailyCostSeries([], "2026-08");
 assert.equal(unavailableMonth.days.length, 31);
 assert.equal(unavailableMonth.days.every((day) => day.status === "unavailable" && !day.available), true);

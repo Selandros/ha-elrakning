@@ -2534,6 +2534,31 @@ export function buildTodayCostValue(dailyBreakdown, month, providerState = null,
     : null;
 }
 
+export function buildTodayCostFromMeterAndPrices(periods, meterPoints, priceForPeriod, now = new Date()) {
+  const current = new Date(now);
+  const dayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime();
+  const nowMs = current.getTime();
+  if (!Array.isArray(periods) || !Array.isArray(meterPoints) || nowMs <= dayStart || typeof priceForPeriod !== "function") return null;
+  let total = 0;
+  let covered = false;
+  for (const period of periods) {
+    const periodStart = new Date(period?.start).getTime();
+    const periodEnd = new Date(period?.end).getTime();
+    if (!Number.isFinite(periodStart) || !Number.isFinite(periodEnd) || periodEnd <= dayStart || periodStart >= nowMs) continue;
+    const priceOre = Number(priceForPeriod(period));
+    if (!Number.isFinite(priceOre)) continue;
+    const energyKwh = integrateMeterEnergyByRange(
+      meterPoints,
+      Math.max(dayStart, periodStart),
+      Math.min(nowMs, periodEnd),
+    );
+    if (!Number.isFinite(energyKwh) || energyKwh < 0) continue;
+    total += energyKwh * priceOre / 100;
+    covered = true;
+  }
+  return covered ? total : null;
+}
+
 export function buildDailyCostTooltipFields(day) {
   const number = (value, suffix = "") => value == null || !Number.isFinite(Number(value))
     ? "–"
@@ -11265,7 +11290,13 @@ class ElrakningPanel {
     total.textContent = presentationModel.forecast_total_sek == null ? "–" : this._formatSek(presentationModel.forecast_total_sek);
     month.hidden = true;
     if (estimateStatus) estimateStatus.hidden = true;
-    const todayCost = buildTodayCostValue(
+    const todayCostFromChart = buildTodayCostFromMeterAndPrices(
+      this.priceData?.periods,
+      this._meterPowerHistory?.points,
+      (period) => this._comparisonPrice(period),
+      new Date(),
+    );
+    const todayCost = todayCostFromChart ?? buildTodayCostValue(
       this._billingDailyByMonth.get(estimate.month) || [],
       estimate.month,
       this._electricityProviderState,
