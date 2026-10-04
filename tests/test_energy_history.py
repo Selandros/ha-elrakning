@@ -16,6 +16,7 @@ from custom_components.elrakning.energy_history import (
     history_targets,
     long_term_contributions,
     merge_contributions,
+    source_entities_by_series,
     _load_long_term_statistics,
 )
 
@@ -33,6 +34,16 @@ def _ledger(site, role, entity, generation, **extra):
 
 
 class EnergyHistoryTests(unittest.TestCase):
+    def test_source_entities_follow_verified_site_ledger_roles(self):
+        targets = [
+            _ledger("site-a", "grid.energy_import", "sensor.grid_import", "import-gen"),
+            _ledger("site-a", "grid.power/import", "sensor.grid_power", "power-gen"),
+        ]
+        self.assertEqual(
+            source_entities_by_series(targets),
+            {"import": ["sensor.grid_import", "sensor.grid_power"]},
+        )
+
     def test_history_targets_are_site_explicit_not_active_site(self):
         start = datetime(2026, 8, 30, tzinfo=UTC)
         end = start + timedelta(days=1)

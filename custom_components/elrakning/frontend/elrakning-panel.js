@@ -1877,6 +1877,21 @@ export function energyHistoryToMeterStepPoints(history) {
   return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
 }
 
+export function resolveCanonicalMeterSeriesPoints(primaryPoints, energyHistory, field, startMs, endMs) {
+  const inRange = (point) => {
+    const timestamp = new Date(point?.timestamp).getTime();
+    return Number.isFinite(timestamp) && timestamp >= startMs && timestamp < endMs;
+  };
+  const primary = (Array.isArray(primaryPoints) ? primaryPoints : [])
+    .filter(inRange)
+    .map((point) => ({ ...point, value_kw: normalizeMeterValue(point[field]) }));
+  if (primary.some((point) => Number.isFinite(point.value_kw))) return primary;
+  const historyField = field === "export_kw" ? "export_kw" : "import_kw";
+  return energyHistoryToMeterStepPoints(energyHistory)
+    .filter(inRange)
+    .map((point) => ({ ...point, value_kw: normalizeMeterValue(point[historyField]) }));
+}
+
 export function integrateEnergyIntervalsKwh(intervals, start, end) {
   const startMs = new Date(start).getTime();
   const endMs = new Date(end).getTime();
@@ -10583,11 +10598,13 @@ class ElrakningPanel {
     if (mode === "hour") {
       const current = this.priceData.periods.find((period) => new Date(period.start) <= new Date() && new Date() < new Date(period.end));
       const values = selectedPeriods.map((period) => this._comparisonPrice(period)).filter(Number.isFinite);
+      const selectedDayStartMs = new Date(year, month, selected.getDate()).getTime();
+      const selectedDayEndMs = new Date(year, month, selected.getDate() + 1).getTime();
       series = {
         price: layers.spot ? priceSeries : [],
         average: layers.average ? [{ value: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null }] : [],
-        buy: layers.import ? canonicalPoints(this._meterCanonicalPoints.map((point) => ({ ...point, value_kw: point.import_kw })), new Date(year, month, selected.getDate()).getTime(), new Date(year, month, selected.getDate() + 1).getTime()) : [],
-        sell: layers.export ? canonicalPoints(this._meterCanonicalPoints.map((point) => ({ ...point, value_kw: point.export_kw })), new Date(year, month, selected.getDate()).getTime(), new Date(year, month, selected.getDate() + 1).getTime()) : [],
+        buy: layers.import ? resolveCanonicalMeterSeriesPoints(this._meterCanonicalPoints, this.priceSnapshot?.energy_history, "import_kw", selectedDayStartMs, selectedDayEndMs) : [],
+        sell: layers.export ? resolveCanonicalMeterSeriesPoints(this._meterCanonicalPoints, this.priceSnapshot?.energy_history, "export_kw", selectedDayStartMs, selectedDayEndMs) : [],
       };
       for (const [key, sourceKey] of [["solar", "solar"], ["load", "consumption"], ["charging", "charging"], ["discharging", "discharging"]]) {
         if (layers[sourceKey]) series[key] = canonicalPoints(this._powerCanonicalPoints?.[sourceKey], new Date(year, month, selected.getDate()).getTime(), new Date(year, month, selected.getDate() + 1).getTime());
@@ -10642,9 +10659,24 @@ class ElrakningPanel {
     const billingSourceEntities = Array.isArray(billingEnergySource.source_entities)
       ? billingEnergySource.source_entities.map((source) => source?.entity_id || source?.source_entity).filter(Boolean)
       : [billingEnergySource.entity_id || billingEnergySource.source_entity].filter(Boolean);
+    const energyHistorySourceEntities = this.priceSnapshot?.energy_history?.source_entities || {};
+    const historyImportSources = Array.isArray(energyHistorySourceEntities.import)
+      ? energyHistorySourceEntities.import
+      : [];
+    const historyExportSources = Array.isArray(energyHistorySourceEntities.export)
+      ? energyHistorySourceEntities.export
+      : [];
     const sourceEntities = {
-      buy: billingSourceEntities.length ? billingSourceEntities : [this._meterState?.energy_import_entity].filter(Boolean),
-      sell: billingSourceEntities.length ? billingSourceEntities : [this._meterState?.energy_export_entity].filter(Boolean),
+      buy: billingSourceEntities.length
+        ? billingSourceEntities
+        : (historyImportSources.length
+          ? historyImportSources
+          : [this._meterState?.energy_import_entity].filter(Boolean)),
+      sell: billingSourceEntities.length
+        ? billingSourceEntities
+        : (historyExportSources.length
+          ? historyExportSources
+          : [this._meterState?.energy_export_entity].filter(Boolean)),
       solar: [this._powerState?.solar_entity].filter(Boolean),
       load: [this._powerState?.consumption_entity].filter(Boolean),
       charging: [this._powerState?.charging_entity].filter(Boolean),

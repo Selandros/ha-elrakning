@@ -58,6 +58,43 @@ def history_targets(site_manager: Any, site_id: str, start: datetime, end: datet
     return targets
 
 
+def source_entities_by_series(
+    targets: list[dict[str, Any]],
+    contributions: list[dict[str, Any]] | None = None,
+) -> dict[str, list[str]]:
+    """Return verified ledger entities grouped by the rendered energy series."""
+    role_series = {
+        "grid.energy_import": "import",
+        "grid.energy_export": "export",
+        "grid.power/import": "import",
+        "house.consumption": "consumption",
+        "solar.production": "solar",
+        "battery.power": "charging",
+    }
+    active_series = {
+        (str(item.get("generation_id")), str(item.get("series")))
+        for item in (contributions or [])
+        if item.get("generation_id") and item.get("series")
+    }
+    result: dict[str, set[str]] = {}
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        entity_id = target.get("entity_id")
+        series = role_series.get(target.get("logical_role"))
+        if isinstance(entity_id, str) and entity_id and series:
+            generation_id = str(target.get("generation_id") or "")
+            if contributions is not None and not any(
+                (generation_id, candidate) in active_series
+                for candidate in ({series} if series not in {"charging", "discharging"} else {"charging", "discharging"})
+            ):
+                continue
+            result.setdefault(series, set()).add(entity_id)
+            if target.get("logical_role") == "battery.power":
+                result.setdefault("discharging", set()).add(entity_id)
+    return {series: sorted(entities) for series, entities in result.items()}
+
+
 def _power_to_kw(value: Any, unit: Any) -> float | None:
     try:
         number = float(value)
@@ -414,6 +451,7 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
         "start": start.astimezone(timezone.utc).isoformat(),
         "end": end.astimezone(timezone.utc).isoformat(),
         "series": series,
+        "source_entities": source_entities_by_series(targets, contributions),
         "sources": sources,
         "interval_count": sum(len(values) for values in series.values()),
     }
