@@ -60,6 +60,26 @@ export function shouldReplacePriceData(currentState, nextPeriods, requestedDateK
     && currentState.date === requestedDateKey);
 }
 
+const PRICE_ERROR_MESSAGES = Object.freeze({
+  site_unconfigured: "Prisdata kan inte visas ännu. Ingen prisbindning är konfigurerad för vald installation.",
+  missing_integration: "Nord Pool-integrationen kunde inte hittas. Kontrollera Diagnostik för tekniska detaljer.",
+  data_unavailable: "Nord Pool gav inget användbart prisdata för vald dag. Kontrollera Diagnostik för tekniska detaljer.",
+  data_pending: "Prisdata hämtas från Nord Pool. Första svaret kan ta en stund.",
+  price_request_failed: "Prisdata kunde inte hämtas just nu. Ett tekniskt fel har sparats i Diagnostik.",
+  invalid_date: "Vald dag kunde inte läsas. Kontrollera Diagnostik för tekniska detaljer.",
+});
+
+export function priceErrorUserMessage(error) {
+  return PRICE_ERROR_MESSAGES[error] || "Prisdata saknas. Kontrollera Diagnostik för tekniska detaljer.";
+}
+
+export function recentPriceErrors(entries, limit = 10) {
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 10;
+  return (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry?.component === "price" && ["ERROR", "WARNING"].includes(entry?.level))
+    .slice(-safeLimit);
+}
+
 export function benchmarkEvidenceVisibleForSite(debugEnabled, evidenceAvailable, siteState) {
   const currentSite = siteState?.current_site || siteState?.site || siteState;
   return Boolean(debugEnabled)
@@ -3878,6 +3898,7 @@ class ElrakningPanel {
       battery: false,
     };
     this._diagnosticEntries = [];
+    this._priceErrorEntries = [];
     this._diagnosticsBound = false;
     this._diagnosticsDomNodes = null;
     this._diagnosticsRequestGeneration = 0;
@@ -3964,6 +3985,7 @@ class ElrakningPanel {
       periods: [],
       error: "missing_integration",
     };
+    this._priceErrorDetails = null;
     this._priceDataRequestToken = 0;
   }
 
@@ -8538,6 +8560,7 @@ class ElrakningPanel {
         binding: this._priceBinding || null,
         coordinator_state: this.priceData,
         source_state: this._priceState || null,
+        error_details: this._priceErrorDetails || null,
       },
       solar_context: {
         forecast: forecast.data,
@@ -8571,6 +8594,7 @@ class ElrakningPanel {
       },
       diagnostics: {
         entries: this._diagnosticEntries || [],
+        price_errors: recentPriceErrors(this._diagnosticEntries || [], 10),
         current_payload_contains_foreign_site_ids: foreignSiteIds.filter((siteId) => currentPayloadText.includes(siteId)),
       },
       site_isolation_check: {
@@ -11088,6 +11112,7 @@ class ElrakningPanel {
     const render = (logs) => {
       const entries = Array.isArray(logs) ? logs : [];
       this._diagnosticEntries = entries.slice();
+      this._priceErrorEntries = recentPriceErrors(entries, 10);
       const latest = entries.at(-1);
       status.textContent = latest?.level === "ERROR" ? "Fel" : latest?.level === "WARNING" ? "Varning" : "OK";
       list.replaceChildren(...this._diagnosticEntries.map((entry) => {
@@ -11114,6 +11139,7 @@ class ElrakningPanel {
         const response = await requestHass.callWS({ type: "elrakning/diagnostics_state", include_inventory: false });
         if (!isCurrentRequest()) return false;
         render(response.logs);
+        if (Array.isArray(response.price_errors)) this._priceErrorEntries = response.price_errors.slice(-10);
         return true;
       } catch {
         if (isCurrentRequest()) status.textContent = "Varning";
@@ -12198,7 +12224,31 @@ class ElrakningPanel {
       this._priceBinding = response?.binding || response?.price?.binding
         || this._siteState?.global_bindings?.nord_pool || null;
       this._priceState = response?.source_state || null;
-    } catch {
+      this._priceErrorDetails = response?.error ? {
+        code: response.error,
+        requested_date: requestedDateKey,
+        response_period_count: responsePeriods.length,
+      } : null;
+    } catch (error) {
+      const details = sanitizeDiagnosticError(error);
+      this._priceErrorDetails = {
+        code: "price_request_failed",
+        error_name: details.error_name,
+        error_message: details.error_message,
+      };
+      this.priceData = {
+        source: "nord_pool",
+        mode: "spot_price",
+        adjustments: {},
+        periods: [],
+        error: "price_request_failed",
+        date: requestedDateKey,
+      };
+      void this._recordDiagnostic("price", "ERROR", "price_request_failed", JSON.stringify({
+        requested_date: requestedDateKey,
+        ...details,
+      }));
+      this._renderHourlyPriceChart();
       return;
     }
     this.priceData = {
@@ -13565,9 +13615,7 @@ class ElrakningPanel {
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       const legend = this.host.querySelector("[data-meter-legend]");
       if (legend) legend.hidden = true;
-      const message = this.priceData.error === "site_unconfigured"
-        ? "<strong>Ej konfigurerad</strong>"
-        : "<strong>Prisdata saknas.</strong><span>Ingen giltig prisserie finns för vald dag.</span>";
+      const message = `<strong>${priceErrorUserMessage(this.priceData.error)}</strong>`;
       chart.innerHTML = `<div class="empty-chart">${message}</div>`;
       return;
     }

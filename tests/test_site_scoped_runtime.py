@@ -81,6 +81,14 @@ class _Store:
         self.data = data
 
 
+class _DiagnosticManager:
+    def __init__(self):
+        self.events = []
+
+    async def async_diagnostic(self, level, component, event, message):
+        self.events.append((level, component, event, message))
+
+
 class _MappingManager:
     def __init__(self, mapping):
         self.mapping = dict(mapping)
@@ -349,6 +357,34 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.periods), 1)
         self.assertEqual(services.calls[-1][0], "nordpool")
         self.assertEqual(services.calls[-1][2]["resolution"], 15)
+
+    async def test_price_failure_and_success_context_is_recorded_in_diagnostics(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        entry.domain = "nordpool"
+        manager = _DiagnosticManager()
+        hass = types.SimpleNamespace(
+            data={"elrakning": {"elhandel_manager": manager}},
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=_Services({"SE2": [{
+                "start": "2026-10-04T00:00:00+00:00",
+                "end": "2026-10-04T00:15:00+00:00",
+                "price": 194.64,
+            }]}),
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {"config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK"}
+        coordinator._price_data_by_date = {}
+        result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        self.assertIsNone(result.error)
+        self.assertEqual(
+            [event[2] for event in manager.events],
+            ["price_fetch_start", "price_service_call_start", "price_fetch_success"],
+        )
+        self.assertIn("period_count=1", manager.events[-1][3])
 
     async def test_missing_or_stale_global_price_binding_fails_closed(self):
         hass = types.SimpleNamespace(

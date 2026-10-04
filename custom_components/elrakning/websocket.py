@@ -238,10 +238,10 @@ async def websocket_get_price_data(
     entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
     coordinator: ElrakningCoordinator | None = entry.runtime_data if entry else None
     data = None
-    if coordinator:
-        requested_date = msg.get("date")
-        if requested_date:
-            try:
+    requested_date = msg.get("date")
+    try:
+        if coordinator:
+            if requested_date:
                 target_date = date.fromisoformat(requested_date)
                 current_data = coordinator.data
                 data = (
@@ -249,11 +249,19 @@ async def websocket_get_price_data(
                     if current_data and current_data.date == target_date and current_data.periods
                     else await coordinator.async_get_price_data(target_date)
                 )
-            except ValueError:
-                data = None
-        else:
-            data = coordinator.data
-    response = _serialize_price_data(hass, data)
+            else:
+                data = coordinator.data
+        response = _serialize_price_data(hass, data)
+    except ValueError:
+        response = {"error": "invalid_date", "periods": [], "date": requested_date}
+    except Exception as error:
+        manager = _elhandel_manager(hass)
+        if manager:
+            await manager.async_diagnostic(
+                "ERROR", "price", "price_websocket_failed",
+                f"date={requested_date} error_type={type(error).__name__} error={error}",
+            )
+        response = {"error": "price_request_failed", "periods": [], "date": requested_date}
     site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     global_binding = site_manager.global_binding("nord_pool") if site_manager else None
     if global_binding:
@@ -1093,6 +1101,11 @@ async def websocket_electricity_provider_source_data(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_diagnostics_state(hass, connection, msg):
     manager = _elhandel_manager(hass)
+    logs = manager.diagnostics if manager else []
+    price_errors = [
+        entry for entry in logs
+        if entry.get("component") == "price" and entry.get("level") in {"ERROR", "WARNING"}
+    ][-10:]
     site_identity = hass.data.get(DOMAIN, {}).get("site_identity_manager")
     inventory = None
     if msg.get("include_inventory", True) and site_identity is not None and _ella_load_registry(hass) is not None:
@@ -1106,7 +1119,8 @@ async def websocket_diagnostics_state(hass, connection, msg):
                 entity_available=lambda entity_id: _ella_entity_available(hass, entity_id),
             )
     connection.send_result(msg["id"], {
-        "logs": manager.diagnostics if manager else [],
+        "logs": logs,
+        "price_errors": price_errors,
         "site_identity": site_identity.public_state() if site_identity else {
             "site_id": None,
             "logical_roles": [],

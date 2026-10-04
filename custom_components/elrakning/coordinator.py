@@ -99,6 +99,11 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
             )
         except asyncio.TimeoutError:
             binding = self._site_binding or {}
+            await self._async_price_diagnostic(
+                "WARNING",
+                "price_request_wait_timeout",
+                f"date={target_date.isoformat()} wait_seconds={PRICE_REQUEST_WAIT_SECONDS}",
+            )
             return PriceData(
                 binding.get("area"),
                 binding.get("currency") or "SEK",
@@ -160,19 +165,40 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
     async def _async_fetch_date(self, target_date: date) -> PriceData:
         """Fetch and normalize one local Nord Pool date."""
         binding = self._site_binding
+        await self._async_price_diagnostic(
+            "INFO",
+            "price_fetch_start",
+            f"date={target_date.isoformat()} binding_present={bool(binding)}",
+        )
         if not binding:
+            await self._async_price_diagnostic(
+                "ERROR", "price_binding_missing", f"date={target_date.isoformat()} error=site_unconfigured"
+            )
             return PriceData(None, None, target_date, (), "site_unconfigured")
         config_entries = getattr(self.hass, "config_entries", None)
         available_entries = config_entries.async_entries(NORD_POOL_DOMAIN) if config_entries else []
         nord_pool_entry = self._resolve_bound_entry(binding)
         if nord_pool_entry is None:
             error = "missing_integration" if not available_entries else "data_unavailable"
+            await self._async_price_diagnostic(
+                "ERROR",
+                "price_binding_resolution_failed",
+                f"date={target_date.isoformat()} configured_entries={len(available_entries)} error={error}",
+            )
             return PriceData(None, None, target_date, (), error)
         area = binding.get("area")
         currency = binding.get("currency") or "SEK"
         if not area:
+            await self._async_price_diagnostic(
+                "ERROR", "price_binding_invalid", f"date={target_date.isoformat()} error=missing_area"
+            )
             return PriceData(None, currency, target_date, (), "data_unavailable")
         service_domain = getattr(nord_pool_entry, "domain", None) or NORD_POOL_DOMAIN
+        await self._async_price_diagnostic(
+            "INFO",
+            "price_service_call_start",
+            f"date={target_date.isoformat()} config_entry={nord_pool_entry.entry_id} area={area} currency={currency} resolution=15",
+        )
 
         try:
             response = await asyncio.wait_for(
@@ -191,13 +217,38 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
                 ),
                 timeout=PRICE_SERVICE_TIMEOUT_SECONDS,
             )
-        except (HomeAssistantError, asyncio.TimeoutError):
+        except asyncio.TimeoutError:
+            await self._async_price_diagnostic(
+                "ERROR",
+                "price_service_timeout",
+                f"date={target_date.isoformat()} timeout_seconds={PRICE_SERVICE_TIMEOUT_SECONDS}",
+            )
+            return PriceData(area, currency, target_date, (), "data_unavailable")
+        except Exception as error:
+            await self._async_price_diagnostic(
+                "ERROR",
+                "price_service_failed",
+                f"date={target_date.isoformat()} error_type={type(error).__name__} error={error}",
+            )
             return PriceData(area, currency, target_date, (), "data_unavailable")
 
         raw_periods = response.get(area, []) if response else []
-        periods = tuple(self._normalize_period(period) for period in raw_periods)
+        try:
+            periods = tuple(self._normalize_period(period) for period in raw_periods)
+        except (TypeError, ValueError, KeyError) as error:
+            await self._async_price_diagnostic(
+                "ERROR",
+                "price_response_invalid",
+                f"date={target_date.isoformat()} area={area} raw_period_count={len(raw_periods) if isinstance(raw_periods, list) else 0} error_type={type(error).__name__} error={error}",
+            )
+            return PriceData(area, currency, target_date, (), "data_unavailable")
         periods = tuple(period for period in periods if period is not None)
         if not periods:
+            await self._async_price_diagnostic(
+                "ERROR",
+                "price_response_empty",
+                f"date={target_date.isoformat()} area={area} raw_period_count={len(raw_periods) if isinstance(raw_periods, list) else 0}",
+            )
             return PriceData(area, currency, target_date, (), "data_unavailable")
         known_at = dt_util.now().astimezone(timezone.utc)
         source_generation_id = "np-" + hashlib.sha256(
@@ -210,7 +261,20 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
                 await collector.async_persist_nord_pool_frame(data, binding, dt_util.now())
             except (ValueError, OSError):
                 _LOGGER.debug("Unable to persist canonical Nord Pool frame", exc_info=True)
+        await self._async_price_diagnostic(
+            "INFO",
+            "price_fetch_success",
+            f"date={target_date.isoformat()} area={area} period_count={len(periods)} first_start={periods[0].start.isoformat()} last_end={periods[-1].end.isoformat()}",
+        )
         return data
+
+    async def _async_price_diagnostic(self, level: str, event: str, message: str) -> None:
+        """Record bounded price diagnostics without coupling the coordinator to startup order."""
+        domain_data = getattr(self.hass, "data", {}).get("elrakning", {})
+        manager = domain_data.get("elhandel_manager")
+        diagnostic = getattr(manager, "async_diagnostic", None)
+        if callable(diagnostic):
+            await diagnostic(level, "price", event, message)
 
     def _resolve_bound_entry(self, binding: dict[str, Any]) -> ConfigEntry | None:
         """Resolve the configured source entry without coupling it to site state."""
