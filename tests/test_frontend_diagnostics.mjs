@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyPriceDataResponse } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { resolveCanonicalMeterSeriesPoints } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { resolveCanonicalMeterSeriesPoints, selectMeterRenderPoints } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
@@ -117,6 +117,11 @@ assert.deepEqual(resolveCanonicalMeterSeriesPoints(
   Date.parse("2026-10-04T00:00:00Z"),
   Date.parse("2026-10-05T00:00:00Z"),
 ), []);
+const canonicalRenderPoints = [{ timestamp: Date.parse("2026-10-04T00:00:00Z"), import_kw: 0.392, export_kw: null, value_kw: 0.392 }];
+assert.deepEqual(selectMeterRenderPoints(
+  [{ timestamp: Date.parse("2026-10-04T00:00:00Z"), import_kw: null, export_kw: null }],
+  canonicalRenderPoints,
+), canonicalRenderPoints);
 const unavailableState = applyPriceDataResponse(
   { periods: [], date: "2026-10-04", error: "missing_integration" },
   { periods: [], error: "missing_integration" },
@@ -2558,7 +2563,8 @@ assert.doesNotMatch(panelSource, /export_kw: Number\(point\.export_kw\) \|\| 0/)
 assert.doesNotMatch(panelSource, /points\[start - 1\]\[key\] === 0/);
 assert.doesNotMatch(panelSource, /points\[end \+ 1\]\[key\] === 0/);
 assert.match(panelSource, /if \(segment\.length < 2\) return \"\"/);
-assert.match(panelSource, /const useHistoricalMeter = rawMeterPoints\.length === 0 && historicalMeterPoints\.length > 0/);
+assert.match(panelSource, /const meterPoints = selectMeterRenderPoints\(rawMeterPoints, historicalMeterPoints\)/);
+assert.match(panelSource, /const meterLinesFor = \(key, className, visible\)/);
 assert.match(panelSource, /const meterCanonicalPoints = useHistoricalMeter[\s\S]*?this\.buildCanonicalMeterPoints\(meterPoints, dayStart, selectedDayEnd\)/);
 assert.match(panelSource, /const historicalMeterDisplayPoints = energyHistoryToMeterCurvePoints\(energyHistory\)/);
 assert.match(panelSource, /this\.prepareMeterDisplayPoints\(this\.buildCanonicalMeterPoints\(meterRenderPoints, dayStart, selectedDayEnd\)\)/);
@@ -2869,6 +2875,7 @@ assert.match(panelSource, /state\.error === "meter_unavailable"/);
 assert.match(panelSource, /state\.error === "power_unavailable"/);
 assert.match(panelSource, /applyPriceDataResponse\(this\.priceData, response, requestedDateKey\)/);
 assert.match(panelSource, /resolveCanonicalMeterSeriesPoints\(this\._meterCanonicalPoints, this\.priceSnapshot\?\.energy_history/);
+assert.match(panelSource, /selectMeterRenderPoints\(rawMeterPoints, historicalMeterPoints\)/);
 assert.match(panelSource, /energyHistorySourceEntities\.import/);
 assert.match(panelSource, /this\.priceData\.periods\.length[\s\S]*this\.priceData\.date === requestedDateKey/);
 assert.match(panelSource, /this\.renderPriceChart\(\);\n\s*this\._persistChartPreferences\(\{ chart_layers: this\._chartLayerState\(\) \}\);/);

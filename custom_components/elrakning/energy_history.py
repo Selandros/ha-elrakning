@@ -223,6 +223,7 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
 def reconciled_contributions(
     rows: list[dict[str, Any]],
     source_entity_by_record: dict[str, str] | None = None,
+    source_entity_by_interval: dict[tuple[Any, Any, int], str] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert the derived billing series without exposing conflicts as energy."""
     result = []
@@ -236,18 +237,21 @@ def reconciled_contributions(
         duration = (end - start).total_seconds() / 3600
         if duration <= 0:
             continue
+        source_entity = next(
+            (
+                source_entity_by_record.get(str(record_id))
+                for record_id in (row.get("local_record_id"), row.get("provider_record_id"))
+                if record_id is not None and source_entity_by_record and source_entity_by_record.get(str(record_id))
+            ),
+            None,
+        )
+        if source_entity is None and source_entity_by_interval:
+            source_entity = source_entity_by_interval.get((start, end, int(row.get("resolution_seconds") or duration * 3600)))
         result.append(_contribution(
             "import", start, end, float(row["value"]) / duration, priority=50,
             source="reconciled_grid_import", generation_id=str(row.get("provider_record_id") or row.get("local_record_id") or "reconciled"),
             source_resolution_seconds=int(row.get("resolution_seconds") or duration * 3600),
-            source_entity=next(
-                (
-                    source_entity_by_record.get(str(record_id))
-                    for record_id in (row.get("local_record_id"), row.get("provider_record_id"))
-                    if record_id is not None and source_entity_by_record and source_entity_by_record.get(str(record_id))
-                ),
-                None,
-            ),
+            source_entity=source_entity,
         ))
     return result
 
@@ -441,6 +445,19 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
         and row.get("source_generation_id")
         and ledger_by_generation.get(str(row.get("source_generation_id")), {}).get("entity_id")
     }
+    source_entities_by_interval: dict[tuple[Any, Any, int], set[str]] = {}
+    for row in rows:
+        target = ledger_by_generation.get(str(row.get("source_generation_id")))
+        entity_id = target.get("entity_id") if target else None
+        if row.get("logical_role") != "grid.energy_import" or not entity_id:
+            continue
+        key = (row.get("interval_start"), row.get("interval_end"), int(row.get("resolution_seconds") or 0))
+        source_entities_by_interval.setdefault(key, set()).add(str(entity_id))
+    source_entity_by_interval = {
+        key: next(iter(entities))
+        for key, entities in source_entities_by_interval.items()
+        if len(entities) == 1
+    }
     reconciled = await hass.async_add_executor_job(
         collector.storage.read_reconciled_grid_import, str(site_id), start, end
     ) if hasattr(collector.storage, "read_reconciled_grid_import") else []
@@ -454,7 +471,7 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
         or (row.get("interval_start"), row.get("interval_end"), int(row.get("resolution_seconds") or 0)) not in reconciled_keys
     ]
     contributions = canonical_contributions(raw_for_contributions, ledger_by_generation)
-    contributions.extend(reconciled_contributions(reconciled, source_entity_by_record))
+    contributions.extend(reconciled_contributions(reconciled, source_entity_by_record, source_entity_by_interval))
 
     statistic_ids = {str(item["entity_id"]) for item in targets if item.get("entity_id")}
     if statistic_ids:

@@ -73,6 +73,19 @@ class EnergyHistoryTests(unittest.TestCase):
             {},
         )
 
+        interval = (datetime(2026, 10, 4, tzinfo=UTC), datetime(2026, 10, 4, 0, 15, tzinfo=UTC), 900)
+        interval_contributions = reconciled_contributions(
+            [{
+                "logical_role": "grid.energy_import",
+                "interval_start": interval[0],
+                "interval_end": interval[1],
+                "value": 0.098,
+                "resolution_seconds": 900,
+            }],
+            source_entity_by_interval={interval: "sensor.grid_import"},
+        )
+        self.assertEqual(source_entities_by_series([], interval_contributions), {"import": ["sensor.grid_import"]})
+
     def test_history_targets_are_site_explicit_not_active_site(self):
         start = datetime(2026, 8, 30, tzinfo=UTC)
         end = start + timedelta(days=1)

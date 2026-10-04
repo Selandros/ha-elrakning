@@ -105,7 +105,7 @@ assert.match(panelSource, /const energyHistory = this\.priceSnapshot\?\.energy_h
 assert.match(panelSource, /this\.loadPowerState\(loadHistory\),[\s\S]*this\.loadSolarEvidence\(\),/);
 assert.doesNotMatch(panelSource.slice(panelSource.indexOf("  async _refreshBackendState"), panelSource.indexOf("  async loadPriceData")), /this\.loadBillingHistory\(\),/);
 assert.match(panelSource, /void this\.loadBillingHistory\(\);/);
-assert.match(panelSource, /rawMeterPoints\.length === 0 && historicalMeterPoints\.length > 0/);
+assert.match(panelSource, /const meterPoints = selectMeterRenderPoints\(rawMeterPoints, historicalMeterPoints\)/);
 assert.match(panelSource, /const useHistoricalPower = rawPoints\.length === 0 && historicalPoints\.length > 0/);
 assert.match(panelSource, /const historicalPowerDisplayPoints = energyIntervalsToCurvePoints[\s\S]*?const displaySource = useHistoricalPower/);
 assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : null;/);

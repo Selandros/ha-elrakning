@@ -1892,6 +1892,15 @@ export function resolveCanonicalMeterSeriesPoints(primaryPoints, energyHistory, 
     .map((point) => ({ ...point, value_kw: normalizeMeterValue(point[historyField]) }));
 }
 
+export function selectMeterRenderPoints(primaryPoints, historicalPoints) {
+  const primary = Array.isArray(primaryPoints) ? primaryPoints : [];
+  const historical = Array.isArray(historicalPoints) ? historicalPoints : [];
+  const hasPrimaryMeterValues = primary.some((point) => (
+    Number.isFinite(normalizeMeterValue(point?.import_kw)) || Number.isFinite(normalizeMeterValue(point?.export_kw))
+  ));
+  return !hasPrimaryMeterValues && historical.length ? historical : primary;
+}
+
 export function integrateEnergyIntervalsKwh(intervals, start, end) {
   const startMs = new Date(start).getTime();
   const endMs = new Date(end).getTime();
@@ -13747,8 +13756,8 @@ class ElrakningPanel {
     const historicalMeterPoints = energyHistoryToMeterStepPoints(energyHistory).filter((point) => (
       point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
     ));
-    const useHistoricalMeter = rawMeterPoints.length === 0 && historicalMeterPoints.length > 0;
-    const meterPoints = useHistoricalMeter ? historicalMeterPoints : rawMeterPoints;
+    const meterPoints = selectMeterRenderPoints(rawMeterPoints, historicalMeterPoints);
+    const useHistoricalMeter = meterPoints === historicalMeterPoints;
     this._meterTooltipPoints = meterPoints;
     const meterCanonicalPoints = useHistoricalMeter
       ? meterPoints
