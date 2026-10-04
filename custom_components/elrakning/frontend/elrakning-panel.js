@@ -12897,6 +12897,7 @@ class ElrakningPanel {
       );
     }
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+    this._renderInvoiceEstimateCard();
   }
 
   _appendMeterPowerPoint(point) {

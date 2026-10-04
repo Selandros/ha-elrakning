@@ -1870,6 +1870,7 @@ assert.match(panelSource, /if \(distribution\.length \|\| score != null\)/);
 assert.match(panelSource, /unit_status !== "unit_verified"/);
 assert.match(panelSource, /Kostnadsfördelning/);
 assert.match(panelSource, /Spotpris/);
+assert.match(panelSource, /if \(this\.host\.querySelector\("\.price-chart"\)\) this\.renderPriceChart\(\);\n    this\._renderInvoiceEstimateCard\(\);\n  }\n\n  _appendMeterPowerPoint/);
 assert.match(panelSource, /elrakning\/electricity_provider_remove/);
 assert.match(panelSource, /await this\.loadPriceData\(\);/);
 assert.equal((panelSource.match(/this\._applyProviderState\(saved\);\n\s*await this\.loadPriceData\(\);/g) || []).length, 2);
