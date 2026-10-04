@@ -12,6 +12,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 install_optional_dependency_stubs()
 from custom_components.elrakning.coordinator import ElrakningCoordinator  # noqa: E402
+import custom_components.elrakning.coordinator as coordinator_module  # noqa: E402
 from custom_components.elrakning.site_identity import SiteIdentityManager  # noqa: E402
 from custom_components.elrakning.websocket import websocket_ella_binding_set  # noqa: E402
 
@@ -31,6 +32,20 @@ class _Services:
     async def async_call(self, domain, service, data, **kwargs):
         self.calls.append((domain, service, data, kwargs))
         return self.response
+
+
+class _HangingServices:
+    def __init__(self):
+        self.calls = []
+        self.cancelled = False
+
+    async def async_call(self, domain, service, data, **kwargs):
+        self.calls.append((domain, service, data, kwargs))
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
 
 
 class _Store:
@@ -336,6 +351,32 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         hass.config_entries.async_entries = lambda _domain: [other_entry]
         result = await coordinator._async_fetch_date(date(2026, 10, 4))
         self.assertEqual(result.error, "data_unavailable")
+
+    async def test_hanging_price_service_fails_closed_and_is_cancelled(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        services = _HangingServices()
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        previous_timeout = coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS
+        coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = 0.01
+        try:
+            result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        finally:
+            coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = previous_timeout
+        self.assertEqual(result.error, "data_unavailable")
+        self.assertTrue(services.cancelled)
 
     def test_binding_fingerprint_excludes_only_derived_fingerprint(self):
         binding = {"config_entry_id": "entry", "area": "SE2", "currency": "SEK"}

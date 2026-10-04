@@ -19,6 +19,7 @@ from .const import NORD_POOL_DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 _NEXT_DAY_PREFETCH_START_HOUR = 14
+PRICE_SERVICE_TIMEOUT_SECONDS = 20
 
 
 @dataclass(frozen=True)
@@ -131,20 +132,23 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         service_domain = getattr(nord_pool_entry, "domain", None) or NORD_POOL_DOMAIN
 
         try:
-            response = await self.hass.services.async_call(
-                service_domain,
-                "get_price_indices_for_date",
-                {
-                    "config_entry": nord_pool_entry.entry_id,
-                    "areas": [area],
-                    "currency": currency,
-                    "date": target_date.isoformat(),
-                    "resolution": 15,
-                },
-                blocking=True,
-                return_response=True,
+            response = await asyncio.wait_for(
+                self.hass.services.async_call(
+                    service_domain,
+                    "get_price_indices_for_date",
+                    {
+                        "config_entry": nord_pool_entry.entry_id,
+                        "areas": [area],
+                        "currency": currency,
+                        "date": target_date.isoformat(),
+                        "resolution": 15,
+                    },
+                    blocking=True,
+                    return_response=True,
+                ),
+                timeout=PRICE_SERVICE_TIMEOUT_SECONDS,
             )
-        except HomeAssistantError:
+        except (HomeAssistantError, asyncio.TimeoutError):
             return PriceData(area, currency, target_date, (), "data_unavailable")
 
         raw_periods = response.get(area, []) if response else []
