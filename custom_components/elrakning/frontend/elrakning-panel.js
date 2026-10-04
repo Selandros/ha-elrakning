@@ -869,6 +869,26 @@ export function nearestMeterPoint(points, timestamp, maxDistanceMs = 2.5 * 60 * 
   return nearest?.point || null;
 }
 
+export function interpolateMeterValueAt(points, key, timestamp) {
+  const target = new Date(timestamp).getTime();
+  if (!Number.isFinite(target)) return null;
+  let previous = null;
+  for (const point of Array.isArray(points) ? points : []) {
+    const pointTimestamp = new Date(point?.timestamp).getTime();
+    const value = normalizeMeterValue(point?.[key]);
+    if (!Number.isFinite(pointTimestamp) || !Number.isFinite(value)) continue;
+    if (pointTimestamp === target) return value;
+    if (pointTimestamp < target) {
+      previous = { timestamp: pointTimestamp, value };
+      continue;
+    }
+    if (!previous || pointTimestamp <= previous.timestamp) return null;
+    const ratio = (target - previous.timestamp) / (pointTimestamp - previous.timestamp);
+    return previous.value + (value - previous.value) * ratio;
+  }
+  return null;
+}
+
 /**
  * Build a bounded display-only series while retaining extrema in each bucket.
  * The source array and its point objects are never mutated.
@@ -14321,6 +14341,13 @@ class ElrakningPanel {
       y,
       meterY,
       meterDisplayY: (key, timestamp) => this.meterDisplayYAt(meterDisplayGeometry[key], timestamp, x),
+      meterDisplayValue: (key, timestamp) => {
+        const displayY = this.meterDisplayYAt(meterDisplayGeometry[key], timestamp, x);
+        if (Number.isFinite(displayY)) {
+          return Math.max(0, ((plot.top + plotHeight - displayY) / plotHeight) * meterRange);
+        }
+        return interpolateMeterValueAt(meterDisplayPoints, key, timestamp);
+      },
       powerDisplayY: (key, timestamp) => this.meterDisplayYAt(powerDisplayGeometry[key], timestamp, x),
     };
     const dynamicChartMarkup = {
@@ -14511,11 +14538,12 @@ class ElrakningPanel {
       const value = visibleLayers.spot && isHoverPowerValue(comparisonPrice)
         ? `${this.formatPrice(comparisonPrice)} öre/kWh`
         : "";
+      const hoverGeometry = this._chartHoverGeometry;
       const canonicalMeterPoint = this._meterCanonicalPointAt(tooltipTimestamp);
       const rawMeterPoint = this._meterPointAtNearest(tooltipTimestamp);
       const meterValue = (key) => canonicalMeterPoint && Number.isFinite(Number(canonicalMeterPoint[key]))
         ? Number(canonicalMeterPoint[key])
-        : null;
+        : hoverGeometry?.meterDisplayValue?.(key, tooltipTimestamp) ?? null;
       const powerValue = (key) => {
         const point = this._powerCanonicalPointMaps?.[key]?.get(tooltipTimestamp);
         return point && Number.isFinite(Number(point.value_kw))
@@ -14523,14 +14551,14 @@ class ElrakningPanel {
           : null;
       };
       const barPrice = this._chartBarPrices?.[index];
+      const importValue = meterValue("import_kw");
+      const exportValue = meterValue("export_kw");
       const hoverSnapshot = {
         hoverTime: tooltipTimestamp,
-        meterSampleTime: canonicalMeterPoint
-          ? canonicalMeterPoint.timestamp
-          : (Number.isFinite(meterValue("import_kw")) || Number.isFinite(meterValue("export_kw")) ? tooltipTimestamp : null),
+        meterSampleTime: Number.isFinite(importValue) || Number.isFinite(exportValue) ? tooltipTimestamp : null,
         priceBarValue: barPrice ?? null,
-        importValue: meterValue("import_kw"),
-        exportValue: meterValue("export_kw"),
+        importValue,
+        exportValue,
         pvValue: powerValue("solar"),
         loadValue: powerValue("consumption"),
         chargeValue: powerValue("charging"),
@@ -14568,7 +14596,6 @@ class ElrakningPanel {
       }
       this._chartDebugCopyText = tooltipText;
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
-      const hoverGeometry = this._chartHoverGeometry;
       if (hoverMarkers && hoverGeometry) {
         const priceMarkerX = hoverGeometry.x(hoverSnapshot.hoverTime);
         const meterMarkerX = Number.isFinite(hoverSnapshot.meterSampleTime)
