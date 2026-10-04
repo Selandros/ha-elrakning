@@ -5512,24 +5512,28 @@ class ElrakningPanel {
         .cost-kpi-comparison.unavailable { color: var(--secondary-text-color); font-size: 16px; }
 
         .cost-chart {
+          display: flex;
           min-height: 144px;
           margin-top: 12px;
           position: relative;
         }
 
-        .cost-main-grid { align-items: start; display: grid; gap: 18px; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); }
+        .cost-main-grid { align-items: stretch; display: grid; gap: 18px; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); }
         .cost-side { border-left: 1px solid var(--divider-color); min-width: 0; padding-left: 16px; }
         .cost-chart-unavailable { align-items: center; border: 1px dashed var(--divider-color); color: var(--secondary-text-color); display: flex; min-height: 144px; justify-content: center; padding: 16px; text-align: center; }
 
         .cost-chart-svg {
           display: block;
-          height: 144px;
+          height: 100%;
+          min-height: 144px;
           overflow: visible;
           width: 100%;
         }
 
         .cost-chart-plot {
           --cost-axis-left-gutter: 48px;
+          flex: 1;
+          min-height: 144px;
           position: relative;
         }
 
