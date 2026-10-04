@@ -53,6 +53,13 @@ export function resolveRenderablePricePeriods(response, previousSnapshot = null)
   return previousSources.find((periods) => Array.isArray(periods) && periods.length) || [];
 }
 
+export function shouldReplacePriceData(currentState, nextPeriods, requestedDateKey) {
+  if (Array.isArray(nextPeriods) && nextPeriods.length) return true;
+  return !(Array.isArray(currentState?.periods)
+    && currentState.periods.length
+    && currentState.date === requestedDateKey);
+}
+
 export function benchmarkEvidenceVisibleForSite(debugEnabled, evidenceAvailable, siteState) {
   const currentSite = siteState?.current_site || siteState?.site || siteState;
   return Boolean(debugEnabled)
@@ -12173,6 +12180,7 @@ class ElrakningPanel {
     if (!this.hass?.callWS) return;
     const requestToken = ++this._priceDataRequestToken;
     const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed || new Date();
+    const requestedDateKey = localDateKey(requestedDate);
     const requestDate = (date) => {
       const request = { type: "elrakning/price_data" };
       if (date instanceof Date && Number.isFinite(date.getTime())) {
@@ -12185,7 +12193,7 @@ class ElrakningPanel {
       response = await this.hass.callWS(requestDate(requestedDate));
       if (requestToken !== this._priceDataRequestToken) return;
       const responsePeriods = resolveRenderablePricePeriods(response);
-      if (response?.error === "integration_unavailable" && !responsePeriods.length) return;
+      if (!shouldReplacePriceData(this.priceData, responsePeriods, requestedDateKey)) return;
       this.priceSnapshot = response;
     } catch {
       return;
@@ -12196,6 +12204,7 @@ class ElrakningPanel {
       adjustments: this.priceSnapshot.adjustments || {},
       periods: responsePeriods,
       error: this.priceSnapshot.error || null,
+      date: requestedDateKey,
     };
     this._eonGridPrice = this.priceSnapshot.adjustments?.grid_price || null;
     this._updatePriceComparisonControls();
