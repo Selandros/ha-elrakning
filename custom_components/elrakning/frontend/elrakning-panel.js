@@ -44,6 +44,27 @@ export function benchmarkEvidenceVisibleForSite(debugEnabled, evidenceAvailable,
     && currentSite?.ella_binding_verified === true;
 }
 
+export function createRafCoalescer(callback, requestFrame, cancelFrame) {
+  let frame = null;
+  let pending = null;
+  const schedule = (value) => {
+    pending = value;
+    if (frame !== null) return;
+    frame = requestFrame(() => {
+      frame = null;
+      const next = pending;
+      pending = null;
+      callback(next);
+    });
+  };
+  const cancel = () => {
+    if (frame !== null) cancelFrame(frame);
+    frame = null;
+    pending = null;
+  };
+  return { schedule, cancel };
+}
+
 export const PHASE_COLOR_MAP = Object.freeze({
   l1: chartColor("phaseL1"),
   l2: chartColor("phaseL2"),
@@ -13983,10 +14004,18 @@ class ElrakningPanel {
     const svg = this.host.querySelector(".chart-svg");
     const tooltip = this.host.querySelector(".chart-tooltip");
     if (!chart || !svg || !tooltip || !this._chartGeometry) return;
+    chart._elrakningChartTooltipCleanup?.();
     const chartPeriods = this._hourlyChartPeriods || this.priceData.periods;
+    const periodBounds = chartPeriods.map((period, index) => ({
+      index,
+      start: new Date(period.start).getTime(),
+      end: new Date(period.end).getTime(),
+    }));
+    let cachedBounds = null;
+    const boundsFor = () => cachedBounds || (cachedBounds = svg.getBoundingClientRect());
     const periodAt = (clientX) => {
       const geometry = this._chartGeometry;
-      const bounds = svg.getBoundingClientRect();
+      const bounds = boundsFor();
       const viewX = ((clientX - bounds.left) / bounds.width) * geometry.width;
       if (viewX < geometry.plotLeft || viewX > geometry.plotLeft + geometry.plotWidth) return null;
       const timestamp = geometry.dayStartMs
@@ -13996,16 +14025,21 @@ class ElrakningPanel {
         geometry.dayStartMs,
         geometry.dayStartMs + geometry.dayDuration,
       );
-      const index = chartPeriods.findIndex((period) => {
-        const start = new Date(period.start).getTime();
-        const end = new Date(period.end).getTime();
-        return start <= tooltipTimestamp && tooltipTimestamp < end;
-      });
+      let low = 0;
+      let high = periodBounds.length - 1;
+      let index = -1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const candidate = periodBounds[middle];
+        if (tooltipTimestamp < candidate.start) high = middle - 1;
+        else if (tooltipTimestamp >= candidate.end) low = middle + 1;
+        else { index = candidate.index; break; }
+      }
       return index < 0 ? null : { period: chartPeriods[index], index, tooltipTimestamp };
     };
     const insidePlot = (clientX, clientY) => {
       const geometry = this._chartGeometry;
-      const bounds = svg.getBoundingClientRect();
+      const bounds = boundsFor();
       const viewX = ((clientX - bounds.left) / bounds.width) * geometry.width;
       const viewY = ((clientY - bounds.top) / bounds.height) * geometry.height;
       return viewX >= geometry.plotLeft
@@ -14013,14 +14047,21 @@ class ElrakningPanel {
         && viewY >= geometry.plotTop
         && viewY <= geometry.plotTop + geometry.plotHeight;
     };
-    const show = (period, event, tooltipTimestamp) => {
+    let lastVisualKey = null;
+    let hoverObstacles = [];
+    const show = (period, index, event, tooltipTimestamp) => {
       const visibleLayers = this._effectiveChartLayerState();
+      const visualKey = `${index}:${tooltipTimestamp}:${visibleLayers.spot}:${visibleLayers.import}:${visibleLayers.export}:${visibleLayers.solar}:${visibleLayers.consumption}:${visibleLayers.charging}:${visibleLayers.discharging}:${this._debugEnabled}`;
+      if (visualKey === lastVisualKey) {
+        positionChartTooltip(chart, tooltip, event.clientX, event.clientY, hoverObstacles, this._tooltipOrbit);
+        return;
+      }
+      lastVisualKey = visualKey;
       const time = this.formatTime(new Date(tooltipTimestamp));
       const comparisonPrice = this._comparisonPrice(period);
       const value = visibleLayers.spot && isHoverPowerValue(comparisonPrice)
         ? `${this.formatPrice(comparisonPrice)} öre/kWh`
         : "";
-      const index = chartPeriods.indexOf(period);
       const canonicalMeterPoint = this._meterCanonicalPointAt(tooltipTimestamp);
       const rawMeterPoint = this._meterPointAtNearest(tooltipTimestamp);
       const meterValue = (key) => canonicalMeterPoint && Number.isFinite(Number(canonicalMeterPoint[key]))
@@ -14113,48 +14154,55 @@ class ElrakningPanel {
           markers.push(`<circle class="chart-hover-marker chart-hover-marker-${className}" fill="${chartColor(className)}" cx="${priceMarkerX}" cy="${Number.isFinite(displayY) ? displayY : hoverGeometry.meterY(value)}" r="4" />`);
         }
         hoverMarkers.innerHTML = markers.join("");
+        hoverObstacles = [...hoverMarkers.querySelectorAll(".chart-hover-marker")];
       }
       tooltip.classList.toggle("debug-tooltip", Boolean(details));
       tooltip.title = "";
       tooltip.hidden = false;
-      const obstacles = [
-        ...svg.querySelectorAll(".chart-hover-marker"),
-      ];
-      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, obstacles, this._tooltipOrbit);
+      positionChartTooltip(chart, tooltip, event.clientX, event.clientY, hoverObstacles, this._tooltipOrbit);
     };
     const clearHoverMarkers = () => {
       const hoverMarkers = svg.querySelector(".chart-hover-markers");
       if (hoverMarkers) hoverMarkers.replaceChildren();
+      hoverObstacles = [];
+      lastVisualKey = null;
     };
     const hasVisibleTooltipLayer = this._spotBarsVisible
       || this._meterPowerVisible.import
       || this._meterPowerVisible.export
       || Object.keys(this._previewLayersVisible).some((key) => this._previewLayersVisible[key]);
-    svg.addEventListener("mousemove", (event) => {
+    const hideHover = () => {
+      clearHoverMarkers();
+      tooltip.hidden = true;
+    };
+    const renderMouseHover = (event) => {
       if (event.sourceCapabilities?.firesTouchEvents) return;
       if (!hasVisibleTooltipLayer) {
-        clearHoverMarkers();
-        tooltip.hidden = true;
+        hideHover();
         return;
       }
       const period = periodAt(event.clientX);
       if (period && insidePlot(event.clientX, event.clientY)) {
-        show(period.period, event, period.tooltipTimestamp);
+        show(period.period, period.index, event, period.tooltipTimestamp);
       } else {
-        clearHoverMarkers();
-        tooltip.hidden = true;
+        hideHover();
       }
-    });
-    svg.addEventListener("mouseleave", () => {
-      clearHoverMarkers();
-      tooltip.hidden = true;
-    });
-    chart.addEventListener("touchstart", (event) => {
+    };
+    const hoverFrame = createRafCoalescer(
+      renderMouseHover,
+      (callback) => requestAnimationFrame(callback),
+      (frame) => cancelAnimationFrame(frame),
+    );
+    const onMouseMove = (event) => hoverFrame.schedule(event);
+    const onMouseLeave = () => {
+      hoverFrame.cancel();
+      hideHover();
+    };
+    const onTouchStart = (event) => {
       const touch = event.touches[0];
       if (!touch) return;
       if (!hasVisibleTooltipLayer || !insidePlot(touch.clientX, touch.clientY)) {
-        clearHoverMarkers();
-        tooltip.hidden = true;
+        hideHover();
         this._chartTouch = null;
         return;
       }
@@ -14163,27 +14211,40 @@ class ElrakningPanel {
       this._chartTouch = {
         active: true,
       };
-      show(hit.period, touch, hit.tooltipTimestamp);
-    }, { passive: true });
-    chart.addEventListener("touchmove", (event) => {
+      show(hit.period, hit.index, touch, hit.tooltipTimestamp);
+    };
+    const onTouchMove = (event) => {
       const state = this._chartTouch;
       const touch = event.touches[0];
       if (!state || !touch) return;
       if (!hasVisibleTooltipLayer || !insidePlot(touch.clientX, touch.clientY)) {
-        clearHoverMarkers();
-        tooltip.hidden = true;
+        hideHover();
         return;
       }
       const hit = periodAt(touch.clientX);
-      if (hit) show(hit.period, touch, hit.tooltipTimestamp);
-    }, { passive: true });
+      if (hit) show(hit.period, hit.index, touch, hit.tooltipTimestamp);
+    };
     const clearTouchHover = () => {
       this._chartTouch = null;
-      clearHoverMarkers();
-      tooltip.hidden = true;
+      hideHover();
     };
+    svg.addEventListener("mousemove", onMouseMove);
+    svg.addEventListener("mouseleave", onMouseLeave);
+    chart.addEventListener("touchstart", onTouchStart, { passive: true });
+    chart.addEventListener("touchmove", onTouchMove, { passive: true });
     chart.addEventListener("touchend", clearTouchHover, { passive: true });
     chart.addEventListener("touchcancel", clearTouchHover, { passive: true });
+    const cleanup = () => {
+      hoverFrame.cancel();
+      svg.removeEventListener("mousemove", onMouseMove);
+      svg.removeEventListener("mouseleave", onMouseLeave);
+      chart.removeEventListener("touchstart", onTouchStart);
+      chart.removeEventListener("touchmove", onTouchMove);
+      chart.removeEventListener("touchend", clearTouchHover);
+      chart.removeEventListener("touchcancel", clearTouchHover);
+      if (chart._elrakningChartTooltipCleanup === cleanup) delete chart._elrakningChartTooltipCleanup;
+    };
+    chart._elrakningChartTooltipCleanup = cleanup;
   }
 
   formatPrice(value) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -66,6 +66,21 @@ assert.deepEqual(resolveRenderablePricePeriods({ error: "integration_unavailable
 assert.deepEqual(resolveRenderablePricePeriods({ error: "integration_unavailable", periods: [] }, { periods: canonicalPeriods }), canonicalPeriods);
 assert.equal(benchmarkEvidenceVisibleForSite(true, true, { current_site: { site_id: "fiskvik", ella_binding_verified: false } }), false);
 assert.equal(benchmarkEvidenceVisibleForSite(true, true, { current_site: { site_id: "ella-site", ella_binding_verified: true } }), true);
+let queuedFrame = null;
+let rendered = [];
+const hoverFrame = createRafCoalescer(
+  (event) => rendered.push(event),
+  (callback) => { queuedFrame = callback; return 1; },
+  () => { queuedFrame = null; },
+);
+hoverFrame.schedule({ index: 1 });
+hoverFrame.schedule({ index: 2 });
+assert.deepEqual(rendered, []);
+queuedFrame();
+assert.deepEqual(rendered, [{ index: 2 }]);
+hoverFrame.schedule({ index: 3 });
+hoverFrame.cancel();
+assert.deepEqual(rendered, [{ index: 2 }]);
 assert.doesNotMatch(invoicePanelSource, /rows\.push\(\["Greenely"/);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /buildCombinedMonthlyCostForecast\(/);
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Jul 2026" }), "Jul 2026");
@@ -175,6 +190,11 @@ const priceEmptyStateSource = pickerPanelSource.slice(pickerPanelSource.indexOf(
 assert.doesNotMatch(priceEmptyStateSource, /this\._renderInvoiceEstimateCard\(\)/);
 const priceSignatureSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _getPriceChartLiveSignature()"), pickerPanelSource.indexOf("  buildMeterDisplaySegments"));
 assert.doesNotMatch(priceSignatureSource, /JSON\.stringify/);
+const chartTooltipSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  bindChartTooltips()"), pickerPanelSource.indexOf("  formatPrice("));
+assert.match(chartTooltipSource, /createRafCoalescer\(/);
+assert.match(chartTooltipSource, /chart\._elrakningChartTooltipCleanup\?\.\(\)/);
+assert.match(chartTooltipSource, /chart\.removeEventListener\("touchmove", onTouchMove\)/);
+assert.doesNotMatch(chartTooltipSource, /chartPeriods\.findIndex/);
 assert.match(priceEmptyStateSource, /this\.priceData\.error === "site_unconfigured"[\s\S]*<strong>Ej konfigurerad<\/strong>/);
 assert.match(priceEmptyStateSource, /<strong>Prisdata saknas\.<\/strong><span>Ingen giltig prisserie finns för vald dag\.<\/span>/);
 assert.doesNotMatch(priceEmptyStateSource, /Ingen Nord Pool-sensor hittades/);
@@ -2625,7 +2645,7 @@ assert.ok((panelSource.match(/var\(--ha-card-background, var\(--card-background-
 assert.match(panelSource, /_buildVisibleTooltipFields\(comparisonPrice, details, layers = this\._chartLayerState\(\)\)/);
 assert.match(panelSource, /snapTooltipTimestamp\(/);
 assert.match(panelSource, /tooltipTimestamp = snapTooltipTimestamp/);
-assert.match(panelSource, /return start <= tooltipTimestamp && tooltipTimestamp < end/);
+assert.match(panelSource, /let low = 0;[\s\S]*while \(low <= high\)[\s\S]*tooltipTimestamp < candidate\.start/);
 assert.match(panelSource, /const time = this\.formatTime\(new Date\(tooltipTimestamp\)\)/);
 assert.match(panelSource, /nearestMeterPoint\(this\._meterTooltipPoints, timestamp\)/);
 assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : null;/);
@@ -2711,7 +2731,7 @@ assert.match(panelSource, /chart-hover-marker-export/);
 assert.doesNotMatch(panelSource, /bar-hover/);
 assert.doesNotMatch(panelSource, /clearBarHover/);
 assert.doesNotMatch(panelSource, /classList\.add\("bar-hover"\)/);
-assert.match(panelSource, /show\(period\.period, event, period\.tooltipTimestamp\)/);
+assert.match(panelSource, /show\(period\.period, period\.index, event, period\.tooltipTimestamp\)/);
 assert.match(panelSource, /tooltip\.hidden = false/);
 assert.match(panelSource, /const priceMarkerX = hoverGeometry\.x\(hoverSnapshot\.hoverTime\)/);
 assert.match(panelSource, /clearHoverMarkers/);
@@ -2899,11 +2919,13 @@ assert.match(panelSource, /const fitsViewport = \(left, top\) =>/);
 assert.match(panelSource, /for \(let distance = 0; distance <= 36; distance \+= 12\)/);
 assert.match(panelSource, /const viewportTop = chart\.scrollTop \+ safety/);
 assert.match(panelSource, /const viewportBottom = chart\.scrollTop \+ chart\.clientHeight - safety/);
-assert.match(panelSource, /positionChartTooltip\(chart, tooltip, event\.clientX, event\.clientY, obstacles, this\._tooltipOrbit\)/);
+assert.match(panelSource, /positionChartTooltip\(chart, tooltip, event\.clientX, event\.clientY, hoverObstacles, this\._tooltipOrbit\)/);
 assert.match(panelSource, /touch-action: pan-y/);
-assert.match(panelSource, /chart\.addEventListener\("touchstart"[\s\S]*insidePlot\(touch\.clientX, touch\.clientY\)[\s\S]*show\(hit\.period, touch, hit\.tooltipTimestamp\)/);
-assert.match(panelSource, /chart\.addEventListener\("touchmove"[\s\S]*periodAt\(touch\.clientX\)[\s\S]*show\(hit\.period, touch, hit\.tooltipTimestamp\)/);
-assert.match(panelSource, /const clearTouchHover = \(\) => \{[\s\S]*tooltip\.hidden = true/);
+assert.match(panelSource, /const onTouchStart = \(event\) => \{[\s\S]*insidePlot\(touch\.clientX, touch\.clientY\)[\s\S]*show\(hit\.period, hit\.index, touch, hit\.tooltipTimestamp\)/);
+assert.match(panelSource, /chart\.addEventListener\("touchstart", onTouchStart, \{ passive: true \}\)/);
+assert.match(panelSource, /const onTouchMove = \(event\) => \{[\s\S]*periodAt\(touch\.clientX\)[\s\S]*show\(hit\.period, hit\.index, touch, hit\.tooltipTimestamp\)/);
+assert.match(panelSource, /chart\.addEventListener\("touchmove", onTouchMove, \{ passive: true \}\)/);
+assert.match(panelSource, /const clearTouchHover = \(\) => \{[\s\S]*hideHover\(\)/);
 assert.doesNotMatch(panelSource, /_pinnedPeriod/);
 assert.doesNotMatch(panelSource, /touchend[\s\S]*copyChartDebugText/);
 assert.match(panelSource, /positionChartTooltip\(chart, tooltip, event\.clientX, event\.clientY, \[\], this\._tooltipOrbit\)/);
