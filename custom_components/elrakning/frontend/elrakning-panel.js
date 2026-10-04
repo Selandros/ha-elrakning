@@ -11078,7 +11078,7 @@ class ElrakningPanel {
     }
     const greenelyProjection = buildGreenelyMonthlyProjection(response, new Date());
     if (greenelyProjection) {
-      rows.push(["Greenely-prognos", `${this._formatNumber(greenelyProjection.estimated_cost_display_sek)} kr · ${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh`]);
+      rows.push(["Greenely", `${this._formatNumber(greenelyProjection.estimated_cost_display_sek)} kr · ${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh`]);
     }
     if (latestDistribution && analysis.cost_distribution?.unit_status === "percentage_verified") {
       const score = latestDistribution.energy_score;
@@ -11089,7 +11089,9 @@ class ElrakningPanel {
         ["Högt", categories.expensive?.daily_rate_percent],
       ].filter(([, value]) => value != null).map(([label, value]) => `${label} ${this._formatNumber(value)} %`);
       const scoreText = score == null ? "" : ` · energipoäng ${this._formatNumber(score)}`;
-      rows.push([`Kostnadsfördelning ${latestDistribution.date}`, `${distribution.join(" · ")}${scoreText}`.trim()]);
+      if (distribution.length || score != null) {
+        rows.push([`Kostnadsfördelning ${latestDistribution.date}`, `${distribution.join(" · ")}${scoreText}`.trim()]);
+      }
     }
     if (!latest && Number(response.invoice_count || 0) === 0) rows.push(["Faktura", "Saknas · ingen faktura tillgänglig"]);
     if (tariff.variable_cost_ore_per_kwh_incl_vat == null && tariff.fixed_fee_incl_vat_per_month == null) rows.push(["Prisdata", "Saknas · tariffdata unavailable"]);

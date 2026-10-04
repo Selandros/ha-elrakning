@@ -56,7 +56,7 @@ assert.equal(buildCombinedMonthlyCostForecast(1127.33, null), null);
 assert.equal(buildGreenelyMonthlyProjection(greenelyProjectionState, new Date(2026, 9, 1, 12, 0)), null);
 assert.equal(buildGreenelyMonthlyProjection({ ...greenelyProjectionState, consumption: { month: "2026-09", month_to_date_kwh: 42.529 } }, new Date(2026, 9, 3)), null);
 assert.equal(buildGreenelyMonthlyProjection({ ...greenelyProjectionState, analysis: { consumption_cost: { ...greenelyProjectionState.analysis.consumption_cost, month_to_date_cost_sek: null } } }, new Date(2026, 9, 3)), null);
-assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /rows\.push\(\["Greenely-prognos"/);
+assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /rows\.push\(\["Greenely"/);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /buildCombinedMonthlyCostForecast\(/);
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Jul 2026" }), "Jul 2026");
 assert.equal(invoicePeriodLabel({ invoice_date: "2026-08-11", month: "Feb 2026-mar 2026" }), "Feb 2026-mar 2026");
@@ -1865,6 +1865,7 @@ assert.match(panelSource, /\["elhandel", estimate\?\.trade\?\.total_so_far_sek \
 assert.doesNotMatch(panelSource, /rows\.push\(\[`Spotpris/);
 assert.match(panelSource, /average_price_ore_per_kwh/);
 assert.match(panelSource, /percentage_verified/);
+assert.match(panelSource, /if \(distribution\.length \|\| score != null\)/);
 assert.match(panelSource, /unit_status !== "unit_verified"/);
 assert.match(panelSource, /Kostnadsfördelning/);
 assert.match(panelSource, /Spotpris/);
