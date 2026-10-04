@@ -16,6 +16,7 @@ from custom_components.elrakning.energy_history import (
     history_targets,
     long_term_contributions,
     merge_contributions,
+    reconciled_contributions,
     source_entities_by_series,
     _load_long_term_statistics,
 )
@@ -42,6 +43,34 @@ class EnergyHistoryTests(unittest.TestCase):
         self.assertEqual(
             source_entities_by_series(targets),
             {"import": ["sensor.grid_import", "sensor.grid_power"]},
+        )
+
+    def test_reconciled_import_preserves_verified_source_entity(self):
+        contributions = reconciled_contributions(
+            [{
+                "logical_role": "grid.energy_import",
+                "interval_start": datetime(2026, 10, 4, tzinfo=UTC),
+                "interval_end": datetime(2026, 10, 4, 0, 15, tzinfo=UTC),
+                "value": 0.098,
+                "resolution_seconds": 900,
+                "local_record_id": "local-1",
+                "provider_record_id": None,
+            }],
+            {"local-1": "sensor.grid_import"},
+        )
+        self.assertEqual(
+            source_entities_by_series([], contributions),
+            {"import": ["sensor.grid_import"]},
+        )
+        self.assertEqual(
+            source_entities_by_series([], reconciled_contributions([{
+                "logical_role": "grid.energy_import",
+                "interval_start": datetime(2026, 10, 4, tzinfo=UTC),
+                "interval_end": datetime(2026, 10, 4, 0, 15, tzinfo=UTC),
+                "value": 0.098,
+                "resolution_seconds": 900,
+            }])),
+            {},
         )
 
     def test_history_targets_are_site_explicit_not_active_site(self):

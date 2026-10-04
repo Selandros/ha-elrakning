@@ -92,6 +92,11 @@ def source_entities_by_series(
             result.setdefault(series, set()).add(entity_id)
             if target.get("logical_role") == "battery.power":
                 result.setdefault("discharging", set()).add(entity_id)
+    for contribution in contributions or []:
+        entity_id = contribution.get("source_entity")
+        series = contribution.get("series")
+        if isinstance(entity_id, str) and entity_id and isinstance(series, str) and series:
+            result.setdefault(series, set()).add(entity_id)
     return {series: sorted(entities) for series, entities in result.items()}
 
 
@@ -144,7 +149,8 @@ def _role_values(role: str, value_kw: float) -> dict[str, float]:
 def _contribution(series: str, start: datetime, end: datetime, value_kw: float, *,
                   priority: int, source: str, generation_id: str, quality: str = "good",
                   coverage: float | None = None,
-                  source_resolution_seconds: int | None = None) -> dict[str, Any]:
+                  source_resolution_seconds: int | None = None,
+                  source_entity: str | None = None) -> dict[str, Any]:
     return {
         "series": series,
         "start": start.astimezone(timezone.utc),
@@ -156,6 +162,7 @@ def _contribution(series: str, start: datetime, end: datetime, value_kw: float, 
         "quality_status": quality,
         "coverage_ratio": coverage,
         "source_resolution_seconds": source_resolution_seconds or int((end - start).total_seconds()),
+        "source_entity": source_entity,
     }
 
 
@@ -213,7 +220,10 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
     return _prefer_non_overlapping_provider_resolution(result)
 
 
-def reconciled_contributions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def reconciled_contributions(
+    rows: list[dict[str, Any]],
+    source_entity_by_record: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """Convert the derived billing series without exposing conflicts as energy."""
     result = []
     for row in rows:
@@ -230,6 +240,14 @@ def reconciled_contributions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             "import", start, end, float(row["value"]) / duration, priority=50,
             source="reconciled_grid_import", generation_id=str(row.get("provider_record_id") or row.get("local_record_id") or "reconciled"),
             source_resolution_seconds=int(row.get("resolution_seconds") or duration * 3600),
+            source_entity=next(
+                (
+                    source_entity_by_record.get(str(record_id))
+                    for record_id in (row.get("local_record_id"), row.get("provider_record_id"))
+                    if record_id is not None and source_entity_by_record and source_entity_by_record.get(str(record_id))
+                ),
+                None,
+            ),
         ))
     return result
 
@@ -416,6 +434,13 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
     ledger_by_generation = {
         str(item.get("generation_id")): item for item in targets if item.get("generation_id")
     }
+    source_entity_by_record = {
+        str(row.get("record_id")): ledger_by_generation[str(row.get("source_generation_id"))]["entity_id"]
+        for row in rows
+        if row.get("record_id")
+        and row.get("source_generation_id")
+        and ledger_by_generation.get(str(row.get("source_generation_id")), {}).get("entity_id")
+    }
     reconciled = await hass.async_add_executor_job(
         collector.storage.read_reconciled_grid_import, str(site_id), start, end
     ) if hasattr(collector.storage, "read_reconciled_grid_import") else []
@@ -429,7 +454,7 @@ async def async_build_energy_history(hass: Any, site_manager: Any, collector: An
         or (row.get("interval_start"), row.get("interval_end"), int(row.get("resolution_seconds") or 0)) not in reconciled_keys
     ]
     contributions = canonical_contributions(raw_for_contributions, ledger_by_generation)
-    contributions.extend(reconciled_contributions(reconciled))
+    contributions.extend(reconciled_contributions(reconciled, source_entity_by_record))
 
     statistic_ids = {str(item["entity_id"]) for item in targets if item.get("entity_id")}
     if statistic_ids:
