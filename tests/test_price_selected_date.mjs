@@ -106,6 +106,6 @@ assert.match(panelSource, /void this\.loadBillingHistory\(\);/);
 assert.match(panelSource, /rawMeterPoints\.length === 0 && historicalMeterPoints\.length > 0/);
 assert.match(panelSource, /const useHistoricalPower = rawPoints\.length === 0 && historicalPoints\.length > 0/);
 assert.match(panelSource, /const historicalPowerDisplayPoints = energyIntervalsToCurvePoints[\s\S]*?const displaySource = useHistoricalPower/);
-assert.match(panelSource, /energyHistoryIntervalValueAt\(this\.priceSnapshot\?\.energy_history/);
+assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : null;/);
 
 console.log("selected hourly price date regression passed");

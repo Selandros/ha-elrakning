@@ -13992,15 +13992,14 @@ class ElrakningPanel {
       const index = chartPeriods.indexOf(period);
       const canonicalMeterPoint = this._meterCanonicalPointAt(tooltipTimestamp);
       const rawMeterPoint = this._meterPointAtNearest(tooltipTimestamp);
-      const meterSeries = { import_kw: "import", export_kw: "export" };
       const meterValue = (key) => canonicalMeterPoint && Number.isFinite(Number(canonicalMeterPoint[key]))
         ? Number(canonicalMeterPoint[key])
-        : energyHistoryIntervalValueAt(this.priceSnapshot?.energy_history, meterSeries[key], tooltipTimestamp);
+        : null;
       const powerValue = (key) => {
         const point = this._powerCanonicalPointMaps?.[key]?.get(tooltipTimestamp);
         return point && Number.isFinite(Number(point.value_kw))
           ? Number(point.value_kw)
-          : energyHistoryIntervalValueAt(this.priceSnapshot?.energy_history, key, tooltipTimestamp);
+          : null;
       };
       const barPrice = this._chartBarPrices?.[index];
       const hoverSnapshot = {

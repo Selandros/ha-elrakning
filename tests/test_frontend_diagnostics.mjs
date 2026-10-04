@@ -2615,6 +2615,8 @@ assert.match(panelSource, /tooltipTimestamp = snapTooltipTimestamp/);
 assert.match(panelSource, /return start <= tooltipTimestamp && tooltipTimestamp < end/);
 assert.match(panelSource, /const time = this\.formatTime\(new Date\(tooltipTimestamp\)\)/);
 assert.match(panelSource, /nearestMeterPoint\(this\._meterTooltipPoints, timestamp\)/);
+assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : null;/);
+assert.match(panelSource, /const powerValue = \(key\) => \{[\s\S]*?\? Number\(point\.value_kw\)\n          : null;/);
 assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
 assert.match(panelSource, /const value = visibleLayers\.spot && isHoverPowerValue\(comparisonPrice\)/);
 assert.doesNotMatch(panelSource, /data-tooltip=/);
@@ -2710,7 +2712,7 @@ assert.match(panelSource, /const hoverSnapshot = \{[\s\S]*hoverTime: tooltipTime
 assert.match(panelSource, /const canonicalMeterPoint = this\._meterCanonicalPointAt\(tooltipTimestamp\)/);
 assert.match(panelSource, /const rawMeterPoint = this\._meterPointAtNearest\(tooltipTimestamp\)/);
 assert.match(panelSource, /meterSampleTime: canonicalMeterPoint[\s\S]*?tooltipTimestamp : null/);
-assert.match(panelSource, /energyHistoryIntervalValueAt\(this\.priceSnapshot\?\.energy_history/);
+assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : null;/);
 assert.match(panelSource, /priceBarValue: barPrice \?\? null/);
 assert.match(panelSource, /importValue: meterValue\("import_kw"\)/);
 assert.match(panelSource, /exportValue: meterValue\("export_kw"\)/);
