@@ -80,6 +80,11 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
 
     async def async_get_price_data(self, target_date: date, *, refresh: bool = False) -> PriceData:
         """Return cached data for a local date, fetching it when needed."""
+        binding = self._site_binding or {}
+        area = binding.get("area")
+        currency = binding.get("currency") or "SEK"
+        if not self._is_price_date_allowed(target_date, area):
+            return PriceData(area, currency, target_date, (), "future_price_unavailable")
         cached = self._price_data_by_date.get(target_date)
         if cached and cached.periods and not refresh:
             return cached
@@ -117,6 +122,18 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         if data.periods:
             self._cache_price_data(data)
         return data
+
+    def _is_price_date_allowed(self, target_date: date, area: str | None) -> bool:
+        """Allow historical/current dates and sensor-confirmed tomorrow only."""
+        today = dt_util.now().date()
+        if target_date <= today:
+            return True
+        if target_date != today + timedelta(days=1) or not isinstance(area, str) or not area:
+            return False
+        states = getattr(self.hass, "states", None)
+        getter = getattr(states, "get", None)
+        state = getter(f"binary_sensor.nord_pool_{area.lower()}_morgondagens_pristillgangligt") if callable(getter) else None
+        return str(getattr(state, "state", "")).lower() == "on"
 
     def _finish_price_fetch(self, target_date: date, task: asyncio.Task) -> None:
         """Cache a completed shared fetch and notify existing coordinator listeners."""

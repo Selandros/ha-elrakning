@@ -1,6 +1,7 @@
 import types
 import asyncio
 import unittest
+from unittest import mock
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
@@ -357,6 +358,62 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.periods), 1)
         self.assertEqual(services.calls[-1][0], "nordpool")
         self.assertEqual(services.calls[-1][2]["resolution"], 15)
+
+    async def test_future_price_fanout_is_blocked_without_tomorrow_sensor(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        services = _Services({"SE2": []})
+        requested_entities = []
+        states = types.SimpleNamespace(get=lambda entity_id: (requested_entities.append(entity_id), types.SimpleNamespace(state="off"))[1])
+        hass = types.SimpleNamespace(
+            states=states,
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {"config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK"}
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        with mock.patch.object(coordinator_module.dt_util, "now", return_value=datetime(2026, 10, 4, tzinfo=timezone.utc)):
+            result = await coordinator.async_get_price_data(date(2026, 10, 6))
+        self.assertEqual(result.error, "future_price_unavailable")
+        self.assertEqual(services.calls, [])
+        self.assertEqual(requested_entities, [])
+
+    async def test_tomorrow_price_requires_the_area_sensor_to_be_on(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        services = _Services({"SE2": [{
+            "start": "2026-10-04T22:00:00+00:00",
+            "end": "2026-10-04T22:15:00+00:00",
+            "price": 194.64,
+        }]})
+        sensor = types.SimpleNamespace(state="off")
+        requested_entities = []
+        states = types.SimpleNamespace(get=lambda entity_id: (requested_entities.append(entity_id), sensor)[1])
+        hass = types.SimpleNamespace(
+            states=states,
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {"config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK"}
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        with mock.patch.object(coordinator_module.dt_util, "now", return_value=datetime(2026, 10, 4, tzinfo=timezone.utc)):
+            blocked = await coordinator.async_get_price_data(date(2026, 10, 5))
+            sensor.state = "on"
+            allowed = await coordinator.async_get_price_data(date(2026, 10, 5))
+        self.assertEqual(blocked.error, "future_price_unavailable")
+        self.assertIsNone(allowed.error)
+        self.assertEqual(services.calls[0][2]["date"], "2026-10-05")
+        self.assertEqual(requested_entities, ["binary_sensor.nord_pool_se2_morgondagens_pristillgangligt", "binary_sensor.nord_pool_se2_morgondagens_pristillgangligt"])
 
     async def test_price_failure_and_success_context_is_recorded_in_diagnostics(self):
         entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
