@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostKpiTotals, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -44,11 +44,14 @@ const forecastProviderState = {
   consumption: { month: "2026-10", month_to_date_kwh: 20 },
   analysis: { consumption_cost: { schema: "greenely.consumption_cost.v1", available: true, month_to_date_cost_sek: 15.67741935483871 } },
 };
-const forecastPresentation = buildCostPresentationModel({ estimated_grid_month_total_sek: 1178.45, trade: { total_so_far_sek: null } }, forecastProviderState, new Date(2026, 9, 3, 12));
+const forecastPresentation = buildCostPresentationModel({ estimated_grid_month_total_sek: 1178.45, trade: { total_so_far_sek: null }, grid: { total_so_far_sek: 332 } }, forecastProviderState, new Date(2026, 9, 3, 12));
 assert.equal(forecastPresentation.trade_forecast_sek, 243);
 assert.equal(forecastPresentation.forecast_total_sek, 1421.45);
 assert.equal(forecastPresentation.trade_mtd_label, "Estimat hittills");
 assert.equal(forecastPresentation.trade_invoice_actual_sek, null);
+assert.equal(forecastPresentation.cost_so_far_sek, 347.6774193548387);
+assert.equal(forecastPresentation.forecast_remaining_display_sek, 1073.7725806451613);
+assert.deepEqual(buildCostKpiTotals(1421.45, 332, 23.55), { cost_so_far_sek: 355.55, forecast_remaining_sek: 1065.9 });
 assert.equal(buildCostKpiComparisons({ estimated_month_total_sek: null }, { coverage: "missing" }, [], forecastPresentation)[0].difference_sek, null);
 assert.equal(buildCombinedMonthlyCostForecast(null, { estimated_cost_display_sek: 243 }), null);
 assert.equal(buildCombinedMonthlyCostForecast(1178.45, null), null);
@@ -402,8 +405,9 @@ const costKpiRender = source.slice(source.indexOf("const currentRows ="), source
 assert.equal((costKpiRender.match(/\["(?:Beräknad månadskostnad|Kostnad hittills|Beräknat återstående)"/g) || []).length, 3);
 assert.match(source, /const currentRows = \[/);
 assert.match(source, /\["Beräknad månadskostnad", showingCurrent \? presentationModel\?\.forecast_total_sek/);
-assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek\]/);
-assert.match(source, /\["Beräknat återstående", estimate\.forecast_remaining_total_sek\]/);
+assert.match(source, /\["Kostnad hittills", showingCurrent \? presentationModel\?\.cost_so_far_sek/);
+assert.match(source, /\["Beräknat återstående", showingCurrent \? presentationModel\?\.forecast_remaining_display_sek/);
+assert.match(source, /const kpiTotals = buildCostKpiTotals\(base\?\.forecast_total_sek, estimate\.grid\?\.total_so_far_sek, base\?\.trade_mtd_sek\)/);
 assert.doesNotMatch(costKpiRender, /cost-kpi-secondary/);
 assert.doesNotMatch(source, /Prognos för hela innevarande månaden|Från månadens början till nu|Prognos från nu till månadens slut/);
 assert.match(source, /cost-history-bar-item\.estimated/);

@@ -247,6 +247,17 @@ export function buildCombinedMonthlyCostForecast(networkForecastSek, tradeProjec
   return network + trade;
 }
 
+export function buildCostKpiTotals(forecastTotalSek, networkMtdSek, tradeMtdSek) {
+  const forecast = finiteCostNumber(forecastTotalSek);
+  const network = finiteCostNumber(networkMtdSek);
+  const trade = finiteCostNumber(tradeMtdSek);
+  const costSoFar = network !== null && trade !== null ? network + trade : null;
+  return {
+    cost_so_far_sek: costSoFar,
+    forecast_remaining_sek: forecast !== null && costSoFar !== null ? Math.max(0, forecast - costSoFar) : null,
+  };
+}
+
 export function buildCostPresentationModel(estimate, providerState, now = new Date()) {
   const tradeProjection = buildGreenelyMonthlyProjection(providerState, now);
   const finite = (value) => finiteCostNumber(value);
@@ -257,14 +268,19 @@ export function buildCostPresentationModel(estimate, providerState, now = new Da
     ? finite(providerState.analysis.consumption_cost.month_to_date_cost_sek)
     : null;
   const tradeInvoiceActualSek = finite(estimate?.trade?.total_so_far_sek);
+  const tradeMtdSek = tradeInvoiceActualSek ?? providerMonthToDateCostSek;
+  const networkMtdSek = finite(estimate?.grid?.total_so_far_sek);
+  const kpiTotals = buildCostKpiTotals(forecastTotalSek, networkMtdSek, tradeMtdSek);
   return {
     network_forecast_sek: networkForecastSek,
     trade_forecast_sek: tradeForecastSek,
     forecast_total_sek: forecastTotalSek,
     trade_provider_mtd_sek: providerMonthToDateCostSek,
     trade_invoice_actual_sek: tradeInvoiceActualSek,
-    trade_mtd_sek: tradeInvoiceActualSek ?? providerMonthToDateCostSek,
+    trade_mtd_sek: tradeMtdSek,
     trade_mtd_label: tradeInvoiceActualSek !== null ? "Hittills" : providerMonthToDateCostSek !== null ? "Estimat hittills" : "Hittills",
+    cost_so_far_sek: kpiTotals.cost_so_far_sek,
+    forecast_remaining_display_sek: kpiTotals.forecast_remaining_sek,
     trade_projection: tradeProjection,
   };
 }
@@ -11384,15 +11400,19 @@ class ElrakningPanel {
       return;
     }
     const presentationModel = showingCurrent
-      ? estimate.cost_presentation || buildCostPresentationModel(estimate, this._electricityProviderState, new Date())
+      ? (() => {
+        const base = estimate.cost_presentation || buildCostPresentationModel(estimate, this._electricityProviderState, new Date());
+        const kpiTotals = buildCostKpiTotals(base?.forecast_total_sek, estimate.grid?.total_so_far_sek, base?.trade_mtd_sek);
+        return { ...base, ...kpiTotals };
+      })()
       : null;
     const selectedCost = showingCurrent ? presentationModel?.forecast_total_sek : selectedRecord?.coverage === "complete" ? selectedRecord.total_sek : selectedRecord?.known_amount_gross_sek;
     const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
     const kpiComparisons = buildCostKpiComparisons(estimate, previous, estimate?.cost_comparison_checkpoints, presentationModel);
     const currentRows = [
       ["Beräknad månadskostnad", showingCurrent ? presentationModel?.forecast_total_sek : estimate.estimated_month_total_sek],
-      ["Kostnad hittills", estimate.total_so_far_sek],
-      ["Beräknat återstående", estimate.forecast_remaining_total_sek],
+      ["Kostnad hittills", showingCurrent ? presentationModel?.cost_so_far_sek : estimate.total_so_far_sek],
+      ["Beräknat återstående", showingCurrent ? presentationModel?.forecast_remaining_display_sek : estimate.forecast_remaining_total_sek],
     ];
     status.textContent = showingCurrent && (estimate.forecast_confidence === "partial_data" || estimate.estimate_status === "partial_provider_trend" || estimate.estimate_status === "partial_missing_greenely_invoice") ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
     kpis.replaceChildren(...currentRows.map(([label, value], index) => {
