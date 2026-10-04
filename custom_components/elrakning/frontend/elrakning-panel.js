@@ -4057,7 +4057,7 @@ class ElrakningPanel {
             <div class="card-heading cost-card-heading"><h2 id="cost-title">Kostnad</h2></div>
             <div class="cost-kpis" data-cost-kpis></div>
             <div class="cost-main-grid"><div class="cost-chart" data-cost-chart aria-live="polite"></div><div class="cost-side"><div class="cost-details" data-cost-summary></div></div></div>
-            <section class="cost-history-section" aria-label="Månads kostnadshistorik"><div class="cost-history-chart" data-cost-history-chart role="tablist" aria-label="Månader"></div></section>
+            <section class="cost-history-section" aria-label="Månads kostnadshistorik"><span class="status" data-cost-status hidden aria-hidden="true"></span><div class="cost-history-chart" data-cost-history-chart role="tablist" aria-label="Månader"></div></section>
             <div class="cost-comparison" data-cost-comparison></div>
             <button type="button" class="card-source-action" data-card-source="cost" hidden>Visa data</button>
           </article>

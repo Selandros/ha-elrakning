@@ -337,6 +337,7 @@ assert.doesNotMatch(source, /\.cost-chart-(estimated|forecast|previous|legend-es
 assert.doesNotMatch(source, /\.cost-chart-legend/);
 const costHistorySectionMarkup = source.slice(source.indexOf('<section class="cost-history-section"'), source.indexOf('</section>', source.indexOf('<section class="cost-history-section"')));
 assert.match(costHistorySectionMarkup, /aria-label="Månads kostnadshistorik"/);
+assert.match(costHistorySectionMarkup, /data-cost-status hidden aria-hidden="true"/);
 assert.doesNotMatch(costHistorySectionMarkup, /Månadskostnad senaste 12 månaderna|känd kostnad av/);
 assert.match(source, /\.cost-main-grid \{ align-items: stretch;/);
 assert.match(source, /\.cost-chart \{[\s\S]*display: flex;[\s\S]*min-height: 144px;/);
