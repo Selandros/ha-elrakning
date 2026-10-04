@@ -368,7 +368,7 @@ assert.doesNotMatch(source, /cost-detail-secondary/);
 assert.match(source, /\["Nät", \[[\s\S]*\["Hittills", estimate\.grid\?\.total_so_far_sek\][\s\S]*\["Fast", networkFixed\][\s\S]*\["Rörlig", networkVariable\]/);
 assert.match(source, /\["Handel", \[[\s\S]*\["Hittills", providerMonthToDateCost\][\s\S]*\["Fast", null\][\s\S]*\["Rörlig", null\]/);
 assert.match(source, /\["Import", \[[\s\S]*\["Hittills", importSoFar\][\s\S]*\["Nät prognos", networkImportForecast\][\s\S]*\["Handel prognos", tradeImportForecast\]/);
-assert.match(source, /\["Kr prognos", \[[\s\S]*\["Nät", networkForecast\][\s\S]*\["Handel", tradeCostForecast\]/);
+assert.match(source, /\["Prognos", \[[\s\S]*\["Nät", networkForecast\][\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(source, /providerMonthToDateCost = this\._electricityProviderState\?\.analysis\?\.consumption_cost\?\.available === true/);
 assert.match(source, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
 assert.match(source, /value == null[\s\S]*?"–"/);

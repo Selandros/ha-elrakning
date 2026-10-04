@@ -11455,7 +11455,7 @@ class ElrakningPanel {
           ["Nät prognos", networkImportForecast],
           ["Handel prognos", tradeImportForecast],
         ]],
-        ["Kr prognos", [
+        ["Prognos", [
           ["Nät", networkForecast],
           ["Handel", tradeCostForecast],
         ]],

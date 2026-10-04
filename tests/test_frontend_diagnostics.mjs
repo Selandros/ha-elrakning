@@ -151,7 +151,7 @@ const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/f
 const costCardSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderCostCard()"), pickerPanelSource.indexOf("  _renderCostChart"));
 assert.match(costCardSource, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
 assert.match(costCardSource, /\["Import", \[[\s\S]*\["Handel prognos", tradeImportForecast\]/);
-assert.match(costCardSource, /\["Kr prognos", \[[\s\S]*\["Handel", tradeCostForecast\]/);
+assert.match(costCardSource, /\["Prognos", \[[\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(costCardSource, /value == null[\s\S]*?"–"/);
 assert.match(pickerPanelSource, /buildProviderOnlyInvoiceEstimate/);
 assert.match(pickerPanelSource, /Ej tillgängligt · Kostnadsdata saknas/);
