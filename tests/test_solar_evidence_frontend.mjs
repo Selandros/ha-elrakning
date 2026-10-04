@@ -22,7 +22,7 @@ assert.match(panel, /const matrix = evidence\.holdout_matrix \|\| \{\}/);
 assert.match(panel, /holdout_matrix/);
 assert.match(panel, /item\.kind\}:\$\{item\.status/);
 assert.match(panel, /\["Last attempt", evidence\.last_attempt/);
-assert.match(panel, /applySolarEvidenceVisibility\(benchmarkEvidenceCard, this\._debugEnabled, this\._benchmarkEvidence\?\.available\)/);
+assert.match(panel, /benchmarkEvidenceVisibleForSite\(/);
 assert.match(websocket, /REPLAY_BENCHMARK_EVIDENCE_COMMAND/);
 assert.match(websocket, /websocket_replay_benchmark_evidence/);
 assert.doesNotMatch(panel, /data-solar-evidence-debug/);

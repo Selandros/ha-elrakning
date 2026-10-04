@@ -31,6 +31,19 @@ export function buildFlatChartSignature(parts) {
   }).join("|");
 }
 
+export function resolveRenderablePricePeriods(response, previousSnapshot = null) {
+  const current = Array.isArray(response?.periods) ? response.periods : [];
+  if (current.length) return current;
+  return Array.isArray(previousSnapshot?.periods) ? previousSnapshot.periods : [];
+}
+
+export function benchmarkEvidenceVisibleForSite(debugEnabled, evidenceAvailable, siteState) {
+  const currentSite = siteState?.current_site || siteState?.site || siteState;
+  return Boolean(debugEnabled)
+    && Boolean(evidenceAvailable)
+    && currentSite?.ella_binding_verified === true;
+}
+
 export const PHASE_COLOR_MAP = Object.freeze({
   l1: chartColor("phaseL1"),
   l2: chartColor("phaseL2"),
@@ -8601,7 +8614,12 @@ class ElrakningPanel {
     if (meterSource) meterSource.hidden = !this._debugEnabled || this._meterState?.configured !== true;
     if (priceSource) priceSource.hidden = !this._debugEnabled;
     applySolarEvidenceVisibility(solarEvidenceCard, this._debugEnabled, this._powerHistory?.solar_evidence?.available);
-    applySolarEvidenceVisibility(benchmarkEvidenceCard, this._debugEnabled, this._benchmarkEvidence?.available);
+    benchmarkEvidenceCard.hidden = !benchmarkEvidenceVisibleForSite(
+      this._debugEnabled,
+      this._benchmarkEvidence?.available,
+      this._siteState,
+    );
+    if (benchmarkEvidenceCard.style) benchmarkEvidenceCard.style.display = benchmarkEvidenceCard.hidden ? "none" : "";
     liveSources.forEach((button) => { button.hidden = !this._debugEnabled; });
     if (diagnostics) diagnostics.hidden = !this._debugEnabled;
     if (phaseCopy) phaseCopy.hidden = !this._debugEnabled || this.host.querySelector("[data-phase-history-card]")?.hidden !== false;
@@ -9715,7 +9733,8 @@ class ElrakningPanel {
     const list = this.host.querySelector("[data-benchmark-evidence-list]");
     const evidence = this._benchmarkEvidence || {};
     if (!card || !summary || !status || !list) return;
-    applySolarEvidenceVisibility(card, this._debugEnabled, evidence.available);
+    card.hidden = !benchmarkEvidenceVisibleForSite(this._debugEnabled, evidence.available, this._siteState);
+    if (card.style) card.style.display = card.hidden ? "none" : "";
     const sourceButton = card.querySelector('[data-card-source="benchmark-evidence"]');
     if (sourceButton) sourceButton.hidden = !this._debugEnabled;
     if (!evidence.available) return;
@@ -12128,7 +12147,8 @@ class ElrakningPanel {
     try {
       response = await this.hass.callWS(requestDate(requestedDate));
       if (requestToken !== this._priceDataRequestToken) return;
-      if (response?.error === "integration_unavailable") return;
+      const responsePeriods = resolveRenderablePricePeriods(response);
+      if (response?.error === "integration_unavailable" && !responsePeriods.length) return;
       this.priceSnapshot = response;
     } catch {
       return;
@@ -12137,7 +12157,7 @@ class ElrakningPanel {
       source: "nord_pool",
       mode: this.priceSnapshot.mode || "spot_price",
       adjustments: this.priceSnapshot.adjustments || {},
-      periods: Array.isArray(this.priceSnapshot.periods) ? this.priceSnapshot.periods : [],
+      periods: responsePeriods,
       error: this.priceSnapshot.error || null,
     };
     this._eonGridPrice = this.priceSnapshot.adjustments?.grid_price || null;
@@ -13498,9 +13518,7 @@ class ElrakningPanel {
       if (legend) legend.hidden = true;
       const message = this.priceData.error === "site_unconfigured"
         ? "<strong>Ej konfigurerad</strong>"
-        : this.priceData.error === "missing_integration"
-        ? "<strong>Ingen Nord Pool-sensor hittades.</strong><span>Lägg till Nord Pool i Home Assistant för att visa dagens elpris.</span>"
-        : "<strong>Dagens Nord Pool-priser kunde inte hämtas.</strong>";
+        : "<strong>Prisdata saknas.</strong><span>Ingen giltig prisserie finns för vald dag.</span>";
       chart.innerHTML = `<div class="empty-chart">${message}</div>`;
       return;
     }
@@ -13569,8 +13587,11 @@ class ElrakningPanel {
     });
     const x = (timestamp) => plot.left + ((new Date(timestamp).getTime() - dayStart.getTime()) / dayDuration) * plotWidth;
     const energyHistory = this.priceSnapshot?.energy_history || {};
-    const rawMeterPoints = Array.isArray(this._meterPowerHistory?.points)
-      ? this._meterPowerHistory.points.filter((point) => {
+    const acceptedMeterPoints = Array.isArray(this._meterPowerHistory?.points) && this._meterPowerHistory.points.length
+      ? this._meterPowerHistory.points
+      : this._meterTooltipPoints;
+    const rawMeterPoints = Array.isArray(acceptedMeterPoints)
+      ? acceptedMeterPoints.filter((point) => {
         const timestamp = new Date(point.timestamp).getTime();
         return !forecastPointIsMarked(point)
           && Number.isFinite(timestamp) && timestamp >= dayStart.getTime() && timestamp <= actualDayEnd;
