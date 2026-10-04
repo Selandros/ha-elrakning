@@ -53,6 +53,7 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         self._active_price_date: date | None = None
         self._next_day_last_attempt: tuple[date, datetime] | None = None
         self._midnight_recovery_task: asyncio.Task | None = None
+        self._price_fetch_tasks: dict[date, asyncio.Task] = {}
         self._site_binding: dict[str, Any] | None = None
         super().__init__(
             hass,
@@ -81,7 +82,19 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         cached = self._price_data_by_date.get(target_date)
         if cached and cached.periods and not refresh:
             return cached
-        data = await self._async_fetch_date(target_date)
+        fetch_tasks = getattr(self, "_price_fetch_tasks", None)
+        if not isinstance(fetch_tasks, dict):
+            fetch_tasks = {}
+            self._price_fetch_tasks = fetch_tasks
+        task = fetch_tasks.get(target_date)
+        if task is None or task.done():
+            task = asyncio.create_task(self._async_fetch_date(target_date))
+            fetch_tasks[target_date] = task
+        try:
+            data = await asyncio.shield(task)
+        finally:
+            if fetch_tasks.get(target_date) is task and task.done():
+                fetch_tasks.pop(target_date, None)
         if data.periods:
             self._cache_price_data(data)
         return data
@@ -211,6 +224,11 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         self._site_binding = normalized
         self._price_data_by_date.clear()
         self._active_price_date = None
+        fetch_tasks = getattr(self, "_price_fetch_tasks", {})
+        for task in fetch_tasks.values():
+            if not task.done():
+                task.cancel()
+        fetch_tasks.clear()
 
     async def async_prefetch_next_day(self) -> None:
         """Cache tomorrow's prices once before the local day changes."""

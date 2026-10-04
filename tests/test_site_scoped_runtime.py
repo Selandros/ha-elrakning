@@ -453,6 +453,35 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.error)
         self.assertEqual(len(result.periods), 1)
 
+    async def test_concurrent_same_date_fetches_share_one_service_call(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        services = _DelayedServices({"SE2": [{
+            "start": "2026-10-03T22:00:00+00:00",
+            "end": "2026-10-03T22:15:00+00:00",
+            "price": 194.64,
+        }]}, 0.02)
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._price_fetch_tasks = {}
+        coordinator._active_price_date = None
+        results = await asyncio.gather(
+            coordinator.async_get_price_data(date(2026, 10, 4)),
+            coordinator.async_get_price_data(date(2026, 10, 4)),
+        )
+        self.assertEqual(len(services.calls), 1)
+        self.assertEqual([len(result.periods) for result in results], [1, 1])
+
     def test_binding_fingerprint_excludes_only_derived_fingerprint(self):
         binding = {"config_entry_id": "entry", "area": "SE2", "currency": "SEK"}
         fingerprint = SiteIdentityManager.binding_fingerprint(binding)
