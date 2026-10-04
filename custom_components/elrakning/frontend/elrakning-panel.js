@@ -54,6 +54,25 @@ export function applyCanonicalEnergyHistoryResponse({
   return { accepted: true, reason: null, energyHistory: response.energy_history };
 }
 
+export function canonicalEnergyHistoryViewIsCurrent({
+  requestSiteId,
+  requestSiteContextGeneration,
+  requestDate,
+  requestLifecycleToken,
+  activeSiteId,
+  activeSiteContextGeneration,
+  activeDate,
+  activeLifecycleToken,
+  requestHass,
+  activeHass,
+} = {}) {
+  return requestSiteId === activeSiteId
+    && requestSiteContextGeneration === activeSiteContextGeneration
+    && requestDate === activeDate
+    && requestLifecycleToken === activeLifecycleToken
+    && requestHass === activeHass;
+}
+
 export function buildMeterScale(actualMaximum, forecastMaximum, hasActualPowerData, hasForecastPowerData) {
   const actual = Number.isFinite(Number(actualMaximum)) ? Math.max(0, Number(actualMaximum)) : 0;
   const forecast = Number.isFinite(Number(forecastMaximum)) ? Math.max(0, Number(forecastMaximum)) : 0;
@@ -2019,12 +2038,58 @@ export function resolveCanonicalMeterSeriesPoints(primaryPoints, energyHistory, 
 }
 
 export function selectMeterRenderPoints(primaryPoints, historicalPoints) {
+  return mergeMeterRenderPoints(primaryPoints, historicalPoints).points;
+}
+
+export function selectMeterRenderSources(primaryPoints, historicalPoints) {
   const primary = Array.isArray(primaryPoints) ? primaryPoints : [];
   const historical = Array.isArray(historicalPoints) ? historicalPoints : [];
-  const hasPrimaryMeterValues = primary.some((point) => (
-    Number.isFinite(normalizeMeterValue(point?.import_kw)) || Number.isFinite(normalizeMeterValue(point?.export_kw))
-  ));
-  return !hasPrimaryMeterValues && historical.length ? historical : primary;
+  const sourceFor = (field) => {
+    if (historical.some((point) => Number.isFinite(normalizeMeterValue(point?.[field])))) {
+      return "canonical_energy_history";
+    }
+    if (primary.some((point) => Number.isFinite(normalizeMeterValue(point?.[field])))) {
+      return "meter_history";
+    }
+    return "unavailable";
+  };
+  return {
+    import_kw: sourceFor("import_kw"),
+    export_kw: sourceFor("export_kw"),
+  };
+}
+
+export function mergeMeterRenderPoints(primaryPoints, historicalPoints, sources = selectMeterRenderSources(primaryPoints, historicalPoints)) {
+  const pointsByTimestamp = new Map();
+  const addPoints = (points, source) => {
+    const useImport = sources.import_kw === source;
+    const useExport = sources.export_kw === source;
+    if (!useImport && !useExport) return;
+    for (const point of Array.isArray(points) ? points : []) {
+      const timestamp = new Date(point?.timestamp).getTime();
+      if (!Number.isFinite(timestamp)) continue;
+      const current = pointsByTimestamp.get(timestamp) || {
+        timestamp,
+        raw_timestamp: point?.raw_timestamp ?? point?.timestamp ?? null,
+        import_kw: null,
+        export_kw: null,
+        gap_before: Boolean(point?.gap_before),
+      };
+      current.gap_before = current.gap_before || Boolean(point?.gap_before);
+      current.raw_timestamp ??= point?.raw_timestamp ?? point?.timestamp ?? null;
+      current.history_source ??= point?.history_source ?? null;
+      current.source_resolution_seconds ??= point?.source_resolution_seconds ?? null;
+      if (useImport) current.import_kw = normalizeMeterValue(point?.import_kw);
+      if (useExport) current.export_kw = normalizeMeterValue(point?.export_kw);
+      pointsByTimestamp.set(timestamp, current);
+    }
+  };
+  addPoints(primaryPoints, "meter_history");
+  addPoints(historicalPoints, "canonical_energy_history");
+  return {
+    sources,
+    points: [...pointsByTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp),
+  };
 }
 
 export function integrateEnergyIntervalsKwh(intervals, start, end) {
@@ -12478,7 +12543,7 @@ class ElrakningPanel {
     const contextKey = buildCanonicalEnergyHistoryContextKey(siteId, siteContextGeneration, requestedDateKey);
     const existing = this._canonicalEnergyHistoryInFlight.get(contextKey);
     if (existing) return existing;
-    const requestToken = ++this._canonicalEnergyHistoryRequestToken;
+    const lifecycleToken = this._canonicalEnergyHistoryRequestToken;
     const started = performance.now();
     this._recordPowerFlowDiagnostic("canonical_energy_history_request_start", {
       requested_date: requestedDateKey,
@@ -12498,9 +12563,18 @@ class ElrakningPanel {
           expectedSiteId: siteId,
           expectedDate: requestedDateKey,
           activeSiteId,
-          siteContextCurrent: requestToken === this._canonicalEnergyHistoryRequestToken
-            && siteContextGeneration === this._siteContextGeneration
-            && requestHass === this.hass,
+          siteContextCurrent: canonicalEnergyHistoryViewIsCurrent({
+            requestSiteId: siteId,
+            requestSiteContextGeneration: siteContextGeneration,
+            requestDate: requestedDateKey,
+            requestLifecycleToken: lifecycleToken,
+            activeSiteId,
+            activeSiteContextGeneration: this._siteContextGeneration,
+            activeDate: localDateKey(this._periodPickerState?.confirmed),
+            activeLifecycleToken: this._canonicalEnergyHistoryRequestToken,
+            requestHass,
+            activeHass: this.hass,
+          }),
         });
         if (!applied.accepted) {
           this._recordPowerFlowDiagnostic("canonical_energy_history_stale_rejected", {
@@ -13970,12 +14044,10 @@ class ElrakningPanel {
     const historicalMeterPoints = energyHistoryToMeterStepPoints(energyHistory).filter((point) => (
       point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
     ));
-    const meterPoints = selectMeterRenderPoints(rawMeterPoints, historicalMeterPoints);
-    const useHistoricalMeter = meterPoints === historicalMeterPoints;
+    const meterSelection = mergeMeterRenderPoints(rawMeterPoints, historicalMeterPoints);
+    const meterPoints = meterSelection.points;
     this._meterTooltipPoints = meterPoints;
-    const meterCanonicalPoints = useHistoricalMeter
-      ? meterPoints
-      : this.buildCanonicalMeterPoints(meterPoints, dayStart, selectedDayEnd);
+    const meterCanonicalPoints = meterPoints;
     this._meterCanonicalPoints = meterCanonicalPoints;
     this._meterCanonicalPointMap = new Map(
       meterCanonicalPoints
@@ -13990,12 +14062,17 @@ class ElrakningPanel {
     const historicalMeterDisplayPoints = energyHistoryToMeterCurvePoints(energyHistory).filter((point) => (
       point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
     ));
-    const meterDisplayPoints = useHistoricalMeter
-      ? this.prepareMeterDisplayPoints(decimateDisplayPoints(historicalMeterDisplayPoints, {
+    const rawMeterDisplayPoints = this.prepareMeterDisplayPoints(
+      this.buildCanonicalMeterPoints(meterRenderPoints, dayStart, selectedDayEnd),
+    );
+    const meterDisplayPoints = this.prepareMeterDisplayPoints(mergeMeterRenderPoints(
+      rawMeterDisplayPoints,
+      decimateDisplayPoints(historicalMeterDisplayPoints, {
         targetPoints: renderBudget,
         valueKeys: ["import_kw", "export_kw"],
-      }))
-      : this.prepareMeterDisplayPoints(this.buildCanonicalMeterPoints(meterRenderPoints, dayStart, selectedDayEnd));
+      }),
+      meterSelection.sources,
+    ).points);
     const powerCanonicalPoints = {};
     const powerDisplayPoints = {};
     const powerDisplayGeometry = {};
@@ -14253,7 +14330,7 @@ class ElrakningPanel {
       lines: meterLines,
     };
     const buyRenderStats = {
-      source: useHistoricalMeter ? "canonical_energy_history" : "meter_history",
+      source: meterSelection.sources.import_kw,
       visible: visibleLayers.import === true,
       input_point_count: meterPoints.length,
       display_point_count: meterDisplayPoints.length,
