@@ -5591,9 +5591,21 @@ class ElrakningPanel {
 
         .cost-details {
           display: grid;
-          gap: 6px 14px;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
           margin-top: 12px;
+        }
+
+        .cost-detail-row {
+          align-items: start;
+          display: grid;
+          gap: 6px 14px;
+          grid-template-columns: minmax(68px, auto) repeat(3, minmax(0, 1fr));
+        }
+
+        .cost-detail-row-label {
+          color: var(--secondary-text-color);
+          font-weight: 500;
+          padding-top: 2px;
         }
 
         .cost-detail strong { font-weight: 500; }
@@ -5617,7 +5629,7 @@ class ElrakningPanel {
         @container (max-width: 600px) {
           .cost-kpis { gap: 8px; grid-template-columns: 1fr; }
           .cost-kpi strong { font-size: 1rem; }
-          .cost-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .cost-detail-row { grid-template-columns: minmax(60px, auto) repeat(2, minmax(0, 1fr)); }
           .cost-comparison { grid-template-columns: 1fr; }
           .cost-main-grid { grid-template-columns: 1fr; }
           .cost-side { border-left: 0; border-top: 1px solid var(--divider-color); padding-left: 0; padding-top: 14px; }
@@ -11411,17 +11423,67 @@ class ElrakningPanel {
       return item;
     }));
     const greenelyProjection = showingCurrent ? buildGreenelyMonthlyProjection(this._electricityProviderState, new Date()) : null;
-    const rows = showingCurrent ? [
-      ["Elnät", estimate.grid?.total_so_far_sek],
-      ["Fast kostnad", Number.isFinite(Number(estimate.trade?.booked_fixed_fee_sek ?? estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.booked_fixed_fee_sek ?? estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
-      ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
-      ["Import", Number.isFinite(Number(estimate.imported_kwh_so_far)) ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null],
-      ["Beräknad import hela månaden", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
-      ["E.ON prognos import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
-      ["E.ON nätprognos hela månaden", Number.isFinite(Number(estimate.estimated_grid_month_total_sek)) ? this._formatSek(Number(estimate.estimated_grid_month_total_sek)) : null],
-      ["Handel prognos import", greenelyProjection ? `${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh` : null],
-      ["Handel prognos hela månaden", greenelyProjection ? this._formatSek(greenelyProjection.estimated_cost_display_sek) : null],
-    ] : selectedRecord ? [
+    if (showingCurrent) {
+      const providerMonthToDateCost = this._electricityProviderState?.analysis?.consumption_cost?.available === true
+        ? this._electricityProviderState.analysis.consumption_cost.month_to_date_cost_sek
+        : null;
+      const networkFixed = estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek ?? null;
+      const networkVariable = estimate.grid?.variable_cost_sek ?? null;
+      const networkForecast = Number.isFinite(Number(estimate.estimated_grid_month_total_sek))
+        ? this._formatSek(Number(estimate.estimated_grid_month_total_sek)) : null;
+      const importSoFar = Number.isFinite(Number(estimate.imported_kwh_so_far))
+        ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null;
+      const networkImportForecast = Number.isFinite(Number(estimate.forecast_import_kwh))
+        ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null;
+      const tradeImportForecast = greenelyProjection
+        ? `${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh` : null;
+      const tradeCostForecast = greenelyProjection
+        ? this._formatSek(greenelyProjection.estimated_cost_display_sek) : null;
+      const rows = [
+        ["Nät", [
+          ["Hittills", estimate.grid?.total_so_far_sek],
+          ["Fast", networkFixed],
+          ["Rörlig", networkVariable],
+        ]],
+        ["Handel", [
+          ["Hittills", providerMonthToDateCost],
+          ["Fast", null],
+          ["Rörlig", null],
+        ]],
+        ["Import", [
+          ["Hittills", importSoFar],
+          ["Nät prognos", networkImportForecast],
+          ["Handel prognos", tradeImportForecast],
+        ]],
+        ["Kr prognos", [
+          ["Nät", networkForecast],
+          ["Handel", tradeCostForecast],
+        ]],
+      ];
+      summary.replaceChildren(...rows.map(([rowLabel, cells]) => {
+        const row = document.createElement("div");
+        row.className = "cost-detail-row";
+        const heading = document.createElement("span");
+        heading.className = "cost-detail-row-label";
+        heading.textContent = rowLabel;
+        row.append(heading);
+        for (const [label, value] of cells) {
+          const item = document.createElement("div");
+          item.className = "cost-detail";
+          const name = document.createElement("span");
+          name.textContent = label;
+          const output = document.createElement("strong");
+          output.textContent = value == null || (typeof value === "number" && !Number.isFinite(value))
+            ? "–"
+            : typeof value === "string" ? value : this._formatSek(Number(value));
+          item.append(name, output);
+          row.append(item);
+        }
+        return row;
+      }));
+      return;
+    }
+    const rows = selectedRecord ? [
       ["Elhandel", selectedRecord.trade_sek == null ? "Saknas" : selectedRecord.trade_sek],
       ["Elnät", selectedRecord.grid_sek == null ? "Saknas" : selectedRecord.grid_sek],
       ["Känd kostnad", selectedRecord.known_amount_gross_sek],

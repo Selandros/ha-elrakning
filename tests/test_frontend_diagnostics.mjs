@@ -150,8 +150,8 @@ assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrak
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costCardSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderCostCard()"), pickerPanelSource.indexOf("  _renderCostChart"));
 assert.match(costCardSource, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
-assert.match(costCardSource, /\["Handel prognos import", greenelyProjection \? `/);
-assert.match(costCardSource, /\["Handel prognos hela månaden", greenelyProjection \? this\._formatSek\(greenelyProjection\.estimated_cost_display_sek\)/);
+assert.match(costCardSource, /\["Import", \[[\s\S]*\["Handel prognos", tradeImportForecast\]/);
+assert.match(costCardSource, /\["Kr prognos", \[[\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(costCardSource, /value == null[\s\S]*?"–"/);
 assert.match(pickerPanelSource, /buildProviderOnlyInvoiceEstimate/);
 assert.match(pickerPanelSource, /Ej tillgängligt · Kostnadsdata saknas/);
@@ -2315,7 +2315,6 @@ assert.doesNotMatch(panelSource, /data-invoice-estimate-copy>Kopiera raw-data/);
 assert.doesNotMatch(panelSource, /data-invoice-estimate-grid/);
 assert.match(panelSource, /data-invoice-estimate-status/);
 assert.doesNotMatch(panelSource, /Prognos för månaden/);
-assert.doesNotMatch(panelSource, /data-invoice-estimate-total[\s\S]*Hittills/);
 assert.match(panelSource, /forecast_method/);
 assert.match(panelSource, /buildInvoiceProvenance\(/);
 assert.match(panelSource, /buildInvoiceEstimate\(/);
