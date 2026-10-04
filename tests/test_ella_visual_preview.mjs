@@ -66,7 +66,7 @@ assert.match(panel, /const currentBlockId = currentPricePlanBlock\(blocks\)/);
 assert.match(panel, /button\.setAttribute\("aria-current", "time"\)/);
 assert.match(panel, /price-plan-card\$\{isCurrent \? " current" : ""\}\$\{isSelected \? " selected" : ""\}/);
 assert.match(panel, /this\.renderPriceChart\(\)/);
-assert.match(panel, /selection: this\._ellaSelection/);
+assert.match(panel, /this\._ellaSelection\s*\?/);
 assert.match(panel, /this\._renderSocChart\(\)/);
 assert.match(panel, /togglePricePlanSelection\(this\._ellaSelection, block/);
 assert.match(panel, /_pricePlanRequestToken/);

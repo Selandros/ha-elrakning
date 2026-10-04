@@ -21,6 +21,16 @@ export function chartColor(key) {
   return CHART_COLORS[key] || CHART_COLORS.neutral;
 }
 
+export function buildFlatChartSignature(parts) {
+  const values = Array.isArray(parts) ? parts : [parts];
+  return values.map((part) => {
+    if (!Array.isArray(part)) return String(part ?? "");
+    return part.map((value) => Array.isArray(value)
+      ? value.map((nested) => String(nested ?? "")).join(",")
+      : String(value ?? "")).join(",");
+  }).join("|");
+}
+
 export const PHASE_COLOR_MAP = Object.freeze({
   l1: chartColor("phaseL1"),
   l2: chartColor("phaseL2"),
@@ -13139,9 +13149,9 @@ class ElrakningPanel {
 
   _getPriceChartLiveSignature() {
     const periods = this.priceData?.periods || [];
-    if (!periods.length) return JSON.stringify({ periods: 0 });
+    if (!periods.length) return buildFlatChartSignature(["periods", 0]);
     const firstTimestamp = new Date(periods[0].start).getTime();
-    if (!Number.isFinite(firstTimestamp)) return JSON.stringify({ periods: periods.length });
+    if (!Number.isFinite(firstTimestamp)) return buildFlatChartSignature(["periods", periods.length]);
     const dayStart = new Date(firstTimestamp);
     dayStart.setHours(0, 0, 0, 0);
     const dayStartMs = dayStart.getTime();
@@ -13155,10 +13165,10 @@ class ElrakningPanel {
     const pointSignature = (points, valueKeys) => {
       const selected = nearestMeterPoint(points, slotTimestamp, slotMs / 2);
       if (!selected) return null;
-      return {
-        timestamp: selected.timestamp || null,
-        values: valueKeys.map((key) => normalizeMeterValue(selected[key])),
-      };
+      return [
+        selected.timestamp || null,
+        ...valueKeys.map((key) => normalizeMeterValue(selected[key])),
+      ];
     };
     const meterPoints = Array.isArray(this._meterPowerHistory?.points) ? this._meterPowerHistory.points : [];
     const power = {};
@@ -13171,13 +13181,13 @@ class ElrakningPanel {
         import_kw: point.value_kw,
       })), ["import_kw"]);
     }
-    return JSON.stringify({
-      date: new Date(dayStartMs).toISOString().slice(0, 10),
-      periods: periods.length,
-      slot: slotTimestamp,
-      meter: pointSignature(meterPoints, ["import_kw", "export_kw"]),
-      power,
-    });
+    return buildFlatChartSignature([
+      new Date(dayStartMs).toISOString().slice(0, 10),
+      periods.length,
+      slotTimestamp,
+      pointSignature(meterPoints, ["import_kw", "export_kw"]),
+      ...Object.values(power),
+    ]);
   }
 
   _getPriceChartRenderCacheKey() {
@@ -13197,19 +13207,20 @@ class ElrakningPanel {
       pointSignature(this._powerHistory?.power_forecast?.series?.[key]?.forecast_points),
     ]));
     const widthBucket = Math.max(1, Math.round((this._priceChartRenderedWidth || 960) / 16) * 16);
-    return JSON.stringify({
-      site: this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
-      date: this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
-      mode: this._periodPickerState?.mode || null,
-      width: widthBucket,
-      selection: this._ellaSelection
+    const layers = this._effectiveChartLayerState();
+    return buildFlatChartSignature([
+      this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
+      this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
+      this._periodPickerState?.mode || null,
+      widthBucket,
+      this._ellaSelection
         ? [this._ellaSelection.id, this._ellaSelection.start, this._ellaSelection.end, this._ellaSelection.revision]
         : null,
-      periods: [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
-      layers: this._effectiveChartLayerState(),
-      series,
-      forecast,
-    });
+      [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
+      Object.values(layers),
+      ...Object.values(series),
+      ...Object.values(forecast),
+    ]);
   }
 
   buildMeterDisplaySegments(points, key) {
@@ -13571,7 +13582,6 @@ class ElrakningPanel {
     const useHistoricalMeter = rawMeterPoints.length === 0 && historicalMeterPoints.length > 0;
     const meterPoints = useHistoricalMeter ? historicalMeterPoints : rawMeterPoints;
     this._meterTooltipPoints = meterPoints;
-    if (meterPoints.length && this._invoiceEstimateRaw) this._renderInvoiceEstimateCard();
     const meterCanonicalPoints = useHistoricalMeter
       ? meterPoints
       : this.buildCanonicalMeterPoints(meterPoints, dayStart, selectedDayEnd);
