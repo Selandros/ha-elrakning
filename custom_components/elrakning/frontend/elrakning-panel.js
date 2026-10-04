@@ -2510,16 +2510,14 @@ export function buildDailyCostSeries(dailyBreakdown, month, providerState = null
 }
 
 export function buildDailyCostTooltipFields(day) {
-  const number = (value, suffix = " kr") => value == null || !Number.isFinite(Number(value))
+  const number = (value, suffix = "") => value == null || !Number.isFinite(Number(value))
     ? "–"
     : `${Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
   return [
     { label: "Import", value: number(day?.import_kwh, " kWh") },
-    { label: "Elhandel", value: number(day?.elhandel_sek) },
-    { label: "Elnät rörlig", value: number(day?.elnat_variable_sek) },
-    { label: "Total rörlig kostnad", value: number(day?.total_variable_cost_sek) },
+    { label: "Handel", value: number(day?.elhandel_sek) },
+    { label: "Nät", value: number(day?.elnat_variable_sek) },
     { label: "Snittpris", value: number(day?.average_price_ore_per_kwh, " öre/kWh") },
-    { label: "Status", value: day?.status === "actual_plus_forecast_provider_estimate" ? "Faktiskt + prognos + handelsestimat" : day?.status === "actual_plus_provider_estimate" ? "Faktiskt + handelsestimat" : day?.status === "actual_plus_forecast" ? "Faktiskt + prognos" : day?.status === "actual" ? "Faktiskt" : day?.status === "actual_to_date" ? "Faktiskt hittills" : day?.status === "forecast" ? "Prognos" : "Ej tillgängligt" },
   ];
 }
 
@@ -11562,14 +11560,13 @@ class ElrakningPanel {
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-cost-axis-day="${day}">${day}</span>`).join("")}</div>`;
     const barWidth = Math.max(3, (width - plotWithAxisGutter.left - plotWithAxisGutter.right) / Math.max(1, series.days_in_month) - 3);
-    const hasProviderTradeEstimate = series.days.some((day) => day.status === "actual_plus_provider_estimate" || day.status === "actual_plus_forecast_provider_estimate");
     const bars = series.days.map((day) => {
       const value = Number.isFinite(day.total_variable_cost_sek) ? day.total_variable_cost_sek : 0;
       const barHeight = value > 0 ? Math.max(2, height - plot.bottom - y(value)) : 2;
-      const className = day.status === "forecast" ? "cost-chart-bar cost-chart-bar-forecast" : day.status === "actual_plus_forecast" || day.status === "actual_plus_provider_estimate" || day.status === "actual_plus_forecast_provider_estimate" ? "cost-chart-bar cost-chart-bar-mixed" : day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
+      const className = day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
       return `<rect class="${className}" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plotWithAxisGutter.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
     }).join("");
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span><span><i class="cost-chart-legend-estimated"></i>${hasProviderTradeEstimate ? "Faktiskt + handelsestimat" : "Faktiskt + prognos"}</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const axis = chart.querySelector(".chart-axis-overlay");
     const screenMatrix = svg.getScreenCTM?.();
@@ -11604,10 +11601,11 @@ class ElrakningPanel {
         clear();
         return;
       }
-      renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "").split(" ")[0]}`, fields });
+      const total = Number.isFinite(point.total_variable_cost_sek) ? Number(point.total_variable_cost_sek).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "–";
+      renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "").split(" ")[0]} - ${total}kr`, fields });
       tooltip.hidden = false;
       const markerValue = Number.isFinite(point.total_variable_cost_sek) ? point.total_variable_cost_sek : 0;
-      hover.innerHTML = `<rect class="chart-hover-marker" fill="${point.status === "forecast" ? "var(--secondary-text-color)" : "var(--el-solar-color, #77C2A1)"}" x="${x(point.day) - barWidth / 2}" y="${height - plot.bottom - Math.max(2, height - plot.bottom - y(markerValue))}" width="${barWidth}" height="${Math.max(2, height - plot.bottom - y(markerValue))}" rx="2" />`;
+      hover.innerHTML = `<rect class="chart-hover-marker" fill="var(--el-solar-color, #77C2A1)" x="${x(point.day) - barWidth / 2}" y="${height - plot.bottom - Math.max(2, height - plot.bottom - y(markerValue))}" width="${barWidth}" height="${Math.max(2, height - plot.bottom - y(markerValue))}" rx="2" />`;
       positionChartTooltip(chart, tooltip, event.clientX, event.clientY, [], this._tooltipOrbit);
     };
     svg.addEventListener("pointerleave", clear);

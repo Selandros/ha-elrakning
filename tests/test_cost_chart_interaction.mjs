@@ -280,9 +280,9 @@ assert.equal(dailyBars.days[2].total_variable_cost_sek, 4.5);
 assert.equal(dailyBars.days[3].total_variable_cost_sek, 6);
 assert.equal(dailyBars.days[4].status, "unavailable");
 assert.equal(dailyBars.days[0].average_price_ore_per_kwh, 150);
-assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.label), ["Import", "Elhandel", "Elnät rörlig", "Total rörlig kostnad", "Snittpris", "Status"]);
-assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.value), ["3,00 kWh", "0,50 kr", "1,00 kr", "4,50 kr", "150,00 öre/kWh", "Faktiskt + prognos"]);
-assert.deepEqual(buildDailyCostTooltipFields({ import_kwh: null, elhandel_sek: undefined, elnat_variable_sek: NaN, total_variable_cost_sek: null, average_price_ore_per_kwh: Infinity, status: "unavailable" }).map((field) => field.value), ["–", "–", "–", "–", "–", "Ej tillgängligt"]);
+assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.label), ["Import", "Handel", "Nät", "Snittpris"]);
+assert.deepEqual(buildDailyCostTooltipFields(dailyBars.days[2]).map((field) => field.value), ["3,00 kWh", "0,50", "1,00", "150,00 öre/kWh"]);
+assert.deepEqual(buildDailyCostTooltipFields({ import_kwh: null, elhandel_sek: undefined, elnat_variable_sek: NaN, total_variable_cost_sek: null, average_price_ore_per_kwh: Infinity, status: "unavailable" }).map((field) => field.value), ["–", "–", "–", "–"]);
 const unavailableMonth = buildDailyCostSeries([], "2026-08");
 assert.equal(unavailableMonth.days.length, 31);
 assert.equal(unavailableMonth.days.every((day) => day.status === "unavailable" && !day.available), true);
@@ -309,8 +309,8 @@ assert.equal(providerDailyBars.days[0].provenance.provider_trade, "greenely_prov
 assert.ok(Math.abs(providerDailyBars.days[0].elhandel_sek - 7.42865) < 1e-9);
 assert.ok(Math.abs(providerDailyBars.days[0].total_variable_cost_sek - 26.61001) < 1e-9);
 assert.ok(Math.abs(providerDailyBars.days[0].average_price_ore_per_kwh - 196.994447735) < 1e-6);
-assert.equal(buildDailyCostTooltipFields(providerDailyBars.days[0])[1].value, "7,43 kr");
-assert.equal(buildDailyCostTooltipFields(providerDailyBars.days[0])[3].value, "26,61 kr");
+assert.equal(buildDailyCostTooltipFields(providerDailyBars.days[0])[1].value, "7,43");
+assert.equal(buildDailyCostTooltipFields(providerDailyBars.days[0])[2].value, "19,18");
 const missingGreenelyCost = buildDailyCostSeries([
   { date: "2026-10-01", actual: { import_kwh: 13.508, elnat_variable_sek: 19.18136, total_variable_cost_sek: 19.18136, status: "actual" } },
 ], "2026-10", { provider: "greenely", analysis: { consumption_cost: { schema: "greenely.consumption_cost.v1", available: false, samples: [] } } });
@@ -322,7 +322,13 @@ const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series
 
 assert.match(costRender, /buildDailyCostTooltipFields\(point\)/);
 assert.doesNotMatch(costRender, /!series\.days\.some\(\(day\) => day\.available\)/);
-assert.match(costRender, /cost-chart-bar-forecast/);
+assert.match(costRender, /cost-chart-legend-actual.*Faktiskt/);
+assert.doesNotMatch(costRender, /Prognos|Faktiskt \+ handelsestimat/);
+assert.match(costRender, /const className = day\.available \? "cost-chart-bar cost-chart-bar-actual"/);
+assert.doesNotMatch(costRender, /cost-chart-bar-(forecast|mixed)/);
+assert.match(costRender, /const total = Number\.isFinite\(point\.total_variable_cost_sek\)/);
+assert.match(costRender, /title: `\$\{point\.day\} \$\{this\._formatInvoiceMonth\(series\.month \|\| ""\)\.split\(" "\)\[0\]\} - \$\{total\}kr`/);
+assert.match(costRender, /fill="var\(--el-solar-color, #77C2A1\)"/);
 assert.match(source, /\.cost-chart-bar-actual \{ fill: var\(--el-solar-color, #77C2A1\);/);
 assert.match(source, /\.cost-chart-bar-mixed \{ fill: var\(--el-solar-color, #77C2A1\);/);
 assert.match(source, /\.cost-chart-legend i \{ background: var\(--el-solar-color, #77C2A1\);/);
@@ -398,7 +404,8 @@ assert.match(source, /\["Import", \[[\s\S]*\["Hittills", importSoFar\][\s\S]*\["
 assert.match(source, /\["Prognos", \[[\s\S]*\["Nät", networkForecast\][\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(source, /providerMonthToDateCost = presentationModel\?\.trade_mtd_sek/);
 assert.match(source, /hasProviderTradeEstimate/);
-assert.match(costRender, /Faktiskt \+ handelsestimat/);
+assert.match(costRender, /cost-chart-legend-actual.*Faktiskt/);
+assert.doesNotMatch(costRender, /Prognos|Faktiskt \+ handelsestimat/);
 assert.match(source, /buildCostPresentationModel\(estimate, this\._electricityProviderState, new Date\(\)\)/);
 assert.match(source, /value == null[\s\S]*?"–"/);
 assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);
