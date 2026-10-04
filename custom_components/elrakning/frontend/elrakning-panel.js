@@ -5602,6 +5602,14 @@ class ElrakningPanel {
           grid-template-columns: minmax(68px, auto) repeat(3, minmax(0, 1fr));
         }
 
+        .cost-detail-row-short {
+          grid-template-columns: minmax(68px, auto) repeat(2, minmax(0, 1fr));
+        }
+
+        .cost-detail-row-short .cost-detail strong {
+          white-space: nowrap;
+        }
+
         .cost-detail-row-label {
           color: var(--secondary-text-color);
           font-weight: 500;
@@ -11462,7 +11470,7 @@ class ElrakningPanel {
       ];
       summary.replaceChildren(...rows.map(([rowLabel, cells]) => {
         const row = document.createElement("div");
-        row.className = "cost-detail-row";
+        row.className = `cost-detail-row${cells.length === 2 ? " cost-detail-row-short" : ""}`;
         const heading = document.createElement("span");
         heading.className = "cost-detail-row-label";
         heading.textContent = rowLabel;
