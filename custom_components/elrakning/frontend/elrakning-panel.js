@@ -850,7 +850,7 @@ export function decimateDisplayPoints(points, {
       let minimum = Infinity;
       let maximum = -Infinity;
       for (let index = start; index < end; index += 1) {
-        const value = Number(source[index]?.[key]);
+        const value = normalizeMeterValue(source[index]?.[key]);
         if (!Number.isFinite(value)) continue;
         if (value < minimum) {
           minimum = value;
@@ -1842,14 +1842,14 @@ export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 *
     const selected = nearestMeterPoint(points, slotTimestamp, maxDistanceMs);
     const importKw = selected ? normalizeMeterValue(selected.import_kw) : null;
     const exportKw = selected ? normalizeMeterValue(selected.export_kw) : null;
-    const hasSample = Boolean(selected)
-      && Number.isFinite(importKw)
-      && Number.isFinite(exportKw);
+    const hasImportSample = Boolean(selected) && Number.isFinite(importKw);
+    const hasExportSample = Boolean(selected) && Number.isFinite(exportKw);
+    const hasSample = hasImportSample || hasExportSample;
     canonical.push({
       timestamp: slotTimestamp,
       raw_timestamp: hasSample ? selected.timestamp : null,
-      import_kw: hasSample ? importKw : null,
-      export_kw: hasSample ? exportKw : null,
+      import_kw: hasImportSample ? importKw : null,
+      export_kw: hasExportSample ? exportKw : null,
       gap_before: hasSample && !previousSelected,
     });
     previousSelected = hasSample;
@@ -1861,7 +1861,7 @@ export function energyIntervalsToStepPoints(intervals, valueField = "value_kw") 
   const rows = (Array.isArray(intervals) ? intervals : []).map((interval) => ({
     start: new Date(interval?.start).getTime(),
     end: new Date(interval?.end).getTime(),
-    value: Number(interval?.[valueField]),
+    value: normalizeMeterValue(interval?.[valueField]),
     resolution_seconds: Number(interval?.resolution_seconds),
     source: interval?.source || null,
   })).filter((interval) => Number.isFinite(interval.start)
@@ -1891,7 +1891,7 @@ export function energyIntervalsToCurvePoints(intervals, valueField = "value_kw")
   const rows = (Array.isArray(intervals) ? intervals : []).map((interval) => ({
     start: new Date(interval?.start).getTime(),
     end: new Date(interval?.end).getTime(),
-    value: Number(interval?.[valueField]),
+    value: normalizeMeterValue(interval?.[valueField]),
     resolution_seconds: Number(interval?.resolution_seconds),
     source: interval?.source || null,
   })).filter((interval) => Number.isFinite(interval.start)
@@ -13914,7 +13914,7 @@ class ElrakningPanel {
         : powerCanonicalPoints[key];
       powerDisplayPoints[key] = displaySource.map((point) => ({
         ...point,
-        value_kw: Number.isFinite(Number(point.value_kw)) ? Number(point.value_kw) : null,
+        value_kw: normalizeMeterValue(point.value_kw),
       }));
     }
     this._lastPowerChartRenderStats = {
@@ -13967,9 +13967,9 @@ class ElrakningPanel {
     );
     const meterMaximum = Math.max(
       0,
-      ...meterDisplayPoints.flatMap((point) => [Number(point.import_kw), Number(point.export_kw)])
+      ...meterDisplayPoints.flatMap((point) => [normalizeMeterValue(point.import_kw), normalizeMeterValue(point.export_kw)])
         .filter(Number.isFinite),
-      ...Object.values(powerDisplayPoints).flatMap((points) => points.map((point) => Number(point.value_kw)))
+      ...Object.values(powerDisplayPoints).flatMap((points) => points.map((point) => normalizeMeterValue(point.value_kw)))
         .filter(Number.isFinite),
     );
     const forecastMaximum = Math.max(
@@ -13978,8 +13978,8 @@ class ElrakningPanel {
         .filter(Number.isFinite),
     );
     const hasActualPowerData = meterDisplayPoints.some((point) => (
-      Number.isFinite(Number(point.import_kw)) || Number.isFinite(Number(point.export_kw))
-    )) || Object.values(powerDisplayPoints).some((points) => points.some((point) => Number.isFinite(Number(point.value_kw))));
+      Number.isFinite(normalizeMeterValue(point.import_kw)) || Number.isFinite(normalizeMeterValue(point.export_kw))
+    )) || Object.values(powerDisplayPoints).some((points) => points.some((point) => Number.isFinite(normalizeMeterValue(point.value_kw))));
     const hasForecastPowerData = Object.values(powerForecastPoints).some((points) => points.length > 0);
     const meterScale = buildMeterScale(meterMaximum, forecastMaximum, hasActualPowerData, hasForecastPowerData);
     const meterStep = meterScale.step;
@@ -14142,7 +14142,7 @@ class ElrakningPanel {
       visible: visibleLayers.import === true,
       input_point_count: meterPoints.length,
       display_point_count: meterDisplayPoints.length,
-      numeric_point_count: meterDisplayPoints.filter((point) => Number.isFinite(Number(point.import_kw))).length,
+      numeric_point_count: meterDisplayPoints.filter((point) => Number.isFinite(normalizeMeterValue(point.import_kw))).length,
       meter_maximum_kw: meterMaximum,
       meter_range_kw: meterRange,
       actual_paths: summarizeSvgPathMarkup(importActualLines),

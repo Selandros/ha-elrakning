@@ -122,6 +122,16 @@ assert.deepEqual(selectMeterRenderPoints(
   [{ timestamp: Date.parse("2026-10-04T00:00:00Z"), import_kw: null, export_kw: null }],
   canonicalRenderPoints,
 ), canonicalRenderPoints);
+const nullRawMeterPoints = Array.from({ length: 57 }, (_, index) => ({
+  timestamp: Date.parse("2026-10-04T00:00:00Z") + index * 15 * 60 * 1000,
+  import_kw: null,
+  export_kw: null,
+}));
+assert.deepEqual(selectMeterRenderPoints(nullRawMeterPoints, canonicalRenderPoints), canonicalRenderPoints);
+assert.equal(selectMeterRenderPoints(
+  [{ timestamp: Date.parse("2026-10-04T00:00:00Z"), import_kw: 0, export_kw: null }],
+  canonicalRenderPoints,
+)[0].import_kw, 0);
 const canonicalBuyCurve = [
   { timestamp: Date.parse("2026-10-04T00:00:00Z"), raw_timestamp: "2026-10-04T00:00:00Z", import_kw: 0.392, history_curve: true, source_resolution_seconds: 900 },
   { timestamp: Date.parse("2026-10-04T00:14:59.999Z"), raw_timestamp: "2026-10-04T00:14:59.999Z", import_kw: 0.74, history_curve: true, source_resolution_seconds: 900 },
@@ -1955,15 +1965,24 @@ assert.equal(normalizeMeterValue(""), null);
 assert.equal(normalizeMeterValue(0), 0);
 assert.equal(normalizeMeterValue("0"), 0);
 assert.equal(normalizeMeterValue(4.82), 4.82);
-const canonicalMissingSample = buildCanonicalMeterPoints(
+const canonicalDirectionalSample = buildCanonicalMeterPoints(
   [{ timestamp: "2026-08-23T05:00:00+02:00", import_kw: null, export_kw: 0 }],
   new Date("2026-08-23T00:00:00+02:00"),
   new Date("2026-08-24T00:00:00+02:00"),
 );
-const canonical0500Missing = canonicalMissingSample.find((point) => point.timestamp === tooltipSlot(5, 0));
-assert.equal(canonical0500Missing.import_kw, null);
-assert.equal(canonical0500Missing.export_kw, null);
-assert.equal(canonical0500Missing.raw_timestamp, null);
+const canonical0500Directional = canonicalDirectionalSample.find((point) => point.timestamp === tooltipSlot(5, 0));
+assert.equal(canonical0500Directional.import_kw, null);
+assert.equal(canonical0500Directional.export_kw, 0);
+assert.equal(canonical0500Directional.raw_timestamp, "2026-08-23T05:00:00+02:00");
+const canonicalImportOnlySample = buildCanonicalMeterPoints(
+  [{ timestamp: "2026-08-23T05:00:00+02:00", import_kw: 0.392, export_kw: null }],
+  new Date("2026-08-23T00:00:00+02:00"),
+  new Date("2026-08-24T00:00:00+02:00"),
+);
+const canonical0500ImportOnly = canonicalImportOnlySample.find((point) => point.timestamp === tooltipSlot(5, 0));
+assert.equal(canonical0500ImportOnly.import_kw, 0.392);
+assert.equal(canonical0500ImportOnly.export_kw, null);
+assert.equal(canonical0500ImportOnly.raw_timestamp, "2026-08-23T05:00:00+02:00");
 const canonicalZeroSample = buildCanonicalMeterPoints(
   [{ timestamp: "2026-08-23T05:00:00+02:00", import_kw: 0, export_kw: 0 }],
   new Date("2026-08-23T00:00:00+02:00"),

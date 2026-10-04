@@ -22,6 +22,8 @@ assert.equal(hourlyStep.length, 2);
 assert.equal(hourlyStep[0].value_kw, 2);
 assert.equal(hourlyStep[0].source_resolution_seconds, 3600);
 assert.equal(hourlyStep[0].history_interval_id, hourlyStep[1].history_interval_id);
+assert.deepEqual(energyIntervalsToStepPoints([{ ...hourlyIntervals[0], value_kw: null }]), []);
+assert.deepEqual(energyIntervalsToCurvePoints([{ ...hourlyIntervals[0], value_kw: null }]), []);
 const historicalSegments = buildThresholdClippedSegments(hourlyStep, "value_kw");
 assert.equal(historicalSegments.length, 1);
 assert.equal(historicalSegments[0].length, 2);
