@@ -155,11 +155,9 @@ export function buildProviderOnlyInvoiceEstimate(currentMonthCost, now = new Dat
 
 export function invoiceMonthDisplayValue(item) {
   if (!item || item.coverage === "missing") return null;
-  const candidates = item.current && item.coverage !== "complete"
-    ? [item.known_amount_gross_sek, item.estimated_total_sek]
-    : item.current
-      ? [item.estimated_total_sek, item.known_amount_gross_sek]
-      : [item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek];
+  const candidates = item.current
+    ? [item.estimated_total_sek, item.known_amount_gross_sek]
+    : [item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek];
   return candidates.map((value) => finiteCostNumber(value)).find((value) => value !== null) ?? null;
 }
 
@@ -247,6 +245,28 @@ export function buildCombinedMonthlyCostForecast(networkForecastSek, tradeProjec
   const trade = Number(tradeProjection?.estimated_cost_display_sek);
   if (!Number.isFinite(network) || !Number.isFinite(trade)) return null;
   return network + trade;
+}
+
+export function buildCostPresentationModel(estimate, providerState, now = new Date()) {
+  const tradeProjection = buildGreenelyMonthlyProjection(providerState, now);
+  const finite = (value) => finiteCostNumber(value);
+  const networkForecastSek = finite(estimate?.estimated_grid_month_total_sek);
+  const tradeForecastSek = finite(tradeProjection?.estimated_cost_display_sek);
+  const forecastTotalSek = buildCombinedMonthlyCostForecast(networkForecastSek, tradeProjection);
+  const providerMonthToDateCostSek = providerState?.analysis?.consumption_cost?.available === true
+    ? finite(providerState.analysis.consumption_cost.month_to_date_cost_sek)
+    : null;
+  const tradeInvoiceActualSek = finite(estimate?.trade?.total_so_far_sek);
+  return {
+    network_forecast_sek: networkForecastSek,
+    trade_forecast_sek: tradeForecastSek,
+    forecast_total_sek: forecastTotalSek,
+    trade_provider_mtd_sek: providerMonthToDateCostSek,
+    trade_invoice_actual_sek: tradeInvoiceActualSek,
+    trade_mtd_sek: tradeInvoiceActualSek ?? providerMonthToDateCostSek,
+    trade_mtd_label: tradeInvoiceActualSek !== null ? "Hittills" : providerMonthToDateCostSek !== null ? "Estimat hittills" : "Hittills",
+    trade_projection: tradeProjection,
+  };
 }
 
 export function billingHistoryHasEnergyEvidence(history) {
@@ -2454,23 +2474,22 @@ export function buildDailyCostSeries(dailyBreakdown, month, providerState = null
     const source = byDate.get(date) || {};
     const sourceActual = source.actual && typeof source.actual === "object" ? source.actual : null;
     const providerTrade = sourceActual && providerTradeByDate.has(date) ? providerTradeByDate.get(date) : null;
-    const actual = sourceActual && providerTrade !== null
-      ? {
-        ...sourceActual,
-        elhandel_sek: providerTrade,
-        total_variable_cost_sek: finite(sourceActual.elnat_variable_sek) === null
-          ? sourceActual.total_variable_cost_sek
-          : finite(sourceActual.elnat_variable_sek) + providerTrade,
-      }
-      : sourceActual;
-    const forecast = source.forecast && typeof source.forecast === "object" ? source.forecast : null;
+    const sourceForecast = source.forecast && typeof source.forecast === "object" ? source.forecast : null;
+    const hasProviderTradeEstimate = providerTrade !== null
+      && finite(sourceActual?.elhandel_sek) === null
+      && finite(sourceForecast?.elhandel_sek) === null;
+    const actual = sourceActual;
+    const forecast = sourceForecast;
     const actualImport = finite(actual?.import_kwh);
     const forecastImport = finite(forecast?.import_kwh);
     const importKwh = sum(actualImport, forecastImport) ?? actualImport ?? forecastImport;
-    const trade = sum(actual?.elhandel_sek, forecast?.elhandel_sek) ?? actual?.elhandel_sek ?? forecast?.elhandel_sek ?? null;
+    const trade = sum(actual?.elhandel_sek, forecast?.elhandel_sek) ?? actual?.elhandel_sek ?? forecast?.elhandel_sek ?? providerTrade ?? null;
     const grid = sum(actual?.elnat_variable_sek, forecast?.elnat_variable_sek) ?? actual?.elnat_variable_sek ?? forecast?.elnat_variable_sek ?? null;
-    const total = sum(actual?.total_variable_cost_sek, forecast?.total_variable_cost_sek) ?? actual?.total_variable_cost_sek ?? forecast?.total_variable_cost_sek ?? null;
-    const status = actual && forecast ? "actual_plus_forecast" : actual ? actual.status || "actual" : forecast ? "forecast" : "unavailable";
+    const totalBase = sum(actual?.total_variable_cost_sek, forecast?.total_variable_cost_sek) ?? actual?.total_variable_cost_sek ?? forecast?.total_variable_cost_sek ?? null;
+    const total = hasProviderTradeEstimate && finite(totalBase) !== null ? finite(totalBase) + providerTrade : totalBase;
+    const status = hasProviderTradeEstimate
+      ? actual && forecast ? "actual_plus_forecast_provider_estimate" : "actual_plus_provider_estimate"
+      : actual && forecast ? "actual_plus_forecast" : actual ? actual.status || "actual" : forecast ? "forecast" : "unavailable";
     return {
       date,
       day: index + 1,
@@ -2484,7 +2503,7 @@ export function buildDailyCostSeries(dailyBreakdown, month, providerState = null
       actual,
       forecast,
       reason: source.reason || (status === "unavailable" ? "daily_actual_or_forecast_missing" : null),
-      provenance: { actual: actual?.source || null, forecast: forecast?.source || null, method: actual && forecast ? "actual_to_date_plus_causal_forecast_remainder" : actual?.method || forecast?.method || null },
+      provenance: { actual: actual?.source || null, forecast: forecast?.source || null, provider_trade: hasProviderTradeEstimate ? "greenely_provider_analysis_estimate" : null, method: hasProviderTradeEstimate ? "network_actual_plus_provider_trade_estimate" : actual && forecast ? "actual_to_date_plus_causal_forecast_remainder" : actual?.method || forecast?.method || null },
     };
   });
   return { month: normalizedMonth, days_in_month: daysInMonth, days, available: days.some((day) => day.available), method: "canonical_daily_billing_breakdown" };
@@ -2500,7 +2519,7 @@ export function buildDailyCostTooltipFields(day) {
     { label: "Elnät rörlig", value: number(day?.elnat_variable_sek) },
     { label: "Total rörlig kostnad", value: number(day?.total_variable_cost_sek) },
     { label: "Snittpris", value: number(day?.average_price_ore_per_kwh, " öre/kWh") },
-    { label: "Status", value: day?.status === "actual_plus_forecast" ? "Faktiskt + prognos" : day?.status === "actual" ? "Faktiskt" : day?.status === "actual_to_date" ? "Faktiskt hittills" : day?.status === "forecast" ? "Prognos" : "Ej tillgängligt" },
+    { label: "Status", value: day?.status === "actual_plus_forecast_provider_estimate" ? "Faktiskt + prognos + handelsestimat" : day?.status === "actual_plus_provider_estimate" ? "Faktiskt + handelsestimat" : day?.status === "actual_plus_forecast" ? "Faktiskt + prognos" : day?.status === "actual" ? "Faktiskt" : day?.status === "actual_to_date" ? "Faktiskt hittills" : day?.status === "forecast" ? "Prognos" : "Ej tillgängligt" },
   ];
 }
 
@@ -2812,9 +2831,9 @@ export function buildInvoiceComparison(estimate, previousActual) {
   };
 }
 
-export function buildCostKpiComparisons(estimate, previousActual, checkpoints = []) {
+export function buildCostKpiComparisons(estimate, previousActual, checkpoints = [], presentationModel = null) {
   const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
-  const currentEstimated = finite(estimate?.estimated_month_total_sek);
+  const currentEstimated = finite(presentationModel?.forecast_total_sek ?? estimate?.estimated_month_total_sek);
   const previousInvoiceTotal = previousActual?.coverage !== "missing"
     ? finite(previousActual?.total_sek ?? previousActual?.known_amount_gross_sek)
     : null;
@@ -2849,7 +2868,7 @@ export function buildCostKpiComparisons(estimate, previousActual, checkpoints = 
   ];
 }
 
-export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
+export function buildInvoiceMonthHistory(estimate, invoiceSources = {}, presentationModel = null) {
   const finite = (value) => value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
   const months = new Set();
   if (estimate?.month) months.add(estimate.month);
@@ -2870,18 +2889,22 @@ export function buildInvoiceMonthHistory(estimate, invoiceSources = {}) {
   }
   return [...months].sort().reverse().slice(0, 12).map((month) => {
     if (month === estimate?.month) {
+      const totalSoFar = finite(estimate?.total_so_far_sek);
+      const networkSoFar = finite(estimate?.grid?.total_so_far_sek);
+      const estimatedTotal = finite(presentationModel?.forecast_total_sek ?? estimate?.estimated_month_total_sek);
+      const tradeActual = finite(estimate?.trade?.total_so_far_sek);
       return {
         month,
         current: true,
         coverage: estimate?.forecast_confidence === "complete_available_data" ? "complete" : "partial",
-        total_sek: Number.isFinite(Number(estimate?.total_so_far_sek)) ? Number(estimate.total_so_far_sek) : null,
-        known_amount_gross_sek: Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? Number(estimate.grid.total_so_far_sek) : null,
-        estimated_total_sek: Number.isFinite(Number(estimate?.estimated_month_total_sek)) ? Number(estimate.estimated_month_total_sek) : null,
-        trade_sek: Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? Number(estimate.trade.total_so_far_sek) : null,
-        grid_sek: Number.isFinite(Number(estimate?.grid?.total_so_far_sek)) ? Number(estimate.grid.total_so_far_sek) : null,
-        variable_actual_sek: Number.isFinite(Number(estimate?.grid?.variable_cost_sek)) ? Number(estimate.grid.variable_cost_sek) : null,
-        fixed_monthly_sek: Number.isFinite(Number(estimate?.grid?.fixed_fee_sek)) ? Number(estimate.grid.fixed_fee_sek) : null,
-        trade_invoice_actual_sek: Number.isFinite(Number(estimate?.trade?.total_so_far_sek)) ? Number(estimate.trade.total_so_far_sek) : null,
+        total_sek: totalSoFar,
+        known_amount_gross_sek: networkSoFar,
+        estimated_total_sek: estimatedTotal,
+        trade_sek: tradeActual,
+        grid_sek: networkSoFar,
+        variable_actual_sek: finite(estimate?.grid?.variable_cost_sek),
+        fixed_monthly_sek: finite(estimate?.grid?.fixed_fee_sek),
+        trade_invoice_actual_sek: tradeActual,
       };
     }
     const actual = buildPreviousMonthActual(invoiceSources, nextCalendarMonth(month));
@@ -2919,21 +2942,21 @@ export function buildCostReferenceComparisons(monthHistory, selectedMonth, selec
   const selectedRecord = selectedIndex >= 0 ? monthHistory[selectedIndex] : null;
   const selectedSignature = selectedRecord?.source_signature || null;
   const selectedIsCurrentEstimate = selectedRecord?.current === true
-    && Number.isFinite(Number(selectedRecord.estimated_total_sek));
+    && finiteCostNumber(selectedRecord.estimated_total_sek) !== null;
   const resolvedSelectedValue = selectedIsCurrentEstimate
-    ? Number(selectedRecord.estimated_total_sek)
+    ? finiteCostNumber(selectedRecord.estimated_total_sek)
     : selectedRecord?.coverage !== "missing"
       && selectedValue != null
       && selectedValue !== ""
-      && Number.isFinite(Number(selectedValue))
-      ? Number(selectedValue)
+      && finiteCostNumber(selectedValue) !== null
+      ? finiteCostNumber(selectedValue)
       : null;
   const comparable = (item) => item
     && item.coverage !== "missing"
     && item.tax_compatible !== false
-    && Number.isFinite(Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek))
+    && finiteCostNumber(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek) !== null
     && (!selectedSignature || item.source_signature === selectedSignature);
-  const valueOf = (item) => Number(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
+  const valueOf = (item) => finiteCostNumber(item.coverage === "complete" ? item.total_sek : item.known_amount_gross_sek);
   const baselineItems = history.filter(comparable);
   const activeCurrentValue = resolvedSelectedValue;
   const reference = (count) => {
@@ -11232,21 +11255,14 @@ class ElrakningPanel {
       this._renderInvoiceCardCosts();
       return;
     }
-    const tradeProjection = buildGreenelyMonthlyProjection(this._electricityProviderState, new Date());
-    const combinedForecast = buildCombinedMonthlyCostForecast(
-      estimate.estimated_grid_month_total_sek,
-      tradeProjection,
-    );
-    total.textContent = combinedForecast == null ? "–" : this._formatSek(combinedForecast);
+    const presentationModel = buildCostPresentationModel(estimate, this._electricityProviderState, new Date());
+    total.textContent = presentationModel.forecast_total_sek == null ? "–" : this._formatSek(presentationModel.forecast_total_sek);
     month.hidden = true;
     if (estimateStatus) estimateStatus.hidden = true;
     today.hidden = true;
     today.textContent = "";
-    const todayVariableCostSek = canonicalEstimate
-      ? finiteCostNumber(canonicalEstimate.rows.at(-1)?.total_variable_cost_sek)
-      : Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
-    today.hidden = !Number.isFinite(todayVariableCostSek);
-    today.textContent = today.hidden ? "" : `+${this._formatSek(todayVariableCostSek)} idag`;
+    today.hidden = true;
+    today.textContent = "";
     const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(
       billingHistory.invoice_sources || {
         trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
@@ -11257,19 +11273,20 @@ class ElrakningPanel {
     const availableMonths = buildInvoiceMonthHistory(estimate, billingHistory.invoice_sources || {
       trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
       grid: billingHistory.grid_invoices,
-    });
+    }, presentationModel);
     if (!availableMonths.some((item) => item.month === this._costSelectedMonth)) this._costSelectedMonth = estimate.month;
     const comparison = buildInvoiceComparison(estimate, previousActual);
     const costAnalysis = buildCostAnalysisSeries(estimate, previousActual);
     this._invoiceEstimateRaw = {
       ...estimate,
+      cost_presentation: presentationModel,
       current_estimate: estimate,
       daily_breakdown_by_month: Object.fromEntries(this._billingDailyByMonth),
       previous_month_actual: previousActual,
       month_history: buildInvoiceMonthHistory(estimate, billingHistory.invoice_sources || {
         trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
         grid: billingHistory.grid_invoices,
-      }),
+      }, presentationModel),
       comparison,
       cost_analysis: costAnalysis,
       provenance: buildInvoiceProvenance(estimate, { ...billingHistory, grid_price: applicableGridPrice }),
@@ -11349,7 +11366,7 @@ class ElrakningPanel {
         itemElement.setAttribute("role", "tab");
         itemElement.setAttribute("aria-selected", String(item.month === selectedMonth));
         const partial = item.coverage === "partial";
-        const estimated = item.current && Number.isFinite(valueForItem(item));
+        const estimated = item.current && item.estimated_total_sek != null && Number.isFinite(valueForItem(item));
         itemElement.className = `cost-history-bar-item${item.month === selectedMonth ? " selected" : ""}${estimated ? " estimated" : partial ? " partial" : item.coverage === "missing" ? " unavailable" : ""}`;
         const bar = document.createElement("div");
         bar.className = "cost-history-bar";
@@ -11371,7 +11388,9 @@ class ElrakningPanel {
         itemElement.append(label, bar, amount);
         return itemElement;
       }));
-      if (historyStatus) historyStatus.textContent = valuedHistory.length ? `${valuedHistory.length} månader med känd kostnad av ${monthHistory.length}` : "Ingen användbar månadsserie";
+      if (historyStatus) historyStatus.textContent = valuedHistory.length
+        ? `${valuedHistory.length} ${valuedHistory.length === 1 ? "månad" : "månader"} med känd kostnad av ${monthHistory.length}`
+        : "Ingen användbar månadsserie";
     }
     if (!estimate) {
       status.textContent = "";
@@ -11381,12 +11400,15 @@ class ElrakningPanel {
       summary.replaceChildren();
       return;
     }
-    const selectedCost = showingCurrent ? estimate.estimated_month_total_sek : selectedRecord?.coverage === "complete" ? selectedRecord.total_sek : selectedRecord?.known_amount_gross_sek;
+    const presentationModel = showingCurrent
+      ? estimate.cost_presentation || buildCostPresentationModel(estimate, this._electricityProviderState, new Date())
+      : null;
+    const selectedCost = showingCurrent ? presentationModel?.forecast_total_sek : selectedRecord?.coverage === "complete" ? selectedRecord.total_sek : selectedRecord?.known_amount_gross_sek;
     const comparisons = buildCostReferenceComparisons(monthHistory, selectedMonth, selectedCost);
-    const kpiComparisons = buildCostKpiComparisons(estimate, previous, estimate?.cost_comparison_checkpoints);
+    const kpiComparisons = buildCostKpiComparisons(estimate, previous, estimate?.cost_comparison_checkpoints, presentationModel);
     const currentRows = [
-      ["Beräknad månadskostnad", estimate.estimated_month_total_sek ?? (estimate.estimated_grid_month_total_sek != null ? `Nät ${this._formatSek(Number(estimate.estimated_grid_month_total_sek))}` : null)],
-      ["Kostnad hittills", estimate.total_so_far_sek ?? (estimate.estimate_status === "partial_missing_greenely_invoice" ? "Ej jämförbart" : null)],
+      ["Beräknad månadskostnad", showingCurrent ? presentationModel?.forecast_total_sek : estimate.estimated_month_total_sek],
+      ["Kostnad hittills", estimate.total_so_far_sek],
       ["Beräknat återstående", estimate.forecast_remaining_total_sek],
     ];
     status.textContent = showingCurrent && (estimate.forecast_confidence === "partial_data" || estimate.estimate_status === "partial_provider_trend" || estimate.estimate_status === "partial_missing_greenely_invoice") ? "Delvis underlag" : showingCurrent ? "Estimerad" : selectedRecord?.coverage === "complete" ? "Fakturerad" : "Delvis underlag";
@@ -11399,24 +11421,19 @@ class ElrakningPanel {
       const numericValue = finiteCostNumber(value);
       output.textContent = typeof value === "string" ? value : numericValue === null ? "–" : this._formatSek(numericValue);
       const comparison = kpiComparisons[index];
-      const bubble = document.createElement("span");
-      bubble.className = `cost-kpi-comparison${comparison.available ? ` ${comparison.direction}` : " unavailable"}`;
-      if (comparison.available) {
+      const comparisonValueAvailable = comparison.available && Number.isFinite(Number(comparison.difference_percent));
+      const bubble = comparisonValueAvailable ? document.createElement("span") : null;
+      if (bubble) {
+        bubble.className = `cost-kpi-comparison ${comparison.direction}`;
         const percent = Number(comparison.difference_percent);
-        if (!Number.isFinite(percent)) {
-          bubble.textContent = "Ej jämförbart";
-          bubble.classList.add("unavailable");
-        } else {
-          const sign = percent > 0 ? "+" : percent < 0 ? "−" : "";
-          bubble.textContent = `${sign}${this._formatNumber(Math.abs(percent))} %`;
-        }
-      } else {
-        bubble.textContent = "Ej jämförbart";
+        const sign = percent > 0 ? "+" : percent < 0 ? "−" : "";
+        bubble.textContent = `${sign}${this._formatNumber(Math.abs(percent))} %`;
+        bubble.title = comparison.reason || "Jämförelse mot föregående månad";
       }
-      bubble.title = comparison.reason || "Jämförelse mot föregående månad";
       const valueRow = document.createElement("div");
       valueRow.className = "cost-kpi-value-row";
-      valueRow.append(output, bubble);
+      valueRow.append(output);
+      if (bubble) valueRow.append(bubble);
       item.append(name, valueRow);
       return item;
     }));
@@ -11443,23 +11460,18 @@ class ElrakningPanel {
       item.append(label, value);
       return item;
     }));
-    const greenelyProjection = showingCurrent ? buildGreenelyMonthlyProjection(this._electricityProviderState, new Date()) : null;
     if (showingCurrent) {
-      const providerMonthToDateCost = this._electricityProviderState?.analysis?.consumption_cost?.available === true
-        ? this._electricityProviderState.analysis.consumption_cost.month_to_date_cost_sek
-        : null;
+      const providerMonthToDateCost = presentationModel?.trade_mtd_sek;
       const networkFixed = estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek ?? null;
       const networkVariable = estimate.grid?.variable_cost_sek ?? null;
-      const networkForecast = Number.isFinite(Number(estimate.estimated_grid_month_total_sek))
-        ? this._formatSek(Number(estimate.estimated_grid_month_total_sek)) : null;
+      const networkForecast = presentationModel?.network_forecast_sek;
       const importSoFar = Number.isFinite(Number(estimate.imported_kwh_so_far))
         ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null;
       const networkImportForecast = Number.isFinite(Number(estimate.forecast_import_kwh))
         ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null;
-      const tradeImportForecast = greenelyProjection
-        ? `${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh` : null;
-      const tradeCostForecast = greenelyProjection
-        ? this._formatSek(greenelyProjection.estimated_cost_display_sek) : null;
+      const tradeImportForecast = presentationModel?.trade_projection
+        ? `${this._formatNumber(presentationModel.trade_projection.estimated_kwh_display)} kWh` : null;
+      const tradeCostForecast = presentationModel?.trade_forecast_sek;
       const rows = [
         ["Nät", [
           ["Hittills", estimate.grid?.total_so_far_sek],
@@ -11467,7 +11479,7 @@ class ElrakningPanel {
           ["Rörlig", networkVariable],
         ]],
         ["Handel", [
-          ["Hittills", providerMonthToDateCost],
+          [presentationModel?.trade_mtd_label || "Hittills", providerMonthToDateCost],
           ["Fast", null],
           ["Rörlig", null],
         ]],
@@ -11550,13 +11562,14 @@ class ElrakningPanel {
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-cost-axis-day="${day}">${day}</span>`).join("")}</div>`;
     const barWidth = Math.max(3, (width - plotWithAxisGutter.left - plotWithAxisGutter.right) / Math.max(1, series.days_in_month) - 3);
+    const hasProviderTradeEstimate = series.days.some((day) => day.status === "actual_plus_provider_estimate" || day.status === "actual_plus_forecast_provider_estimate");
     const bars = series.days.map((day) => {
       const value = Number.isFinite(day.total_variable_cost_sek) ? day.total_variable_cost_sek : 0;
       const barHeight = value > 0 ? Math.max(2, height - plot.bottom - y(value)) : 2;
-      const className = day.status === "forecast" ? "cost-chart-bar cost-chart-bar-forecast" : day.status === "actual_plus_forecast" ? "cost-chart-bar cost-chart-bar-mixed" : day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
+      const className = day.status === "forecast" ? "cost-chart-bar cost-chart-bar-forecast" : day.status === "actual_plus_forecast" || day.status === "actual_plus_provider_estimate" || day.status === "actual_plus_forecast_provider_estimate" ? "cost-chart-bar cost-chart-bar-mixed" : day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
       return `<rect class="${className}" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plotWithAxisGutter.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
     }).join("");
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span><span><i class="cost-chart-legend-estimated"></i>Faktiskt + prognos</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span><span><i class="cost-chart-legend-forecast"></i>Prognos</span><span><i class="cost-chart-legend-estimated"></i>${hasProviderTradeEstimate ? "Faktiskt + handelsestimat" : "Faktiskt + prognos"}</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const axis = chart.querySelector(".chart-axis-overlay");
     const screenMatrix = svg.getScreenCTM?.();

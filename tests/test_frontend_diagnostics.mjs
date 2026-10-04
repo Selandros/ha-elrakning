@@ -154,7 +154,7 @@ assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrak
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costCardSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderCostCard()"), pickerPanelSource.indexOf("  _renderCostChart"));
-assert.match(costCardSource, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
+assert.match(costCardSource, /buildCostPresentationModel\(estimate, this\._electricityProviderState, new Date\(\)\)/);
 assert.match(costCardSource, /\["Import", \[[\s\S]*\["Handel prognos", tradeImportForecast\]/);
 assert.match(costCardSource, /\["Prognos", \[[\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(costCardSource, /value == null[\s\S]*?"–"/);
@@ -2287,14 +2287,14 @@ assert.match(panelSource, /@media \(max-width: 760px\) \{[\s\S]*\.invoice-estima
 assert.match(panelSource, /data-live-power-tile="battery"[\s\S]*data-invoice-estimate-card/);
 assert.match(panelSource, /class="live-power-title">Beräknad månadskostnad/);
 assert.match(panelSource, /class="live-power-title">Beräknad månadskostnad<\/span><span class="live-power-grid-meta invoice-estimate-month"[^>]* hidden/);
-assert.match(panelSource, /const combinedForecast = buildCombinedMonthlyCostForecast\(/);
-assert.match(panelSource, /total\.textContent = combinedForecast == null \? "–"/);
+assert.match(panelSource, /const presentationModel = buildCostPresentationModel\(/);
+assert.match(panelSource, /total\.textContent = presentationModel\.forecast_total_sek == null \? "–"/);
 assert.match(panelSource, /\.invoice-estimate-month \{[\s\S]*grid-row: auto;[\s\S]*text-align: right;/);
 assert.match(panelSource, /\.live-power-tile\.invoice-estimate-card \{[\s\S]*grid-template-rows: auto auto auto minmax\(0, auto\);/);
 assert.match(panelSource, /class="live-power-value" data-invoice-estimate-total/);
 assert.match(panelSource, /data-invoice-estimate-today/);
-assert.match(panelSource, /billingHistory\?\.invoice_estimate\?\.today\?\.variable_cost_sek/);
-assert.match(panelSource, /\+\$\{this\._formatSek\(todayVariableCostSek\)\} idag/);
+assert.match(panelSource, /today\.hidden = true/);
+assert.doesNotMatch(panelSource, /todayVariableCostSek/);
 assert.match(panelSource, /data-invoice-estimate-total/);
 assert.match(panelSource, /_formatInvoiceMonth\(estimate\.month\)\.split\(" "\)\[0\]/);
 assert.match(panelSource, /const invoicePeriod = invoicePeriodLabel\(latest\);/);

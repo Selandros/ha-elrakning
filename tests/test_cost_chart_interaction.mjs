@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -36,8 +36,28 @@ assert.equal(partialProviderHistory[0].coverage, "partial");
 assert.equal(partialProviderHistory[0].known_amount_gross_sek, 281.88);
 assert.equal(partialProviderHistory[0].variable_actual_sek, 40.63);
 assert.equal(partialProviderHistory[0].fixed_monthly_sek, 241.25);
-assert.equal(invoiceMonthDisplayValue({ current: true, coverage: "partial", known_amount_gross_sek: 281.88, estimated_total_sek: 0 }), 281.88);
+assert.equal(invoiceMonthDisplayValue({ current: true, coverage: "partial", known_amount_gross_sek: 281.88, estimated_total_sek: 0 }), 0);
 assert.equal(invoiceMonthDisplayValue({ current: true, coverage: "partial", known_amount_gross_sek: 281.88, estimated_total_sek: null }), 281.88);
+assert.equal(invoiceMonthDisplayValue({ current: true, coverage: "partial", known_amount_gross_sek: null, estimated_total_sek: null }), null);
+const forecastProviderState = {
+  provider: "greenely",
+  consumption: { month: "2026-10", month_to_date_kwh: 20 },
+  analysis: { consumption_cost: { schema: "greenely.consumption_cost.v1", available: true, month_to_date_cost_sek: 15.67741935483871 } },
+};
+const forecastPresentation = buildCostPresentationModel({ estimated_grid_month_total_sek: 1178.45, trade: { total_so_far_sek: null } }, forecastProviderState, new Date(2026, 9, 3, 12));
+assert.equal(forecastPresentation.trade_forecast_sek, 243);
+assert.equal(forecastPresentation.forecast_total_sek, 1421.45);
+assert.equal(forecastPresentation.trade_mtd_label, "Estimat hittills");
+assert.equal(forecastPresentation.trade_invoice_actual_sek, null);
+assert.equal(buildCostKpiComparisons({ estimated_month_total_sek: null }, { coverage: "missing" }, [], forecastPresentation)[0].difference_sek, null);
+assert.equal(buildCombinedMonthlyCostForecast(null, { estimated_cost_display_sek: 243 }), null);
+assert.equal(buildCombinedMonthlyCostForecast(1178.45, null), null);
+const forecastHistory = buildInvoiceMonthHistory({ month: "2026-10", total_so_far_sek: null, estimated_month_total_sek: null, trade: { total_so_far_sek: null }, grid: { total_so_far_sek: 326.22138 } }, {}, forecastPresentation);
+assert.equal(forecastHistory[0].estimated_total_sek, 1421.45);
+assert.equal(invoiceMonthDisplayValue(forecastHistory[0]), 1421.45);
+const partialHistoryWithoutForecast = buildInvoiceMonthHistory({ month: "2026-10", total_so_far_sek: null, estimated_month_total_sek: null, trade: { total_so_far_sek: null }, grid: { total_so_far_sek: 326.22138 } });
+assert.equal(partialHistoryWithoutForecast[0].estimated_total_sek, null);
+assert.equal(invoiceMonthDisplayValue(partialHistoryWithoutForecast[0]), 326.22138);
 assert.equal(buildCostMonthComparison({ month: "2026-08", coverage: "complete", total_sek: 160 }, { month: "2026-07", coverage: "complete", total_sek: 200 }).difference_sek, -40);
 const zeroInvoice = buildInvoiceMonthHistory({ month: "2026-09", total_so_far_sek: 10 }, {
   trade: [{ month: "Aug 2026", amount_due_sek: 0, vat_included: true, revision: 1, _invoice_key: "zero-trade" }],
@@ -283,6 +303,9 @@ const greenelyProviderState = {
 const providerDailyBars = buildDailyCostSeries([
   { date: "2026-10-01", actual: { import_kwh: 13.508, elnat_variable_sek: 19.18136, total_variable_cost_sek: 19.18136, status: "actual", source: "reconciled_grid_import" } },
 ], "2026-10", greenelyProviderState);
+assert.equal(providerDailyBars.days[0].status, "actual_plus_provider_estimate");
+assert.equal(providerDailyBars.days[0].actual.elhandel_sek, undefined);
+assert.equal(providerDailyBars.days[0].provenance.provider_trade, "greenely_provider_analysis_estimate");
 assert.ok(Math.abs(providerDailyBars.days[0].elhandel_sek - 7.42865) < 1e-9);
 assert.ok(Math.abs(providerDailyBars.days[0].total_variable_cost_sek - 26.61001) < 1e-9);
 assert.ok(Math.abs(providerDailyBars.days[0].average_price_ore_per_kwh - 196.994447735) < 1e-6);
@@ -349,7 +372,7 @@ assert.match(source, /itemElement\.append\(label, bar, amount\)/);
 assert.match(source, /const hasValue = item\.coverage !== "missing" && Number\.isFinite\(value\)/);
 assert.match(source, /const valueForItem = invoiceMonthDisplayValue/);
 assert.match(source, /export function invoiceMonthDisplayValue/);
-assert.match(source, /item\.known_amount_gross_sek, item\.estimated_total_sek/);
+assert.match(source, /item\.estimated_total_sek, item\.known_amount_gross_sek/);
 assert.match(source, /cost-history-bar-item\.estimated/);
 assert.match(source, /\.cost-history-bar \{ align-self: center;[\s\S]*background: var\(--el-solar-color, #77C2A1\);/);
 assert.match(source, /\.cost-history-bar \{ align-self: center;[\s\S]*max-width: 50px;[\s\S]*width: 100%; \}/);
@@ -361,8 +384,8 @@ assert.doesNotMatch(source, /data-cost-period|cost-subtitle|Översikt över kost
 const costKpiRender = source.slice(source.indexOf("const currentRows ="), source.indexOf("const series =", source.indexOf("const currentRows =")));
 assert.equal((costKpiRender.match(/\["(?:Beräknad månadskostnad|Kostnad hittills|Beräknat återstående)"/g) || []).length, 3);
 assert.match(source, /const currentRows = \[/);
-assert.match(source, /\["Beräknad månadskostnad", estimate\.estimated_month_total_sek \?\?/);
-assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek \?\?/);
+assert.match(source, /\["Beräknad månadskostnad", showingCurrent \? presentationModel\?\.forecast_total_sek/);
+assert.match(source, /\["Kostnad hittills", estimate\.total_so_far_sek\]/);
 assert.match(source, /\["Beräknat återstående", estimate\.forecast_remaining_total_sek\]/);
 assert.doesNotMatch(costKpiRender, /cost-kpi-secondary/);
 assert.doesNotMatch(source, /Prognos för hela innevarande månaden|Från månadens början till nu|Prognos från nu till månadens slut/);
@@ -370,11 +393,13 @@ assert.match(source, /cost-history-bar-item\.estimated/);
 assert.doesNotMatch(costKpiRender, /Mot förra månaden/);
 assert.doesNotMatch(source, /cost-detail-secondary/);
 assert.match(source, /\["Nät", \[[\s\S]*\["Hittills", estimate\.grid\?\.total_so_far_sek\][\s\S]*\["Fast", networkFixed\][\s\S]*\["Rörlig", networkVariable\]/);
-assert.match(source, /\["Handel", \[[\s\S]*\["Hittills", providerMonthToDateCost\][\s\S]*\["Fast", null\][\s\S]*\["Rörlig", null\]/);
+assert.match(source, /\["Handel", \[[\s\S]*\[presentationModel\?\.trade_mtd_label \|\| "Hittills", providerMonthToDateCost\][\s\S]*\["Fast", null\][\s\S]*\["Rörlig", null\]/);
 assert.match(source, /\["Import", \[[\s\S]*\["Hittills", importSoFar\][\s\S]*\["Nät prognos", networkImportForecast\][\s\S]*\["Handel prognos", tradeImportForecast\]/);
 assert.match(source, /\["Prognos", \[[\s\S]*\["Nät", networkForecast\][\s\S]*\["Handel", tradeCostForecast\]/);
-assert.match(source, /providerMonthToDateCost = this\._electricityProviderState\?\.analysis\?\.consumption_cost\?\.available === true/);
-assert.match(source, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
+assert.match(source, /providerMonthToDateCost = presentationModel\?\.trade_mtd_sek/);
+assert.match(source, /hasProviderTradeEstimate/);
+assert.match(costRender, /Faktiskt \+ handelsestimat/);
+assert.match(source, /buildCostPresentationModel\(estimate, this\._electricityProviderState, new Date\(\)\)/);
 assert.match(source, /value == null[\s\S]*?"–"/);
 assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);
 assert.match(source, /\["Total", selectedRecord\.total_sek\]/);
@@ -389,7 +414,7 @@ assert.doesNotMatch(costKpiComparisonCss, /border: 1px solid/);
 assert.match(source, /\.cost-kpi-comparison\.up \{[^}]*font-size: 16px;/);
 assert.match(source, /\.cost-kpi-comparison\.unavailable \{[^}]*font-size: 16px;/);
 assert.match(source, /buildCostKpiComparisons\(estimate, previous/);
-assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*valueRow\.className = "cost-kpi-value-row"[\s\S]*valueRow\.append\(output, bubble\)[\s\S]*item\.append\(name, valueRow\)/);
+assert.match(costKpiRender, /item\.className = "cost-kpi"[\s\S]*valueRow\.className = "cost-kpi-value-row"[\s\S]*valueRow\.append\(output\)[\s\S]*if \(bubble\) valueRow\.append\(bubble\)[\s\S]*item\.append\(name, valueRow\)/);
 assert.doesNotMatch(costKpiRender, /item\.append\(name, output, bubble\)/);
 assert.match(costKpiRender, /const percent = Number\(comparison\.difference_percent\)/);
 assert.doesNotMatch(costKpiRender, /this\._formatSek\(Math\.abs\(comparison\.difference_sek\)\)/);
