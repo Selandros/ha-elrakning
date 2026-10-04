@@ -32,9 +32,25 @@ export function buildFlatChartSignature(parts) {
 }
 
 export function resolveRenderablePricePeriods(response, previousSnapshot = null) {
-  const current = Array.isArray(response?.periods) ? response.periods : [];
+  const periodSources = [
+    response?.periods,
+    response?.price?.coordinator_state?.periods,
+    response?.coordinator_state?.periods,
+    response?.price_data?.periods,
+    response?.result?.periods,
+    response?.result?.price?.coordinator_state?.periods,
+  ];
+  const current = periodSources.find((periods) => Array.isArray(periods) && periods.length) || [];
   if (current.length) return current;
-  return Array.isArray(previousSnapshot?.periods) ? previousSnapshot.periods : [];
+  const previousSources = [
+    previousSnapshot?.periods,
+    previousSnapshot?.price?.coordinator_state?.periods,
+    previousSnapshot?.coordinator_state?.periods,
+    previousSnapshot?.price_data?.periods,
+    previousSnapshot?.result?.periods,
+    previousSnapshot?.result?.price?.coordinator_state?.periods,
+  ];
+  return previousSources.find((periods) => Array.isArray(periods) && periods.length) || [];
 }
 
 export function benchmarkEvidenceVisibleForSite(debugEnabled, evidenceAvailable, siteState) {

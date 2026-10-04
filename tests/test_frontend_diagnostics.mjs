@@ -64,6 +64,23 @@ assert.equal(buildFlatChartSignature(["hour", [96, ["first", 1]]]), "hour|96,fir
 const canonicalPeriods = [{ start: "2026-10-04T00:00:00+02:00", end: "2026-10-04T01:00:00+02:00", price: 1.5 }];
 assert.deepEqual(resolveRenderablePricePeriods({ error: "integration_unavailable", periods: canonicalPeriods }), canonicalPeriods);
 assert.deepEqual(resolveRenderablePricePeriods({ error: "integration_unavailable", periods: [] }, { periods: canonicalPeriods }), canonicalPeriods);
+const runtimeCanonicalPayload = {
+  error: "integration_unavailable",
+  price: {
+    coordinator_state: {
+      periods: [{
+        start: "2026-10-03T22:00:00+00:00",
+        end: "2026-10-03T22:15:00+00:00",
+        price: 0.2433,
+        customer_price: 0.2433,
+        price_known_at: "2026-10-04T14:47:19.989778+00:00",
+        price_source_generation_id: "np-runtime",
+      }],
+    },
+  },
+};
+assert.deepEqual(resolveRenderablePricePeriods(runtimeCanonicalPayload), runtimeCanonicalPayload.price.coordinator_state.periods);
+assert.deepEqual(resolveRenderablePricePeriods({ periods: [], error: "data_unavailable" }), []);
 assert.equal(benchmarkEvidenceVisibleForSite(true, true, { current_site: { site_id: "fiskvik", ella_binding_verified: false } }), false);
 assert.equal(benchmarkEvidenceVisibleForSite(true, true, { current_site: { site_id: "ella-site", ella_binding_verified: true } }), true);
 let queuedFrame = null;
