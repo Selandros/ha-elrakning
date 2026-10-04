@@ -11076,10 +11076,6 @@ class ElrakningPanel {
     if (consumptionCostAvailable && consumptionCost.average_price_ore_per_kwh != null) {
       rows.push(["Snittpris · providerdata", `${this._formatNumber(consumptionCost.average_price_ore_per_kwh)} öre/kWh`]);
     }
-    const greenelyProjection = buildGreenelyMonthlyProjection(response, new Date());
-    if (greenelyProjection) {
-      rows.push(["Greenely", `${this._formatNumber(greenelyProjection.estimated_cost_display_sek)} kr · ${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh`]);
-    }
     if (latestDistribution && analysis.cost_distribution?.unit_status === "percentage_verified") {
       const score = latestDistribution.energy_score;
       const categories = latestDistribution.categories || {};
