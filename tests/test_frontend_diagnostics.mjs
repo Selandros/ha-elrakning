@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyPriceDataResponse } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyPriceDataResponse, buildPriceChartInputSignature } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { resolveCanonicalMeterSeriesPoints, selectMeterRenderPoints } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
@@ -122,6 +122,22 @@ assert.deepEqual(selectMeterRenderPoints(
   [{ timestamp: Date.parse("2026-10-04T00:00:00Z"), import_kw: null, export_kw: null }],
   canonicalRenderPoints,
 ), canonicalRenderPoints);
+const chartCacheWithoutBuy = buildPriceChartInputSignature({
+  pricePeriods: [{ start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:15:00Z" }],
+  meterPoints: [{ timestamp: "2026-10-04T00:00:00Z", import_kw: null, export_kw: null }],
+  energyHistorySeries: { import: [] },
+});
+const chartCacheWithBuy = buildPriceChartInputSignature({
+  pricePeriods: [{ start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:15:00Z" }],
+  meterPoints: [{ timestamp: "2026-10-04T00:00:00Z", import_kw: null, export_kw: null }],
+  energyHistorySeries: { import: [{ start: "2026-10-04T00:00:00Z", end: "2026-10-04T00:15:00Z", value_kw: 0.392 }] },
+});
+assert.notEqual(chartCacheWithoutBuy, chartCacheWithBuy);
+assert.equal(chartCacheWithBuy, buildPriceChartInputSignature({
+  pricePeriods: [{ start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:15:00Z" }],
+  meterPoints: [{ timestamp: "2026-10-04T00:00:00Z", import_kw: null, export_kw: null }],
+  energyHistorySeries: { import: [{ start: "2026-10-04T00:00:00Z", end: "2026-10-04T00:15:00Z", value_kw: 0.392 }] },
+}));
 const unavailableState = applyPriceDataResponse(
   { periods: [], date: "2026-10-04", error: "missing_integration" },
   { periods: [], error: "missing_integration" },

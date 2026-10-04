@@ -31,6 +31,69 @@ export function buildFlatChartSignature(parts) {
   }).join("|");
 }
 
+export function buildPriceChartInputSignature({
+  siteId = null,
+  selectedDate = null,
+  mode = null,
+  widthBucket = 960,
+  selection = null,
+  pricePeriods = [],
+  layers = [],
+  meterPoints = [],
+  powerSeries = {},
+  forecastSeries = {},
+  energyHistorySeries = {},
+} = {}) {
+  const pointSignature = (points) => {
+    const values = Array.isArray(points) ? points : [];
+    const first = values[0];
+    const last = values.at(-1);
+    let finiteCount = 0;
+    let sum = 0;
+    let minimum = Infinity;
+    let maximum = -Infinity;
+    for (const point of values) {
+      for (const key of ["value_kw", "value", "import_kw", "export_kw"]) {
+        const value = normalizeMeterValue(point?.[key]);
+        if (!Number.isFinite(value)) continue;
+        finiteCount += 1;
+        sum += value;
+        minimum = Math.min(minimum, value);
+        maximum = Math.max(maximum, value);
+      }
+    }
+    const timestamp = (point) => point?.timestamp || point?.start || null;
+    const valueSummary = (point) => [
+      timestamp(point),
+      point?.value_kw ?? point?.value ?? null,
+      point?.import_kw ?? null,
+      point?.export_kw ?? null,
+    ];
+    return [
+      values.length,
+      valueSummary(first),
+      valueSummary(last),
+      finiteCount,
+      finiteCount ? sum : null,
+      finiteCount ? minimum : null,
+      finiteCount ? maximum : null,
+    ];
+  };
+  return buildFlatChartSignature([
+    siteId,
+    selectedDate,
+    mode,
+    widthBucket,
+    selection,
+    [pricePeriods.length || 0, pricePeriods[0]?.start || null, pricePeriods.at(-1)?.end || null],
+    layers,
+    pointSignature(meterPoints),
+    ...Object.keys(powerSeries).sort().map((key) => [key, pointSignature(powerSeries[key])]),
+    ...Object.keys(forecastSeries).sort().map((key) => [key, pointSignature(forecastSeries[key])]),
+    ...Object.keys(energyHistorySeries).sort().map((key) => [key, pointSignature(energyHistorySeries[key])]),
+  ]);
+}
+
 export function resolveRenderablePricePeriods(response, previousSnapshot = null) {
   const periodSources = [
     response?.periods,
@@ -13369,36 +13432,34 @@ class ElrakningPanel {
   }
 
   _getPriceChartRenderCacheKey() {
-    const pointSignature = (points) => {
-      const values = Array.isArray(points) ? points : [];
-      const first = values[0];
-      const last = values.at(-1);
-      const compact = (point) => point ? [point.timestamp || null, point.value_kw ?? point.value ?? null, point.import_kw ?? null, point.export_kw ?? null] : null;
-      return [values.length, compact(first), compact(last)];
-    };
-    const series = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [
-      key,
-      pointSignature(this._powerHistory?.series?.[key]?.points),
-    ]));
-    const forecast = Object.fromEntries(["solar", "consumption", "charging", "discharging", "import", "export"].map((key) => [
-      key,
-      pointSignature(this._powerHistory?.power_forecast?.series?.[key]?.forecast_points),
-    ]));
     const widthBucket = Math.max(1, Math.round((this._priceChartRenderedWidth || 960) / 16) * 16);
     const layers = this._effectiveChartLayerState();
-    return buildFlatChartSignature([
-      this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
-      this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
-      this._periodPickerState?.mode || null,
+    const powerSeries = Object.fromEntries(["solar", "consumption", "charging", "discharging"].map((key) => [
+      key,
+      this._powerHistory?.series?.[key]?.points,
+    ]));
+    const forecastSeries = Object.fromEntries(["solar", "consumption", "charging", "discharging", "import", "export"].map((key) => [
+      key,
+      this._powerHistory?.power_forecast?.series?.[key]?.forecast_points,
+    ]));
+    const energyHistorySeries = Object.fromEntries([
+      "import", "export", "solar", "consumption", "charging", "discharging",
+    ].map((key) => [key, this.priceSnapshot?.energy_history?.series?.[key]]));
+    return buildPriceChartInputSignature({
+      siteId: this._siteState?.site_id || this._siteState?.current_site?.site_id || null,
+      selectedDate: this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
+      mode: this._periodPickerState?.mode || null,
       widthBucket,
-      this._ellaSelection
+      selection: this._ellaSelection
         ? [this._ellaSelection.id, this._ellaSelection.start, this._ellaSelection.end, this._ellaSelection.revision]
         : null,
-      [this.priceData?.periods?.length || 0, this.priceData?.periods?.[0]?.start || null, this.priceData?.periods?.at(-1)?.end || null],
-      Object.values(layers),
-      ...Object.values(series),
-      ...Object.values(forecast),
-    ]);
+      pricePeriods: this.priceData?.periods,
+      layers: Object.values(layers),
+      meterPoints: this._meterPowerHistory?.points,
+      powerSeries,
+      forecastSeries,
+      energyHistorySeries,
+    });
   }
 
   buildMeterDisplaySegments(points, key) {

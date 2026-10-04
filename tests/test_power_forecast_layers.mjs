@@ -72,7 +72,7 @@ for (const series of Object.values(merged.power_forecast.series)) {
 assert.match(panel, /\$\{className\} chart-power-forecast/);
 assert.match(panel, /powerLinesFor\("solar", "chart-power-solar", visibleLayers\.solar\)[\s\S]*powerForecastLinesFor\("solar", "chart-power-solar", visibleLayers\.solar\)/);
 assert.match(panel, /powerLinesFor\("consumption", "chart-power-consumption", visibleLayers\.consumption\)[\s\S]*powerForecastLinesFor\("consumption", "chart-power-consumption", visibleLayers\.consumption\)/);
-assert.match(panel, /forecast = Object\.fromEntries\(\["solar", "consumption", "charging", "discharging", "import", "export"\]/);
+assert.match(panel, /const forecastSeries = Object\.fromEntries\(\["solar", "consumption", "charging", "discharging", "import", "export"\]/);
 assert.match(panel, /mergePowerHistoryEnrichmentState\(/);
 assert.match(panel, /schema: "ella_power_forecast\.v1"/);
 assert.match(panel, /chart-power-forecast\s*\{[\s\S]*?stroke-dasharray: 8 5;/);
