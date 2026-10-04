@@ -239,6 +239,16 @@ export function buildGreenelyMonthlyProjection(providerState, now = new Date()) 
   };
 }
 
+export function buildCombinedMonthlyCostForecast(networkForecastSek, tradeProjection) {
+  if (networkForecastSek == null || networkForecastSek === ""
+    || tradeProjection?.estimated_cost_display_sek == null
+    || tradeProjection.estimated_cost_display_sek === "") return null;
+  const network = Number(networkForecastSek);
+  const trade = Number(tradeProjection?.estimated_cost_display_sek);
+  if (!Number.isFinite(network) || !Number.isFinite(trade)) return null;
+  return network + trade;
+}
+
 export function billingHistoryHasEnergyEvidence(history) {
   if (!history || typeof history !== "object") return false;
   const hasPoints = (value) => Array.isArray(value) && value.length > 0;
@@ -3877,8 +3887,8 @@ class ElrakningPanel {
             <div class="live-power-debug-footer"><span class="live-power-copy-feedback" data-live-power-copy-feedback aria-live="polite"></span><button type="button" class="live-power-action" data-live-power-source="battery" hidden>Visa data</button></div>
           </article>
           <article class="live-power-tile invoice-estimate-card" data-invoice-estimate-card hidden aria-labelledby="invoice-estimate-title">
-            <h2 id="invoice-estimate-title" class="visually-hidden">Estimerad faktura</h2>
-            <div class="live-power-heading"><span class="live-power-title">Estimerad faktura</span><span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month></span></div>
+            <h2 id="invoice-estimate-title" class="visually-hidden">Beräknad månadskostnad</h2>
+            <div class="live-power-heading"><span class="live-power-title">Beräknad månadskostnad</span><span class="live-power-grid-meta invoice-estimate-month" data-invoice-estimate-month hidden></span></div>
             <strong class="live-power-value" data-invoice-estimate-total>–</strong>
             <span class="invoice-estimate-status" data-invoice-estimate-status hidden></span>
             <span class="invoice-estimate-today" data-invoice-estimate-today hidden></span>
@@ -11222,13 +11232,16 @@ class ElrakningPanel {
       this._renderInvoiceCardCosts();
       return;
     }
-    total.textContent = estimate.estimated_month_total_sek != null && Number.isFinite(Number(estimate.estimated_month_total_sek))
-      ? this._formatSek(Number(estimate.estimated_month_total_sek))
-      : estimate.estimated_grid_month_total_sek != null && Number.isFinite(Number(estimate.estimated_grid_month_total_sek))
-        ? `Nät ${this._formatSek(Number(estimate.estimated_grid_month_total_sek))}`
-        : estimate.grid?.total_so_far_sek != null && Number.isFinite(Number(estimate.grid.total_so_far_sek))
-          ? `Faktiskt ${this._formatSek(Number(estimate.grid.total_so_far_sek))}`
-        : "–";
+    const tradeProjection = buildGreenelyMonthlyProjection(this._electricityProviderState, new Date());
+    const combinedForecast = buildCombinedMonthlyCostForecast(
+      estimate.estimated_grid_month_total_sek,
+      tradeProjection,
+    );
+    total.textContent = combinedForecast == null ? "–" : this._formatSek(combinedForecast);
+    month.hidden = true;
+    if (estimateStatus) estimateStatus.hidden = true;
+    today.hidden = true;
+    today.textContent = "";
     const todayVariableCostSek = canonicalEstimate
       ? finiteCostNumber(canonicalEstimate.rows.at(-1)?.total_variable_cost_sek)
       : Number(billingHistory?.invoice_estimate?.today?.variable_cost_sek);
