@@ -31,6 +31,29 @@ export function buildFlatChartSignature(parts) {
   }).join("|");
 }
 
+export function buildCanonicalEnergyHistoryContextKey(siteId, siteContextGeneration, dateKey) {
+  return `${siteId || ""}:${siteContextGeneration || 0}:${dateKey || ""}`;
+}
+
+export function applyCanonicalEnergyHistoryResponse({
+  response,
+  expectedSiteId,
+  expectedDate,
+  activeSiteId,
+  siteContextCurrent = true,
+} = {}) {
+  if (response?.success !== true || !response?.energy_history || typeof response.energy_history !== "object") {
+    return { accepted: false, reason: "response_unavailable", energyHistory: null };
+  }
+  if (response.site_id !== expectedSiteId || response.date !== expectedDate) {
+    return { accepted: false, reason: "response_context", energyHistory: null };
+  }
+  if (activeSiteId !== expectedSiteId || siteContextCurrent !== true) {
+    return { accepted: false, reason: "active_context", energyHistory: null };
+  }
+  return { accepted: true, reason: null, energyHistory: response.energy_history };
+}
+
 export function buildMeterScale(actualMaximum, forecastMaximum, hasActualPowerData, hasForecastPowerData) {
   const actual = Number.isFinite(Number(actualMaximum)) ? Math.max(0, Number(actualMaximum)) : 0;
   const forecast = Number.isFinite(Number(forecastMaximum)) ? Math.max(0, Number(forecastMaximum)) : 0;
@@ -4082,6 +4105,10 @@ class ElrakningPanel {
     this._powerHistoryEnrichmentRequestToken = 0;
     this._powerHistoryContextKey = null;
     this._powerHistoryInFlight = new Map();
+    this._canonicalEnergyHistoryRequestToken = 0;
+    this._canonicalEnergyHistoryContextKey = null;
+    this._canonicalEnergyHistory = null;
+    this._canonicalEnergyHistoryInFlight = new Map();
     this._priceChartRenderCacheKey = null;
     this._lastPowerChartRenderStats = null;
     this._priceChartRenderPass = 0;
@@ -12324,6 +12351,8 @@ class ElrakningPanel {
     this._connectionReadyListener = null;
     this._backendHydrationPromise = null;
     this._powerHistoryInFlight.clear();
+    this._canonicalEnergyHistoryRequestToken += 1;
+    this._canonicalEnergyHistoryInFlight.clear();
     this._loadDiagnosticsState = null;
     this._diagnosticsBound = false;
     this._diagnosticsDomNodes = null;
@@ -12372,6 +12401,7 @@ class ElrakningPanel {
     const requestToken = ++this._priceDataRequestToken;
     const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed || new Date();
     const requestedDateKey = localDateKey(requestedDate);
+    void this.loadCanonicalEnergyHistory(requestedDate);
     const requestDate = (date) => {
       const request = { type: "elrakning/price_data" };
       if (date instanceof Date && Number.isFinite(date.getTime())) {
@@ -12385,7 +12415,11 @@ class ElrakningPanel {
       if (requestToken !== this._priceDataRequestToken) return;
       const applied = applyPriceDataResponse(this.priceData, response, requestedDateKey);
       if (!applied.accepted) return;
-      this.priceSnapshot = response;
+      const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
+      const contextKey = buildCanonicalEnergyHistoryContextKey(activeSiteId, this._siteContextGeneration, requestedDateKey);
+      this.priceSnapshot = this._canonicalEnergyHistoryContextKey === contextKey
+        ? { ...response, energy_history: this._canonicalEnergyHistory }
+        : response;
       this._priceBinding = response?.binding || response?.price?.binding
         || this._siteState?.global_bindings?.nord_pool || null;
       this._priceState = response?.source_state || null;
@@ -12428,6 +12462,87 @@ class ElrakningPanel {
     this.updatePriceSummary();
     if (this.host.querySelector(".price-chart")) this.renderPriceChart();
     this._renderInvoiceEstimateCard();
+  }
+
+  async loadCanonicalEnergyHistory(selectedDate = null) {
+    if (!this.hass?.callWS) return null;
+    const requestedDate = selectedDate instanceof Date ? selectedDate : this._periodPickerState?.confirmed || new Date();
+    const requestedDateKey = localDateKey(requestedDate);
+    if (!requestedDateKey) return null;
+    const requestHass = this.hass;
+    const siteState = await this._loadSiteIdentity();
+    const siteId = siteState?.site_id || siteState?.current_site?.site_id
+      || this._siteState?.site_id || this._siteState?.current_site?.site_id;
+    if (!siteId || requestHass !== this.hass) return null;
+    const siteContextGeneration = this._siteContextGeneration;
+    const contextKey = buildCanonicalEnergyHistoryContextKey(siteId, siteContextGeneration, requestedDateKey);
+    const existing = this._canonicalEnergyHistoryInFlight.get(contextKey);
+    if (existing) return existing;
+    const requestToken = ++this._canonicalEnergyHistoryRequestToken;
+    const started = performance.now();
+    this._recordPowerFlowDiagnostic("canonical_energy_history_request_start", {
+      requested_date: requestedDateKey,
+      site_id: siteId,
+      site_context_generation: siteContextGeneration,
+      active_canonical_history_jobs: this._canonicalEnergyHistoryInFlight.size + 1,
+    });
+    const request = (async () => {
+      try {
+        const response = await requestHass.callWS({
+          type: "elrakning/canonical_energy_history",
+          date: requestedDateKey,
+        });
+        const activeSiteId = this._siteState?.site_id || this._siteState?.current_site?.site_id || null;
+        const applied = applyCanonicalEnergyHistoryResponse({
+          response,
+          expectedSiteId: siteId,
+          expectedDate: requestedDateKey,
+          activeSiteId,
+          siteContextCurrent: requestToken === this._canonicalEnergyHistoryRequestToken
+            && siteContextGeneration === this._siteContextGeneration
+            && requestHass === this.hass,
+        });
+        if (!applied.accepted) {
+          this._recordPowerFlowDiagnostic("canonical_energy_history_stale_rejected", {
+            requested_date: requestedDateKey,
+            reason: applied.reason,
+            duration_ms: roundDiagnosticMs(performance.now() - started),
+          });
+          return null;
+        }
+        this._canonicalEnergyHistoryContextKey = contextKey;
+        this._canonicalEnergyHistory = applied.energyHistory;
+        this._recordPowerFlowDiagnostic("canonical_energy_history_response_received", {
+          requested_date: requestedDateKey,
+          duration_ms: roundDiagnosticMs(performance.now() - started),
+          accepted: true,
+        });
+        if (this.priceData?.date !== requestedDateKey) return applied.energyHistory;
+        this.priceSnapshot = { ...(this.priceSnapshot || {}), energy_history: applied.energyHistory };
+        const renderStarted = performance.now();
+        if (this.host.querySelector(".price-chart")) this.renderPriceChart();
+        this._recordPowerFlowDiagnostic("canonical_energy_history_merge", {
+          requested_date: requestedDateKey,
+          duration_ms: roundDiagnosticMs(performance.now() - renderStarted),
+          time_to_canonical_history_ms: roundDiagnosticMs(performance.now() - started),
+          ...(this._lastPowerChartRenderStats?.buy_render || {}),
+        });
+        return applied.energyHistory;
+      } catch (error) {
+        this._recordPowerFlowDiagnostic("canonical_energy_history_failed", {
+          requested_date: requestedDateKey,
+          ...sanitizeDiagnosticError(error),
+          duration_ms: roundDiagnosticMs(performance.now() - started),
+        });
+        return null;
+      } finally {
+        if (this._canonicalEnergyHistoryInFlight.get(contextKey) === request) {
+          this._canonicalEnergyHistoryInFlight.delete(contextKey);
+        }
+      }
+    })();
+    this._canonicalEnergyHistoryInFlight.set(contextKey, request);
+    return request;
   }
 
   async loadPricePlan(selectedDate = null) {

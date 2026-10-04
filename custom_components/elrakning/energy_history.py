@@ -422,11 +422,12 @@ def _load_long_term_statistics(hass: Any, statistic_ids: set[str], start: dateti
 
 
 async def async_build_energy_history(hass: Any, site_manager: Any, collector: Any,
-                                     start: datetime, end: datetime) -> dict[str, Any]:
+                                     start: datetime, end: datetime,
+                                     site_id: str | None = None) -> dict[str, Any]:
     """Build one site's read-only energy history for a price period range."""
     start = start.astimezone(timezone.utc)
     end = end.astimezone(timezone.utc)
-    site_id = site_manager.state.get("active_site_id") if site_manager else None
+    site_id = site_id or (site_manager.state.get("active_site_id") if site_manager else None)
     empty_series = {name: [] for name in ("import", "export", "solar", "consumption", "charging", "discharging")}
     if not site_id or collector is None:
         return {"site_id": site_id, "start": start.isoformat(), "end": end.isoformat(), "series": empty_series}

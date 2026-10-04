@@ -41,7 +41,7 @@ from .invoice import build_bucketed_actual_cost, build_canonical_cost_result, bu
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
-from .ella_site_state import build_site_state, resolve_timezone
+from .ella_site_state import build_site_state, local_day_slots, resolve_timezone
 from .ella_action_plan import build_action_plan
 from .ella_stage6 import build_stage6_state
 from .ella_ess_twin import build_ess_digital_twin, resolve_shared_ess_resource
@@ -59,6 +59,7 @@ from .site_identity import SiteIdentityManager
 from .site_health import async_site_attention_state
 
 COMMAND = f"{DOMAIN}/price_data"
+CANONICAL_ENERGY_HISTORY_COMMAND = f"{DOMAIN}/canonical_energy_history"
 GREENELY_TEST_COMMAND = f"{DOMAIN}/greenely_test"
 GREENELY_CONSUMPTION_TEST_COMMAND = f"{DOMAIN}/greenely_consumption_test"
 GREENELY_PARSE_LATEST_COMMAND = f"{DOMAIN}/greenely_parse_latest_test"
@@ -154,6 +155,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     if hass.data.get(f"{DOMAIN}_websocket_registered"):
         return
     websocket_api.async_register_command(hass, websocket_get_price_data)
+    websocket_api.async_register_command(hass, websocket_canonical_energy_history)
     websocket_api.async_register_command(hass, websocket_greenely_test)
     websocket_api.async_register_command(hass, websocket_greenely_consumption_test)
     websocket_api.async_register_command(hass, websocket_electricity_provider_state)
@@ -266,14 +268,73 @@ async def websocket_get_price_data(
     global_binding = site_manager.global_binding("nord_pool") if site_manager else None
     if global_binding:
         response["binding"] = global_binding
-    if data is not None and data.periods:
-        collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
-        response["energy_history"] = await async_build_energy_history(
-            hass, site_manager, collector,
-            min(period.start for period in data.periods),
-            max(period.end for period in data.periods),
-        )
     connection.send_result(msg["id"], response)
+
+
+async def _async_canonical_energy_history_for_date(hass, site_manager, collector, site_id: str,
+                                                    target_date: date, timezone_name: str) -> dict:
+    """Build one local-day canonical history response, sharing concurrent readers."""
+    slots = local_day_slots(target_date, timezone_name)
+    if not slots:
+        return {"site_id": site_id, "series": {}}
+    key = (site_id, target_date.isoformat(), timezone_name)
+    state = hass.data.setdefault(DOMAIN, {})
+    in_flight = state.setdefault("canonical_energy_history_inflight", {})
+    task = in_flight.get(key)
+    if task is None:
+        task = hass.async_create_task(async_build_energy_history(
+            hass, site_manager, collector, slots[0][0], slots[-1][1], site_id=site_id,
+        ))
+        in_flight[key] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done() and in_flight.get(key) is task:
+            in_flight.pop(key, None)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): CANONICAL_ENERGY_HISTORY_COMMAND,
+        vol.Required("date"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_canonical_energy_history(hass, connection, msg):
+    """Return canonical energy history for exactly one active-site local day."""
+    try:
+        target_date = date.fromisoformat(msg["date"])
+    except (TypeError, ValueError):
+        connection.send_result(msg["id"], {"success": False, "error": "invalid_date"})
+        return
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    site_id = getattr(site_manager, "state", {}).get("active_site_id") if site_manager else None
+    collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
+    if not site_id or collector is None:
+        connection.send_result(msg["id"], {"success": False, "error": "site_or_storage_unavailable"})
+        return
+    config = getattr(site_manager, "state", {}).get("site_configs", {}).get(site_id, {})
+    try:
+        timezone_name, _ = resolve_timezone(
+            (config.get("location") or {}).get("timezone"),
+            getattr(getattr(hass, "config", None), "time_zone", None),
+        )
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError):
+        connection.send_result(msg["id"], {"success": False, "error": "site_timezone_unavailable", "site_id": str(site_id)})
+        return
+    try:
+        history = await _async_canonical_energy_history_for_date(
+            hass, site_manager, collector, str(site_id), target_date, timezone_name,
+        )
+    except Exception:
+        connection.send_result(msg["id"], {"success": False, "error": "canonical_history_unavailable", "site_id": str(site_id)})
+        return
+    connection.send_result(msg["id"], {
+        "success": True,
+        "site_id": str(site_id),
+        "date": target_date.isoformat(),
+        "energy_history": history,
+    })
 
 
 @websocket_api.websocket_command(

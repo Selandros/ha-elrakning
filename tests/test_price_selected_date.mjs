@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildThresholdClippedSegments, energyHistoryIntervalValueAt, energyHistoryToMeterCurvePoints, energyHistoryToMeterStepPoints, energyIntervalsToCurvePoints, energyIntervalsToStepPoints, integrateEnergyIntervalsKwh, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalEnergyHistoryResponse, buildCanonicalEnergyHistoryContextKey, buildThresholdClippedSegments, energyHistoryIntervalValueAt, energyHistoryToMeterCurvePoints, energyHistoryToMeterStepPoints, energyIntervalsToCurvePoints, energyIntervalsToStepPoints, integrateEnergyIntervalsKwh, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const websocketSource = readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
@@ -95,14 +95,50 @@ assert.match(websocketSource, /target_date = date\.fromisoformat\(requested_date
 assert.match(websocketSource, /current_data = coordinator\.data/);
 assert.match(websocketSource, /current_data\.date == target_date/);
 assert.match(websocketSource, /await coordinator\.async_get_price_data\(target_date\)/);
-const priceHandler = websocketSource.slice(websocketSource.indexOf("async def websocket_get_price_data"), websocketSource.indexOf("async def websocket_greenely_test"));
+const priceHandler = websocketSource.slice(websocketSource.indexOf("async def websocket_get_price_data"), websocketSource.indexOf("async def _async_canonical_energy_history_for_date"));
 assert.doesNotMatch(priceHandler, /_site_is_configured\(hass\)/);
 assert.match(websocketSource, /site_manager\.global_binding\("nord_pool"\)/);
 assert.match(websocketSource, /else:\n\s+data = coordinator\.data/);
 
-assert.match(priceHandler, /response\["energy_history"\] = await async_build_energy_history/);
+assert.doesNotMatch(priceHandler, /async_build_energy_history/);
 assert.match(priceHandler, /global_binding\("nord_pool"\)/);
 assert.match(priceHandler, /response\["binding"\] = global_binding/);
+const canonicalHistoryHandler = websocketSource.slice(websocketSource.indexOf("async def websocket_canonical_energy_history"), websocketSource.indexOf("async def websocket_greenely_test"));
+assert.match(websocketSource, /CANONICAL_ENERGY_HISTORY_COMMAND = f"\{DOMAIN\}\/canonical_energy_history"/);
+assert.match(websocketSource, /local_day_slots\(target_date, timezone_name\)/);
+assert.match(canonicalHistoryHandler, /_async_canonical_energy_history_for_date/);
+assert.match(websocketSource, /asyncio\.shield\(task\)/);
+const loadPriceDataSource = panelSource.slice(panelSource.indexOf("  async loadPriceData("), panelSource.indexOf("  async loadPricePlan("));
+assert.ok(
+  loadPriceDataSource.indexOf("void this.loadCanonicalEnergyHistory(requestedDate);")
+    < loadPriceDataSource.indexOf("await this.hass.callWS(requestDate(requestedDate))"),
+  "canonical history must start without waiting for price data",
+);
+assert.match(loadPriceDataSource, /this\._canonicalEnergyHistoryContextKey === contextKey/);
+assert.match(panelSource, /async loadCanonicalEnergyHistory\(selectedDate = null\)/);
+assert.match(panelSource, /type: "elrakning\/canonical_energy_history"/);
+assert.match(panelSource, /canonical_energy_history_stale_rejected/);
+assert.match(panelSource, /canonical_energy_history_merge/);
+const canonicalHistory = { series: { import: [{ start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:15:00Z", value_kw: 0.392 }] } };
+assert.equal(buildCanonicalEnergyHistoryContextKey("site-a", 4, "2026-10-04"), "site-a:4:2026-10-04");
+assert.deepEqual(applyCanonicalEnergyHistoryResponse({
+  response: { success: true, site_id: "site-a", date: "2026-10-04", energy_history: canonicalHistory },
+  expectedSiteId: "site-a",
+  expectedDate: "2026-10-04",
+  activeSiteId: "site-a",
+}), { accepted: true, reason: null, energyHistory: canonicalHistory });
+assert.equal(applyCanonicalEnergyHistoryResponse({
+  response: { success: true, site_id: "site-a", date: "2026-10-03", energy_history: canonicalHistory },
+  expectedSiteId: "site-a",
+  expectedDate: "2026-10-04",
+  activeSiteId: "site-a",
+}).accepted, false);
+assert.equal(applyCanonicalEnergyHistoryResponse({
+  response: { success: true, site_id: "site-a", date: "2026-10-04", energy_history: canonicalHistory },
+  expectedSiteId: "site-a",
+  expectedDate: "2026-10-04",
+  activeSiteId: "site-b",
+}).accepted, false);
 assert.match(panelSource, /const energyHistory = this\.priceSnapshot\?\.energy_history \|\| \{\};/);
 assert.match(panelSource, /this\.loadPowerState\(loadHistory\),[\s\S]*this\.loadSolarEvidence\(\),/);
 assert.doesNotMatch(panelSource.slice(panelSource.indexOf("  async _refreshBackendState"), panelSource.indexOf("  async loadPriceData")), /this\.loadBillingHistory\(\),/);
