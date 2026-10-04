@@ -12195,6 +12195,9 @@ class ElrakningPanel {
       const responsePeriods = resolveRenderablePricePeriods(response);
       if (!shouldReplacePriceData(this.priceData, responsePeriods, requestedDateKey)) return;
       this.priceSnapshot = response;
+      this._priceBinding = response?.binding || response?.price?.binding
+        || this._siteState?.global_bindings?.nord_pool || null;
+      this._priceState = response?.source_state || null;
     } catch {
       return;
     }

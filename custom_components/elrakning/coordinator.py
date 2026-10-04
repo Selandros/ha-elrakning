@@ -118,21 +118,18 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         binding = self._site_binding
         if not binding:
             return PriceData(None, None, target_date, (), "site_unconfigured")
-        nord_pool_entries = self.hass.config_entries.async_entries(NORD_POOL_DOMAIN)
-        if not nord_pool_entries:
-            return PriceData(None, None, target_date, (), "missing_integration")
-        entry_id = binding.get("config_entry_id")
-        nord_pool_entry = next((entry for entry in nord_pool_entries if entry.entry_id == entry_id), None)
+        nord_pool_entry = self._resolve_bound_entry(binding)
         if nord_pool_entry is None:
-            return PriceData(None, None, target_date, (), "data_unavailable")
+            return PriceData(None, None, target_date, (), "missing_integration")
         area = binding.get("area")
         currency = binding.get("currency") or "SEK"
         if not area:
             return PriceData(None, currency, target_date, (), "data_unavailable")
+        service_domain = getattr(nord_pool_entry, "domain", None) or NORD_POOL_DOMAIN
 
         try:
             response = await self.hass.services.async_call(
-                NORD_POOL_DOMAIN,
+                service_domain,
                 "get_price_indices_for_date",
                 {
                     "config_entry": nord_pool_entry.entry_id,
@@ -164,6 +161,20 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
             except (ValueError, OSError):
                 _LOGGER.debug("Unable to persist canonical Nord Pool frame", exc_info=True)
         return data
+
+    def _resolve_bound_entry(self, binding: dict[str, Any]) -> ConfigEntry | None:
+        """Resolve the configured source entry without coupling it to site state."""
+        entry_id = binding.get("config_entry_id") if isinstance(binding, dict) else None
+        if not isinstance(entry_id, str) or not entry_id:
+            return None
+        config_entries = getattr(self.hass, "config_entries", None)
+        lookup = getattr(config_entries, "async_entry_for_id", None)
+        if callable(lookup):
+            entry = lookup(entry_id)
+            if entry is not None:
+                return entry
+        entries = config_entries.async_entries(NORD_POOL_DOMAIN) if config_entries else []
+        return next((entry for entry in entries if entry.entry_id == entry_id), None)
 
     def discovered_binding(self) -> dict[str, Any] | None:
         """Describe the currently discovered Nord Pool resource for first-site migration."""

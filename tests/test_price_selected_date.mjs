@@ -99,6 +99,8 @@ assert.match(websocketSource, /site_manager\.global_binding\("nord_pool"\)/);
 assert.match(websocketSource, /else:\n\s+data = coordinator\.data/);
 
 assert.match(priceHandler, /response\["energy_history"\] = await async_build_energy_history/);
+assert.match(priceHandler, /global_binding\("nord_pool"\)/);
+assert.match(priceHandler, /response\["binding"\] = global_binding/);
 assert.match(panelSource, /const energyHistory = this\.priceSnapshot\?\.energy_history \|\| \{\};/);
 assert.match(panelSource, /this\.loadPowerState\(loadHistory\),[\s\S]*this\.loadSolarEvidence\(\),/);
 assert.doesNotMatch(panelSource.slice(panelSource.indexOf("  async _refreshBackendState"), panelSource.indexOf("  async loadPriceData")), /this\.loadBillingHistory\(\),/);

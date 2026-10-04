@@ -285,6 +285,52 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(services.calls[-1][2]["config_entry"], "nord-entry")
         self.assertEqual(services.calls[-1][2]["date"], "2026-09-03")
 
+    async def test_global_price_binding_works_for_unconfigured_site(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        entry.domain = "nordpool"
+        services = _Services({"SE2": [{
+            "start": "2026-10-04T00:00:00+02:00",
+            "end": "2026-10-04T00:15:00+02:00",
+            "price": 264.2,
+        }]})
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        self.assertIsNone(result.error)
+        self.assertEqual(len(result.periods), 1)
+        self.assertEqual(services.calls[-1][0], "nordpool")
+
+    async def test_missing_or_stale_global_price_binding_fails_closed(self):
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [],
+                async_entry_for_id=lambda _entry_id: None,
+            ),
+            services=_Services({}),
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "stale-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        self.assertEqual(result.error, "missing_integration")
+        self.assertEqual(hass.services.calls, [])
+
     def test_binding_fingerprint_excludes_only_derived_fingerprint(self):
         binding = {"config_entry_id": "entry", "area": "SE2", "currency": "SEK"}
         fingerprint = SiteIdentityManager.binding_fingerprint(binding)

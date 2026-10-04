@@ -254,8 +254,11 @@ async def websocket_get_price_data(
         else:
             data = coordinator.data
     response = _serialize_price_data(hass, data)
+    site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+    global_binding = site_manager.global_binding("nord_pool") if site_manager else None
+    if global_binding:
+        response["binding"] = global_binding
     if data is not None and data.periods:
-        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
         collector = hass.data.get(DOMAIN, {}).get("canonical_collector")
         response["energy_history"] = await async_build_energy_history(
             hass, site_manager, collector,
