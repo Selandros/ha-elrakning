@@ -2525,6 +2525,15 @@ export function buildDailyCostSeries(dailyBreakdown, month, providerState = null
   return { month: normalizedMonth, days_in_month: daysInMonth, days, available: days.some((day) => day.available), method: "canonical_daily_billing_breakdown" };
 }
 
+export function buildTodayCostValue(dailyBreakdown, month, providerState = null, now = new Date()) {
+  const today = new Date(now).toLocaleDateString("sv-SE");
+  const series = buildDailyCostSeries(dailyBreakdown, month, providerState);
+  const day = series.days.find((item) => item.date === today);
+  return day?.available && Number.isFinite(day.total_variable_cost_sek)
+    ? day.total_variable_cost_sek
+    : null;
+}
+
 export function buildDailyCostTooltipFields(day) {
   const number = (value, suffix = "") => value == null || !Number.isFinite(Number(value))
     ? "–"
@@ -11256,10 +11265,14 @@ class ElrakningPanel {
     total.textContent = presentationModel.forecast_total_sek == null ? "–" : this._formatSek(presentationModel.forecast_total_sek);
     month.hidden = true;
     if (estimateStatus) estimateStatus.hidden = true;
-    today.hidden = true;
-    today.textContent = "";
-    today.hidden = true;
-    today.textContent = "";
+    const todayCost = buildTodayCostValue(
+      this._billingDailyByMonth.get(estimate.month) || [],
+      estimate.month,
+      this._electricityProviderState,
+      new Date(),
+    );
+    today.textContent = `Idag + ${todayCost == null ? "–" : this._formatSek(todayCost)}`;
+    today.hidden = false;
     const previousActual = billingHistory.previous_month_actual || buildPreviousMonthActual(
       billingHistory.invoice_sources || {
         trade: billingHistory.trade_invoices || this._electricityProviderState?.invoice_history,
