@@ -118,9 +118,12 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         binding = self._site_binding
         if not binding:
             return PriceData(None, None, target_date, (), "site_unconfigured")
+        config_entries = getattr(self.hass, "config_entries", None)
+        available_entries = config_entries.async_entries(NORD_POOL_DOMAIN) if config_entries else []
         nord_pool_entry = self._resolve_bound_entry(binding)
         if nord_pool_entry is None:
-            return PriceData(None, None, target_date, (), "missing_integration")
+            error = "missing_integration" if not available_entries else "data_unavailable"
+            return PriceData(None, None, target_date, (), error)
         area = binding.get("area")
         currency = binding.get("currency") or "SEK"
         if not area:

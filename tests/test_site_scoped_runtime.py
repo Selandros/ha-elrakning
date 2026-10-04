@@ -331,6 +331,11 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error, "missing_integration")
         self.assertEqual(hass.services.calls, [])
 
+        other_entry = _Entry("other-entry", {"areas": ["SE2"], "currency": "SEK"})
+        hass.config_entries.async_entries = lambda _domain: [other_entry]
+        result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        self.assertEqual(result.error, "data_unavailable")
+
     def test_binding_fingerprint_excludes_only_derived_fingerprint(self):
         binding = {"config_entry_id": "entry", "area": "SE2", "currency": "SEK"}
         fingerprint = SiteIdentityManager.binding_fingerprint(binding)
