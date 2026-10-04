@@ -321,9 +321,9 @@ const source = readFileSync(new URL("../custom_components/elrakning/frontend/elr
 const costRender = source.slice(source.indexOf("  _renderCostChart(chart, series)"), source.indexOf("  _bindCostCard()"));
 
 assert.match(costRender, /buildDailyCostTooltipFields\(point\)/);
+assert.match(costRender, /if \(!point \|\| !point\.available\) \{/);
 assert.doesNotMatch(costRender, /!series\.days\.some\(\(day\) => day\.available\)/);
-assert.match(costRender, /cost-chart-legend-actual.*Faktiskt/);
-assert.doesNotMatch(costRender, /Prognos|Faktiskt \+ handelsestimat/);
+assert.doesNotMatch(costRender, /cost-chart-legend|Faktiskt|Prognos|Faktiskt \+ handelsestimat/);
 assert.match(costRender, /series\.days\.filter\(\(day\) => day\.available\)\.map/);
 assert.match(costRender, /class="cost-chart-bar cost-chart-bar-actual"/);
 assert.doesNotMatch(costRender, /cost-chart-bar-(forecast|mixed)/);
@@ -334,7 +334,7 @@ assert.match(costRender, /title: `\$\{point\.day\} \$\{this\._formatInvoiceMonth
 assert.match(costRender, /fill="var\(--el-solar-color, #77C2A1\)"/);
 assert.match(source, /\.cost-chart-bar-actual \{ fill: var\(--el-solar-color, #77C2A1\);/);
 assert.doesNotMatch(source, /\.cost-chart-(estimated|forecast|previous|legend-estimated|legend-forecast|legend-previous|bar-forecast|bar-mixed|bar-unavailable)\s*\{/);
-assert.match(source, /\.cost-chart-legend i \{ background: var\(--el-solar-color, #77C2A1\);/);
+assert.doesNotMatch(source, /\.cost-chart-legend/);
 assert.match(costRender, /var\(--el-solar-color, #77C2A1\)/);
 assert.match(costRender, /Daglig rörlig kostnad över vald månad/);
 assert.match(costRender, /buildCostChartGeometry\(width, plotWithAxisGutter, series\.days_in_month\)/);
@@ -407,8 +407,6 @@ assert.match(source, /\["Import", \[[\s\S]*\["Hittills", importSoFar\][\s\S]*\["
 assert.match(source, /\["Prognos", \[[\s\S]*\["Nät", networkForecast\][\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(source, /providerMonthToDateCost = presentationModel\?\.trade_mtd_sek/);
 assert.match(source, /hasProviderTradeEstimate/);
-assert.match(costRender, /cost-chart-legend-actual.*Faktiskt/);
-assert.doesNotMatch(costRender, /Prognos|Faktiskt \+ handelsestimat/);
 assert.match(source, /buildCostPresentationModel\(estimate, this\._electricityProviderState, new Date\(\)\)/);
 assert.match(source, /value == null[\s\S]*?"–"/);
 assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);

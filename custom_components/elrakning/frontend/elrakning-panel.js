@@ -5586,9 +5586,6 @@ class ElrakningPanel {
         .cost-chart-gridline { stroke: var(--divider-color); stroke-width: 1; opacity: .45; }
         .cost-chart-actual { fill: none; stroke: var(--primary-color); stroke-width: 2.5; }
         .cost-chart-marker { fill: var(--primary-color); }
-        .cost-chart-legend { color: var(--secondary-text-color); display: flex; flex-wrap: wrap; font-size: var(--card-legend-size); gap: 4px 12px; margin-bottom: 2px; }
-        .cost-chart-legend span { align-items: center; display: inline-flex; gap: 4px; }
-        .cost-chart-legend i { background: var(--el-solar-color, #77C2A1); display: inline-block; height: 2px; width: 14px; }
         .cost-chart-bar-actual { fill: var(--el-solar-color, #77C2A1); opacity: .82; }
 
         .cost-comparison {
@@ -11556,7 +11553,7 @@ class ElrakningPanel {
       const barHeight = value > 0 ? Math.max(2, height - plot.bottom - y(value)) : 2;
       return `<rect class="cost-chart-bar cost-chart-bar-actual" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plotWithAxisGutter.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
     }).join("");
-    chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
+    chart.innerHTML = `<div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
     const axis = chart.querySelector(".chart-axis-overlay");
     const screenMatrix = svg.getScreenCTM?.();
@@ -11582,15 +11579,11 @@ class ElrakningPanel {
       }
       const day = 1 + ((pointer.viewX - plotWithAxisGutter.left) / Math.max(1, width - plotWithAxisGutter.left - plotWithAxisGutter.right)) * (series.days_in_month - 1);
       const point = nearest(day);
-      if (!point) {
+      if (!point || !point.available) {
         clear();
         return;
       }
       const fields = buildDailyCostTooltipFields(point).map((field) => ({ ...field, formatted: field.value }));
-      if (!point) {
-        clear();
-        return;
-      }
       const total = Number.isFinite(point.total_variable_cost_sek) ? Number(point.total_variable_cost_sek).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "–";
       renderSharedTooltip(tooltip, { title: `${point.day} ${this._formatInvoiceMonth(series.month || "").split(" ")[0]} - ${total}kr`, fields });
       tooltip.hidden = false;
