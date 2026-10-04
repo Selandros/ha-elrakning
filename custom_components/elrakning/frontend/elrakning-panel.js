@@ -13571,6 +13571,7 @@ class ElrakningPanel {
     const useHistoricalMeter = rawMeterPoints.length === 0 && historicalMeterPoints.length > 0;
     const meterPoints = useHistoricalMeter ? historicalMeterPoints : rawMeterPoints;
     this._meterTooltipPoints = meterPoints;
+    if (meterPoints.length && this._invoiceEstimateRaw) this._renderInvoiceEstimateCard();
     const meterCanonicalPoints = useHistoricalMeter
       ? meterPoints
       : this.buildCanonicalMeterPoints(meterPoints, dayStart, selectedDayEnd);

@@ -1873,6 +1873,7 @@ assert.match(panelSource, /Spotpris/);
 assert.match(panelSource, /if \(this\.host\.querySelector\("\.price-chart"\)\) this\.renderPriceChart\(\);\n    this\._renderInvoiceEstimateCard\(\);\n  }\n\n  _appendMeterPowerPoint/);
 assert.match(panelSource, /const todayMeterPoints = this\._meterTooltipPoints\?\.length\n      \? this\._meterTooltipPoints\n      : this\._meterPowerHistory\?\.points;/);
 assert.match(panelSource, /buildTodayCostFromMeterAndPrices\(\n      this\.priceData\?\.periods,\n      todayMeterPoints,/);
+assert.match(panelSource, /this\._meterTooltipPoints = meterPoints;\n    if \(meterPoints\.length && this\._invoiceEstimateRaw\) this\._renderInvoiceEstimateCard\(\);/);
 assert.match(panelSource, /elrakning\/electricity_provider_remove/);
 assert.match(panelSource, /await this\.loadPriceData\(\);/);
 assert.equal((panelSource.match(/this\._applyProviderState\(saved\);\n\s*await this\.loadPriceData\(\);/g) || []).length, 2);
