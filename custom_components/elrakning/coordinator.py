@@ -139,7 +139,7 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
                     "areas": [area],
                     "currency": currency,
                     "date": target_date.isoformat(),
-                    "resolution": "15",
+                    "resolution": 15,
                 },
                 blocking=True,
                 return_response=True,

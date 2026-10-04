@@ -311,6 +311,7 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.error)
         self.assertEqual(len(result.periods), 1)
         self.assertEqual(services.calls[-1][0], "nordpool")
+        self.assertEqual(services.calls[-1][2]["resolution"], 15)
 
     async def test_missing_or_stale_global_price_binding_fails_closed(self):
         hass = types.SimpleNamespace(
