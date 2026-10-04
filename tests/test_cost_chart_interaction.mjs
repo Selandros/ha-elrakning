@@ -364,9 +364,11 @@ assert.doesNotMatch(source, /Prognos för hela innevarande månaden|Från månad
 assert.match(source, /cost-history-bar-item\.estimated/);
 assert.doesNotMatch(costKpiRender, /Mot förra månaden/);
 assert.doesNotMatch(source, /cost-detail-secondary/);
-assert.match(source, /\["Elhandel", estimate\.trade\?\.total_so_far_sek\]/);
 assert.match(source, /\["Import", Number\.isFinite\(Number\(estimate\.imported_kwh_so_far\)\)/);
-assert.match(source, /\["Snittpris", Number\.isFinite\(Number\(estimate\.total_weighted_average_ore_per_kwh\)\)/);
+assert.match(source, /\["Handel prognos import", greenelyProjection \? `/);
+assert.match(source, /\["Handel prognos hela månaden", greenelyProjection \? this\._formatSek\(greenelyProjection\.estimated_cost_display_sek\)/);
+assert.match(source, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
+assert.match(source, /value == null[\s\S]*?"–"/);
 assert.match(source, /\["Elnät", selectedRecord\.grid_sek == null \? "Saknas"/);
 assert.match(source, /\["Total", selectedRecord\.total_sek\]/);
 assert.match(source, /\.cost-kpis \{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);

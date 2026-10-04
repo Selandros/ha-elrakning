@@ -11410,8 +11410,8 @@ class ElrakningPanel {
       item.append(label, value);
       return item;
     }));
+    const greenelyProjection = showingCurrent ? buildGreenelyMonthlyProjection(this._electricityProviderState, new Date()) : null;
     const rows = showingCurrent ? [
-      ["Elhandel", estimate.trade?.total_so_far_sek],
       ["Elnät", estimate.grid?.total_so_far_sek],
       ["Fast kostnad", Number.isFinite(Number(estimate.trade?.booked_fixed_fee_sek ?? estimate.trade?.accrued_fixed_fee_sek)) || Number.isFinite(Number(estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek)) ? (Number(estimate.trade?.booked_fixed_fee_sek ?? estimate.trade?.accrued_fixed_fee_sek) || 0) + (Number(estimate.grid?.booked_fixed_fee_sek ?? estimate.grid?.accrued_fixed_fee_sek) || 0) : null],
       ["Rörlig kostnad", Number.isFinite(Number(estimate.trade?.variable_cost_sek)) || Number.isFinite(Number(estimate.grid?.variable_cost_sek)) ? (Number(estimate.trade?.variable_cost_sek) || 0) + (Number(estimate.grid?.variable_cost_sek) || 0) : null],
@@ -11419,20 +11419,23 @@ class ElrakningPanel {
       ["Beräknad import hela månaden", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
       ["E.ON prognos import", Number.isFinite(Number(estimate.forecast_import_kwh)) ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null],
       ["E.ON nätprognos hela månaden", Number.isFinite(Number(estimate.estimated_grid_month_total_sek)) ? this._formatSek(Number(estimate.estimated_grid_month_total_sek)) : null],
-      ["Snittpris", Number.isFinite(Number(estimate.total_weighted_average_ore_per_kwh)) ? `${this._formatNumber(Number(estimate.total_weighted_average_ore_per_kwh))} öre/kWh` : null],
+      ["Handel prognos import", greenelyProjection ? `${this._formatNumber(greenelyProjection.estimated_kwh_display)} kWh` : null],
+      ["Handel prognos hela månaden", greenelyProjection ? this._formatSek(greenelyProjection.estimated_cost_display_sek) : null],
     ] : selectedRecord ? [
       ["Elhandel", selectedRecord.trade_sek == null ? "Saknas" : selectedRecord.trade_sek],
       ["Elnät", selectedRecord.grid_sek == null ? "Saknas" : selectedRecord.grid_sek],
       ["Känd kostnad", selectedRecord.known_amount_gross_sek],
       ["Total", selectedRecord.total_sek],
     ] : [];
-    summary.replaceChildren(...rows.filter(([, value]) => value != null && (typeof value !== "number" || Number.isFinite(value))).map(([label, value]) => {
+    summary.replaceChildren(...rows.map(([label, value]) => {
       const item = document.createElement("div");
       item.className = "cost-detail";
       const name = document.createElement("span");
       name.textContent = label;
       const output = document.createElement("strong");
-      output.textContent = typeof value === "string" ? value : this._formatSek(Number(value));
+      output.textContent = value == null || (typeof value === "number" && !Number.isFinite(value))
+        ? "–"
+        : typeof value === "string" ? value : this._formatSek(Number(value));
       item.append(name, output);
       return item;
     }));

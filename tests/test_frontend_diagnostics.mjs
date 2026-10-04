@@ -148,6 +148,11 @@ assert.equal(billingHistoryHasEnergyEvidence({ success: true, invoice_estimate: 
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker/);
 assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8"), /data-period-picker-mode="hour"[\s\S]*data-period-picker-mode="day"[\s\S]*data-period-picker-mode="month"[\s\S]*data-period-picker-mode="year"/);
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
+const costCardSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderCostCard()"), pickerPanelSource.indexOf("  _renderCostChart"));
+assert.match(costCardSource, /buildGreenelyMonthlyProjection\(this\._electricityProviderState, new Date\(\)\)/);
+assert.match(costCardSource, /\["Handel prognos import", greenelyProjection \? `/);
+assert.match(costCardSource, /\["Handel prognos hela månaden", greenelyProjection \? this\._formatSek\(greenelyProjection\.estimated_cost_display_sek\)/);
+assert.match(costCardSource, /value == null[\s\S]*?"–"/);
 assert.match(pickerPanelSource, /buildProviderOnlyInvoiceEstimate/);
 assert.match(pickerPanelSource, /Ej tillgängligt · Kostnadsdata saknas/);
 assert.match(pickerPanelSource, /\.card\.soc-card\[hidden\] \{[\s\S]*display: none/);
