@@ -19,7 +19,7 @@ from .const import NORD_POOL_DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 _NEXT_DAY_PREFETCH_START_HOUR = 14
-PRICE_SERVICE_TIMEOUT_SECONDS = 20
+PRICE_SERVICE_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True)

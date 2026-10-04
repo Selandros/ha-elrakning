@@ -2,7 +2,7 @@ import types
 import asyncio
 import unittest
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from tests._elrakning_test_bootstrap import install_elrakning_package_stub, install_homeassistant_stubs
 from tests._elrakning_test_bootstrap import install_optional_dependency_stubs
@@ -46,6 +46,18 @@ class _HangingServices:
         except asyncio.CancelledError:
             self.cancelled = True
             raise
+
+
+class _DelayedServices:
+    def __init__(self, response, delay):
+        self.response = response
+        self.delay = delay
+        self.calls = []
+
+    async def async_call(self, domain, service, data, **kwargs):
+        self.calls.append((domain, service, data, kwargs))
+        await asyncio.sleep(self.delay)
+        return self.response
 
 
 class _Store:
@@ -377,6 +389,69 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
             coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = previous_timeout
         self.assertEqual(result.error, "data_unavailable")
         self.assertTrue(services.cancelled)
+
+    async def test_real_nord_pool_map_shape_normalizes_96_quarter_hours(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        first_start = datetime(2026, 10, 3, 22, tzinfo=timezone.utc)
+        raw_periods = []
+        for index in range(96):
+            start = first_start + timedelta(minutes=15 * index)
+            raw_periods.append({
+                "start": start.isoformat(),
+                "end": (start + timedelta(minutes=15)).isoformat(),
+                "price": 194.64 if index == 0 else 518.93 if index == 44 else 64.43 if index == 95 else 200.0,
+            })
+        services = _Services({"SE2": raw_periods})
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        self.assertIsNone(result.error)
+        self.assertEqual(len(result.periods), 96)
+        self.assertAlmostEqual(result.periods[0].price, 0.19464)
+        self.assertAlmostEqual(result.periods[44].price, 0.51893)
+        self.assertAlmostEqual(result.periods[95].price, 0.06443)
+
+    async def test_slow_successful_price_service_is_not_discarded(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        services = _DelayedServices({"SE2": [{
+            "start": "2026-10-03T22:00:00+00:00",
+            "end": "2026-10-03T22:15:00+00:00",
+            "price": 194.64,
+        }]}, 0.02)
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._active_price_date = None
+        previous_timeout = coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS
+        coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = 0.05
+        try:
+            result = await coordinator._async_fetch_date(date(2026, 10, 4))
+        finally:
+            coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = previous_timeout
+        self.assertIsNone(result.error)
+        self.assertEqual(len(result.periods), 1)
 
     def test_binding_fingerprint_excludes_only_derived_fingerprint(self):
         binding = {"config_entry_id": "entry", "area": "SE2", "currency": "SEK"}
