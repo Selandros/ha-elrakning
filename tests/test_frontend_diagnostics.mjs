@@ -148,7 +148,7 @@ const canonicalBuyPathStats = summarizeSvgPathMarkup(canonicalBuyMarkup);
 assert.ok(canonicalBuyPathStats.path_count >= 1);
 assert.equal(canonicalBuyPathStats.path_count, canonicalBuyPathStats.nonempty_path_count);
 assert.ok(canonicalBuyPathStats.d_length > 0);
-assert.equal(buildMeterScale(0.784, 0, true, false).range, 1);
+assert.equal(buildMeterScale(0.784, 0, true, false).range, 10);
 assert.ok(buildMeterScale(10.1, 0, true, false).range > 10);
 const chartCacheWithoutBuy = buildPriceChartInputSignature({
   pricePeriods: [{ start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:15:00Z" }],
@@ -2626,19 +2626,12 @@ assert.match(panelSource, /const meterMaximum = Math\.max\(/);
 assert.match(panelSource, /const forecastMaximum = Math\.max\(/);
 assert.match(panelSource, /const hasActualPowerData = meterDisplayPoints\.some/);
 assert.match(panelSource, /const meterBase = hasActualPowerData/);
-const meterRangeForMaximum = (meterMaximum) => {
-  const meterBase = Math.max(1, meterMaximum);
-  const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
-  const meterNormalized = (meterBase / 4) / meterMagnitude;
-  const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;
-  const meterStep = meterStepFactor * meterMagnitude;
-  return Math.ceil(meterBase / meterStep) * meterStep;
-};
-assert.equal(meterRangeForMaximum(0.8), 1);
-assert.equal(meterRangeForMaximum(4.2), 6);
-assert.equal(meterRangeForMaximum(9.9), 10);
-assert.equal(meterRangeForMaximum(10), 10);
-assert.ok(meterRangeForMaximum(10.1) > 10);
+assert.match(panelSource, /\? Math\.max\(10, actual\)/);
+assert.equal(buildMeterScale(0.8, 0, true, false).range, 10);
+assert.equal(buildMeterScale(4.2, 0, true, false).range, 10);
+assert.equal(buildMeterScale(9.9, 0, true, false).range, 10);
+assert.equal(buildMeterScale(10, 0, true, false).range, 10);
+assert.ok(buildMeterScale(10.1, 0, true, false).range > 10);
 assert.match(panelSource, /const meterY = \(value\) => plot\.top \+ plotHeight - \(Math\.max\(0, Number\(value\) \|\| 0\) \/ meterRange\) \* plotHeight/);
 assert.match(panelSource, /source: useHistoricalMeter \? "canonical_energy_history" : "meter_history"/);
 assert.match(panelSource, /selector: "\.chart-meter-import-actual"/);

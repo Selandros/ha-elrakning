@@ -35,7 +35,7 @@ export function buildMeterScale(actualMaximum, forecastMaximum, hasActualPowerDa
   const actual = Number.isFinite(Number(actualMaximum)) ? Math.max(0, Number(actualMaximum)) : 0;
   const forecast = Number.isFinite(Number(forecastMaximum)) ? Math.max(0, Number(forecastMaximum)) : 0;
   const meterBase = hasActualPowerData
-    ? Math.max(1, actual)
+    ? Math.max(10, actual)
     : hasForecastPowerData
       ? Math.max(1, forecast)
       : 10;
