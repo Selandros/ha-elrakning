@@ -11290,9 +11290,12 @@ class ElrakningPanel {
     total.textContent = presentationModel.forecast_total_sek == null ? "–" : this._formatSek(presentationModel.forecast_total_sek);
     month.hidden = true;
     if (estimateStatus) estimateStatus.hidden = true;
+    const todayMeterPoints = this._meterTooltipPoints?.length
+      ? this._meterTooltipPoints
+      : this._meterPowerHistory?.points;
     const todayCostFromChart = buildTodayCostFromMeterAndPrices(
       this.priceData?.periods,
-      this._meterPowerHistory?.points,
+      todayMeterPoints,
       (period) => this._comparisonPrice(period),
       new Date(),
     );

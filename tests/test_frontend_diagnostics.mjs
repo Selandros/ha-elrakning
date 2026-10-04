@@ -1871,6 +1871,8 @@ assert.match(panelSource, /unit_status !== "unit_verified"/);
 assert.match(panelSource, /Kostnadsfördelning/);
 assert.match(panelSource, /Spotpris/);
 assert.match(panelSource, /if \(this\.host\.querySelector\("\.price-chart"\)\) this\.renderPriceChart\(\);\n    this\._renderInvoiceEstimateCard\(\);\n  }\n\n  _appendMeterPowerPoint/);
+assert.match(panelSource, /const todayMeterPoints = this\._meterTooltipPoints\?\.length\n      \? this\._meterTooltipPoints\n      : this\._meterPowerHistory\?\.points;/);
+assert.match(panelSource, /buildTodayCostFromMeterAndPrices\(\n      this\.priceData\?\.periods,\n      todayMeterPoints,/);
 assert.match(panelSource, /elrakning\/electricity_provider_remove/);
 assert.match(panelSource, /await this\.loadPriceData\(\);/);
 assert.equal((panelSource.match(/this\._applyProviderState\(saved\);\n\s*await this\.loadPriceData\(\);/g) || []).length, 2);
