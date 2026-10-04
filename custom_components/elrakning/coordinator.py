@@ -19,7 +19,8 @@ from .const import NORD_POOL_DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 _NEXT_DAY_PREFETCH_START_HOUR = 14
-PRICE_SERVICE_TIMEOUT_SECONDS = 60
+PRICE_SERVICE_TIMEOUT_SECONDS = 180
+PRICE_REQUEST_WAIT_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -90,14 +91,43 @@ class ElrakningCoordinator(DataUpdateCoordinator[PriceData]):
         if task is None or task.done():
             task = asyncio.create_task(self._async_fetch_date(target_date))
             fetch_tasks[target_date] = task
+            task.add_done_callback(lambda completed: self._finish_price_fetch(target_date, completed))
         try:
-            data = await asyncio.shield(task)
+            data = await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=PRICE_REQUEST_WAIT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            binding = self._site_binding or {}
+            return PriceData(
+                binding.get("area"),
+                binding.get("currency") or "SEK",
+                target_date,
+                (),
+                "data_pending",
+            )
         finally:
             if fetch_tasks.get(target_date) is task and task.done():
                 fetch_tasks.pop(target_date, None)
         if data.periods:
             self._cache_price_data(data)
         return data
+
+    def _finish_price_fetch(self, target_date: date, task: asyncio.Task) -> None:
+        """Cache a completed shared fetch and notify existing coordinator listeners."""
+        fetch_tasks = getattr(self, "_price_fetch_tasks", {})
+        if fetch_tasks.get(target_date) is task:
+            fetch_tasks.pop(target_date, None)
+        if task.cancelled():
+            return
+        try:
+            data = task.result()
+        except Exception:
+            return
+        if not data.periods:
+            return
+        self._cache_price_data(data)
+        self.async_set_updated_data(data)
 
     def _cache_price_data(self, data: PriceData) -> None:
         """Keep current-month periods available for billing without unbounded growth."""

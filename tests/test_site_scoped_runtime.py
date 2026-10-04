@@ -60,6 +60,16 @@ class _DelayedServices:
         return self.response
 
 
+class _DeferredServices:
+    def __init__(self):
+        self.calls = []
+        self.future = asyncio.get_running_loop().create_future()
+
+    async def async_call(self, domain, service, data, **kwargs):
+        self.calls.append((domain, service, data, kwargs))
+        return await self.future
+
+
 class _Store:
     def __init__(self, data=None):
         self.data = data
@@ -481,6 +491,48 @@ class SiteScopedRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(services.calls), 1)
         self.assertEqual([len(result.periods) for result in results], [1, 1])
+
+    async def test_slow_fetch_continues_after_request_wait_and_updates_cache(self):
+        entry = _Entry("nord-entry", {"areas": ["SE2"], "currency": "SEK"})
+        services = _DeferredServices()
+        hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(
+                async_entries=lambda _domain: [entry],
+                async_entry_for_id=lambda entry_id: entry if entry_id == "nord-entry" else None,
+            ),
+            services=services,
+        )
+        coordinator = object.__new__(ElrakningCoordinator)
+        coordinator.hass = hass
+        coordinator._site_binding = {
+            "config_entry_id": "nord-entry", "area": "SE2", "currency": "SEK",
+        }
+        coordinator._price_data_by_date = {}
+        coordinator._price_fetch_tasks = {}
+        coordinator._active_price_date = None
+        coordinator.async_set_updated_data = lambda _data: None
+        previous_wait = coordinator_module.PRICE_REQUEST_WAIT_SECONDS
+        previous_timeout = coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS
+        coordinator_module.PRICE_REQUEST_WAIT_SECONDS = 0.01
+        coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = 1
+        try:
+            result = await coordinator.async_get_price_data(date(2026, 10, 4))
+            self.assertEqual(result.error, "data_pending")
+            self.assertEqual(len(services.calls), 1)
+            services.future.set_result({"SE2": [{
+                "start": "2026-10-03T22:00:00+00:00",
+                "end": "2026-10-03T22:15:00+00:00",
+                "price": 194.64,
+            }]})
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            cached = await coordinator.async_get_price_data(date(2026, 10, 4))
+        finally:
+            coordinator_module.PRICE_REQUEST_WAIT_SECONDS = previous_wait
+            coordinator_module.PRICE_SERVICE_TIMEOUT_SECONDS = previous_timeout
+        self.assertIsNone(cached.error)
+        self.assertEqual(len(cached.periods), 1)
+        self.assertEqual(len(services.calls), 1)
 
     def test_binding_fingerprint_excludes_only_derived_fingerprint(self):
         binding = {"config_entry_id": "entry", "area": "SE2", "currency": "SEK"}
