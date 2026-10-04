@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { applyPriceDataResponse } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
@@ -94,6 +95,25 @@ assert.equal(shouldReplacePriceData(validPriceState, [], "2026-10-04"), false);
 assert.equal(shouldReplacePriceData(validPriceState, [], "2026-10-05"), true);
 assert.equal(shouldReplacePriceData({ date: "2026-10-04", periods: [] }, [], "2026-10-04"), true);
 assert.equal(shouldReplacePriceData(validPriceState, runtimeCanonicalPayload.price.coordinator_state.periods, "2026-10-04"), true);
+const unavailableState = applyPriceDataResponse(
+  { periods: [], date: "2026-10-04", error: "missing_integration" },
+  { periods: [], error: "missing_integration" },
+  "2026-10-04",
+).state;
+const recoveredState = applyPriceDataResponse(
+  unavailableState,
+  { error: "missing_integration", periods: runtimeCanonicalPayload.price.coordinator_state.periods },
+  "2026-10-04",
+).state;
+assert.equal(recoveredState.periods.length, 1);
+assert.equal(recoveredState.error, null);
+assert.equal(recoveredState.date, "2026-10-04");
+const preservedState = applyPriceDataResponse(
+  recoveredState,
+  { periods: [], error: "data_unavailable" },
+  "2026-10-04",
+).state;
+assert.deepEqual(preservedState, recoveredState);
 assert.equal(benchmarkEvidenceVisibleForSite(true, true, { current_site: { site_id: "fiskvik", ella_binding_verified: false } }), false);
 assert.equal(benchmarkEvidenceVisibleForSite(true, true, { current_site: { site_id: "ella-site", ella_binding_verified: true } }), true);
 let queuedFrame = null;
@@ -2825,7 +2845,8 @@ assert.match(panelSource, /addEventListener\?\.\("ready", this\._connectionReady
 assert.match(panelSource, /removeEventListener\("ready", this\._connectionReadyListener\)/);
 assert.match(panelSource, /state\.error === "meter_unavailable"/);
 assert.match(panelSource, /state\.error === "power_unavailable"/);
-assert.match(panelSource, /shouldReplacePriceData\(this\.priceData, responsePeriods, requestedDateKey\)/);
+assert.match(panelSource, /applyPriceDataResponse\(this\.priceData, response, requestedDateKey\)/);
+assert.match(panelSource, /this\.priceData\.periods\.length[\s\S]*this\.priceData\.date === requestedDateKey/);
 assert.match(panelSource, /this\.renderPriceChart\(\);\n\s*this\._persistChartPreferences\(\{ chart_layers: this\._chartLayerState\(\) \}\);/);
 assert.match(panelSource, /Array\.isArray\(current\.solar_entities\) \? \[\.\.\.current\.solar_entities\]/);
 assert.match(panelSource, /data-power-clear/);

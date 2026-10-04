@@ -60,6 +60,25 @@ export function shouldReplacePriceData(currentState, nextPeriods, requestedDateK
     && currentState.date === requestedDateKey);
 }
 
+export function applyPriceDataResponse(currentState, response, requestedDateKey) {
+  const periods = resolveRenderablePricePeriods(response);
+  if (!shouldReplacePriceData(currentState, periods, requestedDateKey)) {
+    return { accepted: false, periods, state: currentState };
+  }
+  return {
+    accepted: true,
+    periods,
+    state: {
+      source: "nord_pool",
+      mode: response?.mode || "spot_price",
+      adjustments: response?.adjustments || {},
+      periods,
+      error: periods.length ? null : response?.error || null,
+      date: requestedDateKey,
+    },
+  };
+}
+
 const PRICE_ERROR_MESSAGES = Object.freeze({
   site_unconfigured: "Prisdata kan inte visas ännu. Ingen prisbindning är konfigurerad för vald installation.",
   missing_integration: "Nord Pool-integrationen kunde inte hittas. Kontrollera Diagnostik för tekniska detaljer.",
@@ -12218,17 +12237,18 @@ class ElrakningPanel {
     try {
       response = await this.hass.callWS(requestDate(requestedDate));
       if (requestToken !== this._priceDataRequestToken) return;
-      const responsePeriods = resolveRenderablePricePeriods(response);
-      if (!shouldReplacePriceData(this.priceData, responsePeriods, requestedDateKey)) return;
+      const applied = applyPriceDataResponse(this.priceData, response, requestedDateKey);
+      if (!applied.accepted) return;
       this.priceSnapshot = response;
       this._priceBinding = response?.binding || response?.price?.binding
         || this._siteState?.global_bindings?.nord_pool || null;
       this._priceState = response?.source_state || null;
-      this._priceErrorDetails = response?.error ? {
+      this._priceErrorDetails = response?.error && !applied.periods.length ? {
         code: response.error,
         requested_date: requestedDateKey,
-        response_period_count: responsePeriods.length,
+        response_period_count: applied.periods.length,
       } : null;
+      this.priceData = applied.state;
     } catch (error) {
       const details = sanitizeDiagnosticError(error);
       this._priceErrorDetails = {
@@ -12236,6 +12256,12 @@ class ElrakningPanel {
         error_name: details.error_name,
         error_message: details.error_message,
       };
+      if (requestToken !== this._priceDataRequestToken) return;
+      if (Array.isArray(this.priceData?.periods)
+        && this.priceData.periods.length
+        && this.priceData.date === requestedDateKey) {
+        return;
+      }
       this.priceData = {
         source: "nord_pool",
         mode: "spot_price",
@@ -12251,14 +12277,6 @@ class ElrakningPanel {
       this._renderHourlyPriceChart();
       return;
     }
-    this.priceData = {
-      source: "nord_pool",
-      mode: this.priceSnapshot.mode || "spot_price",
-      adjustments: this.priceSnapshot.adjustments || {},
-      periods: responsePeriods,
-      error: this.priceSnapshot.error || null,
-      date: requestedDateKey,
-    };
     this._eonGridPrice = this.priceSnapshot.adjustments?.grid_price || null;
     this._updatePriceComparisonControls();
     this.updatePriceSummary();
