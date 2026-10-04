@@ -36,7 +36,7 @@ const past = new Date("2026-09-19T12:07:00+02:00");
 assert.deepEqual(selectPowerForecastPoints(source, { selectedDate: past, now }), []);
 
 for (const [key, className] of [
-  ["import", "chart-meter-import"],
+  ["import", "chart-meter-import chart-meter-import-forecast"],
   ["export", "chart-meter-export"],
   ["solar", "chart-power-solar"],
   ["consumption", "chart-power-consumption"],

@@ -31,6 +31,46 @@ export function buildFlatChartSignature(parts) {
   }).join("|");
 }
 
+export function buildMeterScale(actualMaximum, forecastMaximum, hasActualPowerData, hasForecastPowerData) {
+  const actual = Number.isFinite(Number(actualMaximum)) ? Math.max(0, Number(actualMaximum)) : 0;
+  const forecast = Number.isFinite(Number(forecastMaximum)) ? Math.max(0, Number(forecastMaximum)) : 0;
+  const meterBase = hasActualPowerData
+    ? Math.max(1, actual)
+    : hasForecastPowerData
+      ? Math.max(1, forecast)
+      : 10;
+  const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
+  const meterNormalized = (meterBase / 4) / meterMagnitude;
+  const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;
+  const meterStep = meterStepFactor * meterMagnitude;
+  return {
+    range: Math.ceil(meterBase / meterStep) * meterStep,
+    step: meterStep,
+  };
+}
+
+export function summarizeSvgPathMarkup(markup) {
+  const paths = [...String(markup || "").matchAll(/<path\b[^>]*\bd="([^"]*)"[^>]*>/g)].map((match) => match[1]);
+  return {
+    path_count: paths.length,
+    nonempty_path_count: paths.filter((path) => path.trim().length > 0).length,
+    d_length: paths.reduce((total, path) => total + path.length, 0),
+  };
+}
+
+export function buildMeterPathMarkup(points, key, className, x, meterY, buildSmoothPath) {
+  const color = chartSeriesColor(className);
+  const segments = buildThresholdClippedSegments(points, key).map((segment) => {
+    if (segment.length < 2) return "";
+    return `<path class="${className}" fill="none" stroke="${color}" d="${buildSmoothPath(segment, key, x, meterY)}" />`;
+  }).join("");
+  const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
+    if (!isChartPowerValue(from?.[key]) || !isChartPowerValue(to?.[key])) return "";
+    return `<path class="${className} chart-interpolated-line" fill="none" stroke="${color}" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
+  }).join("");
+  return `${segments}${interpolated}`;
+}
+
 export function buildPriceChartInputSignature({
   siteId = null,
   selectedDate = null,
@@ -4044,6 +4084,7 @@ class ElrakningPanel {
     this._powerHistoryInFlight = new Map();
     this._priceChartRenderCacheKey = null;
     this._lastPowerChartRenderStats = null;
+    this._priceChartRenderPass = 0;
     this._pricePlanRequestToken = 0;
     this._solarForecastEventUnsubscribePromise = null;
     this._loadForecastEventUnsubscribePromise = null;
@@ -10763,6 +10804,7 @@ class ElrakningPanel {
       energy: mode === "hour" ? { series, unit: "kW" } : { groups, unit: "kWh" },
       axes: mode === "hour" ? { price: { unit: "öre/kWh", side: "left" }, energy: { unit: "kW", side: "right" } } : { energy: { unit: "kWh", side: "left" }, price: { unit: "öre/kWh", side: "right" } },
       coverage,
+      render: { price_chart: this._lastPowerChartRenderStats || null },
       provenance: Object.fromEntries(Object.entries(sourceEntities).map(([key, entities]) => [key, { method: key === "buy" || key === "sell" ? (this._billingHistory?.integration_method || billingEnergySource.method || "canonical_meter_history") : "canonical_power_history", source_entities: entities }])),
       legend: {
         visible_series: visibleSeries,
@@ -13539,16 +13581,8 @@ class ElrakningPanel {
   }
 
   buildMeterDisplayMarkup(points, key, className, x, meterY) {
-    const color = chartSeriesColor(className);
-    const segments = this.buildMeterDisplaySegments(points, key).map((segment) => {
-      if (segment.length < 2) return "";
-      return `<path class="${className}" fill="none" stroke="${color}" d="${this.buildSmoothMeterPath(segment, key, x, meterY)}" />`;
-    }).join("");
-    const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
-      if (!isChartPowerValue(from?.[key]) || !isChartPowerValue(to?.[key])) return "";
-      return `<path class="${className} chart-interpolated-line" fill="none" stroke="${color}" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
-    }).join("");
-    return `${segments}${interpolated}`;
+    return buildMeterPathMarkup(points, key, className, x, meterY,
+      (segment, field, pointX, pointY) => this.buildSmoothMeterPath(segment, field, pointX, pointY));
   }
 
   buildForecastDisplayMarkup(points, key, className, x, meterY) {
@@ -13727,7 +13761,11 @@ class ElrakningPanel {
     const liveUpdate = options.liveUpdate === true;
     const renderCacheKey = this._getPriceChartRenderCacheKey();
     if (!liveUpdate && this._priceChartRenderCacheKey === renderCacheKey && chart.querySelector(".chart-svg")) {
-      this._lastPowerChartRenderStats = { ...(this._lastPowerChartRenderStats || {}), cache_hit: true };
+      this._lastPowerChartRenderStats = {
+        ...(this._lastPowerChartRenderStats || {}),
+        cache_hit: true,
+        render_pass: this._priceChartRenderPass,
+      };
       return;
     }
 
@@ -13943,16 +13981,9 @@ class ElrakningPanel {
       Number.isFinite(Number(point.import_kw)) || Number.isFinite(Number(point.export_kw))
     )) || Object.values(powerDisplayPoints).some((points) => points.some((point) => Number.isFinite(Number(point.value_kw))));
     const hasForecastPowerData = Object.values(powerForecastPoints).some((points) => points.length > 0);
-    const meterBase = hasActualPowerData
-      ? Math.max(10, meterMaximum)
-      : hasForecastPowerData
-        ? Math.max(1, forecastMaximum)
-        : 10;
-    const meterMagnitude = 10 ** Math.floor(Math.log10(meterBase / 4));
-    const meterNormalized = (meterBase / 4) / meterMagnitude;
-    const meterStepFactor = meterNormalized <= 1 ? 1 : meterNormalized <= 2 ? 2 : meterNormalized <= 5 ? 5 : 10;
-    const meterStep = meterStepFactor * meterMagnitude;
-    const meterRange = Math.ceil(meterBase / meterStep) * meterStep;
+    const meterScale = buildMeterScale(meterMaximum, forecastMaximum, hasActualPowerData, hasForecastPowerData);
+    const meterStep = meterScale.step;
+    const meterRange = meterScale.range;
     const meterY = (value) => plot.top + plotHeight - (Math.max(0, Number(value) || 0) / meterRange) * plotHeight;
     const meterLinesFor = (key, className, visible) => visible
       ? this.buildMeterDisplayMarkup(meterDisplayPoints, key, className, x, meterY)
@@ -13972,10 +14003,12 @@ class ElrakningPanel {
     for (const key of ["solar", "consumption", "charging", "discharging"]) {
       powerDisplayGeometry[key] = this.buildMeterDisplayGeometry(powerDisplayPoints[key] || [], "value_kw", x, meterY);
     }
+    const importActualLines = meterLinesFor("import_kw", "chart-meter-import chart-meter-import-actual", visibleLayers.import);
+    const importForecastLines = powerForecastLinesFor("import", "chart-meter-import chart-meter-import-forecast", visibleLayers.import);
     const meterLines = [
-      meterLinesFor("import_kw", "chart-meter-import", visibleLayers.import),
+      importActualLines,
       meterLinesFor("export_kw", "chart-meter-export", visibleLayers.export),
-      powerForecastLinesFor("import", "chart-meter-import", visibleLayers.import),
+      importForecastLines,
       powerForecastLinesFor("export", "chart-meter-export", visibleLayers.export),
       powerLinesFor("solar", "chart-power-solar", visibleLayers.solar),
       powerLinesFor("consumption", "chart-power-consumption", visibleLayers.consumption),
@@ -14104,6 +14137,32 @@ class ElrakningPanel {
       areas: meterAreas,
       lines: meterLines,
     };
+    const buyRenderStats = {
+      source: useHistoricalMeter ? "canonical_energy_history" : "meter_history",
+      visible: visibleLayers.import === true,
+      input_point_count: meterPoints.length,
+      display_point_count: meterDisplayPoints.length,
+      numeric_point_count: meterDisplayPoints.filter((point) => Number.isFinite(Number(point.import_kw))).length,
+      meter_maximum_kw: meterMaximum,
+      meter_range_kw: meterRange,
+      actual_paths: summarizeSvgPathMarkup(importActualLines),
+      forecast_paths: summarizeSvgPathMarkup(importForecastLines),
+      selector: ".chart-meter-import-actual",
+    };
+    const finalizeRenderStats = (svg) => {
+      const paths = [...svg.querySelectorAll(".chart-meter-import-actual")];
+      this._lastPowerChartRenderStats = {
+        ...(this._lastPowerChartRenderStats || {}),
+        cache_hit: false,
+        render_pass: ++this._priceChartRenderPass,
+        buy_render: {
+          ...buyRenderStats,
+          dom_path_count: paths.length,
+          dom_nonempty_path_count: paths.filter((path) => (path.getAttribute("d") || "").trim().length > 0).length,
+          dom_d_length: paths.reduce((total, path) => total + (path.getAttribute("d") || "").length, 0),
+        },
+      };
+    };
     const existingSvg = liveUpdate ? chart.querySelector(".chart-svg") : null;
     if (existingSvg
       && existingSvg.querySelector('[data-price-dynamic="grid"]')
@@ -14115,6 +14174,7 @@ class ElrakningPanel {
       }
       const overlay = chart.querySelector(".chart-axis-overlay");
       if (overlay) overlay.outerHTML = axisOverlayMarkup;
+      finalizeRenderStats(existingSvg);
       this._priceChartLiveSignature = this._getPriceChartLiveSignature();
       this._priceChartRenderCacheKey = renderCacheKey;
       return;
@@ -14128,6 +14188,7 @@ class ElrakningPanel {
       ${visibleLayers.average ? `<line class="chart-average" stroke="${chartColor("priceNormal")}" x1="${plot.left}" y1="${y(average)}" x2="${width - plot.right}" y2="${y(average)}" />` : ""}
       <g class="chart-hover-markers" aria-hidden="true"></g>
     </svg>${axisOverlayMarkup}<div class="chart-tooltip" hidden></div>`;
+    finalizeRenderStats(chart.querySelector(".chart-svg"));
     this.bindChartTooltips();
     this._priceChartLiveSignature = this._getPriceChartLiveSignature();
     this._priceChartRenderCacheKey = renderCacheKey;

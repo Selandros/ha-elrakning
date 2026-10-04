@@ -1,7 +1,7 @@
 {
   "domain": "elrakning",
   "name": "Elräkning",
-  "version": "0.0.1053",
+  "version": "0.0.1054",
   "documentation": "https://github.com/Selandros/ha-elrakning",
   "issue_tracker": "https://github.com/Selandros/ha-elrakning/issues",
   "codeowners": ["@Selandros"],
