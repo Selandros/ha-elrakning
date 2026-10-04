@@ -5585,20 +5585,11 @@ class ElrakningPanel {
 
         .cost-chart-gridline { stroke: var(--divider-color); stroke-width: 1; opacity: .45; }
         .cost-chart-actual { fill: none; stroke: var(--primary-color); stroke-width: 2.5; }
-        .cost-chart-estimated { fill: none; stroke: var(--primary-color); stroke-dasharray: 3 4; opacity: .58; stroke-width: 2; }
-        .cost-chart-forecast { fill: none; stroke: var(--secondary-text-color); stroke-dasharray: 5 4; stroke-width: 2; }
-        .cost-chart-previous { fill: none; stroke: var(--neutral-color, #8590A6); opacity: .55; stroke-width: 1.5; }
         .cost-chart-marker { fill: var(--primary-color); }
         .cost-chart-legend { color: var(--secondary-text-color); display: flex; flex-wrap: wrap; font-size: var(--card-legend-size); gap: 4px 12px; margin-bottom: 2px; }
         .cost-chart-legend span { align-items: center; display: inline-flex; gap: 4px; }
         .cost-chart-legend i { background: var(--el-solar-color, #77C2A1); display: inline-block; height: 2px; width: 14px; }
-        .cost-chart-legend-estimated { opacity: .58; }
-        .cost-chart-legend-forecast { background: var(--secondary-text-color) !important; }
-        .cost-chart-legend-previous { background: var(--neutral-color, #8590A6) !important; opacity: .55; }
         .cost-chart-bar-actual { fill: var(--el-solar-color, #77C2A1); opacity: .82; }
-        .cost-chart-bar-forecast { fill: var(--secondary-text-color); opacity: .72; }
-        .cost-chart-bar-mixed { fill: var(--el-solar-color, #77C2A1); opacity: .58; stroke: var(--secondary-text-color); stroke-dasharray: 3 2; stroke-width: 1.5; }
-        .cost-chart-bar-unavailable { fill: var(--divider-color); opacity: .8; }
 
         .cost-comparison {
           display: grid;
@@ -11560,11 +11551,10 @@ class ElrakningPanel {
     }).join("");
     const axisOverlay = `<div class="chart-axis-overlay">${[0, .5, 1].map((ratio) => `<span class="chart-axis-overlay-label chart-axis-overlay-y-left" style="top:${(y(max * ratio) / height) * 100}%">${this._formatNumber(max * ratio)} kr</span>`).join("")}${[1, Math.ceil(series.days_in_month / 2), series.days_in_month].map((day) => `<span class="chart-axis-overlay-label chart-axis-overlay-x" data-cost-axis-day="${day}">${day}</span>`).join("")}</div>`;
     const barWidth = Math.max(3, (width - plotWithAxisGutter.left - plotWithAxisGutter.right) / Math.max(1, series.days_in_month) - 3);
-    const bars = series.days.map((day) => {
+    const bars = series.days.filter((day) => day.available).map((day) => {
       const value = Number.isFinite(day.total_variable_cost_sek) ? day.total_variable_cost_sek : 0;
       const barHeight = value > 0 ? Math.max(2, height - plot.bottom - y(value)) : 2;
-      const className = day.available ? "cost-chart-bar cost-chart-bar-actual" : "cost-chart-bar cost-chart-bar-unavailable";
-      return `<rect class="${className}" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plotWithAxisGutter.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
+      return `<rect class="cost-chart-bar cost-chart-bar-actual" data-cost-day="${day.day}" x="${x(day.day) - barWidth / 2}" y="${height - plotWithAxisGutter.bottom - barHeight}" width="${barWidth}" height="${barHeight}" rx="2" />`;
     }).join("");
     chart.innerHTML = `<div class="cost-chart-legend"><span><i class="cost-chart-legend-actual"></i>Faktiskt</span></div><div class="cost-chart-plot" style="--cost-axis-left-gutter:${(axisGutter / width) * 100}%"><svg class="cost-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daglig rörlig kostnad över vald månad"><g>${grid}</g><g class="cost-chart-bars">${bars}</g><g class="cost-chart-hover" aria-hidden="true"></g><rect data-cost-chart-hit x="${plotWithAxisGutter.left}" y="${plotWithAxisGutter.top}" width="${width - plotWithAxisGutter.left - plotWithAxisGutter.right}" height="${height - plotWithAxisGutter.top - plotWithAxisGutter.bottom}" fill="transparent" /></svg>${axisOverlay}</div><div class="soc-tooltip" hidden></div>`;
     const svg = chart.querySelector("svg");
