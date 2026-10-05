@@ -60,10 +60,10 @@ const pricePlanCardRule = panel.match(/\.price-plan-card\s*\{([^}]*)\}/)?.[1] ||
 assert.match(pricePlanCardRule, /background: var\(--ha-card-glass-tint, var\(--ha-card-background, var\(--card-background-color\)\)\);/);
 assert.match(pricePlanCardRule, /border: var\(--ha-card-border-width, 1px\) var\(--ha-card-border-style, solid\) var\(--ha-card-border-color, var\(--divider-color\)\);/);
 assert.match(pricePlanCardRule, /border-color: transparent;/);
-assert.match(panel, /\.price-plan-card\.current\s*\{[\s\S]*?border-color: rgba\(240, 160, 106, \.42\);/);
-assert.match(panel, /\.price-plan-card\.current\s*\{[\s\S]*?border-color: color-mix\(in srgb, var\(--primary-color, var\(--el-import-color, #F0A06A\)\) 28%, var\(--el-import-color, #F0A06A\) 72%\);/);
+const activePricePlanRule = panel.match(/\.price-plan-card\.current,\s*\.price-plan-card:hover,\s*\.price-plan-card:focus-visible\s*\{([^}]*)\}/)?.[1] || "";
+assert.match(activePricePlanRule, /border-color: var\(--primary-color\) !important;/);
+assert.doesNotMatch(activePricePlanRule, /color-mix|rgba/);
 assert.match(panel, /\.price-plan-card\.selected\s*\{[\s\S]*?border-color: var\(--primary-color\);/);
-assert.match(panel, /\.price-plan-card:hover,\s*\.price-plan-card:focus-visible\s*\{[\s\S]*?border-color: var\(--primary-color\);/);
 assert.match(panel, /const currentBlockId = currentPricePlanBlock\(blocks\)/);
 assert.match(panel, /button\.setAttribute\("aria-current", "time"\)/);
 assert.match(panel, /price-plan-card\$\{isCurrent \? " current" : ""\}\$\{isSelected \? " selected" : ""\}/);

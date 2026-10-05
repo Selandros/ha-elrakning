@@ -5456,19 +5456,15 @@ class ElrakningPanel {
           text-align: left;
         }
 
-        .price-plan-card.current {
-          border-color: rgba(240, 160, 106, .42);
-          border-color: color-mix(in srgb, var(--primary-color, var(--el-import-color, #F0A06A)) 28%, var(--el-import-color, #F0A06A) 72%);
+        .price-plan-card.current,
+        .price-plan-card:hover,
+        .price-plan-card:focus-visible {
+          border-color: var(--primary-color) !important;
         }
 
         .price-plan-card.selected {
           border-color: var(--primary-color);
           box-shadow: 0 0 0 1px var(--primary-color);
-        }
-
-        .price-plan-card:hover,
-        .price-plan-card:focus-visible {
-          border-color: var(--primary-color);
         }
 
         .price-plan-card strong,
