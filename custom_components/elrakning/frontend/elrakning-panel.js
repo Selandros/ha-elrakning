@@ -13576,7 +13576,7 @@ class ElrakningPanel {
       const input = control?.querySelector("[data-price-toggle]");
       if (!control || !input) continue;
       input.disabled = !available;
-      input.checked = available && this._priceComparisonVisible[layer];
+      input.checked = this._priceComparisonVisible[layer];
       control.title = available ? titles[layer] : unavailableTitles[layer];
       control.classList.toggle("is-disabled", !available);
     }

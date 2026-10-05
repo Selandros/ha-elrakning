@@ -2541,6 +2541,8 @@ assert.match(panelSource, /_persistChartPreferences/);
 assert.match(panelSource, /async _persistChartPreferences\(updates = \{\}\)/);
 assert.match(panelSource, /\.\.\.updates/);
 assert.match(panelSource, /this\._persistChartPreferences\(\{ price_comparison: \{ \.\.\.this\._priceComparisonVisible \} \}\)/);
+assert.match(panelSource, /input\.checked = this\._priceComparisonVisible\[layer\];/);
+assert.doesNotMatch(panelSource, /input\.checked = available && this\._priceComparisonVisible\[layer\]/);
 assert.match(panelSource, /response\?\.price_comparison/);
 assert.match(panelSource, /this\._chartPreferencesSavePromise = Promise\.resolve\(\);/);
 assert.match(panelSource, /this\._chartPreferencesSavePromise = this\._chartPreferencesSavePromise[\s\S]*\.catch\(\(\) => \{\}\)[\s\S]*\.then\(async/);
