@@ -8412,6 +8412,7 @@ class ElrakningPanel {
       this._syncPriceComparisonControls();
       this._syncPhaseHistoryMetricButtons();
       this._syncPhaseHistoryVisibilityButtons();
+      this.updatePriceSummary();
       this.renderPriceChart();
     } catch {
       // Keep the first-use defaults for this session when preference loading fails.
