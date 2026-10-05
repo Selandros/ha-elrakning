@@ -60,7 +60,7 @@ const pricePlanCardRule = panel.match(/\.price-plan-card\s*\{([^}]*)\}/)?.[1] ||
 assert.match(pricePlanCardRule, /background: var\(--ha-card-glass-tint, var\(--ha-card-background, var\(--card-background-color\)\)\);/);
 assert.match(pricePlanCardRule, /border: var\(--ha-card-border-width, 1px\) var\(--ha-card-border-style, solid\) var\(--ha-card-border-color, var\(--divider-color\)\);/);
 assert.match(pricePlanCardRule, /border-color: transparent;/);
-assert.match(panel, /\.price-plan-card\.current\s*\{[\s\S]*?border-color: color-mix\(in srgb, var\(--primary-color\) 28%, var\(--ha-card-border-color, var\(--divider-color\)\)\);/);
+assert.match(panel, /\.price-plan-card\.current\s*\{[\s\S]*?border-color: color-mix\(in srgb, var\(--primary-color, var\(--el-import-color, #F0A06A\)\) 28%, transparent\);/);
 assert.match(panel, /\.price-plan-card\.selected\s*\{[\s\S]*?border-color: var\(--primary-color\);/);
 assert.match(panel, /\.price-plan-card:hover,\s*\.price-plan-card:focus-visible\s*\{[\s\S]*?border-color: var\(--primary-color\);/);
 assert.match(panel, /const currentBlockId = currentPricePlanBlock\(blocks\)/);
