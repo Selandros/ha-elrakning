@@ -5457,7 +5457,8 @@ class ElrakningPanel {
         }
 
         .price-plan-card.current {
-          border-color: color-mix(in srgb, var(--primary-color, var(--el-import-color, #F0A06A)) 28%, transparent);
+          border-color: rgba(240, 160, 106, .42);
+          border-color: color-mix(in srgb, var(--primary-color, var(--el-import-color, #F0A06A)) 28%, var(--el-import-color, #F0A06A) 72%);
         }
 
         .price-plan-card.selected {
