@@ -6,7 +6,8 @@ const backend = fs.readFileSync("custom_components/elrakning/websocket.py", "utf
 
 assert.match(frontend, /this\._siteIdentityPromise = null;/);
 assert.match(frontend, /if \(this\._siteIdentityPromise\) return this\._siteIdentityPromise;/);
-assert.match(frontend, /if \(this\.hass !== requestHass\) return null;/);
+assert.match(frontend, /const requestConnection = requestHass\?\.connection \|\| null;/);
+assert.match(frontend, /if \(this\.hass\?\.connection !== requestConnection\) return null;/);
 assert.match(frontend, /this\._siteIdentityPromise === request/);
 assert.match(frontend, /data-site-attention/);
 assert.match(frontend, /\.site-attention \{[\s\S]*display: none !important;/);

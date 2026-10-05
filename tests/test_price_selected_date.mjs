@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyCanonicalEnergyHistoryResponse, buildCanonicalEnergyHistoryContextKey, buildThresholdClippedSegments, canonicalEnergyHistoryViewIsCurrent, energyHistoryIntervalValueAt, energyHistoryToMeterCurvePoints, energyHistoryToMeterStepPoints, energyIntervalsToCurvePoints, energyIntervalsToStepPoints, integrateEnergyIntervalsKwh, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyCanonicalEnergyHistoryResponse, buildCanonicalEnergyHistoryContextKey, buildThresholdClippedSegments, canonicalEnergyHistoryCacheIsUsable, canonicalEnergyHistoryViewIsCurrent, energyHistoryIntervalValueAt, energyHistoryToMeterCurvePoints, energyHistoryToMeterStepPoints, energyIntervalsToCurvePoints, energyIntervalsToStepPoints, integrateEnergyIntervalsKwh, selectHourlyPricePeriods } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const panelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const websocketSource = readFileSync(new URL("../custom_components/elrakning/websocket.py", import.meta.url), "utf8");
@@ -121,7 +121,7 @@ assert.match(panelSource, /canonical_energy_history_stale_rejected/);
 assert.match(panelSource, /canonical_energy_history_merge/);
 const canonicalHistory = { series: { import: [{ start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:15:00Z", value_kw: 0.392 }] } };
 assert.equal(buildCanonicalEnergyHistoryContextKey("site-a", 4, "2026-10-04"), "site-a:4:2026-10-04");
-const hass = {};
+const connection = {};
 const stableCanonicalView = (date) => canonicalEnergyHistoryViewIsCurrent({
   requestSiteId: "site-a",
   requestSiteContextGeneration: 4,
@@ -131,8 +131,8 @@ const stableCanonicalView = (date) => canonicalEnergyHistoryViewIsCurrent({
   activeSiteContextGeneration: 4,
   activeDate: date,
   activeLifecycleToken: 1,
-  requestHass: hass,
-  activeHass: hass,
+  requestConnection: connection,
+  activeConnection: connection,
 });
 for (const date of ["2026-10-03", "2026-10-04", "2026-10-03", "2026-10-02", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"]) {
   assert.equal(stableCanonicalView(date), true, `same view must accept ${date} regardless of sibling completion`);
@@ -146,9 +146,25 @@ assert.equal(canonicalEnergyHistoryViewIsCurrent({
   activeSiteContextGeneration: 4,
   activeDate: "2026-10-04",
   activeLifecycleToken: 1,
-  requestHass: hass,
-  activeHass: hass,
+  requestConnection: connection,
+  activeConnection: connection,
 }), false, "a late response for a previous day must remain rejected");
+assert.equal(canonicalEnergyHistoryViewIsCurrent({
+  requestSiteId: "site-a",
+  requestSiteContextGeneration: 4,
+  requestDate: "2026-10-04",
+  requestLifecycleToken: 1,
+  activeSiteId: "site-a",
+  activeSiteContextGeneration: 4,
+  activeDate: "2026-10-04",
+  activeLifecycleToken: 1,
+  requestConnection: connection,
+  activeConnection: {},
+}), false, "a reconnect must reject the old request");
+const cachedHistory = { energyHistory: canonicalHistory, loadedAt: 10_000 };
+assert.equal(canonicalEnergyHistoryCacheIsUsable(cachedHistory, { isCurrentDate: false, now: 999_999 }), true);
+assert.equal(canonicalEnergyHistoryCacheIsUsable(cachedHistory, { isCurrentDate: true, now: 14_999 }), true);
+assert.equal(canonicalEnergyHistoryCacheIsUsable(cachedHistory, { isCurrentDate: true, now: 15_001 }), false);
 assert.deepEqual(applyCanonicalEnergyHistoryResponse({
   response: { success: true, site_id: "site-a", date: "2026-10-04", energy_history: canonicalHistory },
   expectedSiteId: "site-a",
@@ -173,6 +189,10 @@ assert.doesNotMatch(panelSource.slice(panelSource.indexOf("  async _refreshBacke
 assert.match(panelSource, /void this\.loadBillingHistory\(\);/);
 assert.match(panelSource, /const meterSelection = mergeMeterRenderPoints\(rawMeterPoints, historicalMeterPoints\)/);
 assert.match(panelSource, /canonicalEnergyHistoryViewIsCurrent\(\{/);
+assert.match(panelSource, /canonical_energy_history_cache_hit/);
+assert.match(panelSource, /_canonicalEnergyHistoryInFlight\.get\(contextKey\)/);
+assert.match(panelSource, /requestConnection !== this\.hass\?\.connection/);
+assert.doesNotMatch(panelSource.slice(panelSource.indexOf("async loadCanonicalEnergyHistory"), panelSource.indexOf("async loadPricePlan")), /requestHass !== this\.hass/);
 assert.match(panelSource, /const useHistoricalPower = rawPoints\.length === 0 && historicalPoints\.length > 0/);
 assert.match(panelSource, /const historicalPowerDisplayPoints = energyIntervalsToCurvePoints[\s\S]*?const displaySource = useHistoricalPower/);
 assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : hoverGeometry\?\.meterDisplayValue\?\.\(key, tooltipTimestamp\) \?\? null;/);
