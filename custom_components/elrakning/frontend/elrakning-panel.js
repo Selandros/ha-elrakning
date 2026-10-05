@@ -11929,7 +11929,7 @@ class ElrakningPanel {
           ["Rörlig", networkVariable],
         ]],
         ["Handel", [
-          [presentationModel?.trade_mtd_label || "Hittills", providerMonthToDateCost],
+          ["Hittills", providerMonthToDateCost],
           ["Fast", null],
           ["Rörlig", null],
         ]],
