@@ -10750,6 +10750,49 @@ class ElrakningPanel {
     dialog.hidden = false;
   }
 
+  _buildEllaCurrentCardRuntimeDiagnostics(plan, selectedBlock) {
+    const rail = this.host?.querySelector?.("[data-price-plan-rail]");
+    const nowMs = Date.now();
+    const computedBlock = currentPricePlanBlock(plan?.plan_blocks, nowMs);
+    const cards = [...(rail?.querySelectorAll?.(".price-plan-card") || [])];
+    const renderedCards = cards.map((card) => {
+      const style = typeof getComputedStyle === "function" ? getComputedStyle(card) : null;
+      return {
+        plan_block_id: card.dataset?.planBlockId || null,
+        start: card.dataset?.planStart || null,
+        end: card.dataset?.planEnd || null,
+        class_name: card.className || "",
+        aria_current: card.getAttribute?.("aria-current") || null,
+        current_class_match: card.matches?.(".price-plan-card.current") === true,
+        border: style ? {
+          color: style.borderColor || null,
+          top_color: style.borderTopColor || null,
+          width: style.borderWidth || null,
+          top_width: style.borderTopWidth || null,
+          style: style.borderStyle || null,
+          top_style: style.borderTopStyle || null,
+        } : null,
+      };
+    });
+    const currentCards = renderedCards.filter((card) => card.current_class_match);
+    const rootStyle = typeof getComputedStyle === "function" && this.host ? getComputedStyle(this.host) : null;
+    return {
+      generated_at: new Date(nowMs).toISOString(),
+      now_ms: nowMs,
+      computed_current_block_id: computedBlock?.plan_block_id || null,
+      selected_block_id: selectedBlock?.plan_block_id || null,
+      rendered_card_count: renderedCards.length,
+      current_class_count: currentCards.length,
+      rendered_cards: renderedCards,
+      current_card: currentCards[0] || null,
+      theme_variables: rootStyle ? {
+        primary_color: rootStyle.getPropertyValue("--primary-color").trim() || null,
+        el_import_color: rootStyle.getPropertyValue("--el-import-color").trim() || null,
+        card_border_color: rootStyle.getPropertyValue("--ha-card-border-color").trim() || null,
+      } : null,
+    };
+  }
+
   async _loadEllaDebugSnapshot(plan, block) {
     const requestToken = ++this._ellaDebugRequestToken;
     const siteGeneration = this._siteContextGeneration;
@@ -10769,7 +10812,12 @@ class ElrakningPanel {
         || this._pricePlan?.revision !== plan?.revision
         || this._siteState?.site_id && this._siteState.site_id !== siteId) return;
       if (response?.success === true && response?.available === true && response.snapshot) {
-        this._showSourceDataDialog("ELLA · Visa data", `Planblock ${block.plan_block_id}`, response.snapshot, "Kopiera data");
+        this._showSourceDataDialog("ELLA · Visa data", `Planblock ${block.plan_block_id}`, {
+          ...response.snapshot,
+          frontend_runtime: {
+            current_card: this._buildEllaCurrentCardRuntimeDiagnostics(plan, block),
+          },
+        }, "Kopiera data");
         return;
       }
       this._showSourceDataDialog("ELLA · Visa data", `Planblock ${block.plan_block_id}`, {
