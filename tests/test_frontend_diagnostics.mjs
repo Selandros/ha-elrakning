@@ -2536,6 +2536,7 @@ assert.match(panelSource, /this\._spotBarsVisible/);
 assert.match(panelSource, /elrakning\/ui_preferences\/get/);
 assert.match(panelSource, /elrakning\/ui_preferences\/set/);
 assert.match(panelSource, /_loadChartPreferences/);
+assert.match(panelSource, /\]\)\.finally\(\(\) => \{[\s\S]*this\._updatePriceComparisonControls\(\);[\s\S]*void this\.loadBillingHistory\(\);/);
 assert.match(panelSource, /_persistChartPreferences/);
 assert.match(panelSource, /async _persistChartPreferences\(updates = \{\}\)/);
 assert.match(panelSource, /\.\.\.updates/);

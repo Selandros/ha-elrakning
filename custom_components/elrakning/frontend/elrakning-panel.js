@@ -12513,6 +12513,7 @@ class ElrakningPanel {
       this._loadChartPreferences(),
     ]).finally(() => {
       this._backendHydrationPromise = null;
+      this._updatePriceComparisonControls();
       // Billing history is not required for initial live or chart history.
       // Defer its larger Recorder query until critical hydration is complete.
       void this.loadBillingHistory();
