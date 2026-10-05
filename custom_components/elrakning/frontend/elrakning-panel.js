@@ -5457,12 +5457,17 @@ class ElrakningPanel {
         }
 
         .price-plan-card.current {
-          border-color: color-mix(in srgb, var(--primary-color) 48%, var(--ha-card-border-color, var(--divider-color)));
+          border-color: color-mix(in srgb, var(--primary-color) 28%, var(--ha-card-border-color, var(--divider-color)));
         }
 
         .price-plan-card.selected {
           border-color: var(--primary-color);
           box-shadow: 0 0 0 1px var(--primary-color);
+        }
+
+        .price-plan-card:hover,
+        .price-plan-card:focus-visible {
+          border-color: var(--primary-color);
         }
 
         .price-plan-card strong,
