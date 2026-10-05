@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostKpiTotals, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildInvoiceMonthHistory, buildPreviousMonthActual, buildTodayCostFromMeterAndPrices, buildTodayCostValue, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { buildCombinedMonthlyCostForecast, buildCostAnalysisSeries, buildCostChartGeometry, buildCostChartTooltipFields, buildCostKpiComparisons, buildCostKpiTotals, buildCostMonthComparison, buildCostPresentationModel, buildCostReferenceComparisons, buildDailyCostSeries, buildDailyCostTooltipFields, buildImportForecastKwh, buildInvoiceMonthHistory, buildPreviousMonthActual, buildTodayCostFromMeterAndPrices, buildTodayCostValue, costHistoryDisplayOrder, invoiceMonthDisplayValue, mergeKnownProviderGridCost, nextCalendarMonth, normalizeInvoiceMonth } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+
+assert.equal(buildImportForecastKwh(544, 540), 542);
+assert.equal(buildImportForecastKwh(544, null), 544);
+assert.equal(buildImportForecastKwh(null, 540), 540);
+assert.equal(buildImportForecastKwh(null, undefined), null);
 
 assert.equal(nextCalendarMonth("2026-12"), "2027-01");
 assert.equal(normalizeInvoiceMonth("Aug 2026"), "2026-08");
@@ -431,7 +436,8 @@ assert.doesNotMatch(costKpiRender, /Mot förra månaden/);
 assert.doesNotMatch(source, /cost-detail-secondary/);
 assert.match(source, /\["Nät", \[[\s\S]*\["Hittills", estimate\.grid\?\.total_so_far_sek\][\s\S]*\["Fast", networkFixed\][\s\S]*\["Rörlig", networkVariable\]/);
 assert.match(source, /\["Handel", \[[\s\S]*\[presentationModel\?\.trade_mtd_label \|\| "Hittills", providerMonthToDateCost\][\s\S]*\["Fast", null\][\s\S]*\["Rörlig", null\]/);
-assert.match(source, /\["Import", \[[\s\S]*\["Hittills", importSoFar\][\s\S]*\["Nät prognos", networkImportForecast\][\s\S]*\["Handel prognos", tradeImportForecast\]/);
+assert.match(source, /\["Import", \[[\s\S]*\["Hittills", importSoFar\][\s\S]*\["Prognos", importForecast\]/);
+assert.match(source, /buildImportForecastKwh\(\s*estimate\.forecast_import_kwh,\s*presentationModel\?\.trade_projection\?\.estimated_kwh_display,/);
 assert.match(source, /\["Prognos", \[[\s\S]*\["Nät", networkForecast\][\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(source, /providerMonthToDateCost = presentationModel\?\.trade_mtd_sek/);
 assert.match(source, /hasProviderTradeEstimate/);

@@ -330,7 +330,7 @@ assert.match(readFileSync(new URL("../custom_components/elrakning/frontend/elrak
 const pickerPanelSource = readFileSync(new URL("../custom_components/elrakning/frontend/elrakning-panel.js", import.meta.url), "utf8");
 const costCardSource = pickerPanelSource.slice(pickerPanelSource.indexOf("  _renderCostCard()"), pickerPanelSource.indexOf("  _renderCostChart"));
 assert.match(costCardSource, /buildCostPresentationModel\(estimate, this\._electricityProviderState, new Date\(\)\)/);
-assert.match(costCardSource, /\["Import", \[[\s\S]*\["Handel prognos", tradeImportForecast\]/);
+assert.match(costCardSource, /\["Import", \[[\s\S]*\["Prognos", importForecast\]/);
 assert.match(costCardSource, /\["Prognos", \[[\s\S]*\["Handel", tradeCostForecast\]/);
 assert.match(costCardSource, /value == null[\s\S]*?"–"/);
 assert.match(pickerPanelSource, /buildProviderOnlyInvoiceEstimate/);

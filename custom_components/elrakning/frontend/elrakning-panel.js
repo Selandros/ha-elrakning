@@ -507,6 +507,15 @@ export function buildCombinedMonthlyCostForecast(networkForecastSek, tradeProjec
   return network + trade;
 }
 
+export function buildImportForecastKwh(networkForecastKwh, tradeForecastKwh) {
+  const values = [networkForecastKwh, tradeForecastKwh]
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+  if (!values.length) return null;
+  return values.length === 2 ? (values[0] + values[1]) / 2 : values[0];
+}
+
 export function buildCostKpiTotals(forecastTotalSek, networkMtdSek, tradeMtdSek) {
   const forecast = finiteCostNumber(forecastTotalSek);
   const network = finiteCostNumber(networkMtdSek);
@@ -5887,6 +5896,8 @@ class ElrakningPanel {
           display: block;
           font-size: var(--card-legend-size);
         }
+
+        .cost-detail-label { white-space: nowrap; }
 
         .cost-kpi strong {
           display: block;
@@ -11904,10 +11915,12 @@ class ElrakningPanel {
       const networkForecast = presentationModel?.network_forecast_sek;
       const importSoFar = Number.isFinite(Number(estimate.imported_kwh_so_far))
         ? `${this._formatNumber(Number(estimate.imported_kwh_so_far))} kWh` : null;
-      const networkImportForecast = Number.isFinite(Number(estimate.forecast_import_kwh))
-        ? `${this._formatNumber(Number(estimate.forecast_import_kwh))} kWh` : null;
-      const tradeImportForecast = presentationModel?.trade_projection
-        ? `${this._formatNumber(presentationModel.trade_projection.estimated_kwh_display)} kWh` : null;
+      const importForecastKwh = buildImportForecastKwh(
+        estimate.forecast_import_kwh,
+        presentationModel?.trade_projection?.estimated_kwh_display,
+      );
+      const importForecast = Number.isFinite(importForecastKwh)
+        ? `${this._formatNumber(importForecastKwh)} kWh` : null;
       const tradeCostForecast = presentationModel?.trade_forecast_sek;
       const rows = [
         ["Nät", [
@@ -11922,8 +11935,7 @@ class ElrakningPanel {
         ]],
         ["Import", [
           ["Hittills", importSoFar],
-          ["Nät prognos", networkImportForecast],
-          ["Handel prognos", tradeImportForecast],
+          ["Prognos", importForecast],
         ]],
         ["Prognos", [
           ["Nät", networkForecast],
@@ -11941,6 +11953,7 @@ class ElrakningPanel {
           const item = document.createElement("div");
           item.className = "cost-detail";
           const name = document.createElement("span");
+          name.className = "cost-detail-label";
           name.textContent = label;
           const output = document.createElement("strong");
           output.textContent = value == null || (typeof value === "number" && !Number.isFinite(value))
