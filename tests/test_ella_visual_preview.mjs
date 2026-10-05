@@ -62,6 +62,7 @@ assert.match(pricePlanCardRule, /border: var\(--ha-card-border-width, 1px\) var\
 assert.match(pricePlanCardRule, /border-color: transparent;/);
 const activePricePlanRule = panel.match(/\.price-plan-card\.current,\s*\.price-plan-card:hover,\s*\.price-plan-card:focus-visible\s*\{([^}]*)\}/)?.[1] || "";
 assert.match(activePricePlanRule, /border-color: var\(--primary-color\) !important;/);
+assert.match(activePricePlanRule, /box-shadow: 0 0 0 1px var\(--primary-color\);/);
 assert.doesNotMatch(activePricePlanRule, /color-mix|rgba/);
 assert.match(panel, /\.price-plan-card\.selected\s*\{[\s\S]*?border-color: var\(--primary-color\);/);
 assert.match(panel, /const currentBlockId = currentPricePlanBlock\(blocks\)/);

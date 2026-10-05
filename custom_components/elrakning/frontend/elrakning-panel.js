@@ -5460,6 +5460,7 @@ class ElrakningPanel {
         .price-plan-card:hover,
         .price-plan-card:focus-visible {
           border-color: var(--primary-color) !important;
+          box-shadow: 0 0 0 1px var(--primary-color);
         }
 
         .price-plan-card.selected {
