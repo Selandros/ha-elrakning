@@ -28,7 +28,7 @@ from .const import (
 )
 from .coordinator import ElrakningCoordinator, PriceData
 from .customer_price import build_customer_price_data, grid_price_is_applicable, grid_price_is_current, grid_variable_cost_ex_vat
-from .energy_history import async_build_energy_history
+from .energy_history import async_build_energy_history, energy_history_billing_points
 from .elhandel.manager import CHART_LAYER_DEFAULTS, DASHBOARD_CARD_VISIBILITY_DEFAULTS, DASHBOARD_CARD_VISIBILITY_VALUES, MAIN_CARD_DEFAULTS, PHASE_HISTORY_METRICS, PHASE_HISTORY_VISIBLE_DEFAULTS, PRICE_COMPARISON_DEFAULTS, ElhandelManager
 from .elhandel.models import ProviderData, serialize_provider_state
 from .elhandel.providers.greenely_client import GreenelyClient, GreenelyError
@@ -85,6 +85,8 @@ ELECTRICITY_HISTORY_PURGE_COMMAND = f"{DOMAIN}/electricity_history_purge"
 DIAGNOSTICS_STATE_COMMAND = f"{DOMAIN}/diagnostics_state"
 CANONICAL_COLLECTOR_STATE_COMMAND = f"{DOMAIN}/canonical_collector_state"
 DIAGNOSTICS_CLEAR_COMMAND = f"{DOMAIN}/diagnostics_clear"
+
+
 FRONTEND_PREFERENCES_COMMAND = f"{DOMAIN}/frontend_preferences"
 FRONTEND_PREFERENCES_SET_COMMAND = f"{DOMAIN}/frontend_preferences_set"
 CHART_LAYERS_COMMAND = f"{DOMAIN}/ui_preferences/get"
@@ -1462,15 +1464,28 @@ async def websocket_billing_history(hass, connection, msg):
             collector.storage.read_reconciled_grid_import,
             site_id, datetime.fromisoformat(billing["start"]), datetime.fromisoformat(billing["end"]),
         )
-    use_reconciled = not billing.get("points") and any(
-        row.get("value") is not None and row.get("source_status") in {"local_primary", "provider_gap_fill", "provider_reconciled"}
-        for row in reconciled_rows
-    )
     reconciled_points = [
         {"timestamp": row["interval_start"].isoformat(), "end": row["interval_end"].isoformat(), "import_kwh": row["value"]}
         for row in reconciled_rows
         if row.get("value") is not None and row.get("source_status") in {"local_primary", "provider_gap_fill", "provider_reconciled"}
-    ] if use_reconciled else []
+    ]
+    canonical_energy_history = None
+    if not billing.get("points") and not reconciled_points and site_id:
+        canonical_energy_history = await async_build_energy_history(
+            hass,
+            site_manager,
+            collector,
+            datetime.fromisoformat(billing["start"]),
+            datetime.fromisoformat(billing["end"]),
+            site_id,
+        )
+    canonical_points = energy_history_billing_points(canonical_energy_history)
+    use_reconciled = not billing.get("points") and bool(reconciled_points or canonical_points)
+    use_canonical_energy = use_reconciled and not reconciled_points and bool(canonical_points)
+    if use_canonical_energy:
+        reconciled_points = canonical_points
+    elif not use_reconciled:
+        reconciled_points = []
     start = date.fromisoformat(billing["start"][:10])
     end = date.fromisoformat(billing["end"][:10])
     month_end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
@@ -1567,15 +1582,19 @@ async def websocket_billing_history(hass, connection, msg):
         "energy_points": reconciled_points if use_reconciled else billing.get("points", []),
         "baseline_energy_points": billing.get("baseline_points", []),
         "energy_source": {
-            "method": "native_reconciled_energy_buckets" if use_reconciled else "integrated_grid_power",
+            "method": "native_canonical_energy_history" if use_canonical_energy else "native_reconciled_energy_buckets" if use_reconciled else "integrated_grid_power",
             "entity_id": billing.get("entity_id") if not use_reconciled else None,
-            "source_entity": billing.get("entity_id"),
+            "source_entity": billing.get("entity_id") if not use_reconciled else None,
             "raw_unit": "kWh" if use_reconciled else "kW",
-            "source": "reconciled_grid_import" if use_reconciled else "local_meter_history",
-            "provenance": [row.get("provenance", {}) for row in reconciled_rows] if use_reconciled else {"source": "meter_history"},
+            "source": "canonical_energy_history" if use_canonical_energy else "reconciled_grid_import" if use_reconciled else "local_meter_history",
+            "source_entities": ((canonical_energy_history or {}).get("source_entities", {}).get("import", []) if use_canonical_energy else []),
+            "provenance": ((canonical_energy_history or {}).get("sources", []) if use_canonical_energy else [row.get("provenance", {}) for row in reconciled_rows] if use_reconciled else {"source": "meter_history"}),
         },
         "integration_method": "trapezoidal_power_integration",
-        "energy_coverage": billing.get("coverage", {}),
+        "energy_coverage": {
+            "point_count": len(reconciled_points),
+            "source": "canonical_energy_history" if use_canonical_energy else "reconciled_grid_import" if use_reconciled else "local_meter_history",
+        } if use_reconciled else billing.get("coverage", {}),
         "baseline_energy_coverage": billing.get("baseline_coverage", {}),
         "price_periods": price_periods,
         "grid_price": applicable_grid_price,

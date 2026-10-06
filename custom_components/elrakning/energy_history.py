@@ -146,6 +146,27 @@ def _role_values(role: str, value_kw: float) -> dict[str, float]:
     return {}
 
 
+def energy_history_billing_points(energy_history: dict | None) -> list[dict[str, Any]]:
+    """Convert verified canonical import intervals to non-overlapping energy buckets."""
+    result = []
+    for item in ((energy_history or {}).get("series", {}).get("import") or []):
+        try:
+            start = datetime.fromisoformat(str(item["start"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(item["end"]).replace("Z", "+00:00"))
+            value_kw = float(item["value_kw"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        duration_hours = (end - start).total_seconds() / 3600
+        if end <= start or duration_hours <= 0 or not math.isfinite(value_kw) or value_kw < 0:
+            continue
+        result.append({
+            "timestamp": start.isoformat(),
+            "end": end.isoformat(),
+            "import_kwh": value_kw * duration_hours,
+        })
+    return result
+
+
 def _contribution(series: str, start: datetime, end: datetime, value_kw: float, *,
                   priority: int, source: str, generation_id: str, quality: str = "good",
                   coverage: float | None = None,
@@ -208,7 +229,14 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
             continue
         is_provider = (row.get("provenance") or {}).get("provider") == "eon"
         source = "eon_provider" if is_provider else "canonical" if row.get("storage_class") == "canonical" else "historical_canonical"
-        priority = 10 if is_provider else 30 if source == "canonical" else 25
+        # Local grid power is the authoritative signed source for overlapping intervals.
+        priority = (
+            60 if role == "grid.power/import" and not is_provider
+            else 10 if is_provider
+            else 30 if source == "canonical"
+            else 25
+        )
+        source_entity = (target or {}).get("entity_id") if target else None
         values = {"import": value_kw} if role == "grid.energy_import" else {"export": value_kw} if role == "grid.energy_export" else _role_values(role, value_kw)
         for series, value in values.items():
             result.append(_contribution(
@@ -216,6 +244,7 @@ def canonical_contributions(rows: list[dict[str, Any]], ledger_by_generation: di
                 generation_id=generation_id, quality=str(row.get("quality_status")),
                 coverage=row.get("coverage_ratio"),
                 source_resolution_seconds=row.get("source_resolution_seconds"),
+                source_entity=source_entity,
             ))
     return _prefer_non_overlapping_provider_resolution(result)
 
@@ -247,8 +276,10 @@ def reconciled_contributions(
         )
         if source_entity is None and source_entity_by_interval:
             source_entity = source_entity_by_interval.get((start, end, int(row.get("resolution_seconds") or duration * 3600)))
+        source_status = row.get("source_status")
+        priority = {"local_primary": 55, "provider_reconciled": 40, "provider_gap_fill": 10}.get(source_status, 10)
         result.append(_contribution(
-            "import", start, end, float(row["value"]) / duration, priority=50,
+            "import", start, end, float(row["value"]) / duration, priority=priority,
             source="reconciled_grid_import", generation_id=str(row.get("provider_record_id") or row.get("local_record_id") or "reconciled"),
             source_resolution_seconds=int(row.get("resolution_seconds") or duration * 3600),
             source_entity=source_entity,

@@ -47,6 +47,7 @@ from .replay_runtime import async_generate_artifact
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .grid_tariff_timeline import resolve_grid_tariff
 from .site_identity import SiteIdentityManager
+from .energy_history import _power_to_kw
 from .websocket import async_register_websocket_commands, clear_forecast_view_caches
 from .elhandel.providers.greenely_invoice_economics import GreenelyInvoiceEconomicsProducer, async_register_proof_service
 
@@ -269,10 +270,11 @@ async def _async_capture_monthly_forecast_impl(hass, requested_site_id: str | No
         collector.storage.read_site_energy_history, site_id, month_start, now
     )
     billing_points = [
-        {"timestamp": row["interval_start"].isoformat(), "import_kw": max(0.0, float(row["value"]) / 1000.0)}
+        {"timestamp": row["interval_start"].isoformat(), "import_kw": max(0.0, value_kw)}
         for row in rows
-        if row.get("logical_role") == "grid.power/import" and row.get("unit") == "W"
+        if row.get("logical_role") == "grid.power/import"
         and row.get("quality_status") in {"good", "partial"}
+        and (value_kw := _power_to_kw(row.get("value"), row.get("unit"))) is not None
     ]
     coordinator = getattr(entry, "runtime_data", None)
     price_periods = []

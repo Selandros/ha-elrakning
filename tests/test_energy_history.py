@@ -183,6 +183,30 @@ class EnergyHistoryTests(unittest.TestCase):
         self.assertEqual(series["import"][0]["source"], "canonical")
         self.assertEqual(series["import"][0]["value_kw"], 0.8 / 0.25)
 
+    def test_canonical_p1_power_wins_over_reconciled_provider_and_keeps_entity(self):
+        start = datetime(2026, 10, 6, 0, tzinfo=UTC)
+        end = start + timedelta(minutes=15)
+        rows = [{
+            "logical_role": "grid.power/import", "source_generation_id": "p1",
+            "interval_start": start, "interval_end": end, "value": 740,
+            "unit": "W", "quality_status": "good", "coverage_ratio": 1.0,
+            "storage_class": "canonical",
+        }]
+        ledger = {"p1": _ledger("site-a", "grid.power/import", "sensor.p1_meter_effekt", "p1")}
+        reconciled = [{
+            "logical_role": "grid.energy_import", "interval_start": start,
+            "interval_end": end, "value": 0.05, "resolution_seconds": 900,
+            "source_status": "provider_reconciled",
+        }]
+        contributions = canonical_contributions(rows, ledger) + reconciled_contributions(reconciled)
+        series = merge_contributions(contributions)
+        self.assertEqual(series["import"][0]["source"], "canonical")
+        self.assertEqual(series["import"][0]["value_kw"], 0.74)
+        self.assertEqual(source_entities_by_series(ledger.values(), contributions), {
+            "import": ["sensor.p1_meter_effekt"],
+            "export": ["sensor.p1_meter_effekt"],
+        })
+
     def test_energy_counters_override_net_power_for_import_and_export(self):
         start = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
         targets = [

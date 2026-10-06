@@ -2068,11 +2068,12 @@ export function resolveCanonicalMeterSeriesPoints(primaryPoints, energyHistory, 
   const primary = (Array.isArray(primaryPoints) ? primaryPoints : [])
     .filter(inRange)
     .map((point) => ({ ...point, value_kw: normalizeMeterValue(point[field]) }));
-  if (primary.some((point) => Number.isFinite(point.value_kw))) return primary;
   const historyField = field === "export_kw" ? "export_kw" : "import_kw";
-  return energyHistoryToMeterStepPoints(energyHistory)
+  const canonical = energyHistoryToMeterStepPoints(energyHistory)
     .filter(inRange)
     .map((point) => ({ ...point, value_kw: normalizeMeterValue(point[historyField]) }));
+  if (canonical.some((point) => Number.isFinite(point.value_kw))) return canonical;
+  return primary;
 }
 
 export function selectMeterRenderPoints(primaryPoints, historicalPoints) {
@@ -2673,7 +2674,9 @@ export function applyCanonicalMonthlyForecast(estimate, monthlyForecast) {
   const actualCostToDate = canonicalField("actual_cost_to_date_sek");
   const estimatedMonthTotal = canonicalField("estimated_month_total_sek");
   const expectedFutureCost = canonicalField("expected_future_cost_sek");
-  const actualImportToDate = canonicalField("actual_import_to_date_kwh");
+  const actualImportToDate = monthlyForecast.actual_import_available === true
+    ? canonicalField("actual_import_to_date_kwh")
+    : undefined;
   const estimatedMonthImport = canonicalField("estimated_month_import_kwh");
   const expectedFutureImport = canonicalField("expected_future_import_kwh");
   const tradeActual = finiteCostNumber(estimate?.trade?.total_so_far_sek);

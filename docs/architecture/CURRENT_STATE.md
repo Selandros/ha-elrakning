@@ -2,6 +2,20 @@
 
 Updated: 2026-10-01
 
+## 0.0.1072 canonical P1 import precedence checkpoint
+
+- IMPLEMENTED/TESTED: Verified site-bound local grid-power history is preferred
+  over overlapping provider/reconciled import intervals. Canonical energy
+  history is reused for billing when the meter-history path has no usable
+  points, while provider history remains available for earlier coverage and
+  safe gaps.
+- IMPLEMENTED/TESTED: Missing actual import remains unavailable rather than
+  being converted to zero. Frontend rendering prefers verified canonical
+  energy history and falls back to raw meter history only when canonical
+  coverage is absent.
+- PRESERVED: Signed import/export semantics, exact-site isolation, fail-closed
+  behavior and existing price/forecast separation.
+
 Status labels: `VERIFIED` means directly supported by the recorded
 static/runtime evidence; `INFERRED` means derived from documented code or
 architecture; `UNKNOWN` means not established by the permanent evidence.

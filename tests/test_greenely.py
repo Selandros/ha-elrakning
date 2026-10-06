@@ -43,6 +43,7 @@ from custom_components.elrakning.websocket import (
     websocket_electricity_provider_source_data,
 )
 from custom_components.elrakning.coordinator import PriceData, PricePeriod
+from homeassistant.util import dt as dt_util
 
 GreenelyClient = ProviderGreenelyClient
 GreenelyError = ProviderGreenelyError
@@ -1260,7 +1261,7 @@ class GreenelyLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         args = provider.async_get_consumption_data.await_args.args
         queried_start, queried_end, queried_month = args[1], args[2], args[3]
-        today = date.today()
+        today = dt_util.as_local(dt_util.now()).date()
         self.assertEqual(queried_start, today.replace(day=1))
         self.assertEqual(queried_end, today + timedelta(days=1))
         self.assertEqual(queried_month, today.strftime("%Y-%m"))

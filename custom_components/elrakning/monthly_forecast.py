@@ -225,7 +225,7 @@ def canonical_spot_price_periods(
     return sorted(periods, key=lambda item: (item["start"], item["end"], item.get("price_source_generation_id") or ""))
 
 
-def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datetime) -> float:
+def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datetime) -> float | None:
     normalized = []
     for point in points or []:
         timestamp = _moment(point.get("timestamp"))
@@ -233,7 +233,10 @@ def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datet
         if timestamp and value is not None and value >= 0:
             normalized.append((timestamp, value))
     normalized.sort()
+    if len(normalized) < 2:
+        return None
     total = 0.0
+    covered = False
     for (left_time, left_value), (right_time, right_value) in zip(normalized, normalized[1:]):
         if right_time - left_time > timedelta(minutes=30):
             continue
@@ -241,13 +244,14 @@ def _integrated_import(points: list[dict[str, Any]], start: datetime, end: datet
         overlap_end = min(end, right_time)
         if overlap_end <= overlap_start:
             continue
+        covered = True
         duration = (right_time - left_time).total_seconds()
         if duration <= 0:
             continue
         def value_at(moment: datetime) -> float:
             return left_value + (right_value - left_value) * ((moment - left_time).total_seconds() / duration)
         total += (value_at(overlap_start) + value_at(overlap_end)) / 2 * ((overlap_end - overlap_start).total_seconds() / 3600)
-    return total
+    return total if covered else None
 
 
 def build_actual_priced_cost_to_date(
@@ -275,7 +279,7 @@ def build_actual_priced_cost_to_date(
         segment_start = max(month_start, start)
         segment_end = min(now, end)
         segment_import = _integrated_import(points, segment_start, segment_end)
-        if segment_import <= 0:
+        if segment_import is None or segment_import <= 0:
             continue
         expected_next = min(now, max(covered_until, segment_start))
         if segment_start <= expected_next + timedelta(milliseconds=1) and segment_end > covered_until:
@@ -286,7 +290,7 @@ def build_actual_priced_cost_to_date(
     trade_fixed = _number(trade_fixed_fee_sek)
     grid_fixed = _number(grid_fixed_fee_sek)
     fixed = (trade_fixed or 0.0) + (grid_fixed or 0.0)
-    missing_past = max(0.0, actual_import - priced_import)
+    missing_past = max(0.0, actual_import - priced_import) if actual_import is not None else None
     return {
         "actual_import_to_date_kwh": actual_import,
         "priced_import_to_date_kwh": priced_import,
@@ -296,7 +300,8 @@ def build_actual_priced_cost_to_date(
         "fixed_cost_to_date_sek": fixed,
         "fixed_monthly_cost_sek": fixed,
         "actual_cost_to_date_sek": trade + grid + fixed,
-        "price_coverage_complete": missing_past <= 1e-9,
+        "price_coverage_complete": missing_past is not None and missing_past <= 1e-9,
+        "actual_import_available": actual_import is not None,
         "provenance": {"method": "canonical_trapezoidal_import_with_complete_price_coverage", "missingPast_excluded_from_future": True},
     }
 
@@ -559,6 +564,7 @@ def build_monthly_cost_forecast(
         "expected_future_cost_sek": expected_future_cost if quality == "qualified" else None,
         "estimated_month_total_sek": estimate,
         "actual_import_to_date_kwh": actual_import,
+        "actual_import_available": True,
         "expected_future_import_kwh": expected_future_import if quality == "qualified" else None,
         "estimated_month_import_kwh": total_import,
         "per_day": days,
@@ -587,6 +593,7 @@ def _unavailable(site_id: str, target_month: str, reason: str) -> dict[str, Any]
     return {
         "schema": SCHEMA, "model_version": MODEL_VERSION, "site_id": site_id,
         "target_month": target_month, "available": False, "quality": "unavailable",
+        "actual_import_available": False,
         "reasons": [reason], "execution_eligible": False,
         "actuator_writes_enabled": False, "fingerprint": _fingerprint({"site_id": site_id, "target_month": target_month, "reason": reason}),
     }

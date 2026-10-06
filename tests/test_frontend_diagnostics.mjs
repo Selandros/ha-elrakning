@@ -110,6 +110,13 @@ assert.equal(resolveCanonicalMeterSeriesPoints(
   Date.parse("2026-10-04T00:00:00Z"),
   Date.parse("2026-10-05T00:00:00Z"),
 )[0].value_kw, 0.392);
+assert.equal(resolveCanonicalMeterSeriesPoints(
+  [{ timestamp: "2026-10-04T00:00:00Z", import_kw: 0.05, export_kw: null }],
+  canonicalEnergyHistory,
+  "import_kw",
+  Date.parse("2026-10-04T00:00:00Z"),
+  Date.parse("2026-10-05T00:00:00Z"),
+)[0].value_kw, 0.392);
 assert.deepEqual(resolveCanonicalMeterSeriesPoints(
   [],
   { series: { import: [] } },
@@ -970,6 +977,11 @@ const canonicalZeroEstimate = applyCanonicalMonthlyForecast(
 assert.equal(canonicalZeroEstimate.total_so_far_sek, 0);
 assert.equal(canonicalZeroEstimate.estimated_month_total_sek, 0);
 assert.equal(canonicalZeroEstimate.forecast_remaining_total_sek, 0);
+const unavailableZeroImport = applyCanonicalMonthlyForecast(
+  { imported_kwh_so_far: null },
+  { actual_import_to_date_kwh: 0, actual_import_available: false },
+);
+assert.equal(unavailableZeroImport.imported_kwh_so_far, null);
 const providerActualWinsOverStaleForecast = applyCanonicalMonthlyForecast(
   {
     imported_kwh_so_far: 28.611,
