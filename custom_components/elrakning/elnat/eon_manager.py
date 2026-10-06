@@ -85,6 +85,23 @@ EON_BACKFILL_DAYS = 7
 EON_BACKFILL_RETRY_HOURS = 6
 
 
+def _persist_cached_historical_observations(storage: Any, observations: list[dict[str, Any]]) -> int:
+    """Persist cache observations while isolating immutable recovery conflicts."""
+    try:
+        return storage.insert_historical_observations_atomic(observations)
+    except ValueError as error:
+        if str(error) != "canonical_historical_revision_conflict":
+            raise
+    inserted = 0
+    for observation in observations:
+        try:
+            inserted += storage.insert_historical_observations_atomic([observation])
+        except ValueError as error:
+            if str(error) != "canonical_historical_revision_conflict":
+                raise
+    return inserted
+
+
 def _provider_timestamp(value: Any, fallback: datetime) -> datetime:
     """Normalize persisted provider timestamps before canonical storage use."""
     if isinstance(value, datetime):
@@ -877,7 +894,7 @@ class EonGridManager:
                             "site_binding_fingerprint": binding.get("binding_fingerprint"),
                         },
                     })
-                storage.insert_historical_observations_atomic(observations)
+                _persist_cached_historical_observations(storage, observations)
                 storage.reconcile_grid_import(str(site_id), first_start, points[-1]["end"])
             if temperature_points:
                 grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}

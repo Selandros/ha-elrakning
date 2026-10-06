@@ -2,6 +2,16 @@
 
 Updated: 2026-10-01
 
+## 0.0.1073 idempotent E.ON cache recovery checkpoint
+
+- IMPLEMENTED/TESTED: E.ON cached historical recovery isolates an immutable
+  revision conflict per observation instead of aborting the complete startup
+  batch. Existing canonical rows are never overwritten or deleted; exact
+  replays remain idempotent and legitimate storage revisions remain governed
+  by the canonical immutability rules.
+- PRESERVED: exact-site binding, source provenance, deterministic recovery and
+  fail-closed handling of changed facts.
+
 ## 0.0.1072 canonical P1 import precedence checkpoint
 
 - IMPLEMENTED/TESTED: Verified site-bound local grid-power history is preferred

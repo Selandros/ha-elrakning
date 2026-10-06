@@ -19,7 +19,10 @@ install_optional_dependency_stubs()
 
 from custom_components.elrakning.canonical_storage import CanonicalStorage  # noqa: E402
 from custom_components.elrakning.const import DOMAIN  # noqa: E402
-from custom_components.elrakning.elnat.eon_manager import EonGridManager  # noqa: E402
+from custom_components.elrakning.elnat.eon_manager import (  # noqa: E402
+    EonGridManager,
+    _persist_cached_historical_observations,
+)
 from custom_components.elrakning.elnat.eon_models import facility_identity  # noqa: E402
 import custom_components.elrakning.grid_reconciliation  # noqa: E402,F401
 
@@ -34,6 +37,24 @@ class _SiteManager:
 
 
 class EonProviderPersistTimestampTests(unittest.TestCase):
+    def test_cached_recovery_isolates_immutable_conflicts(self):
+        class Storage:
+            def __init__(self):
+                self.calls = []
+
+            def insert_historical_observations_atomic(self, observations):
+                self.calls.append(len(observations))
+                if len(observations) > 1 or observations[0].get("conflict"):
+                    raise ValueError("canonical_historical_revision_conflict")
+                return 1
+
+        storage = Storage()
+        self.assertEqual(
+            _persist_cached_historical_observations(storage, [{"conflict": True}, {"conflict": False}]),
+            1,
+        )
+        self.assertEqual(storage.calls, [2, 1, 1])
+
     def test_persisted_iso_timestamps_are_normalized_before_canonical_insert(self):
         site_id = "site-a"
         binding = {"provider": "eon", "config_entry_id": "entry-a", "facility": {"installation_identifier": "install-a"}}
