@@ -143,9 +143,37 @@ const canonicalDirectionalPoints = [
 const directionalSources = selectMeterRenderSources(onePointRawMeter, canonicalDirectionalPoints);
 assert.deepEqual(directionalSources, { import_kw: "canonical_energy_history", export_kw: "meter_history" });
 const directionalRenderPoints = mergeMeterRenderPoints(onePointRawMeter, canonicalDirectionalPoints, directionalSources).points;
-assert.equal(directionalRenderPoints[0].import_kw, 0.392);
+assert.equal(directionalRenderPoints[0].import_kw, 0);
 assert.equal(directionalRenderPoints[0].export_kw, 1.2);
 assert.equal(directionalRenderPoints[1].import_kw, 0.74);
+
+const p1RawPoints = [
+  { timestamp: Date.parse("2026-10-08T00:00:00Z"), import_kw: 1.1, export_kw: null },
+  { timestamp: Date.parse("2026-10-08T00:15:00Z"), import_kw: 1.2, export_kw: null },
+  { timestamp: Date.parse("2026-10-08T00:30:00Z"), import_kw: 1.3, export_kw: null },
+];
+const providerFallbackPoints = [
+  { timestamp: Date.parse("2026-10-07T23:45:00Z"), import_kw: 0.0478, export_kw: null, history_source: "eon_provider" },
+  { timestamp: Date.parse("2026-10-08T00:00:00Z"), import_kw: 0.0478, export_kw: null, history_source: "eon_provider" },
+  { timestamp: Date.parse("2026-10-08T00:15:00Z"), import_kw: 0.0478, export_kw: null, history_source: "eon_provider" },
+  { timestamp: Date.parse("2026-10-08T00:45:00Z"), import_kw: 0.0478, export_kw: null, history_source: "eon_provider" },
+];
+const p1PrecedencePoints = mergeMeterRenderPoints(
+  p1RawPoints,
+  providerFallbackPoints,
+  { import_kw: "canonical_energy_history", export_kw: "unavailable" },
+).points;
+assert.deepEqual(
+  p1PrecedencePoints.map((point) => [point.timestamp, point.import_kw]),
+  [
+    [Date.parse("2026-10-07T23:45:00Z"), 0.0478],
+    [Date.parse("2026-10-08T00:00:00Z"), 1.1],
+    [Date.parse("2026-10-08T00:15:00Z"), 1.2],
+    [Date.parse("2026-10-08T00:30:00Z"), 1.3],
+    [Date.parse("2026-10-08T00:45:00Z"), 0.0478],
+  ],
+  "raw P1 must replace provider points where it is present and retain provider only in a real gap",
+);
 const directionalBuyPath = buildMeterPathMarkup(
   directionalRenderPoints,
   "import_kw",

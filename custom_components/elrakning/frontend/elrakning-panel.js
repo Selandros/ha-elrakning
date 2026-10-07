@@ -2175,31 +2175,40 @@ export function selectMeterRenderSources(primaryPoints, historicalPoints) {
 
 export function mergeMeterRenderPoints(primaryPoints, historicalPoints, sources = selectMeterRenderSources(primaryPoints, historicalPoints)) {
   const pointsByTimestamp = new Map();
-  const addPoints = (points, source) => {
-    const useImport = sources.import_kw === source;
-    const useExport = sources.export_kw === source;
-    if (!useImport && !useExport) return;
-    for (const point of Array.isArray(points) ? points : []) {
-      const timestamp = new Date(point?.timestamp).getTime();
-      if (!Number.isFinite(timestamp)) continue;
-      const current = pointsByTimestamp.get(timestamp) || {
-        timestamp,
-        raw_timestamp: point?.raw_timestamp ?? point?.timestamp ?? null,
-        import_kw: null,
-        export_kw: null,
-        gap_before: Boolean(point?.gap_before),
-      };
-      current.gap_before = current.gap_before || Boolean(point?.gap_before);
-      current.raw_timestamp ??= point?.raw_timestamp ?? point?.timestamp ?? null;
-      current.history_source ??= point?.history_source ?? null;
-      current.source_resolution_seconds ??= point?.source_resolution_seconds ?? null;
-      if (useImport) current.import_kw = normalizeMeterValue(point?.import_kw);
-      if (useExport) current.export_kw = normalizeMeterValue(point?.export_kw);
-      pointsByTimestamp.set(timestamp, current);
+  const addPoint = (point, isPrimary = false) => {
+    const timestamp = new Date(point?.timestamp).getTime();
+    if (!Number.isFinite(timestamp)) return;
+    const current = pointsByTimestamp.get(timestamp) || {
+      timestamp,
+      raw_timestamp: point?.raw_timestamp ?? point?.timestamp ?? null,
+      import_kw: null,
+      export_kw: null,
+      gap_before: Boolean(point?.gap_before),
+    };
+    current.gap_before = current.gap_before || Boolean(point?.gap_before);
+    current.raw_timestamp ??= point?.raw_timestamp ?? point?.timestamp ?? null;
+    current.history_source ??= point?.history_source ?? null;
+    current.source_resolution_seconds ??= point?.source_resolution_seconds ?? null;
+    for (const [field, sourceKey] of [["import_kw", "import_kw"], ["export_kw", "export_kw"]]) {
+      const sourceSelected = sources[sourceKey];
+      const value = normalizeMeterValue(point?.[field]);
+      if (sourceSelected === "unavailable"
+        || (!isPrimary && sourceSelected !== "canonical_energy_history")
+        || !Number.isFinite(value)) continue;
+      const existingValue = normalizeMeterValue(current[field]);
+      if (!Number.isFinite(existingValue) || isPrimary) {
+        current[field] = value;
+        if (isPrimary) {
+          current.history_source = "meter_history";
+          current.source_resolution_seconds = point?.source_resolution_seconds ?? null;
+          current.raw_timestamp = point?.raw_timestamp ?? point?.timestamp ?? current.raw_timestamp;
+        }
+      }
     }
+    pointsByTimestamp.set(timestamp, current);
   };
-  addPoints(primaryPoints, "meter_history");
-  addPoints(historicalPoints, "canonical_energy_history");
+  for (const point of Array.isArray(historicalPoints) ? historicalPoints : []) addPoint(point);
+  for (const point of Array.isArray(primaryPoints) ? primaryPoints : []) addPoint(point, true);
   return {
     sources,
     points: [...pointsByTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp),

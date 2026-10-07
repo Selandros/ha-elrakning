@@ -2,6 +2,16 @@
 
 Updated: 2026-10-01
 
+## 0.0.1081 P1 import/live consumption precedence checkpoint
+
+- IMPLEMENTED/TESTED: The frontend meter merge keeps verified canonical/provider
+  import fallback points but lets numeric current meter samples win at matching
+  timestamps. This keeps Köp aligned with Last when both resolve to the same
+  mapped grid-power source, without fabricating values or zero-filling gaps.
+- PRESERVED: Canonical history remains the fallback for missing meter samples,
+  exact-site/date isolation, signed import/export semantics, gap breaking and
+  existing P1/provider provenance rules.
+
 ## 0.0.1073 idempotent E.ON cache recovery checkpoint
 
 - IMPLEMENTED/TESTED: E.ON cached historical recovery isolates an immutable
