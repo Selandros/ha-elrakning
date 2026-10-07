@@ -8834,8 +8834,12 @@ class ElrakningPanel {
       call("elrakning/solar_evidence_state"),
     ]);
     const siteData = site.data || {};
-    const currentSiteId = siteData.current_site?.site_id || siteData.site_id || null;
-    const allSites = Array.isArray(siteData.available_sites) ? siteData.available_sites : [];
+    const localSite = this._siteState?.current_site || this._siteState?.site || (this._siteState?.site_id ? this._siteState : null);
+    const currentSite = siteData.current_site || siteData.site || localSite || null;
+    const currentSiteId = currentSite?.site_id || siteData.site_id || this._siteState?.site_id || null;
+    const allSites = Array.isArray(siteData.available_sites)
+      ? siteData.available_sites
+      : Array.isArray(this._siteState?.available_sites) ? this._siteState.available_sites : [];
     const foreignSiteIds = allSites
       .map((item) => item?.site_id)
       .filter((siteId) => siteId && siteId !== currentSiteId);
@@ -8854,11 +8858,12 @@ class ElrakningPanel {
         runtime_status: siteData.runtime_status || null,
       },
       site: {
-        current_site: siteData.current_site || siteData.site || null,
+        current_site: currentSite,
         available_sites: allSites,
         site_configured: siteData.site_configured ?? null,
         current_site_id: currentSiteId,
-        current_site_name: siteData.current_site?.name || siteData.site?.name || null,
+        current_site_name: currentSite?.name || null,
+        state_source: siteData.current_site || siteData.site ? "site_identity_endpoint" : currentSite ? "frontend_site_state_fallback" : "unavailable",
       },
       source_ledger: {
         current_site_logical_roles: siteData.logical_roles || [],
@@ -8873,6 +8878,10 @@ class ElrakningPanel {
         coordinator_state: this.priceData,
         source_state: this._priceState || null,
         error_details: this._priceErrorDetails || null,
+      },
+      price_chart_runtime_diagnostics: {
+        site_id: currentSiteId,
+        ...(this._buildPriceSourceData().runtime_diagnostics || {}),
       },
       solar_context: {
         forecast: forecast.data,
@@ -14568,6 +14577,7 @@ class ElrakningPanel {
           bbox = null;
         }
         const path = first?.getAttribute?.("d") || "";
+        const coordinates = (path.match(/[-+]?(?:\d+\.?\d*|\.\d+)/g) || []).map(Number);
         return {
           selector,
           element_count: elements.length,
@@ -14575,6 +14585,8 @@ class ElrakningPanel {
           d_length: elements.reduce((total, element) => total + (element.getAttribute("d") || "").length, 0),
           d_start: path.slice(0, 80) || null,
           d_end: path.slice(-80) || null,
+          first_x: Number.isFinite(coordinates[0]) ? coordinates[0] : null,
+          last_x: coordinates.length >= 2 && Number.isFinite(coordinates.at(-2)) ? coordinates.at(-2) : null,
           bbox,
           computed: style ? {
             display: style.display || null,
