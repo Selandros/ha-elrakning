@@ -1155,12 +1155,35 @@ export function selectPowerForecastPoints(source, {
   return selectForecastPointsFromFrames(frames, { siteId, selectedDate, now, includeElapsed });
 }
 
+function mergePowerHistorySeries(existingSeries = {}, incomingSeries = {}) {
+  const merged = {};
+  for (const key of new Set([...Object.keys(existingSeries || {}), ...Object.keys(incomingSeries || {})])) {
+    const existing = existingSeries?.[key] || {};
+    const incoming = incomingSeries?.[key] || {};
+    const pointsByTimestamp = new Map();
+    for (const point of [...(Array.isArray(existing.points) ? existing.points : []), ...(Array.isArray(incoming.points) ? incoming.points : [])]) {
+      const timestamp = new Date(point?.timestamp).getTime();
+      if (Number.isFinite(timestamp)) pointsByTimestamp.set(timestamp, point);
+    }
+    merged[key] = {
+      ...existing,
+      ...incoming,
+      ...(pointsByTimestamp.size ? {
+        points: [...pointsByTimestamp.entries()]
+          .sort(([left], [right]) => left - right)
+          .map(([, point]) => point),
+      } : {}),
+    };
+  }
+  return merged;
+}
+
 export function mergePowerHistoryRefreshState({ response, series, existingState = {}, contextKey, previousContextKey } = {}) {
   const unavailableForecast = { schema: "ella_power_forecast.v1", available: false, series: {} };
   const sameContext = contextKey && contextKey === previousContextKey;
   return {
     date: response?.date || null,
-    series: series || {},
+    series: sameContext ? mergePowerHistorySeries(existingState.series, series) : series || {},
     power_forecast: sameContext ? (existingState.power_forecast || unavailableForecast) : unavailableForecast,
     solar_analysis: { available: false, days: [] },
     solar_forecast: { available: false },

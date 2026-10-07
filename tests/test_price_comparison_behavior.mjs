@@ -116,11 +116,22 @@ const forecastState = {
 const sameContextRefresh = mergePowerHistoryRefreshState({
   response: { date: "2026-09-30" },
   series: { solar: { points: [{ timestamp: "2026-09-30T09:00:00Z", value_kw: 1 }] } },
-  existingState: { power_forecast: forecastState, solar_evidence: { available: true } },
+  existingState: {
+    power_forecast: forecastState,
+    solar_evidence: { available: true },
+    series: {
+      solar: { points: [{ timestamp: "2026-09-30T08:00:00Z", value_kw: 0.5 }] },
+    },
+  },
   contextKey: "site-a:1:2026-09-30",
   previousContextKey: "site-a:1:2026-09-30",
 });
 assert.equal(sameContextRefresh.power_forecast, forecastState, "history refresh must preserve forecast in the same context");
+assert.deepEqual(
+  sameContextRefresh.series.solar.points.map((point) => point.timestamp),
+  ["2026-09-30T08:00:00Z", "2026-09-30T09:00:00Z"],
+  "same-context refresh must retain earlier verified history points",
+);
 const differentContextRefresh = mergePowerHistoryRefreshState({
   response: { date: "2026-10-01" },
   series: { solar: { points: [] } },
