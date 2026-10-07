@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyPriceDataResponse, buildMeterPathMarkup, buildMeterScale, buildPriceChartInputSignature, summarizeRuntimeSeries, summarizeSvgPathMarkup } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyPriceDataResponse, buildMeterPathMarkup, buildMeterScale, buildPriceChartInputSignature, mergePowerRenderPoints, splitMeterSegmentsByGap, summarizeRuntimeSeries, summarizeSvgPathMarkup } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { mergeMeterRenderPoints, resolveCanonicalMeterSeriesPoints, selectMeterRenderPoints, selectMeterRenderSources } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, dailyEnergyCardVisible, mergeLiveMeterState, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, interpolateMeterValueAt, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
@@ -1835,6 +1835,45 @@ assert.equal(continuousGaps[0][0].value_kw, 2);
 assert.equal(continuousGaps[0][1].value_kw, 5);
 assert.equal(JSON.stringify(continuousGapPoints), continuousGapSnapshot);
 assert.equal(buildContinuousGapPairs(thresholdPoints([1, 2]), "value_kw").length, 0);
+const longPowerGap = [
+  { timestamp: Date.parse("2026-10-08T00:25:00Z"), value_kw: 1.4 },
+  { timestamp: Date.parse("2026-10-08T01:25:00Z"), value_kw: 1.3 },
+];
+assert.equal(splitMeterSegmentsByGap(longPowerGap).length, 2);
+const longGapMarkup = buildMeterPathMarkup(
+  longPowerGap,
+  "value_kw",
+  "chart-power-consumption",
+  (timestamp) => timestamp,
+  (value) => value,
+  (segment) => `M ${segment[0].timestamp} ${segment[0].value_kw} L ${segment.at(-1).timestamp} ${segment.at(-1).value_kw}`,
+);
+assert.equal((longGapMarkup.match(/<path\b/g) || []).length, 0);
+const continuousMarkup = buildMeterPathMarkup(
+  [
+    { timestamp: Date.parse("2026-10-08T00:25:00Z"), raw_timestamp: "2026-10-08T00:25:00Z", value_kw: 1.4 },
+    { timestamp: Date.parse("2026-10-08T00:30:00Z"), raw_timestamp: "2026-10-08T00:30:00Z", value_kw: 1.3 },
+  ],
+  "value_kw",
+  "chart-power-consumption",
+  (timestamp) => timestamp,
+  (value) => value,
+  (segment) => `M ${segment[0].timestamp} ${segment[0].value_kw} L ${segment.at(-1).timestamp} ${segment.at(-1).value_kw}`,
+);
+assert.equal((continuousMarkup.match(/<path\b/g) || []).length, 1);
+const mergedPowerPoints = mergePowerRenderPoints(
+  longPowerGap,
+  [
+    { timestamp: Date.parse("2026-10-08T00:45:00Z"), value_kw: 1.5 },
+    { timestamp: Date.parse("2026-10-08T01:00:00Z"), value_kw: 1.6 },
+  ],
+);
+assert.deepEqual(mergedPowerPoints.map((point) => point.timestamp), [
+  Date.parse("2026-10-08T00:25:00Z"),
+  Date.parse("2026-10-08T00:45:00Z"),
+  Date.parse("2026-10-08T01:00:00Z"),
+  Date.parse("2026-10-08T01:25:00Z"),
+]);
 const forecastBase = Date.parse("2026-09-22T00:00:00Z");
 const forecastPoints = [0, 15, 30, 45].map((minutes) => ({
   timestamp: forecastBase + minutes * 60 * 1000,
@@ -2634,9 +2673,10 @@ assert.match(panelSource, /prepareMeterDisplayPoints\(points\)/);
 assert.match(panelSource, /POWER_DISPLAY_THRESHOLD_KW = 0\.1/);
 assert.match(panelSource, /import_kw: Number\.isFinite\(importKw\) \? importKw : null/);
 assert.match(panelSource, /export_kw: Number\.isFinite\(exportKw\) \? exportKw : null/);
-assert.match(panelSource, /const displaySource = useHistoricalPower/);
+assert.match(panelSource, /const mergedPowerPoints = historicalPoints\.length/);
+assert.match(panelSource, /const displaySource = mergedPowerPoints\.length/);
 assert.match(panelSource, /powerDisplayPoints\[key\] = displaySource\.map/);
-assert.match(panelSource, /energyIntervalsToCurvePoints\(energyHistory\?\.series\?\.\[key\]\)/);
+assert.match(panelSource, /const historicalPowerDisplayPoints = energyIntervalsToCurvePoints\(energyHistory\?\.series\?\.\[key\]\)/);
 assert.match(panelSource, /meterDisplayPoints\.flatMap/);
 assert.match(panelSource, /isHoverPowerValue\(details\?\.import_kw\)/);
 assert.match(panelSource, /isHoverPowerValue\(details\?\.export_kw\)/);

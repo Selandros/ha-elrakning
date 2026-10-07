@@ -133,10 +133,12 @@ export function summarizeRuntimeSeries(series, valueKeys = ["value_kw", "import_
 
 export function buildMeterPathMarkup(points, key, className, x, meterY, buildSmoothPath) {
   const color = chartSeriesColor(className);
-  const segments = buildThresholdClippedSegments(points, key).map((segment) => {
-    if (segment.length < 2) return "";
-    return `<path class="${className}" fill="none" stroke="${color}" d="${buildSmoothPath(segment, key, x, meterY)}" />`;
-  }).join("");
+  const segments = buildThresholdClippedSegments(points, key)
+    .flatMap((segment) => splitMeterSegmentsByGap(segment))
+    .map((segment) => {
+      if (segment.length < 2) return "";
+      return `<path class="${className}" fill="none" stroke="${color}" d="${buildSmoothPath(segment, key, x, meterY)}" />`;
+    }).join("");
   const interpolated = buildContinuousGapPairs(points, key).map(([from, to]) => {
     if (!isChartPowerValue(from?.[key]) || !isChartPowerValue(to?.[key])) return "";
     return `<path class="${className} chart-interpolated-line" fill="none" stroke="${color}" d="M ${x(from.timestamp)} ${meterY(from[key])} L ${x(to.timestamp)} ${meterY(to[key])}" />`;
@@ -3883,12 +3885,51 @@ export function buildContinuousGapPairs(points, key) {
     const timestamp = new Date(point?.timestamp).getTime();
     const value = normalizeMeterValue(point?.[key]);
     if (!Number.isFinite(timestamp) || !isChartPowerValue(value)) continue;
-    if (previous && timestamp - previous.timestamp > 5 * 60 * 1000) {
+    if (previous && timestamp - previous.timestamp > 5 * 60 * 1000
+      && timestamp - previous.timestamp <= 20 * 60 * 1000) {
       gaps.push([previous.point, point]);
     }
     previous = { point, timestamp };
   }
   return gaps;
+}
+
+export function splitMeterSegmentsByGap(points, maxGapMs = 20 * 60 * 1000) {
+  const segments = [];
+  let segment = [];
+  let previousTimestamp = null;
+  const append = () => {
+    if (segment.length) segments.push(segment);
+    segment = [];
+  };
+  for (const point of Array.isArray(points) ? points : []) {
+    const timestamp = new Date(point?.timestamp).getTime();
+    if (!Number.isFinite(timestamp)) continue;
+    if (previousTimestamp !== null && timestamp - previousTimestamp > maxGapMs) append();
+    segment.push(point);
+    previousTimestamp = timestamp;
+  }
+  append();
+  return segments;
+}
+
+export function mergePowerRenderPoints(primaryPoints = [], historicalPoints = []) {
+  const pointsByTimestamp = new Map();
+  for (const point of Array.isArray(historicalPoints) ? historicalPoints : []) {
+    const timestamp = new Date(point?.timestamp).getTime();
+    const value = normalizeMeterValue(point?.value_kw);
+    if (Number.isFinite(timestamp) && Number.isFinite(value)) {
+      pointsByTimestamp.set(timestamp, { ...point, timestamp, value_kw: value });
+    }
+  }
+  for (const point of Array.isArray(primaryPoints) ? primaryPoints : []) {
+    const timestamp = new Date(point?.timestamp).getTime();
+    const value = normalizeMeterValue(point?.value_kw);
+    if (Number.isFinite(timestamp) && Number.isFinite(value)) {
+      pointsByTimestamp.set(timestamp, { ...point, timestamp, value_kw: value });
+    }
+  }
+  return [...pointsByTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
 }
 
 export function buildForecastSegments(points, key, resolutionMs = 15 * 60 * 1000) {
@@ -13952,7 +13993,8 @@ class ElrakningPanel {
   }
 
   buildMeterDisplaySegments(points, key) {
-    return buildThresholdClippedSegments(points, key, { thresholded: false });
+    return buildThresholdClippedSegments(points, key, { thresholded: false })
+      .flatMap((segment) => splitMeterSegmentsByGap(segment));
   }
 
   buildThresholdClippedSegments(points, key) {
@@ -14350,22 +14392,24 @@ class ElrakningPanel {
         targetPoints: renderBudget,
         valueKeys: ["value_kw"],
       });
-      powerCanonicalPoints[key] = useHistoricalPower
-        ? historicalPoints
-        : this.buildCanonicalPowerPoints(renderRawPoints, dayStart, selectedDayEnd);
       const historicalPowerDisplayPoints = energyIntervalsToCurvePoints(energyHistory?.series?.[key]).filter((point) => (
         point.timestamp >= dayStart.getTime() && point.timestamp <= actualDayEnd
       ));
-      const displaySource = useHistoricalPower
-        ? decimateDisplayPoints(historicalPowerDisplayPoints, {
-          targetPoints: renderBudget,
-          valueKeys: ["value_kw"],
-        })
+      const mergedPowerPoints = historicalPoints.length
+        ? mergePowerRenderPoints(rawPoints, historicalPoints)
+        : [];
+      powerCanonicalPoints[key] = useHistoricalPower
+        ? historicalPoints
+        : mergedPowerPoints.length
+          ? mergedPowerPoints
+          : this.buildCanonicalPowerPoints(renderRawPoints, dayStart, selectedDayEnd);
+      const displaySource = mergedPowerPoints.length
+        ? mergePowerRenderPoints(rawPoints, historicalPowerDisplayPoints)
         : powerCanonicalPoints[key];
       powerDisplayPoints[key] = displaySource.map((point) => ({
         ...point,
         value_kw: normalizeMeterValue(point.value_kw),
-      }));
+      })).filter((point) => Number.isFinite(point.value_kw));
     }
     this._lastPowerChartRenderStats = {
       cache_hit: false,

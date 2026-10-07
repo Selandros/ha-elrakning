@@ -194,7 +194,7 @@ assert.match(panelSource, /_canonicalEnergyHistoryInFlight\.get\(contextKey\)/);
 assert.match(panelSource, /requestConnection !== this\.hass\?\.connection/);
 assert.doesNotMatch(panelSource.slice(panelSource.indexOf("async loadCanonicalEnergyHistory"), panelSource.indexOf("async loadPricePlan")), /requestHass !== this\.hass/);
 assert.match(panelSource, /const useHistoricalPower = rawPoints\.length === 0 && historicalPoints\.length > 0/);
-assert.match(panelSource, /const historicalPowerDisplayPoints = energyIntervalsToCurvePoints[\s\S]*?const displaySource = useHistoricalPower/);
+assert.match(panelSource, /const mergedPowerPoints = historicalPoints\.length[\s\S]*?const displaySource = mergedPowerPoints\.length/);
 assert.match(panelSource, /const meterValue = \(key\) => canonicalMeterPoint && Number\.isFinite\(Number\(canonicalMeterPoint\[key\]\)\)\n        \? Number\(canonicalMeterPoint\[key\]\)\n        : hoverGeometry\?\.meterDisplayValue\?\.\(key, tooltipTimestamp\) \?\? null;/);
 
 console.log("selected hourly price date regression passed");
