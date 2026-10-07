@@ -421,6 +421,8 @@ class PowerManager:
             return {
                 "success": True,
                 "date": date,
+                "interval_start": start.isoformat(),
+                "interval_end": end.isoformat(),
                 "series": {key: {"points": []} for key in ("solar", "consumption", "charging", "discharging", "soc")},
             }
         mapping_key = "|".join(
@@ -484,7 +486,13 @@ class PowerManager:
             "discharging": {"points": self._battery_history_points("discharging", mapping, raw)},
             "soc": {"points": self._points_for_entity(soc_entity, raw)},
         }
-        result = {"success": True, "date": date, "series": series}
+        result = {
+            "success": True,
+            "date": date,
+            "interval_start": start.isoformat(),
+            "interval_end": end.isoformat(),
+            "series": series,
+        }
         hass_data = getattr(self.hass, "data", {})
         forecast = hass_data.get("elrakning", {}).get("solar_forecast_manager") if isinstance(hass_data, dict) else None
         weather_manager = hass_data.get("elrakning", {}).get("solar_weather_manager") if isinstance(hass_data, dict) else None

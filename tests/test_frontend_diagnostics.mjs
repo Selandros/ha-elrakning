@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyPriceDataResponse, buildMeterPathMarkup, buildMeterScale, buildPriceChartInputSignature, summarizeSvgPathMarkup } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { applyPriceDataResponse, buildMeterPathMarkup, buildMeterScale, buildPriceChartInputSignature, summarizeRuntimeSeries, summarizeSvgPathMarkup } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { mergeMeterRenderPoints, resolveCanonicalMeterSeriesPoints, selectMeterRenderPoints, selectMeterRenderSources } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, interpolateMeterValueAt, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
@@ -2987,6 +2987,33 @@ assert.match(panelSource, /chart-power-solar/);
 assert.match(panelSource, /chart-power-consumption/);
 assert.match(panelSource, /chart-power-charging/);
 assert.match(panelSource, /chart-power-discharging/);
+assert.match(panelSource, /runtime_diagnostics:/);
+assert.match(panelSource, /backend_power_history: {/);
+assert.match(panelSource, /interval_start: this\._powerHistory\?\.interval_start/);
+assert.match(panelSource, /canonical_energy_history: {/);
+assert.match(panelSource, /frontend_after_merge: {/);
+assert.match(panelSource, /final_paths: {/);
+assert.match(panelSource, /pathDiagnostics\("\.chart-power-consumption"\)/);
+assert.match(panelSource, /pathDiagnostics\("\.chart-meter-import-actual"\)/);
+assert.deepEqual(summarizeRuntimeSeries([
+  { start: "2026-10-07T00:00:00+02:00", end: "2026-10-07T00:05:00+02:00", value_kw: 0.392, source: "reconciled_grid_import" },
+  { start: "2026-10-07T00:05:00+02:00", end: "2026-10-07T00:10:00+02:00", value_kw: 0.74, source: "p1" },
+  { start: "2026-10-07T00:10:00+02:00", end: "2026-10-07T00:15:00+02:00", value_kw: 0.736, source: "p1" },
+]), {
+  count: 3,
+  first_timestamp: "2026-10-07T00:00:00+02:00",
+  last_timestamp: "2026-10-07T00:10:00+02:00",
+  first_points: [
+    { timestamp: "2026-10-07T00:00:00+02:00", end: "2026-10-07T00:05:00+02:00", value_kw: 0.392, source: "reconciled_grid_import", source_entity: null },
+    { timestamp: "2026-10-07T00:05:00+02:00", end: "2026-10-07T00:10:00+02:00", value_kw: 0.74, source: "p1", source_entity: null },
+    { timestamp: "2026-10-07T00:10:00+02:00", end: "2026-10-07T00:15:00+02:00", value_kw: 0.736, source: "p1", source_entity: null },
+  ],
+  last_points: [
+    { timestamp: "2026-10-07T00:00:00+02:00", end: "2026-10-07T00:05:00+02:00", value_kw: 0.392, source: "reconciled_grid_import", source_entity: null },
+    { timestamp: "2026-10-07T00:05:00+02:00", end: "2026-10-07T00:10:00+02:00", value_kw: 0.74, source: "p1", source_entity: null },
+    { timestamp: "2026-10-07T00:10:00+02:00", end: "2026-10-07T00:15:00+02:00", value_kw: 0.736, source: "p1", source_entity: null },
+  ],
+});
 assert.match(panelSource, /powerForecastPoints\[key\]\?\.length > 1/);
 assert.match(panelSource, /this\._previewLayersVisible\[layer\] = !this\._previewLayersVisible\[layer\]/);
 assert.match(panelSource, /chart-legend-preview:not\(\.active\)/);

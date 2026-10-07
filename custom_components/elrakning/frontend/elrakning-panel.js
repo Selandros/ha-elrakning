@@ -109,6 +109,28 @@ export function summarizeSvgPathMarkup(markup) {
   };
 }
 
+export function summarizeRuntimeSeries(series, valueKeys = ["value_kw", "import_kw", "value"]) {
+  const rows = Array.isArray(series) ? series : [];
+  const timestampFor = (row) => row?.timestamp || row?.start || null;
+  const valueFor = (row) => valueKeys
+    .map((key) => normalizeMeterValue(row?.[key]))
+    .find((value) => Number.isFinite(value)) ?? null;
+  const sample = (row) => ({
+    timestamp: timestampFor(row),
+    end: row?.end || null,
+    value_kw: valueFor(row),
+    source: row?.source || row?.history_source || null,
+    source_entity: row?.source_entity || row?.entity_id || null,
+  });
+  return {
+    count: rows.length,
+    first_timestamp: rows.length ? timestampFor(rows[0]) : null,
+    last_timestamp: rows.length ? timestampFor(rows.at(-1)) : null,
+    first_points: rows.slice(0, 3).map(sample),
+    last_points: rows.slice(-3).map(sample),
+  };
+}
+
 export function buildMeterPathMarkup(points, key, className, x, meterY, buildSmoothPath) {
   const color = chartSeriesColor(className);
   const segments = buildThresholdClippedSegments(points, key).map((segment) => {
@@ -10996,6 +11018,34 @@ class ElrakningPanel {
       axes: mode === "hour" ? { price: { unit: "öre/kWh", side: "left" }, energy: { unit: "kW", side: "right" } } : { energy: { unit: "kWh", side: "left" }, price: { unit: "öre/kWh", side: "right" } },
       coverage,
       render: { price_chart: this._lastPowerChartRenderStats || null },
+      runtime_diagnostics: {
+        selected_date: selectedPeriod,
+        requested_date: this._periodPickerState?.confirmed ? localDateKey(this._periodPickerState.confirmed) : null,
+        backend_power_history: {
+          response_date: this._powerHistory?.date || null,
+          interval_start: this._powerHistory?.interval_start || null,
+          interval_end: this._powerHistory?.interval_end || null,
+        },
+        canonical_energy_history: {
+          source_entities: this.priceSnapshot?.energy_history?.source_entities || {},
+          sources: this.priceSnapshot?.energy_history?.sources || [],
+          series: {
+            consumption: summarizeRuntimeSeries(this.priceSnapshot?.energy_history?.series?.consumption),
+            import: summarizeRuntimeSeries(this.priceSnapshot?.energy_history?.series?.import),
+          },
+        },
+        frontend_after_merge: {
+          power_history: {
+            consumption: summarizeRuntimeSeries(this._powerHistory?.series?.consumption?.points),
+            import: summarizeRuntimeSeries(this._powerHistory?.series?.import?.points),
+          },
+          canonicalized: {
+            consumption: summarizeRuntimeSeries([...((this._powerCanonicalPointMaps?.consumption || new Map()).values())]),
+            import: summarizeRuntimeSeries(this._meterCanonicalPoints, ["import_kw"]),
+          },
+          render: this._lastPowerChartRenderStats || null,
+        },
+      },
       provenance: Object.fromEntries(Object.entries(sourceEntities).map(([key, entities]) => [key, { method: key === "buy" || key === "sell" ? (this._billingHistory?.integration_method || billingEnergySource.method || "canonical_meter_history") : "canonical_power_history", source_entities: entities }])),
       legend: {
         visible_series: visibleSeries,
@@ -14506,10 +14556,52 @@ class ElrakningPanel {
     };
     const finalizeRenderStats = (svg) => {
       const paths = [...svg.querySelectorAll(".chart-meter-import-actual")];
+      const pathDiagnostics = (selector) => {
+        const elements = [...svg.querySelectorAll(selector)];
+        const first = elements[0] || null;
+        const style = first && typeof getComputedStyle === "function" ? getComputedStyle(first) : null;
+        let bbox = null;
+        try {
+          const value = first?.getBBox?.();
+          if (value) bbox = { x: value.x, y: value.y, width: value.width, height: value.height };
+        } catch {
+          bbox = null;
+        }
+        const path = first?.getAttribute?.("d") || "";
+        return {
+          selector,
+          element_count: elements.length,
+          nonempty_path_count: elements.filter((element) => (element.getAttribute("d") || "").trim().length > 0).length,
+          d_length: elements.reduce((total, element) => total + (element.getAttribute("d") || "").length, 0),
+          d_start: path.slice(0, 80) || null,
+          d_end: path.slice(-80) || null,
+          bbox,
+          computed: style ? {
+            display: style.display || null,
+            visibility: style.visibility || null,
+            opacity: style.opacity || null,
+            stroke: style.stroke || null,
+            stroke_width: style.strokeWidth || null,
+          } : null,
+        };
+      };
       this._lastPowerChartRenderStats = {
         ...(this._lastPowerChartRenderStats || {}),
         cache_hit: false,
         render_pass: ++this._priceChartRenderPass,
+        power_render: Object.fromEntries(Object.entries(powerDisplayPoints).map(([key, points]) => ({
+          [key]: {
+            source_point_count: Array.isArray(this._powerHistory?.series?.[key]?.points)
+              ? this._powerHistory.series[key].points.length : 0,
+            display_point_count: points.length,
+            first_timestamp: points.length ? points[0].timestamp : null,
+            last_timestamp: points.length ? points.at(-1).timestamp : null,
+          },
+        }))),
+        final_paths: {
+          consumption: pathDiagnostics(".chart-power-consumption"),
+          import_actual: pathDiagnostics(".chart-meter-import-actual"),
+        },
         buy_render: {
           ...buyRenderStats,
           dom_path_count: paths.length,
