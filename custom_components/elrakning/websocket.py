@@ -37,7 +37,7 @@ from .elhandel.providers.greenely_source import paginate_source
 from .elnat.manager import GridManager
 from .elnat.provider_registry import GRID_PROVIDER_REGISTRY
 from .meter import MeterManager
-from .invoice import build_bucketed_actual_cost, build_canonical_cost_result, build_daily_actual_cost, build_today_variable_cost
+from .invoice import build_bucketed_actual_cost, build_canonical_cost_result, build_daily_actual_cost, build_today_variable_cost, select_billing_energy_source
 from .power import PowerManager
 from .load_forecast import build_historical_model_points
 from .ella_capabilities import build_capability_inventory
@@ -1470,7 +1470,7 @@ async def websocket_billing_history(hass, connection, msg):
         if row.get("value") is not None and row.get("source_status") in {"local_primary", "provider_gap_fill", "provider_reconciled"}
     ]
     canonical_energy_history = None
-    if not billing.get("points") and not reconciled_points and site_id:
+    if not reconciled_points and not billing.get("points") and site_id:
         canonical_energy_history = await async_build_energy_history(
             hass,
             site_manager,
@@ -1480,12 +1480,12 @@ async def websocket_billing_history(hass, connection, msg):
             site_id,
         )
     canonical_points = energy_history_billing_points(canonical_energy_history)
-    use_reconciled = not billing.get("points") and bool(reconciled_points or canonical_points)
+    selected_energy_points, selected_energy_source = select_billing_energy_source(
+        billing.get("points", []), reconciled_points, canonical_points
+    )
+    use_reconciled = selected_energy_source != "local_meter_history"
     use_canonical_energy = use_reconciled and not reconciled_points and bool(canonical_points)
-    if use_canonical_energy:
-        reconciled_points = canonical_points
-    elif not use_reconciled:
-        reconciled_points = []
+    reconciled_points = selected_energy_points if use_reconciled else []
     start = date.fromisoformat(billing["start"][:10])
     end = date.fromisoformat(billing["end"][:10])
     month_end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)

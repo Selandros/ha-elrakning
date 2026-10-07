@@ -23,6 +23,15 @@ def _number(value: Any) -> float | None:
     return number if number == number and number not in (float("inf"), float("-inf")) else None
 
 
+def select_billing_energy_source(raw_points, reconciled_points, canonical_points):
+    """Select the canonical site-scoped billing series before raw fallback data."""
+    if reconciled_points:
+        return reconciled_points, "reconciled_grid_import"
+    if canonical_points:
+        return canonical_points, "canonical_energy_history"
+    return raw_points, "local_meter_history"
+
+
 def build_today_variable_cost(
     points: list[dict[str, Any]] | None,
     periods: list[dict[str, Any]] | None,
