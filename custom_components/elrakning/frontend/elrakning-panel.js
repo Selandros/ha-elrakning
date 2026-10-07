@@ -1228,6 +1228,10 @@ export function normalizeDashboardCardVisibility(preferences = {}) {
   return { ...preferences, house: "always", grid: "always" };
 }
 
+export function dailyEnergyCardVisible(solarEnabled, batteryEnabled) {
+  return solarEnabled === true || batteryEnabled === true;
+}
+
 export function displayPowerValue(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -8322,12 +8326,24 @@ class ElrakningPanel {
     return true;
   }
 
+  _dashboardCardIsEnabled(key) {
+    const visibility = this._dashboardCardVisibility[key];
+    return visibility !== "hidden" && (visibility === "always" || this._dashboardCardIsConfigured(key));
+  }
+
+  _dailyEnergyCardIsEnabled() {
+    return dailyEnergyCardVisible(
+      this._dashboardCardIsEnabled("solar"),
+      this._dashboardCardIsEnabled("battery"),
+    );
+  }
+
   _renderDashboardCardVisibility() {
     const visible = (key) => this._configurationCardsVisible
       || (this._dashboardCardVisibility[key] !== "hidden"
         && (this._dashboardCardVisibility[key] === "always" || this._dashboardCardIsConfigured(key)));
     const groups = {
-      house: ["[data-live-power-tile=house]", "[data-daily-energy]"],
+      house: ["[data-live-power-tile=house]"],
       solar: ["[data-live-power-tile=solar]", "[data-power-card=solar-history]", "[data-solar-evidence-card]"],
       grid: ["[data-live-power-tile=grid]", "[data-phase-history-card]"],
       battery: ["[data-live-power-tile=battery]", "[data-power-card=battery-history]", "[data-soc-card]"],
@@ -8337,6 +8353,9 @@ class ElrakningPanel {
       for (const selector of selectors) {
         for (const node of this.host.querySelectorAll(selector)) node.toggleAttribute("hidden", !visible(key));
       }
+    }
+    for (const node of this.host.querySelectorAll("[data-daily-energy]")) {
+      node.toggleAttribute("hidden", !this._dailyEnergyCardIsEnabled());
     }
     for (const toggle of this.host.querySelectorAll("[data-dashboard-card-toggle]")) {
       const key = toggle.dataset.dashboardCardToggle;
@@ -9700,9 +9719,9 @@ class ElrakningPanel {
         reason: "meter_energy_unavailable",
       });
     }
-    const hasAnyPart = solarConfigured || consumptionConfigured;
-    card.hidden = !hasAnyPart;
-    if (!hasAnyPart) {
+    const cardVisible = this._dailyEnergyCardIsEnabled();
+    card.hidden = !cardVisible;
+    if (!cardVisible) {
       grid.replaceChildren();
       return;
     }
