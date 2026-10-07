@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { applyPriceDataResponse, buildMeterPathMarkup, buildMeterScale, buildPriceChartInputSignature, summarizeRuntimeSeries, summarizeSvgPathMarkup } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { mergeMeterRenderPoints, resolveCanonicalMeterSeriesPoints, selectMeterRenderPoints, selectMeterRenderSources } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 import { applyCanonicalMonthlyForecast, applyProviderMonthlyTrendEstimate, billingHistoryHasEnergyEvidence, buildCanonicalInvoiceEstimate, buildCombinedMonthlyCostForecast, buildGreenelyMonthlyProjection, finiteCostNumber, formatGreenelySpotObservation, resolveGreenelyActualInvoiceCost } from "../custom_components/elrakning/frontend/elrakning-panel.js";
-import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, dailyEnergyCardVisible, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, interpolateMeterValueAt, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
+import { aggregatePriceAndEnergyByPeriod, aggregatedPriceGroupIndex, benchmarkEvidenceVisibleForSite, buildBatteryDailyHistory, buildCanonicalMeterPoints, buildCanonicalPhasePoints, buildContinuousGapPairs, buildCostAnalysisSeries, buildDailyCostSeries, buildDailyMaxPhase, buildDailyObservedMaxima, buildEnergyBalance, buildFlatChartSignature, buildForecastSegments, buildGridSourceCost, buildHourlyBoundaryHours, buildInvoiceComparison, buildInvoiceEstimate, buildInvoiceEstimateFromEnergyBuckets, buildInvoiceProvenance, buildLivePowerProvenance, buildLivePowerTiles, buildLiveSourceEntity, buildMonotoneCubicSegments, buildPhaseChartGeometry, createRafCoalescer, dailyEnergyCardVisible, mergeLiveMeterState, phaseAxisGutter, buildPhaseProvenance, buildPreviousMonthActual, buildPriceAnalysisFacts, buildPriceChartGeometry, priceAxisGutter, buildProviderOnlyInvoiceEstimate, buildSolarDailyHistory, buildSolarHistoryTooltipFields, buildSolarHistoryTooltipLines, buildThresholdClippedSegments, chartColor, chartResourceLegendVisible, chartResourceSeriesVisible, CHART_COLORS, createMeterPowerHistoryState, createPriceDebugText, diagnosticComponent, diagnosticSymbol, displayPowerValue, formatDiagnosticsText, generateUpcomingPriceAnalysis, interpolateMeterValueAt, invoicePeriodLabel, integrateMeterEnergyByRange, integrateMeterHistoryKwh, integratePowerHistoryKwh, isChartPowerValue, isHoverPowerValue, isPointerInsidePlot, isVisiblePowerValue, mergeDailyPhaseMaxima, mergeMeterPowerHistoryPoint, mergePhaseHistory, nearestMeterPoint, normalizeDashboardCardVisibility, normalizeMeterValue, PHASE_COLOR_MAP, phaseHistoryAvailable, phaseHistoryAxisEnd, phaseHistoryPointCounts, pointerToPlotCoordinates, POWER_DISPLAY_THRESHOLD_KW, priceCategory, priceColorBands, priceColorDetails, priceErrorUserMessage, previousCalendarMonth, providerLabel, recomputeDailyEnergyState, recentPriceErrors, renderPriceAnalysis, renderSharedTooltip, resolveFuseAmpere, resolveRenderablePricePeriods, sanitizeDebugData, selectPhaseTimeTicks, shouldReplacePriceData, snapTooltipTimestamp, stockholmDayWindow } from "../custom_components/elrakning/frontend/elrakning-panel.js";
 
 const output = formatDiagnosticsText([
   {
@@ -705,6 +705,19 @@ assert.equal(dailyEnergyCardVisible(true, true), true);
 assert.equal(dailyEnergyCardVisible(false, true), true);
 assert.equal(dailyEnergyCardVisible(true, false), true);
 assert.equal(dailyEnergyCardVisible(false, false), false);
+assert.deepEqual(mergeLiveMeterState({ power_kw: 0, phase_current_a: { l1: 1 } }, {
+  entity_id: "sensor.p1_meter_effekt",
+  import_kw: 2.4,
+  export_kw: 0.3,
+  phase_current_a: { l1: 7.2, l2: null },
+  phase_voltage_v: { l1: 231.4 },
+  phase_active_power_kw: { l1: 1.8 },
+}), {
+  power_kw: 2.1,
+  phase_current_a: { l1: 7.2 },
+  phase_voltage_v: { l1: 231.4 },
+  phase_active_power_kw: { l1: 1.8 },
+});
 const phaseMaxima = mergeDailyPhaseMaxima({}, { l1: -12, l2: 7, l3: 9 }, "2026-08-30T12:00:00Z");
 assert.deepEqual(phaseMaxima, {
   l1: { ampere: 12, raw_value: -12, timestamp: "2026-08-30T12:00:00.000Z" },
@@ -3108,8 +3121,8 @@ assert.doesNotMatch(panelSource, /tooltip_copy_text_length/);
 assert.match(panelSource, /if \(mode === "house_load"\)[\s\S]*await this\.loadPowerHistory\(\);[\s\S]*close\(\);/);
 assert.match(panelSource, /const payload = \{[\s\S]*type: "elrakning\/meter_save"/);
 assert.match(panelSource, /this\.loadMeterState\(loadHistory\)/);
-assert.match(panelSource, /phaseEntities = Object\.values\(mapping\.phase_current_entities \|\| \{\}\)/);
-assert.match(panelSource, /\[mapping\.power_entity, mapping\.energy_import_entity, mapping\.energy_export_entity, \.\.\.phaseEntities\]\.includes\(entityId\)/);
+assert.match(panelSource, /\[mapping\.energy_import_entity, mapping\.energy_export_entity\]\.includes\(entityId\)/);
+assert.match(panelSource, /this\._meterState = mergeLiveMeterState\(this\._meterState \|\| \{\}, point\)/);
 assert.match(panelSource, /async loadMeterState\(loadHistory = false\)/);
 assert.match(panelSource, /if \(loadHistory\) await this\.loadMeterPowerHistory\(\);/);
 assert.doesNotMatch(panelSource, /meter_history_request_started/);

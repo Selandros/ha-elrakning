@@ -1228,6 +1228,30 @@ export function normalizeDashboardCardVisibility(preferences = {}) {
   return { ...preferences, house: "always", grid: "always" };
 }
 
+export function mergeLiveMeterState(state = {}, event = {}) {
+  const next = { ...state };
+  const mergeFiniteRecord = (key) => {
+    if (!event[key] || typeof event[key] !== "object") return;
+    next[key] = { ...(next[key] || {}) };
+    for (const [phase, value] of Object.entries(event[key])) {
+      if (value === null || value === undefined || value === "") continue;
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) next[key][phase] = numeric;
+    }
+  };
+  mergeFiniteRecord("phase_current_a");
+  mergeFiniteRecord("phase_voltage_v");
+  mergeFiniteRecord("phase_active_power_kw");
+  const imported = event.import_kw === null || event.import_kw === undefined || event.import_kw === ""
+    ? NaN
+    : Number(event.import_kw);
+  const exported = event.export_kw === null || event.export_kw === undefined || event.export_kw === ""
+    ? NaN
+    : Number(event.export_kw);
+  if (Number.isFinite(imported) && Number.isFinite(exported)) next.power_kw = imported - exported;
+  return next;
+}
+
 export function dailyEnergyCardVisible(solarEnabled, batteryEnabled) {
   return solarEnabled === true || batteryEnabled === true;
 }
@@ -12440,8 +12464,7 @@ class ElrakningPanel {
         (event) => {
           const entityId = event.data?.entity_id;
           const mapping = this._meterState || {};
-          const phaseEntities = Object.values(mapping.phase_current_entities || {});
-          if ([mapping.power_entity, mapping.energy_import_entity, mapping.energy_export_entity, ...phaseEntities].includes(entityId)) {
+          if ([mapping.energy_import_entity, mapping.energy_export_entity].includes(entityId)) {
             this.loadMeterState();
           }
           // PowerManager owns live power state through elrakning_power_update;
@@ -13620,6 +13643,7 @@ class ElrakningPanel {
   }
 
   _appendMeterPowerPoint(point) {
+    this._meterState = mergeLiveMeterState(this._meterState || {}, point);
     const hasPhaseData = Boolean(point?.phase_current_a || point?.phase_voltage_v || point?.phase_active_power_kw);
     if (hasPhaseData) {
       this._updateLivePhaseMaxima(point.phase_current_a, point.timestamp ? new Date(point.timestamp) : new Date());

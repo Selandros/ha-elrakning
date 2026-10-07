@@ -5,7 +5,8 @@ const source = readFileSync(new URL("../custom_components/elrakning/frontend/elr
 const subscription = source.slice(source.indexOf('subscribeEvents(\n        (event) => {'), source.indexOf('"state_changed",') + '"state_changed",'.length);
 const power = readFileSync(new URL("../custom_components/elrakning/power.py", import.meta.url), "utf8");
 
-assert.match(subscription, /if \(\[mapping\.power_entity, mapping\.energy_import_entity, mapping\.energy_export_entity, \.\.\.phaseEntities\]\.includes\(entityId\)\) \{[\s\S]*loadMeterState\(\)/);
+assert.match(subscription, /if \(\[mapping\.energy_import_entity, mapping\.energy_export_entity\]\.includes\(entityId\)\) \{[\s\S]*loadMeterState\(\)/);
+assert.doesNotMatch(subscription, /phaseEntities/);
 for (const forbidden of ["loadPowerState", "loadPowerHistory", "loadPowerStateEnrichment", "loadPowerHistoryEnrichment"]) {
   assert.doesNotMatch(subscription, new RegExp(forbidden));
 }
