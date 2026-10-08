@@ -2,6 +2,20 @@
 
 Updated: 2026-10-08
 
+## 0.0.1083 current-day phase history refresh checkpoint
+
+- ROOT CAUSE VERIFIED: completed `meter_power_history` results were cached by
+  the local date without a freshness boundary. Reopening the panel after a
+  long interval therefore reused the first Recorder snapshot and appended
+  only the newest live point.
+- IMPLEMENTED/TESTED: current-day history continues to deduplicate concurrent
+  in-flight requests, but completed current-day results are fetched again on
+  a later request. Invalid or fabricated points are not introduced, while
+  bounded completed-cache behavior remains available for non-current dates.
+- PRESERVED: full local-day Recorder interval, deterministic phase merge,
+  live-event continuity, gap handling, exact source mapping, and the
+  0.0.1076–0.0.1082 P1/import and chart fixes.
+
 ## 0.0.1082 phase chart live-event continuity checkpoint
 
 - ROOT CAUSE VERIFIED IN CODE: the frontend subscribed to the generic

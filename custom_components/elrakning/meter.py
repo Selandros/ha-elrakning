@@ -492,7 +492,8 @@ class MeterManager:
         self._phase_current_entities = phase_entities["current"]
         phase_key = tuple(sorted((kind, phase, entity_id) for kind, entities in phase_entities.items() for phase, entity_id in entities.items()))
         key = (entity_id, date, invert_power, phase_key)
-        cached = self._history_cache.get(key)
+        current_date = date == dt_util.now().date().isoformat()
+        cached = None if current_date else self._history_cache.get(key)
         if cached is not None:
             return cached
         task = self._history_inflight.get(key)
@@ -500,10 +501,16 @@ class MeterManager:
             cache_epoch = self._history_cache_epoch
             task = asyncio.create_task(self._async_power_history_fetch(entity_id, start, end, date, invert_power, phase_entities))
             self._history_inflight[key] = task
-            def clear_inflight(completed: asyncio.Task, *, request_key: tuple[str, str, bool, tuple[tuple[str, str, str], ...]] = key, request_epoch: int = cache_epoch) -> None:
+            def clear_inflight(
+                completed: asyncio.Task,
+                *,
+                request_key: tuple[str, str, bool, tuple[tuple[str, str, str], ...]] = key,
+                request_epoch: int = cache_epoch,
+                cache_result: bool = not current_date,
+            ) -> None:
                 if self._history_inflight.get(request_key) is completed:
                     self._history_inflight.pop(request_key, None)
-                if not completed.cancelled() and completed.exception() is None and request_epoch == self._history_cache_epoch:
+                if cache_result and not completed.cancelled() and completed.exception() is None and request_epoch == self._history_cache_epoch:
                     result = completed.result()
                     if isinstance(result, dict) and result.get("success") is True:
                         self._history_cache[request_key] = result
