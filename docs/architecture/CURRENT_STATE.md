@@ -2,6 +2,20 @@
 
 Updated: 2026-10-08
 
+## 0.0.1085 frontend history recomputation performance checkpoint
+
+- ROOT CAUSE VERIFIED: raw history canonicalization searched the complete point
+  array for every five-minute slot. Daily energy recomputation repeated that
+  O(slots × points) work across six series, while live maxima formatted every
+  point through locale conversion.
+- IMPLEMENTED/TESTED: canonical meter slots now use a stable chronological
+  nearest-point index, preserving null, zero, tie, gap and timestamp semantics.
+  Daily maxima use one local-day interval instead of per-point locale formatting.
+  No source selection, integration, rendering or energy semantics changed.
+- BENCHMARK: the 10,000-point recomputation benchmark decreased from about
+  4.35 s to 21–25 ms locally; the 20,000-point maxima benchmark decreased from
+  about 59–72 ms to 16–29 ms. The regression test checks semantic equivalence.
+
 ## 0.0.1084 replay site isolation and timeout recovery checkpoint
 
 - ROOT CAUSE VERIFIED: one global 20-minute replay timeout wrapped the complete

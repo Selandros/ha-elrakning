@@ -1336,16 +1336,24 @@ export function displayPowerValue(value) {
 }
 
 export function buildDailyObservedMaxima(powerHistory = {}, meterHistory = {}, now = new Date()) {
-  const date = localDateKey(now);
+  const dayStart = localDayStart(now);
+  const dayStartMs = dayStart?.getTime();
+  const dayEnd = dayStart ? new Date(dayStart) : null;
+  if (dayEnd) dayEnd.setDate(dayEnd.getDate() + 1);
+  const dayEndMs = dayEnd?.getTime();
+  const date = Number.isFinite(dayStartMs) ? localDateKey(dayStart) : null;
+  const isInDay = (timestamp) => Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs)
+    && timestamp >= dayStartMs && timestamp < dayEndMs;
   const maxFor = (points, value) => (Array.isArray(points) ? points : [])
-    .filter((point) => localDateKey(point?.timestamp) === date)
-    .map((point) => Math.abs(Number(value(point))))
+    .map((point) => ({ point, timestamp: new Date(point?.timestamp).getTime() }))
+    .filter(({ timestamp }) => isInDay(timestamp))
+    .map(({ point }) => Math.abs(Number(value(point))))
     .filter(Number.isFinite)
     .reduce((maximum, current) => Math.max(maximum, current), 0);
   const series = powerHistory?.series || {};
   const meterPoints = Array.isArray(meterHistory?.points) ? meterHistory.points : [];
   const gridMaximum = meterPoints
-    .filter((point) => localDateKey(point?.timestamp) === date)
+    .filter((point) => isInDay(new Date(point?.timestamp).getTime()))
     .map((point) => Math.max(Math.abs(Number(point.import_kw)), Math.abs(Number(point.export_kw))))
     .filter(Number.isFinite)
     .reduce((maximum, current) => Math.max(maximum, current), 0);
@@ -2039,10 +2047,42 @@ export function buildLivePowerProvenance(key, tile, powerState = {}, meterState 
 export function buildCanonicalMeterPoints(points, dayStart, dayEnd, slotMs = 5 * 60 * 1000, maxDistanceMs = 2.5 * 60 * 1000) {
   const dayStartMs = new Date(dayStart).getTime();
   const dayEndMs = new Date(dayEnd).getTime();
+  if (!Number.isFinite(dayStartMs) || !Number.isFinite(dayEndMs) || dayEndMs <= dayStartMs || slotMs <= 0) return [];
+  const indexed = (Array.isArray(points) ? points : [])
+    .map((point, index) => ({ point, index, timestamp: new Date(point?.timestamp).getTime() }))
+    .filter((item) => Number.isFinite(item.timestamp));
+  let sorted = true;
+  for (let index = 1; index < indexed.length; index += 1) {
+    if (indexed[index - 1].timestamp > indexed[index].timestamp) {
+      sorted = false;
+      break;
+    }
+  }
+  if (!sorted) indexed.sort((left, right) => left.timestamp - right.timestamp || left.index - right.index);
+  const nearestCandidates = [];
+  for (const item of indexed) {
+    if (nearestCandidates.at(-1)?.timestamp !== item.timestamp) nearestCandidates.push(item);
+  }
   const canonical = [];
   let previousSelected = false;
+  let rightIndex = 0;
+  const nearestForSlot = (slotTimestamp) => {
+    while (rightIndex < nearestCandidates.length && nearestCandidates[rightIndex].timestamp < slotTimestamp) rightIndex += 1;
+    const before = nearestCandidates[rightIndex - 1];
+    const after = nearestCandidates[rightIndex];
+    const beforeDistance = before ? slotTimestamp - before.timestamp : Infinity;
+    const afterDistance = after ? after.timestamp - slotTimestamp : Infinity;
+    const beforeValid = beforeDistance <= maxDistanceMs;
+    const afterValid = afterDistance <= maxDistanceMs;
+    if (!beforeValid && !afterValid) return null;
+    if (!beforeValid) return after.point;
+    if (!afterValid) return before.point;
+    return beforeDistance < afterDistance || (beforeDistance === afterDistance && before.index < after.index)
+      ? before.point
+      : after.point;
+  };
   for (let slotTimestamp = dayStartMs; slotTimestamp < dayEndMs; slotTimestamp += slotMs) {
-    const selected = nearestMeterPoint(points, slotTimestamp, maxDistanceMs);
+    const selected = nearestForSlot(slotTimestamp);
     const importKw = selected ? normalizeMeterValue(selected.import_kw) : null;
     const exportKw = selected ? normalizeMeterValue(selected.export_kw) : null;
     const hasImportSample = Boolean(selected) && Number.isFinite(importKw);
