@@ -229,6 +229,11 @@ def test_replay_artifact_generation_is_background_work_outside_startup_barrier()
     assert "_replay_trigger_identity" in source
     assert "replay_active_trigger_keys" in source
     assert "replay_pending_trigger_keys" in source
+    assert "_ReplaySiteTaskRegistry" in source
+    assert "replay_site_task_registry" in source
+    assert "replay_site_timeout" in source
+    assert "asyncio.gather" in source
+    assert "asyncio.shield" in source
     assert 'frontend_data["replay_artifact_startup_task"] = hass.async_create_task' not in source
     assert "replay_refresh_task = hass.create_task(_generate_replay_artifact" not in source
 
@@ -263,7 +268,7 @@ def _load_replay_scheduler():
     nodes = [
         node for node in tree.body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef))
-        and node.name in {"_ReplayTaskProxy", "_create_replay_background_task"}
+        and node.name in {"_ReplayTaskProxy", "_ReplaySiteTaskRegistry", "_create_replay_background_task"}
     ]
     namespace = {
         "asyncio": asyncio,
@@ -272,6 +277,67 @@ def _load_replay_scheduler():
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
     return namespace["_create_replay_background_task"]
+
+
+def _load_replay_site_registry():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_ReplaySiteTaskRegistry")
+    namespace = {"asyncio": asyncio}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["_ReplaySiteTaskRegistry"]
+
+
+def test_replay_site_timeout_keeps_single_flight_and_does_not_cancel_work():
+    registry_class = _load_replay_site_registry()
+
+    async def exercise():
+        registry = registry_class()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        cancelled = []
+
+        async def stuck():
+            started.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+
+        first = await registry.run("site-a", lambda: stuck(), 0.001, "replay-site-a")
+        assert first["reason"] == "replay_timeout"
+        assert first["task_active"] is True
+        assert started.is_set()
+        second = await registry.run("site-a", lambda: (_ for _ in ()).throw(AssertionError("duplicate")), 0.001, "replay-site-a-duplicate")
+        assert second["reason"] == "site_replay_active"
+        assert cancelled == []
+        await registry.async_close()
+        assert cancelled == [True]
+
+    asyncio.run(exercise())
+
+
+def test_replay_site_timeout_does_not_block_another_site():
+    registry_class = _load_replay_site_registry()
+
+    async def exercise():
+        registry = registry_class()
+        release = asyncio.Event()
+
+        async def stuck():
+            await release.wait()
+
+        async def healthy():
+            return {"accepted": True, "site_id": "site-b"}
+
+        first = await registry.run("site-a", lambda: stuck(), 0.001, "replay-site-a")
+        assert first["reason"] == "replay_timeout"
+        second = await registry.run("site-b", lambda: healthy(), 0.1, "replay-site-b")
+        assert second == {"accepted": True, "site_id": "site-b"}
+        await registry.async_close()
+
+    asyncio.run(exercise())
 
 
 class _ReplaySchedulerHass:

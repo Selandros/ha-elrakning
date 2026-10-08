@@ -2,6 +2,23 @@
 
 Updated: 2026-10-08
 
+## 0.0.1084 replay site isolation and timeout recovery checkpoint
+
+- ROOT CAUSE VERIFIED: one global 20-minute replay timeout wrapped the complete
+  multi-site run. A blocked site therefore delayed every later site, while
+  cancellation of an executor-backed canonical read could leave the worker
+  thread waiting on the shared SQLite connection lock. Coalesced triggers then
+  started the same blocked work again after every timeout.
+- IMPLEMENTED/TESTED: replay work now has one bounded single-flight task per
+  site. Timed-out executor work is shielded and retained until it really ends,
+  so the same site is not duplicated; other sites run independently. Replay
+  reads use a site-local read-only SQLite connection and never write or migrate
+  the canonical store. Store writes remain serialized, and unload cancels all
+  retained site tasks deterministically.
+- PRESERVED: exact-site causal selection, immutable storage, fail-closed
+  qualification, bounded coalescing, read-only Step 9 semantics, and all
+  0.0.1076–0.0.1083 energy, phase and frontend behavior.
+
 ## 0.0.1083 current-day phase history refresh checkpoint
 
 - ROOT CAUSE VERIFIED: completed `meter_power_history` results were cached by

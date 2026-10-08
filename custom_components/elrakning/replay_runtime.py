@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 import hashlib
 import json
+import sqlite3
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -41,6 +42,87 @@ REQUIRED_ESS_KEYS = {
 def _connection_guard(storage: Any):
     lock_factory = getattr(storage, "connection_lock", None)
     return lock_factory() if callable(lock_factory) else nullcontext()
+
+
+class _ReplayReadStorage:
+    """Provide one site-local read-only SQLite connection for replay work."""
+
+    def __init__(self, path):
+        self.path = path
+        self.connection = sqlite3.connect(
+            f"file:{path}?mode=ro", uri=True, check_same_thread=False
+        )
+        self.connection.execute("PRAGMA query_only=ON")
+        self.connection.execute("PRAGMA busy_timeout=5000")
+
+    def _connection(self):
+        return self.connection
+
+    def connection_lock(self):
+        return nullcontext()
+
+    def read_site_energy_history(self, site_id: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        if not site_id or start.tzinfo is None or end.tzinfo is None or end <= start:
+            return []
+        start_us = int(start.astimezone(UTC).timestamp() * 1_000_000)
+        end_us = int(end.astimezone(UTC).timestamp() * 1_000_000)
+        rows: list[tuple[Any, ...]] = []
+        for table in ("historical_energy_observations", "energy_observations"):
+            rows.extend(self.connection.execute(
+                f"""SELECT record_id, logical_role, source_generation_id, interval_start_us, interval_end_us,
+                           resolution_seconds, value, unit, sign_convention, quality_status,
+                           coverage_ratio, gap_status, semantic_key, revision,
+                           CASE WHEN ? = 'energy_observations' THEN 1 ELSE 0 END AS live_priority,
+                           site_id, provenance_json
+                      FROM {table} AS current
+                     WHERE site_id = ?
+                       AND interval_start_us < ?
+                       AND interval_end_us > ?
+                       AND NOT EXISTS (
+                           SELECT 1 FROM {table} AS newer
+                            WHERE newer.semantic_key = current.semantic_key
+                              AND newer.revision > current.revision
+                       )""",
+                (table, site_id, end_us, start_us),
+            ).fetchall())
+        latest: dict[tuple[str, str, int, int], tuple[Any, ...]] = {}
+        for row in rows:
+            key = (str(row[1]), str(row[2]), int(row[3]), int(row[4]))
+            previous = latest.get(key)
+            if previous is None or (int(row[14]), int(row[13])) > (int(previous[14]), int(previous[13])):
+                latest[key] = row
+        return [
+            {
+                "record_id": row[0],
+                "logical_role": row[1],
+                "source_generation_id": row[2],
+                "interval_start": datetime.fromtimestamp(row[3] / 1_000_000, tz=UTC),
+                "interval_end": datetime.fromtimestamp(row[4] / 1_000_000, tz=UTC),
+                "resolution_seconds": int(row[5]),
+                "value": row[6],
+                "unit": row[7],
+                "sign_convention": row[8],
+                "quality_status": row[9],
+                "coverage_ratio": row[10],
+                "gap_status": row[11],
+                "semantic_key": row[12],
+                "revision": int(row[13]),
+                "storage_class": "canonical" if int(row[14]) else "historical",
+                "site_id": row[15],
+                "provenance": json.loads(row[16]) if row[16] else {},
+            }
+            for row in sorted(latest.values(), key=lambda item: (item[3], item[1], item[2]))
+        ]
+
+    def close(self):
+        self.connection.close()
+
+
+def _open_replay_storage(storage: Any):
+    path = getattr(storage, "path", None)
+    if path is None:
+        return storage
+    return _ReplayReadStorage(path)
 
 
 def _economics_is_causal(economics: dict[str, Any], decision_at: datetime) -> bool:
@@ -674,9 +756,8 @@ def _benchmark_readiness(storage: Any, facts: list[dict[str, Any]], site_id: str
     return evidence
 
 
-async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
+async def _async_generate_artifact_with_storage(hass: Any, site_id: str, storage: Any) -> dict[str, Any]:
     """Build, persist and read back one exact-site causal replay artifact."""
-    storage = hass.data.get("elrakning", {}).get("canonical_collector").storage
     facts_store = hass.data.get("elrakning", {}).get("ella_ess_facts_store")
     facts = facts_store.list_site(site_id) if facts_store else []
     site_manager = hass.data.get("elrakning", {}).get("site_identity_manager")
@@ -707,10 +788,9 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
 
     now = datetime.now(UTC)
     runtime_data = hass.data.setdefault("elrakning", {})
-    replay_lock = runtime_data.setdefault("replay_runtime_lock", asyncio.Lock())
+    replay_store_lock = runtime_data.setdefault("replay_store_lock", asyncio.Lock())
     try:
-        async with replay_lock:
-            readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics, ess_context)
+        readiness = await hass.async_add_executor_job(_benchmark_readiness, storage, facts, site_id, now, resolve_economics, ess_context)
     except (AttributeError, KeyError, TypeError, ValueError):
         readiness = {
             "available": False, "site_id": site_id, "resource_id": None, "status": "blocked", "blocker": "readiness_unavailable",
@@ -721,15 +801,15 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
             "holdouts": {"qualified": False, "reasons": ["run_not_qualified"]},
             "provenance": {"source": "canonical_storage", "hindsight_used_for_decision": False},
         }
-    async with replay_lock:
-        run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics, ess_context)
+    run, evidence = await hass.async_add_executor_job(_build_run, storage, facts, site_id, now, resolve_economics, ess_context)
     if run is None:
         readiness["last_attempt"] = {"at": now.isoformat(), "accepted": False, "reason": evidence.get("reason", "replay_run_unavailable")}
         result = {"accepted": False, "site_id": site_id, "reason": evidence.get("reason", "replay_run_unavailable"), "evidence": {**readiness, "runner": evidence}}
         store = hass.data.get("elrakning", {}).get("replay_artifact_store")
         if store:
-            await store.async_record_attempt(result)
-            await store.async_record_evidence(site_id, result["evidence"])
+            async with replay_store_lock:
+                await store.async_record_attempt(result)
+                await store.async_record_evidence(site_id, result["evidence"])
         return result
     holdout_status = readiness.get("holdout_matrix") if isinstance(readiness.get("holdout_matrix"), dict) else {"qualified": False, "items": [], "reasons": ["holdout_matrix_missing"]}
     holdouts = holdout_status.get("items") if isinstance(holdout_status.get("items"), list) else []
@@ -737,14 +817,27 @@ async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
     store = hass.data.get("elrakning", {}).get("replay_artifact_store")
     # A valid replay artifact is qualified by its own causal, mature and
     # complete inputs. The holdout matrix remains a separate promotion gate.
-    if artifact and store:
-        await store.async_append(artifact)
-    readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
+    async with replay_store_lock:
+        if artifact and store:
+            await store.async_append(artifact)
+        readback = next((item for item in store.state.get("sites", {}).get(site_id, []) if item.get("artifact_id") == artifact.get("artifact_id")), None) if store and artifact else None
     artifact_verified = bool(artifact and readback is not None)
     promotion_eligible = bool(holdout_status.get("qualified"))
     result = {"accepted": artifact_verified, "site_id": site_id, "artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None, "qualification": run["qualification"], "holdouts": holdout_status, "evidence": {**readiness, "status": "artifact_verified" if artifact_verified else "blocked", "blocker": None if artifact_verified else "artifact_not_verified", "qualified": bool(run["qualification"].get("qualified")), "promotion_eligible": promotion_eligible, "promotion_blockers": [] if promotion_eligible else [item.get("kind") for item in holdout_status.get("items", []) if item.get("status") != "qualified"], "artifact": {"artifact_id": artifact.get("artifact_id") if artifact else None, "readback": readback is not None}, "holdouts": holdout_status, "fingerprint": run.get("run_fingerprint"), "evaluation": run.get("evaluation")}}
     result["evidence"]["last_attempt"] = {"at": now.isoformat(), "accepted": artifact_verified, "reason": None if artifact_verified else "artifact_not_verified", "artifact_id": result["artifact_id"], "promotion_eligible": promotion_eligible}
     if store:
-        await store.async_record_attempt(result)
-        await store.async_record_evidence(site_id, result["evidence"])
+        async with replay_store_lock:
+            await store.async_record_attempt(result)
+            await store.async_record_evidence(site_id, result["evidence"])
     return result
+
+
+async def async_generate_artifact(hass: Any, site_id: str) -> dict[str, Any]:
+    """Build one exact-site replay using an isolated read-only database view."""
+    storage = hass.data.get("elrakning", {}).get("canonical_collector").storage
+    replay_storage = _open_replay_storage(storage)
+    try:
+        return await _async_generate_artifact_with_storage(hass, site_id, replay_storage)
+    finally:
+        if replay_storage is not storage:
+            replay_storage.close()

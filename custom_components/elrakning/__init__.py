@@ -66,6 +66,60 @@ async def _run_replay_with_timeout(coroutine, timeout_seconds=REPLAY_RUN_TIMEOUT
     return await asyncio.wait_for(coroutine, timeout=timeout_seconds)
 
 
+class _ReplaySiteTaskRegistry:
+    """Keep timed-out site work single-flight until its executor task really ends."""
+
+    def __init__(self, create_task=None):
+        self._tasks = {}
+        self._closed = False
+        self._create_task = create_task or asyncio.create_task
+
+    def _consume_task_exception(self, task):
+        if not task.done() or task.cancelled():
+            return
+        try:
+            task.exception()
+        except BaseException:
+            pass
+
+    def _cleanup(self, task):
+        for site_id, current in tuple(self._tasks.items()):
+            if current is task:
+                self._tasks.pop(site_id, None)
+
+    async def run(self, site_id, coroutine_factory, timeout_seconds, task_name):
+        existing = self._tasks.get(site_id)
+        if existing is not None and not existing.done():
+            return {"accepted": False, "site_id": site_id, "reason": "site_replay_active"}
+        if self._closed:
+            return {"accepted": False, "site_id": site_id, "reason": "replay_scheduler_closed"}
+        task = self._create_task(coroutine_factory(), name=task_name)
+        self._tasks[site_id] = task
+        task.add_done_callback(self._cleanup)
+        task.add_done_callback(self._consume_task_exception)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            return {
+                "accepted": False,
+                "site_id": site_id,
+                "reason": "replay_timeout",
+                "task_active": not task.done(),
+            }
+        finally:
+            if task.done():
+                self._cleanup(task)
+
+    async def async_close(self):
+        self._closed = True
+        tasks = [task for task in self._tasks.values() if not task.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+
+
 def _replay_trigger_identity(event) -> str:
     """Return a stable identity for one source event without using wall-clock time."""
     data = getattr(event, "data", None)
@@ -880,16 +934,41 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     replay_pending_site_ids = set()
     replay_active_trigger_keys = set()
     replay_pending_trigger_keys = set()
+    replay_site_tasks = _ReplaySiteTaskRegistry(
+        lambda coroutine, name: hass.async_create_background_task(coroutine, name=name)
+    )
+    frontend_data["replay_site_task_registry"] = replay_site_tasks
     frontend_data["replay_scheduler_closed"] = False
 
     async def _generate_replay_artifact(_call=None, event_site_id=None):
-        for site_id in _replay_site_ids(event_site_id):
+        async def _run_site(site_id):
             await _record_replay_diagnostic(
                 "INFO",
                 "replay_site_started",
                 json.dumps({"site_id": site_id}, separators=(",", ":")),
             )
-            result = await async_generate_artifact(hass, site_id)
+            try:
+                result = await replay_site_tasks.run(
+                    site_id,
+                    lambda: async_generate_artifact(hass, site_id),
+                    REPLAY_RUN_TIMEOUT_SECONDS,
+                    f"elrakning_replay_site_{site_id}",
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                result = {"accepted": False, "site_id": site_id, "reason": type(err).__name__}
+                await _record_replay_diagnostic(
+                    "ERROR",
+                    "replay_site_failed",
+                    json.dumps({"site_id": site_id, "error_type": type(err).__name__, "error": str(err)[:200]}, separators=(",", ":")),
+                )
+            if result.get("reason") == "replay_timeout":
+                await _record_replay_diagnostic(
+                    "ERROR",
+                    "replay_site_timeout",
+                    json.dumps({"site_id": site_id, "task_active": result.get("task_active") is True}, separators=(",", ":")),
+                )
             hass.bus.async_fire("elrakning_replay_benchmark_evidence_update", {"site_id": site_id, "status": (result.get("evidence") or {}).get("status")})
             if result.get("accepted"):
                 hass.bus.async_fire("elrakning_replay_artifact_published", {
@@ -904,6 +983,13 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "replay_site_completed",
                 json.dumps({"site_id": site_id, "accepted": result.get("accepted") is True}, separators=(",", ":")),
             )
+            return result
+
+        site_ids = _replay_site_ids(event_site_id)
+        results = await asyncio.gather(*(_run_site(site_id) for site_id in site_ids))
+        if len(results) == 1:
+            return results[0]
+        return {"accepted": all(result.get("accepted") is True for result in results), "results": results}
 
     async def _record_replay_diagnostic(level, event, payload):
         """Record one bounded replay lifecycle event when diagnostics are available."""
@@ -934,7 +1020,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         started_monotonic = time.monotonic()
         try:
-            result = await _run_replay_with_timeout(_generate_replay_artifact(event_site_id=event_site_id))
+            result = await _generate_replay_artifact(event_site_id=event_site_id)
         except asyncio.CancelledError:
             finished_at = dt_util.now().astimezone(timezone.utc)
             frontend_data["replay_artifact_task_status"] = {
@@ -1132,6 +1218,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pass
     if refresh_task := frontend_data.pop("replay_benchmark_refresh_task", None):
         refresh_task.cancel()
+    if replay_site_tasks := frontend_data.pop("replay_site_task_registry", None):
+        await replay_site_tasks.async_close()
     if startup_task := frontend_data.pop("replay_artifact_startup_task", None):
         startup_task.cancel()
         try:
