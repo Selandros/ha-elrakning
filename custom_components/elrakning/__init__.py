@@ -509,18 +509,11 @@ class _MonthlyForecastTaskOwner:
         self.closed = False
 
     def _create_task(self):
-        coroutine = _async_capture_monthly_forecast(self.hass)
-        create_background_task = getattr(self.entry, "async_create_background_task", None)
-        if callable(create_background_task):
-            return create_background_task(
-                self.hass,
-                coroutine,
-                name="elrakning_monthly_forecast",
-            )
-        create_background_task = getattr(self.hass, "async_create_background_task", None)
-        if callable(create_background_task):
-            return create_background_task(coroutine, name="elrakning_monthly_forecast")
-        return self.hass.async_create_task(coroutine)
+        return _create_background_task_on_ha_loop(
+            self.hass,
+            lambda: _async_capture_monthly_forecast(self.hass),
+            "elrakning_monthly_forecast",
+        )
 
     def schedule(self):
         if self.closed:
@@ -567,6 +560,11 @@ def _get_monthly_forecast_task_owner(hass, entry=None):
 def _schedule_monthly_forecast_capture(hass):
     """Schedule one coalesced monthly forecast refresh."""
     return _get_monthly_forecast_task_owner(hass).schedule()
+
+
+def _schedule_monthly_forecast_capture_on_loop(hass):
+    """Marshal event-driven forecast scheduling onto Home Assistant's loop."""
+    hass.loop.call_soon_threadsafe(_schedule_monthly_forecast_capture, hass)
 
 
 class _ReplayTaskProxy:
@@ -622,12 +620,16 @@ class _ReplayTaskProxy:
     def exception(self, *args, **kwargs):
         return self._completion.exception(*args, **kwargs)
 
+    def add_done_callback(self, callback):
+        """Adapt completion callbacks to the proxy task interface."""
+        self._completion.add_done_callback(lambda _future: callback(self))
+
     def __await__(self):
         return asyncio.wrap_future(self._completion).__await__()
 
 
-def _create_replay_background_task(hass, coroutine_factory, name):
-    """Create replay work on Home Assistant's active loop only."""
+def _create_background_task_on_ha_loop(hass, coroutine_factory, name):
+    """Create background work on Home Assistant's active loop only."""
     def create_on_loop():
         coroutine = coroutine_factory()
         create_background_task = getattr(hass, "async_create_background_task", None)
@@ -655,6 +657,11 @@ def _create_replay_background_task(hass, coroutine_factory, name):
 
     ha_loop.call_soon_threadsafe(schedule_on_loop)
     return proxy
+
+
+def _create_replay_background_task(hass, coroutine_factory, name):
+    """Create replay work on Home Assistant's active loop only."""
+    return _create_background_task_on_ha_loop(hass, coroutine_factory, name)
 
 
 async def _async_warm_history(power_manager, meter_manager) -> None:
@@ -1144,9 +1151,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen(EON_GRID_UPDATE_EVENT, _schedule_replay_evidence),
     ]
     frontend_data["monthly_forecast_event_unsubs"] = [
-        hass.bus.async_listen("elrakning_load_forecast_update", lambda _event: _schedule_monthly_forecast_capture(hass)),
-        hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
-        hass.bus.async_listen(EON_GRID_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture(hass)),
+        hass.bus.async_listen("elrakning_load_forecast_update", lambda _event: _schedule_monthly_forecast_capture_on_loop(hass)),
+        hass.bus.async_listen(ELECTRICITY_PROVIDER_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture_on_loop(hass)),
+        hass.bus.async_listen(EON_GRID_UPDATE_EVENT, lambda _event: _schedule_monthly_forecast_capture_on_loop(hass)),
     ]
     frontend_data["forecast_view_cache_unsubs"] = [
         hass.bus.async_listen(

@@ -268,7 +268,12 @@ def _load_replay_scheduler():
     nodes = [
         node for node in tree.body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef))
-        and node.name in {"_ReplayTaskProxy", "_ReplaySiteTaskRegistry", "_create_replay_background_task"}
+        and node.name in {
+            "_ReplayTaskProxy",
+            "_ReplaySiteTaskRegistry",
+            "_create_background_task_on_ha_loop",
+            "_create_replay_background_task",
+        }
     ]
     namespace = {
         "asyncio": asyncio,
@@ -545,7 +550,12 @@ def test_monthly_forecast_startup_reuses_owner_created_by_early_event():
         if isinstance(node, (ast.ClassDef, ast.FunctionDef))
         and node.name in {"_MonthlyForecastTaskOwner", "_get_monthly_forecast_task_owner"}
     ]
-    namespace = {"asyncio": asyncio, "DOMAIN": "elrakning", "_async_capture_monthly_forecast": lambda _hass: _capture()}
+    namespace = {
+        "asyncio": asyncio,
+        "DOMAIN": "elrakning",
+        "_async_capture_monthly_forecast": lambda _hass: _capture(),
+        "_create_background_task_on_ha_loop": lambda hass, factory, name: hass.async_create_background_task(factory(), name=name),
+    }
 
     async def _capture():
         await asyncio.Event().wait()
@@ -566,7 +576,7 @@ def test_monthly_forecast_startup_reuses_owner_created_by_early_event():
     asyncio.run(exercise())
 
 
-def _load_monthly_forecast_task_owner(capture):
+def _load_monthly_forecast_task_owner(capture, task_helper=None):
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
     class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_MonthlyForecastTaskOwner")
@@ -574,9 +584,29 @@ def _load_monthly_forecast_task_owner(capture):
         "asyncio": asyncio,
         "DOMAIN": "elrakning",
         "_async_capture_monthly_forecast": capture,
+        "_create_background_task_on_ha_loop": task_helper or (
+            lambda hass, factory, name: hass.async_create_background_task(factory(), name=name)
+        ),
     }
     exec(compile(ast.Module(body=[class_node], type_ignores=[]), str(source_path), "exec"), namespace)
     return namespace["_MonthlyForecastTaskOwner"]
+
+
+def _load_background_task_helper():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    nodes = [
+        node for node in tree.body
+        if (isinstance(node, ast.ClassDef) and node.name == "_ReplayTaskProxy")
+        or (isinstance(node, ast.FunctionDef) and node.name == "_create_background_task_on_ha_loop")
+    ]
+    namespace = {
+        "asyncio": asyncio,
+        "concurrent": concurrent,
+        "threading": threading,
+    }
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["_create_background_task_on_ha_loop"]
 
 
 class _MonthlyForecastEntry:
@@ -587,6 +617,57 @@ class _MonthlyForecastEntry:
 class _MonthlyForecastHass:
     def __init__(self):
         self.data = {"elrakning": {}}
+
+    def async_create_background_task(self, coroutine, *, name):
+        return asyncio.create_task(coroutine, name=name)
+
+
+def test_monthly_forecast_worker_schedule_uses_ha_loop_and_coalesces():
+    async def exercise():
+        started = []
+        releases = []
+
+        async def capture(_hass):
+            started.append(True)
+            release = asyncio.Event()
+            releases.append(release)
+            await release.wait()
+
+        helper = _load_background_task_helper()
+        loop = asyncio.get_running_loop()
+        hass = SimpleNamespace(
+            data={"elrakning": {}},
+            loop=loop,
+            async_create_background_task=lambda coroutine, name: asyncio.create_task(coroutine, name=name),
+        )
+        owner_class = _load_monthly_forecast_task_owner(capture, helper)
+        owner = owner_class(hass, None)
+
+        first = await asyncio.to_thread(owner.schedule)
+        second = await asyncio.to_thread(owner.schedule)
+        assert second is first
+        await asyncio.sleep(0)
+        assert len(started) == 1
+        releases[0].set()
+        await first
+        for _ in range(4):
+            await asyncio.sleep(0)
+        assert len(started) == 2
+        releases[1].set()
+        await owner.task
+        owner.close()
+
+    asyncio.run(exercise())
+
+
+def test_monthly_forecast_event_listeners_marshal_scheduling_to_ha_loop():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index('frontend_data["monthly_forecast_event_unsubs"] = [')
+    end = source.index('frontend_data["forecast_view_cache_unsubs"] = [', start)
+    listener_source = source[start:end]
+    assert listener_source.count("_schedule_monthly_forecast_capture_on_loop(hass)") == 3
+    assert "_schedule_monthly_forecast_capture(hass)" not in listener_source
 
 
 def test_monthly_forecast_single_flight_coalesces_triggers_into_one_rerun():

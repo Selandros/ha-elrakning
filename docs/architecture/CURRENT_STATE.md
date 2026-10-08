@@ -2,6 +2,20 @@
 
 Updated: 2026-10-08
 
+## 0.0.1086 monthly forecast loop-safety checkpoint
+
+- ROOT CAUSE VERIFIED: forecast update listeners could execute from a
+  `SyncWorker` after an event was fired off the Home Assistant loop. The owner
+  then called `async_create_background_task` directly, producing wrong-loop,
+  pending-task and never-awaited coroutine failures.
+- IMPLEMENTED/TESTED: event-driven scheduling is marshalled onto the active HA
+  loop before owner state or the forecast coroutine is touched. The shared
+  task proxy also supports single-flight completion callbacks when a defensive
+  worker-thread caller remains. Unload cancellation and coalescing are
+  preserved.
+- SCOPE: no forecast values, storage semantics, site selection, replay logic or
+  frontend rendering were changed.
+
 ## 0.0.1085 frontend history recomputation performance checkpoint
 
 - ROOT CAUSE VERIFIED: raw history canonicalization searched the complete point
