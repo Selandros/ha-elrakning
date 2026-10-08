@@ -2,6 +2,20 @@
 
 Updated: 2026-10-08
 
+## 0.0.1087 load-forecast startup lifecycle checkpoint
+
+- ROOT CAUSE VERIFIED: `_async_capture_load_forecasts()` was created with
+  `hass.async_create_task()` during config-entry setup, so Home Assistant kept
+  it in the bootstrap completion barrier while it performed long-running
+  forecast and canonical-storage work.
+- IMPLEMENTED/TESTED: startup and cadence captures now share one
+  site-independent single-flight owner created through Home Assistant's
+  background-task API. Repeated triggers coalesce, exceptions are consumed by
+  the owner, and unload cancels and awaits the active task.
+- PRESERVED: forecast calculations, storage semantics, source provenance,
+  site selection, fail-closed behavior, executor-backed blocking I/O and all
+  prior P1, replay, history and frontend behavior.
+
 ## 0.0.1086 monthly forecast loop-safety checkpoint
 
 - ROOT CAUSE VERIFIED: forecast update listeners could execute from a

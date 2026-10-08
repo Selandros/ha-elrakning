@@ -491,11 +491,80 @@ async def _async_capture_monthly_forecast_impl(hass, requested_site_id: str | No
     )}
 
 
+class _LoadForecastTaskOwner:
+    """Own one coalesced load-forecast task for the config entry."""
+
+    def __init__(self, hass, site_identity_manager, canonical_collector):
+        self.hass = hass
+        self.site_identity_manager = site_identity_manager
+        self.canonical_collector = canonical_collector
+        self.task = None
+        self.pending = False
+        self.closed = False
+
+    def _create_task(self):
+        return _create_background_task_on_ha_loop(
+            self.hass,
+            lambda: _async_capture_load_forecasts(
+                self.hass, self.site_identity_manager, self.canonical_collector
+            ),
+            "elrakning_load_forecast",
+        )
+
+    def schedule(self):
+        if self.closed:
+            return None
+        if self.task is not None and not self.task.done():
+            self.pending = True
+            return self.task
+        self.pending = False
+        self.task = self._create_task()
+        self.task.add_done_callback(self._task_done)
+        self.hass.data.setdefault(DOMAIN, {})["load_forecast_capture_task"] = self.task
+        return self.task
+
+    def _task_done(self, task):
+        if task is not self.task:
+            return
+        try:
+            if not task.cancelled():
+                task.exception()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+        self.task = None
+        self.hass.data.setdefault(DOMAIN, {})["load_forecast_capture_task"] = None
+        if self.closed or not self.pending:
+            self.pending = False
+            return
+        self.pending = False
+        self.schedule()
+
+    def close(self):
+        self.closed = True
+        self.pending = False
+        task = self.task
+        if task is not None and not task.done():
+            task.cancel()
+        return task
+
+
+def _get_load_forecast_task_owner(hass, site_identity_manager=None, canonical_collector=None):
+    """Return the shared load-forecast owner for this config entry."""
+    data = hass.data.setdefault(DOMAIN, {})
+    owner = data.get("load_forecast_task_owner")
+    if owner is None or owner.closed:
+        owner = _LoadForecastTaskOwner(hass, site_identity_manager, canonical_collector)
+        data["load_forecast_task_owner"] = owner
+    return owner
+
+
 def _schedule_load_forecast_capture(hass, site_identity_manager, canonical_collector):
-    """Schedule the cadence capture through Home Assistant's thread-safe API."""
-    return hass.create_task(
-        _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
-    )
+    """Schedule one coalesced load-forecast capture on Home Assistant's loop."""
+    return _get_load_forecast_task_owner(
+        hass, site_identity_manager, canonical_collector
+    ).schedule()
 
 
 class _MonthlyForecastTaskOwner:
@@ -850,9 +919,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, lambda _now: greenely_economics.async_schedule_capture(), hour=0, minute=5, second=0
     )
     await solar_forecast_manager.async_capture_collection_baselines()
-    frontend_data["load_forecast_startup_task"] = hass.async_create_task(
-        _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector)
+    load_forecast_owner = _get_load_forecast_task_owner(
+        hass, site_identity_manager, canonical_collector
     )
+    frontend_data["load_forecast_startup_task"] = load_forecast_owner.schedule()
     if unsubscribe := frontend_data.pop("load_forecast_cadence_unsub", None):
         unsubscribe()
     frontend_data["load_forecast_cadence_unsub"] = async_track_time_change(
@@ -1221,6 +1291,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if startup_task := monthly_forecast_task:
         try:
             await startup_task
+        except asyncio.CancelledError:
+            pass
+    load_forecast_owner = frontend_data.pop("load_forecast_task_owner", None)
+    load_forecast_task = load_forecast_owner.close() if load_forecast_owner else None
+    frontend_data.pop("load_forecast_capture_task", None)
+    frontend_data.pop("load_forecast_startup_task", None)
+    if load_forecast_task:
+        try:
+            await load_forecast_task
         except asyncio.CancelledError:
             pass
     if refresh_task := frontend_data.pop("replay_benchmark_refresh_task", None):

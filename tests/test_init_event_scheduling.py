@@ -60,35 +60,57 @@ def test_price_update_is_scheduled_once_on_home_assistant_loop():
 
 def test_load_forecast_cadence_uses_thread_safe_create_task_from_worker_thread():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
-    source = source_path.read_text(encoding="utf-8")
-    start = source.index("def _schedule_load_forecast_capture(")
-    end = source.index("\n\nasync def _async_register_frontend", start)
-    namespace = {}
-    exec(compile(source[start:end], str(source_path), "exec"), namespace)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    names = {
+        "_ReplayTaskProxy",
+        "_LoadForecastTaskOwner",
+        "_get_load_forecast_task_owner",
+        "_schedule_load_forecast_capture",
+    }
+    nodes = [
+        node for node in tree.body
+        if (isinstance(node, ast.ClassDef) and node.name in names)
+        or (isinstance(node, ast.FunctionDef) and node.name in names)
+    ]
+    namespace = {
+        "asyncio": asyncio,
+        "concurrent": concurrent,
+        "threading": threading,
+        "DOMAIN": "elrakning",
+        "_create_background_task_on_ha_loop": _load_background_task_helper(),
+    }
 
     async def capture(*_args):
         return None
 
+    namespace["_async_capture_load_forecasts"] = capture
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
+
     class ThreadSafeHass:
         def __init__(self):
             self.loop = asyncio.get_running_loop()
+            self.data = {"elrakning": {}}
             self.async_create_task_called = False
+            self.created = []
 
         def async_create_task(self, _coroutine):
             self.async_create_task_called = True
             raise AssertionError("worker callback used async_create_task")
 
-        def create_task(self, coroutine):
-            return asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+        def async_create_background_task(self, coroutine, *, name):
+            assert asyncio.get_running_loop() is self.loop
+            task = asyncio.create_task(coroutine, name=name)
+            self.created.append(task)
+            return task
 
     async def exercise():
         hass = ThreadSafeHass()
-        namespace["_async_capture_load_forecasts"] = capture
         task = await asyncio.to_thread(
             namespace["_schedule_load_forecast_capture"], hass, object(), object()
         )
-        await asyncio.wrap_future(task)
+        await task
         assert hass.async_create_task_called is False
+        assert hass.created[0].get_name() == "elrakning_load_forecast"
 
     asyncio.run(exercise())
 
@@ -607,6 +629,136 @@ def _load_background_task_helper():
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
     return namespace["_create_background_task_on_ha_loop"]
+
+
+def _load_load_forecast_task_owner(capture):
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    names = {
+        "_ReplayTaskProxy",
+        "_LoadForecastTaskOwner",
+        "_get_load_forecast_task_owner",
+        "_schedule_load_forecast_capture",
+    }
+    nodes = [
+        node for node in tree.body
+        if (isinstance(node, ast.ClassDef) and node.name in names)
+        or (isinstance(node, ast.FunctionDef) and node.name in names)
+    ]
+    namespace = {
+        "asyncio": asyncio,
+        "concurrent": concurrent,
+        "threading": threading,
+        "DOMAIN": "elrakning",
+        "_async_capture_load_forecasts": capture,
+        "_create_background_task_on_ha_loop": _load_background_task_helper(),
+    }
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["_LoadForecastTaskOwner"], namespace["_get_load_forecast_task_owner"]
+
+
+def test_load_forecast_startup_uses_background_owner_not_bootstrap_task():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    setup_start = source.index("async def _async_setup_entry")
+    setup_end = source.index("\n\nasync def async_unload_entry", setup_start)
+    setup = source[setup_start:setup_end]
+
+    assert 'frontend_data["load_forecast_startup_task"] = hass.async_create_task(' not in setup
+    assert 'frontend_data["load_forecast_startup_task"] = load_forecast_owner.schedule()' in setup
+    assert 'load_forecast_task_owner' in setup
+    assert '"elrakning_load_forecast"' in source
+
+
+def test_load_forecast_owner_starts_after_setup_and_coalesces_triggers():
+    async def exercise():
+        started = []
+        releases = []
+
+        async def capture(*_args):
+            started.append(True)
+            release = asyncio.Event()
+            releases.append(release)
+            await release.wait()
+
+        owner_class, _ = _load_load_forecast_task_owner(capture)
+        loop = asyncio.get_running_loop()
+        hass = SimpleNamespace(
+            data={"elrakning": {}},
+            loop=loop,
+            async_create_background_task=lambda coroutine, name: asyncio.create_task(coroutine, name=name),
+        )
+        owner = owner_class(hass, object(), object())
+        first = owner.schedule()
+        assert owner.schedule() is first
+        await asyncio.sleep(0)
+        assert started == [True]
+        assert first.done() is False
+        releases[0].set()
+        await first
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert len(started) == 2
+        releases[1].set()
+        await owner.task
+        owner.close()
+
+    asyncio.run(exercise())
+
+
+def test_load_forecast_owner_close_cancels_background_capture_cleanly():
+    async def exercise():
+        release = asyncio.Event()
+
+        async def capture(*_args):
+            await release.wait()
+
+        owner_class, _ = _load_load_forecast_task_owner(capture)
+        loop = asyncio.get_running_loop()
+        hass = SimpleNamespace(
+            data={"elrakning": {}},
+            loop=loop,
+            async_create_background_task=lambda coroutine, name: asyncio.create_task(coroutine, name=name),
+        )
+        owner = owner_class(hass, object(), object())
+        task = owner.schedule()
+        await asyncio.sleep(0)
+        closed_task = owner.close()
+        assert closed_task is task
+        assert owner.closed is True
+        await asyncio.gather(task, return_exceptions=True)
+        for _ in range(2):
+            await asyncio.sleep(0)
+        assert owner.task is None
+
+    asyncio.run(exercise())
+
+
+def test_load_forecast_owner_consumes_unexpected_capture_exception():
+    async def exercise():
+        async def capture(*_args):
+            raise RuntimeError("capture failure")
+
+        owner_class, _ = _load_load_forecast_task_owner(capture)
+        loop = asyncio.get_running_loop()
+        hass = SimpleNamespace(
+            data={"elrakning": {}},
+            loop=loop,
+            async_create_background_task=lambda coroutine, name: asyncio.create_task(coroutine, name=name),
+        )
+        owner = owner_class(hass, object(), object())
+        task = owner.schedule()
+        try:
+            await task
+        except RuntimeError:
+            pass
+        for _ in range(2):
+            await asyncio.sleep(0)
+        assert owner.task is None
+        assert hass.data["elrakning"]["load_forecast_capture_task"] is None
+        owner.close()
+
+    asyncio.run(exercise())
 
 
 class _MonthlyForecastEntry:
