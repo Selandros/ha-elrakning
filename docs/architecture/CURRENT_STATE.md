@@ -1,6 +1,22 @@
 # Elräkning – Current State
 
-Updated: 2026-10-01
+Updated: 2026-10-08
+
+## 0.0.1082 phase chart live-event continuity checkpoint
+
+- ROOT CAUSE VERIFIED IN CODE: the frontend subscribed to the generic
+  `state_changed` stream only for configured accumulated import/export
+  entities. Phase state changes therefore had no direct frontend append path;
+  the phase chart could retain its initial Recorder series while live header
+  values changed through the existing meter event/state path.
+- IMPLEMENTED/TESTED: phase-source state changes are normalized into the same
+  bounded phase-history merge used by `elrakning_meter_power_update`. Existing
+  timestamps are replaced rather than duplicated, finite values only are
+  accepted, and missing/invalid values do not become zeroes.
+- PRESERVED: Recorder history bootstrap, exact source mapping, current/import
+  semantics, no fabricated interpolation, existing phase gap handling,
+  0.0.1076–0.0.1081 P1 and chart behavior, and frontend-only deployment
+  semantics.
 
 ## 0.0.1081 P1 import/live consumption precedence checkpoint
 

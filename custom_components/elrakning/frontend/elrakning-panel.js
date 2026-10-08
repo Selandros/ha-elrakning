@@ -1277,6 +1277,54 @@ export function mergeLiveMeterState(state = {}, event = {}) {
   return next;
 }
 
+export function buildPhaseLiveMeterPoint(event = {}, meterState = {}, states = {}) {
+  const eventData = event?.data || event || {};
+  const eventEntityId = eventData.entity_id || null;
+  const eventState = eventData.new_state || null;
+  const sourceGroups = meterState?.phase_source_entities || {};
+  const sources = {
+    current: {
+      ...(meterState?.phase_current_source_entities || meterState?.phase_current_entities || {}),
+      ...(sourceGroups.current || {}),
+    },
+    voltage: { ...(sourceGroups.voltage || {}) },
+    active_power: { ...(sourceGroups.active_power || {}) },
+  };
+  const stateFor = (entityId) => entityId && entityId === eventEntityId ? eventState : states?.[entityId];
+  const finiteState = (state, kind) => {
+    if (!state || typeof state !== "object") return null;
+    const attributes = state.attributes || {};
+    const deviceClass = String(attributes.device_class || "").toLowerCase();
+    const unit = String(attributes.unit_of_measurement || "").toLowerCase();
+    if (kind === "current" && (deviceClass !== "current" || unit !== "a")) return null;
+    if (kind === "voltage" && (deviceClass !== "voltage" || unit !== "v")) return null;
+    if (kind === "active_power" && (deviceClass !== "power" || !["w", "kw", "mw"].includes(unit))) return null;
+    const raw = Number(state.state);
+    if (!Number.isFinite(raw)) return null;
+    if (kind === "active_power") {
+      const normalized = unit === "w" ? raw / 1000 : unit === "mw" ? raw * 1000 : raw;
+      return meterState?.invert_power === true ? -normalized : normalized;
+    }
+    return raw;
+  };
+  const buildGroup = (kind) => Object.fromEntries(Object.entries(sources[kind])
+    .map(([phase, entityId]) => [phase, finiteState(stateFor(entityId), kind)])
+    .filter(([, value]) => Number.isFinite(value)));
+  const timestamp = eventState?.last_updated || event?.time_fired || eventData.time_fired || null;
+  const parsedTimestamp = timestamp ? new Date(timestamp) : null;
+  if (!parsedTimestamp || !Number.isFinite(parsedTimestamp.getTime())) return null;
+  const point = {
+    entity_id: eventEntityId,
+    timestamp: parsedTimestamp.toISOString(),
+    phase_current_a: buildGroup("current"),
+    phase_voltage_v: buildGroup("voltage"),
+    phase_active_power_kw: buildGroup("active_power"),
+  };
+  return Object.values(point).some((value) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length)
+    ? point
+    : null;
+}
+
 export function dailyEnergyCardVisible(solarEnabled, batteryEnabled) {
   return solarEnabled === true || batteryEnabled === true;
 }
@@ -12539,6 +12587,20 @@ class ElrakningPanel {
           const mapping = this._meterState || {};
           if ([mapping.energy_import_entity, mapping.energy_export_entity].includes(entityId)) {
             this.loadMeterState();
+          }
+          const phaseSources = {
+            current: {
+              ...(mapping.phase_current_source_entities || mapping.phase_current_entities || {}),
+              ...(mapping.phase_source_entities?.current || {}),
+            },
+            voltage: { ...(mapping.phase_source_entities?.voltage || {}) },
+            active_power: { ...(mapping.phase_source_entities?.active_power || {}) },
+          };
+          const phaseEntityIds = new Set(Object.values(phaseSources)
+            .flatMap((group) => Object.values(group || {})));
+          if (phaseEntityIds.has(entityId)) {
+            const point = buildPhaseLiveMeterPoint(event, mapping, hass.states);
+            if (point) this._appendMeterPowerPoint(point);
           }
           // PowerManager owns live power state through elrakning_power_update;
           // generic state_changed must not reintroduce redundant power refreshes.
