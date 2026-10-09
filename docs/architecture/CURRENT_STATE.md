@@ -2,12 +2,14 @@
 
 Updated: 2026-10-09
 
-## 0.0.1091 Phase 1 App repository packaging checkpoint
+## 0.0.1092 Phase 1 App repository packaging checkpoint
 
 - IMPLEMENTED: the App repository now has root `repository.yaml` metadata and a
   standalone App build context. The Dockerfile no longer depends on the Core
-  repository root, and the bounded contract validator is included in the App
-  image without adding dependencies or changing runtime semantics.
+  repository root or the removed legacy build metadata. It declares the
+  current explicit base image, Python runtime and App labels, and the bounded
+  contract validator is included in the App image without adding dependencies
+  or changing runtime semantics.
 - PRESERVED: the App remains manual-boot, shadow-only, read-only, disabled by
   default in Core, and separate from canonical storage, provider ingestion,
   optimizer, physical control and the existing source-of-truth.

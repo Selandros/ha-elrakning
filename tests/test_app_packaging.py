@@ -17,6 +17,7 @@ def test_repository_metadata_and_app_layout_are_discoverable():
     assert (ROOT / "app/Dockerfile").is_file()
     assert (ROOT / "app/run.sh").is_file()
     assert (ROOT / "app/elrakning_app/app_contract.py").is_file()
+    assert not (ROOT / "app/build.json").exists()
     assert (
         (ROOT / "app/elrakning_app/app_contract.py").read_text()
         == (ROOT / "custom_components/elrakning/app_contract.py").read_text()
@@ -29,3 +30,5 @@ def test_app_dockerfile_uses_standalone_app_build_context():
     assert "COPY run.sh /run.sh" in dockerfile
     assert "COPY app/" not in dockerfile
     assert "COPY custom_components/" not in dockerfile
+    assert "FROM ghcr.io/home-assistant/base:latest" in dockerfile
+    assert "io.hass.type=\"app\"" in dockerfile
