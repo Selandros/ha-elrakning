@@ -19,6 +19,7 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
+from .app_client import AppShadowClient
 from .canonical_collector import CanonicalCollector
 from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
@@ -809,6 +810,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
     frontend_data = hass.data.setdefault(DOMAIN, {})
     frontend_data["config_entry"] = entry
+    frontend_data["app_shadow_client"] = AppShadowClient.from_environment(hass)
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
@@ -1313,6 +1315,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except asyncio.CancelledError:
             pass
     frontend_data.pop("config_entry", None)
+    frontend_data.pop("app_shadow_client", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()
         try:

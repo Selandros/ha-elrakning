@@ -1,0 +1,14 @@
+name: Elräkning App
+version: 0.0.1089
+slug: elrakning_app
+description: Shadow-only Elräkning worker boundary
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: manual
+init: false
+options:
+  app_token: ""
+schema:
+  app_token: password

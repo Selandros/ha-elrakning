@@ -1,6 +1,26 @@
 # Elräkning – Current State
 
-Updated: 2026-10-08
+Updated: 2026-10-09
+
+## 0.0.1089 Phase 1 hybrid shadow boundary
+
+- IMPLEMENTED: a separate, dependency-free Home Assistant App/add-on
+  skeleton exposes bounded liveness/readiness and authenticated read-only
+  StateSnapshot ingress. The contract is versioned and rejects wrong
+  contract/site/generation context, stale validity, invalid provenance,
+  `known_at > decision_at`, malformed values and unavailable-as-zero payloads.
+- CORE ADAPTER: the integration creates a disabled-by-default bounded client
+  during setup and removes it during unload. It performs no network request,
+  polling, HA service call or result projection unless explicitly enabled in a
+  later shadow deployment. App-down handling is fail-closed and bounded to
+  one second.
+- ISOLATION: the add-on has no host port mapping, no HA token, no physical
+  control endpoint, no canonical storage writer and no HiGHS/optimizer import.
+  Its in-memory snapshot buffer is bounded by site and snapshot count.
+- GATE: the existing Core integration and canonical storage remain the sole
+  source of truth. This release contains no cutover, dual writer or physical
+  command path; Phase 2 shadow computation starts only after contract/runtime
+  equivalence tests are green.
 
 ## 0.0.1088 E.ON canonical persistence executor-safety checkpoint
 
