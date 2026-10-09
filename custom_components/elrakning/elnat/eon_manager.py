@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 from copy import deepcopy
 import secrets
@@ -134,6 +135,7 @@ class EonGridManager:
         self._web_session: EonSession | None = None
         self._app_source_snapshot: dict[str, Any] | None = None
         self._active_binding: dict[str, Any] | None = None
+        self._provider_persist_lock = asyncio.Lock()
 
     @property
     def configured(self) -> bool:
@@ -805,35 +807,63 @@ class EonGridManager:
 
     async def _async_persist_provider_imports(self, states: dict[str, dict[str, Any]]) -> None:
         """Persist only verified E.ON import buckets for explicitly bound sites."""
-        domain_data = self.hass.data.get(DOMAIN, {})
-        collector = domain_data.get("canonical_collector")
-        site_manager = domain_data.get("site_identity_manager")
-        storage = getattr(collector, "storage", None)
-        site_state = getattr(site_manager, "state", {}) if site_manager else {}
-        configs = site_state.get("site_configs", {}) if isinstance(site_state, dict) else {}
-        if storage is None or not isinstance(configs, dict):
-            return
-        captured_at = datetime.now(timezone.utc)
-        for site_id, config in configs.items():
-            if not isinstance(config, dict) or config.get("collection_enabled") is not True:
-                continue
-            binding = (config.get("bindings") or {}).get("grid")
-            if not isinstance(binding, dict) or binding.get("provider") != "eon":
-                continue
-            if binding.get("config_entry_id") != getattr(self.entry, "entry_id", None):
-                continue
-            facility = binding.get("facility")
-            if not isinstance(facility, dict):
-                continue
-            identity = facility_identity(facility)
-            state = states.get(identity) if identity else None
-            if not isinstance(state, dict):
-                continue
+        persist_lock = getattr(self, "_provider_persist_lock", None)
+        if persist_lock is None:
+            persist_lock = asyncio.Lock()
+            self._provider_persist_lock = persist_lock
+        async with persist_lock:
+            domain_data = self.hass.data.get(DOMAIN, {})
+            collector = domain_data.get("canonical_collector")
+            site_manager = domain_data.get("site_identity_manager")
+            storage = getattr(collector, "storage", None)
+            site_state = getattr(site_manager, "state", {}) if site_manager else {}
+            configs = site_state.get("site_configs", {}) if isinstance(site_state, dict) else {}
+            if storage is None or not isinstance(configs, dict):
+                return
+            work_items = []
+            entry_id = getattr(self.entry, "entry_id", None)
+            for site_id, config in configs.items():
+                if not isinstance(config, dict) or config.get("collection_enabled") is not True:
+                    continue
+                binding = (config.get("bindings") or {}).get("grid")
+                if not isinstance(binding, dict) or binding.get("provider") != "eon":
+                    continue
+                if binding.get("config_entry_id") != entry_id:
+                    continue
+                facility = binding.get("facility")
+                if not isinstance(facility, dict):
+                    continue
+                identity = facility_identity(facility)
+                state = states.get(identity) if identity else None
+                if not isinstance(state, dict):
+                    continue
+                if not (state.get("facility") or {}).get("installation_identifier"):
+                    continue
+                work_items.append({
+                    "site_id": str(site_id),
+                    "binding": deepcopy(binding),
+                    "state": deepcopy(state),
+                })
+            if not work_items:
+                return
+            captured_at = datetime.now(timezone.utc)
+            await self.hass.async_add_executor_job(
+                self._persist_provider_imports_sync,
+                storage,
+                work_items,
+                captured_at,
+            )
+
+    @staticmethod
+    def _persist_provider_imports_sync(storage: Any, work_items: list[dict[str, Any]], captured_at: datetime) -> None:
+        """Persist a captured provider snapshot without touching Home Assistant APIs."""
+        for work_item in work_items:
+            site_id = work_item["site_id"]
+            binding = work_item["binding"]
+            state = work_item["state"]
             installation_id = (state.get("facility") or {}).get("installation_identifier")
-            if not installation_id:
-                continue
-            batches = self._provider_import_batches(state)
-            temperature_points = self._provider_temperature_points(state, captured_at)
+            batches = EonGridManager._provider_import_batches(state)
+            temperature_points = EonGridManager._provider_temperature_points(state, captured_at)
             if not batches and not temperature_points:
                 continue
             for resolution, points in batches:
@@ -841,7 +871,7 @@ class EonGridManager:
                 first_start = points[0]["start"]
                 storage.ensure_source_generation({
                     "generation_id": generation_id,
-                    "site_id": str(site_id),
+                    "site_id": site_id,
                     "logical_role": "grid.energy_import",
                     "source_identity": {
                         "identity_key": f"eon:{installation_id}:electricity:grid:false",
@@ -863,7 +893,7 @@ class EonGridManager:
                     observations.append({
                         "record_id": str(uuid.uuid5(uuid.NAMESPACE_URL, semantic_key)),
                         "semantic_key": semantic_key,
-                        "site_id": str(site_id),
+                        "site_id": site_id,
                         "logical_role": "grid.energy_import",
                         "source_generation_id": generation_id,
                         "interval_start": start,
@@ -884,18 +914,18 @@ class EonGridManager:
                         "gap_status": "none",
                         "quality": {"padded": False, "provider_actual": True},
                         "provenance": {
-                        "provider": "eon",
-                        "dataset": "energy_transfer",
-                        "padded": False,
-                        "provider_actual": True,
-                        "installation_identifier": installation_id,
+                            "provider": "eon",
+                            "dataset": "energy_transfer",
+                            "padded": False,
+                            "provider_actual": True,
+                            "installation_identifier": installation_id,
                             "point_of_delivery_number": (state.get("facility") or {}).get("point_of_delivery_number"),
                             "resolution": resolution,
                             "site_binding_fingerprint": binding.get("binding_fingerprint"),
                         },
                     })
                 _persist_cached_historical_observations(storage, observations)
-                storage.reconcile_grid_import(str(site_id), first_start, points[-1]["end"])
+                storage.reconcile_grid_import(site_id, first_start, points[-1]["end"])
             if temperature_points:
                 grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
                 for point in temperature_points:
@@ -907,7 +937,7 @@ class EonGridManager:
                     frame_captured = max(point_captured, default=captured_at)
                     frame_known = max(point_known, default=frame_captured)
                     frame, frame_points = build_eon_transfer_temperature_frame(
-                        str(site_id), str(installation_id),
+                        site_id, str(installation_id),
                         (state.get("facility") or {}).get("point_of_delivery_number"),
                         aggregation, points, frame_captured, frame_known,
                         binding.get("binding_fingerprint"),

@@ -2,6 +2,20 @@
 
 Updated: 2026-10-08
 
+## 0.0.1088 E.ON canonical persistence executor-safety checkpoint
+
+- ROOT CAUSE VERIFIED IN CODE: `_async_persist_provider_imports()` performed
+  synchronous canonical SQLite recovery, persistence and reconciliation inside
+  an async Home Assistant call path, including cached recovery during setup.
+- IMPLEMENTED/TESTED: site-scoped provider snapshots are captured on the HA
+  loop and the complete synchronous persistence/reconciliation chain runs in
+  `hass.async_add_executor_job`. A manager-local async lock preserves the
+  previous single-flight ordering while the executor work is active.
+- PRESERVED: setup/refresh await ordering, immutable recovery semantics,
+  exact-site binding, deterministic provider data, fail-closed behavior and
+  all prior P1, replay, history, phase and frontend behavior. The executor
+  helper receives plain captured data and performs no HA API calls.
+
 ## 0.0.1087 load-forecast startup lifecycle checkpoint
 
 - ROOT CAUSE VERIFIED: `_async_capture_load_forecasts()` was created with
