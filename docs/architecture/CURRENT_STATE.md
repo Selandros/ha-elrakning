@@ -10,10 +10,11 @@ Updated: 2026-10-09
   contract/site/generation context, stale validity, invalid provenance,
   `known_at > decision_at`, malformed values and unavailable-as-zero payloads.
 - CORE ADAPTER: the integration creates a disabled-by-default bounded client
-  during setup and removes it during unload. It performs no network request,
-  polling, HA service call or result projection unless explicitly enabled in a
-  later shadow deployment. App-down handling is fail-closed and bounded to
-  one second.
+  during setup and removes it during unload. The supported OptionsFlow stores
+  the explicit enable flag, local URL and bearer token in config-entry options.
+  It performs no network request, polling, HA service call or result
+  projection unless explicitly enabled in a later shadow deployment. App-down
+  handling is fail-closed and bounded to one second.
 - ISOLATION: the add-on has no host port mapping, no HA token, no physical
   control endpoint, no canonical storage writer and no HiGHS/optimizer import.
   Its in-memory snapshot buffer is bounded by site and snapshot count.

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
+from urllib.parse import urlsplit
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .app_contract import AppContractError, validate_state_snapshot
+from .const import APP_SHADOW_ENABLED, APP_SHADOW_TOKEN, APP_SHADOW_URL
 
 
 DEFAULT_APP_URL = "http://elrakning-app:8099"
@@ -20,18 +21,24 @@ class AppShadowClient:
 
     def __init__(self, hass: Any, *, base_url: str, token: str, enabled: bool) -> None:
         self.hass = hass
-        self.base_url = base_url.rstrip("/")
-        self.token = token
-        self.enabled = enabled and bool(self.base_url) and bool(self.token)
+        parsed_url = urlsplit(base_url) if isinstance(base_url, str) else None
+        self.base_url = (
+            base_url.rstrip("/")
+            if parsed_url and parsed_url.scheme in {"http", "https"}
+            and parsed_url.hostname and not parsed_url.username and not parsed_url.password
+            else ""
+        )
+        self.token = token if isinstance(token, str) else ""
+        self.enabled = enabled is True and bool(self.base_url) and bool(self.token)
 
     @classmethod
-    def from_environment(cls, hass: Any) -> "AppShadowClient":
-        enabled = os.getenv("ELRAKNING_APP_SHADOW", "0").lower() in {"1", "true", "yes"}
+    def from_config_entry(cls, hass: Any, entry: Any) -> "AppShadowClient":
+        options = getattr(entry, "options", {}) or {}
         return cls(
             hass,
-            base_url=os.getenv("ELRAKNING_APP_URL", DEFAULT_APP_URL),
-            token=os.getenv("ELRAKNING_APP_TOKEN", ""),
-            enabled=enabled,
+            base_url=options.get(APP_SHADOW_URL, DEFAULT_APP_URL),
+            token=options.get(APP_SHADOW_TOKEN, ""),
+            enabled=options.get(APP_SHADOW_ENABLED, False) is True,
         )
 
     def _headers(self) -> dict[str, str]:

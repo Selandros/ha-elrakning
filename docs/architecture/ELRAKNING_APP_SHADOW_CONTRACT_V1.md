@@ -36,10 +36,13 @@ status and bounded diagnostics. Core must reject mismatches and stale results.
 
 ## Failure and security model
 
-The Core client is disabled by default. When enabled, each request has a
-one-second timeout and failures return an unavailable result without raising
-into HA setup or the event loop. There is no polling task. The App token is
-separate from any HA token and is not persisted in the repository.
+The Core client is disabled by default. It is enabled only through the
+integration's supported config-entry OptionsFlow, which stores the explicit
+flag, local URL and bearer token in Home Assistant's config-entry options.
+When enabled, each request has a one-second timeout and failures return an
+unavailable result without raising into HA setup or the event loop. There is
+no polling task. The App token is separate from any HA token and is not
+persisted in the repository.
 
 The App uses no worker pool in Phase 1. Request headers/body and per-site
 snapshot retention are bounded. The process has no physical-write endpoint.

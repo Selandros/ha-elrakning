@@ -11,13 +11,44 @@ from custom_components.elrakning.app_client import AppShadowClient
 
 def test_shadow_client_is_disabled_without_explicit_enablement():
     async def run():
-        client = AppShadowClient.from_environment(object())
+        entry = type("Entry", (), {"options": {}})()
+        client = AppShadowClient.from_config_entry(object(), entry)
         result = await client.async_health()
         assert result["available"] is False
         assert result["live"]["reason"] == "shadow_disabled"
         assert result["ready"]["reason"] == "shadow_disabled"
 
     asyncio.run(run())
+
+
+def test_shadow_client_reads_only_explicit_config_entry_options():
+    async def run():
+        entry = type("Entry", (), {
+            "options": {
+                "app_shadow_enabled": True,
+                "app_shadow_url": "http://elrakning-app:8099",
+                "app_shadow_token": "configured-token",
+            },
+        })()
+        client = AppShadowClient.from_config_entry(object(), entry)
+        assert client.enabled is True
+        assert client.base_url == "http://elrakning-app:8099"
+        assert client.token == "configured-token"
+
+    asyncio.run(run())
+
+
+def test_shadow_client_rejects_unsafe_url_without_network_access():
+    entry = type("Entry", (), {
+        "options": {
+            "app_shadow_enabled": True,
+            "app_shadow_url": "https://user:secret@example.invalid",
+            "app_shadow_token": "configured-token",
+        },
+    })()
+    client = AppShadowClient.from_config_entry(object(), entry)
+    assert client.enabled is False
+    assert client.base_url == ""
 
 def test_shadow_client_fails_closed_when_app_is_unavailable(monkeypatch):
     class UnavailableSession:

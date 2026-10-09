@@ -810,7 +810,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning from a config entry."""
     frontend_data = hass.data.setdefault(DOMAIN, {})
     frontend_data["config_entry"] = entry
-    frontend_data["app_shadow_client"] = AppShadowClient.from_environment(hass)
+    frontend_data["app_shadow_client"] = AppShadowClient.from_config_entry(hass, entry)
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)

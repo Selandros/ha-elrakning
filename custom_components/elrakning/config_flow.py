@@ -2,14 +2,21 @@
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 
-from .const import DOMAIN
+from .app_client import DEFAULT_APP_URL
+from .const import APP_SHADOW_ENABLED, APP_SHADOW_TOKEN, APP_SHADOW_URL, DOMAIN
 
 
 class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Elräkning."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return ElrakningOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input: dict[str, str] | None = None):
         """Handle the user step."""
@@ -22,4 +29,34 @@ class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({}),
+        )
+
+
+class ElrakningOptionsFlow(config_entries.OptionsFlow):
+    """Configure the optional, read-only shadow App boundary."""
+
+    def __init__(self, config_entry) -> None:
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict | None = None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self.config_entry.options
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    APP_SHADOW_ENABLED,
+                    default=options.get(APP_SHADOW_ENABLED, False),
+                ): bool,
+                vol.Optional(
+                    APP_SHADOW_URL,
+                    default=options.get(APP_SHADOW_URL, DEFAULT_APP_URL),
+                ): vol.All(str, vol.Length(max=256)),
+                vol.Optional(
+                    APP_SHADOW_TOKEN,
+                    default=options.get(APP_SHADOW_TOKEN, ""),
+                ): vol.All(str, vol.Length(max=512)),
+            }),
         )
