@@ -2,6 +2,16 @@
 
 Updated: 2026-10-09
 
+## 0.0.1093 OptionsFlow compatibility checkpoint
+
+- ROOT CAUSE VERIFIED: Home Assistant Core 2026.10 owns the read-only
+  `OptionsFlow.config_entry` property. The integration assigned that property
+  in its constructor, so opening OptionsFlow raised an `AttributeError` before
+  the form could be returned and left the frontend spinner active.
+- CORRECTED/TESTED: the flow now uses Home Assistant's lifecycle-provided
+  `config_entry` property. Shadow remains disabled by default and no App,
+  entity, decision or source-of-truth behavior changes.
+
 ## 0.0.1092 Phase 1 App repository packaging checkpoint
 
 - IMPLEMENTED: the App repository now has root `repository.yaml` metadata and a

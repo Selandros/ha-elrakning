@@ -16,7 +16,7 @@ class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return ElrakningOptionsFlow(config_entry)
+        return ElrakningOptionsFlow()
 
     async def async_step_user(self, user_input: dict[str, str] | None = None):
         """Handle the user step."""
@@ -34,9 +34,6 @@ class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class ElrakningOptionsFlow(config_entries.OptionsFlow):
     """Configure the optional, read-only shadow App boundary."""
-
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None):
         if user_input is not None:
