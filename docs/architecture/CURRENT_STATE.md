@@ -2,6 +2,16 @@
 
 Updated: 2026-10-09
 
+## 0.0.1091 Phase 1 App repository packaging checkpoint
+
+- IMPLEMENTED: the App repository now has root `repository.yaml` metadata and a
+  standalone App build context. The Dockerfile no longer depends on the Core
+  repository root, and the bounded contract validator is included in the App
+  image without adding dependencies or changing runtime semantics.
+- PRESERVED: the App remains manual-boot, shadow-only, read-only, disabled by
+  default in Core, and separate from canonical storage, provider ingestion,
+  optimizer, physical control and the existing source-of-truth.
+
 ## 0.0.1089 Phase 1 hybrid shadow boundary
 
 - IMPLEMENTED: a separate, dependency-free Home Assistant App/add-on
