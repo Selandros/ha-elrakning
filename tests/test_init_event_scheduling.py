@@ -221,7 +221,7 @@ def test_site_independent_forecast_and_evidence_providers_are_wired():
 
     assert "site_identity_manager.forecast_collection_targets" in source
     assert "site_identity_manager.collection_site_configs" in source
-    assert "await solar_forecast_manager.async_capture_collection_baselines()" in source
+    assert '"setup.solar_forecast_capture_baselines"' in source
     assert 'frontend_data["solar_evidence_startup_task"] = hass.async_create_task(' in source
     assert "solar_evidence_manager.async_startup_catch_up()" in source
 
@@ -476,7 +476,7 @@ def test_baseline_capture_precedes_evidence_startup_catch_up():
     source = source_path.read_text(encoding="utf-8")
     coordinator_source = source_path.with_name("coordinator.py").read_text(encoding="utf-8")
 
-    baseline = source.index("await solar_forecast_manager.async_capture_collection_baselines()")
+    baseline = source.index('"setup.solar_forecast_capture_baselines"')
     catch_up = source.index('frontend_data["solar_evidence_startup_task"] = hass.async_create_task(')
     assert baseline < catch_up
     assert "for delay in (15, 30, 60, 120, 240)" in coordinator_source
@@ -496,10 +496,10 @@ def test_integration_ready_event_is_fired_after_runtime_components_are_ready():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
     assert 'INTEGRATION_READY_EVENT = "elrakning_integration_ready"' in source_path.parents[0].joinpath("const.py").read_text(encoding="utf-8")
-    assert "await coordinator.async_config_entry_first_refresh()" in source
-    assert "await manager.async_load()" in source
-    assert "await meter_manager.async_load()" in source
-    assert "await power_manager.async_load()" in source
+    assert '"setup.coordinator_first_refresh"' in source
+    assert '"setup.manager_load"' in source
+    assert '"setup.meter_manager_load"' in source
+    assert '"setup.power_manager_load"' in source
     assert "async_register_websocket_commands(hass)" in source
     assert "hass.bus.async_fire(INTEGRATION_READY_EVENT)" in source
     assert source.index("async_register_websocket_commands(hass)") < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
@@ -512,7 +512,7 @@ def test_control_plane_is_registered_before_risky_runtime_initialization():
     assert 'frontend_data["runtime_status"] = "initializing"' in source
     assert 'frontend_data["runtime_status"] = "failed"' in source
     assert 'frontend_data["runtime_status"] = "ready"' in source
-    assert source.index("async_register_websocket_commands(hass)") < source.index("await manager.async_load()")
+    assert source.index("async_register_websocket_commands(hass)") < source.index('"setup.manager_load"')
     assert source.index('frontend_data["runtime_status"] = "ready"') < source.index("hass.bus.async_fire(INTEGRATION_READY_EVENT)")
 
 
@@ -988,5 +988,5 @@ def test_panel_is_registered_before_site_runtime_initialization():
     source = source_path.read_text(encoding="utf-8")
 
     assert "async_register_built_in_panel" in source
-    assert source.index("await _async_register_frontend(hass)") < source.index("await manager.async_load()")
-    assert source.index("await _async_register_frontend(hass)") < source.index("await site_identity_manager.async_prepare_runtime_bindings")
+    assert source.index('"setup_entry.frontend_register"') < source.index('"setup.manager_load"')
+    assert source.index('"setup_entry.frontend_register"') < source.index('"setup.runtime_bindings_prepare"')

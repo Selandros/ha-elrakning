@@ -8,12 +8,12 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-try:
-    from highspy import Highs, HighsModelStatus, HighsVarType
-except ImportError:  # pragma: no cover - exercised by fail-closed runtime tests
-    Highs = None
-    HighsModelStatus = None
-    HighsVarType = None
+# Keep the diagnostic release independent from native solver loading during Core setup.
+HIGHSPY_DIAGNOSTIC_MODE = True
+Highs = None
+HighsModelStatus = None
+HighsVarType = None
+_HIGHS_IMPORT_ATTEMPTED = False
 
 
 SCHEMA = "ella_economic_optimizer.v1"
@@ -23,6 +23,28 @@ MIN_SLOTS = 96
 MAX_SLOTS = 144
 EXPORT_FALLBACK_FACTOR = 0.75
 PLANNING_EFFICIENCY_SOURCE = "conservative_calibration_planning_assumption"
+
+
+def _load_highspy() -> bool:
+    """Load HiGHS only on an explicit non-diagnostic optimizer call."""
+    global Highs, HighsModelStatus, HighsVarType, _HIGHS_IMPORT_ATTEMPTED
+    if HIGHSPY_DIAGNOSTIC_MODE:
+        return False
+    if Highs is not None:
+        return True
+    if _HIGHS_IMPORT_ATTEMPTED:
+        return False
+    _HIGHS_IMPORT_ATTEMPTED = True
+    try:
+        from highspy import Highs as _Highs
+        from highspy import HighsModelStatus as _HighsModelStatus
+        from highspy import HighsVarType as _HighsVarType
+    except ImportError:  # pragma: no cover - exercised by fail-closed runtime tests
+        return False
+    Highs = _Highs
+    HighsModelStatus = _HighsModelStatus
+    HighsVarType = _HighsVarType
+    return True
 
 
 def _number(value: Any) -> float | None:
@@ -314,8 +336,12 @@ def build_economic_plan(inputs: dict[str, Any]) -> dict[str, Any]:
     normalized, reason = _validate_inputs(inputs)
     if normalized is None:
         return _unavailable(reason or "invalid_inputs")
-    if Highs is None:
-        return _unavailable("highspy_unavailable")
+    if not _load_highspy():
+        return _unavailable(
+            "highspy_disabled_for_diagnostics"
+            if HIGHSPY_DIAGNOSTIC_MODE
+            else "highspy_unavailable"
+        )
 
     site_id = normalized["site_id"]
     slots = normalized["slots"]

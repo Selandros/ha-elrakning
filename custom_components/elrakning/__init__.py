@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import json
+import logging
 import threading
 import time
 from functools import partial
@@ -45,6 +46,7 @@ from .ella_ess_facts import EllaEssFactsStore
 from .ella_economic_policy import EllaEconomicPolicyStore
 from .replay_artifact_store import ReplayArtifactStore, async_register_replay_artifact_service
 from .replay_runtime import async_generate_artifact
+from .runtime_diagnostics import async_event_loop_lag_heartbeat, runtime_checkpoint
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .grid_tariff_timeline import resolve_grid_tariff
 from .site_identity import SiteIdentityManager
@@ -60,11 +62,64 @@ PANEL_RESOURCE_PATH = f"/{DOMAIN}/elrakning-panel.js"
 PANEL_CADENCE_AUDIT_PATH = f"/{DOMAIN}/elrakning-cadence-audit.js"
 PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
 REPLAY_RUN_TIMEOUT_SECONDS = 20 * 60
+_LOGGER = logging.getLogger(__name__)
+
+runtime_checkpoint(
+    "module_imports.complete",
+    phase="import",
+    highspy_loaded=False,
+    highspy_diagnostic_mode=True,
+)
 
 
 async def _run_replay_with_timeout(coroutine, timeout_seconds=REPLAY_RUN_TIMEOUT_SECONDS):
     """Bound one replay task so worker stalls cannot hold the scheduler forever."""
     return await asyncio.wait_for(coroutine, timeout=timeout_seconds)
+
+
+async def _await_setup_step(label: str, awaitable):
+    """Await one setup phase while recording bounded timing metadata."""
+    started_at = runtime_checkpoint(f"{label}.start")
+    try:
+        result = await awaitable
+    except BaseException as error:
+        runtime_checkpoint(
+            f"{label}.error",
+            started_at=started_at,
+            level=logging.ERROR,
+            error_type=type(error).__name__,
+        )
+        raise
+    runtime_checkpoint(f"{label}.complete", started_at=started_at)
+    return result
+
+
+async def _async_cancel_task(task) -> None:
+    """Cancel and await one task without leaking its exception."""
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+def _start_event_loop_lag_heartbeat(hass):
+    """Start one low-overhead heartbeat for the integration lifecycle."""
+    data = hass.data.setdefault(DOMAIN, {})
+    existing = data.get("event_loop_lag_heartbeat_task")
+    if existing is not None and not existing.done():
+        return existing
+    coroutine = async_event_loop_lag_heartbeat()
+    create_task = getattr(hass, "async_create_background_task", None)
+    task = (
+        create_task(coroutine, name="elrakning_event_loop_lag_heartbeat")
+        if callable(create_task)
+        else hass.async_create_task(coroutine)
+    )
+    data["event_loop_lag_heartbeat_task"] = task
+    return task
 
 
 class _ReplaySiteTaskRegistry:
@@ -796,13 +851,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning with the control plane available during startup."""
     frontend_data = hass.data.setdefault(DOMAIN, {})
     frontend_data["runtime_status"] = "initializing"
+    setup_started_at = runtime_checkpoint(
+        "setup_entry.start", phase="setup", entry_id=entry.entry_id
+    )
+    _start_event_loop_lag_heartbeat(hass)
     try:
-        await _async_register_frontend(hass)
+        await _await_setup_step("setup_entry.frontend_register", _async_register_frontend(hass))
+        runtime_checkpoint("setup_entry.websocket_register.start", phase="setup")
         async_register_websocket_commands(hass)
         async_register_cadence_audit_websocket(hass)
-        return await _async_setup_entry(hass, entry)
+        runtime_checkpoint("setup_entry.websocket_register.complete", phase="setup")
+        result = await _async_setup_entry(hass, entry)
+        runtime_checkpoint("setup_entry.complete", phase="setup", started_at=setup_started_at)
+        return result
     except Exception:
+        await _async_cancel_task(frontend_data.pop("event_loop_lag_heartbeat_task", None))
         frontend_data["runtime_status"] = "failed"
+        runtime_checkpoint(
+            "setup_entry.error", phase="setup", started_at=setup_started_at,
+            level=logging.ERROR,
+        )
         raise
 
 
@@ -814,81 +882,93 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
     manager = ElhandelManager(hass, entry)
-    await manager.async_load()
+    await _await_setup_step("setup.manager_load", manager.async_load())
     hass.data.setdefault(DOMAIN, {})["elhandel_manager"] = manager
     meter_manager = MeterManager(hass, manager.async_diagnostic)
-    await meter_manager.async_load()
+    await _await_setup_step("setup.meter_manager_load", meter_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["meter_manager"] = meter_manager
     power_manager = PowerManager(hass, manager.async_diagnostic)
-    await power_manager.async_load()
+    await _await_setup_step("setup.power_manager_load", power_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["power_manager"] = power_manager
     site_identity_manager = SiteIdentityManager(hass, power_manager, meter_manager)
-    await site_identity_manager.async_load()
-    await site_identity_manager.async_sync_from_current()
+    await _await_setup_step("setup.site_identity_load", site_identity_manager.async_load())
+    await _await_setup_step("setup.site_identity_sync", site_identity_manager.async_sync_from_current())
     power_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
     ella_load_registry = EllaLoadRegistry(hass, lambda: dt_util.now().isoformat())
-    await ella_load_registry.async_load()
+    await _await_setup_step("setup.ella_load_registry_load", ella_load_registry.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_load_registry"] = ella_load_registry
     ella_debug_snapshot_store = EllaDebugSnapshotStore(hass)
-    await ella_debug_snapshot_store.async_load()
+    await _await_setup_step("setup.ella_debug_snapshot_store_load", ella_debug_snapshot_store.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_debug_snapshot_store"] = ella_debug_snapshot_store
     ella_learning_store = EllaLearningStore(hass)
-    await ella_learning_store.async_load()
+    await _await_setup_step("setup.ella_learning_store_load", ella_learning_store.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_learning_store"] = ella_learning_store
     monthly_forecast_manager = MonthlyForecastManager(ella_learning_store)
     hass.data.setdefault(DOMAIN, {})["monthly_forecast_manager"] = monthly_forecast_manager
     ella_stage6_store = EllaStage6CalibrationStore(hass)
-    await ella_stage6_store.async_load()
+    await _await_setup_step("setup.ella_stage6_store_load", ella_stage6_store.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_stage6_store"] = ella_stage6_store
     ella_execution_store = EllaExecutionStore(hass)
-    await ella_execution_store.async_load()
+    await _await_setup_step("setup.ella_execution_store_load", ella_execution_store.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_execution_store"] = ella_execution_store
     ella_ess_facts_store = EllaEssFactsStore(hass)
-    await ella_ess_facts_store.async_load()
+    await _await_setup_step("setup.ella_ess_facts_store_load", ella_ess_facts_store.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_ess_facts_store"] = ella_ess_facts_store
     ella_economic_policy_store = EllaEconomicPolicyStore(hass)
-    await ella_economic_policy_store.async_load()
+    await _await_setup_step("setup.ella_economic_policy_store_load", ella_economic_policy_store.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_economic_policy_store"] = ella_economic_policy_store
     replay_artifact_store = ReplayArtifactStore(hass)
-    await replay_artifact_store.async_load()
+    await _await_setup_step("setup.replay_artifact_store_load", replay_artifact_store.async_load())
     hass.data.setdefault(DOMAIN, {})["replay_artifact_store"] = replay_artifact_store
     await async_register_replay_artifact_service(hass)
     cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
-    await cadence_audit_manager.async_load()
+    await _await_setup_step("setup.cadence_audit_load", cadence_audit_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager
     grid_manager = GridManager(hass, entry)
-    await grid_manager.async_load()
+    await _await_setup_step("setup.grid_manager_load", grid_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
-    await site_identity_manager.async_prepare_runtime_bindings(manager, grid_manager, coordinator)
+    await _await_setup_step(
+        "setup.runtime_bindings_prepare",
+        site_identity_manager.async_prepare_runtime_bindings(manager, grid_manager, coordinator),
+    )
     canonical_collector = CanonicalCollector(hass, site_identity_manager)
-    await canonical_collector.async_start()
+    await _await_setup_step("setup.canonical_collector_start", canonical_collector.async_start())
     hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
     frontend_data["history_warmup_task"] = hass.async_create_task(
         _async_warm_history(power_manager, meter_manager)
     )
     apply_migrations = getattr(site_identity_manager, "async_apply_canonical_source_migrations", None)
     if apply_migrations is not None:
-        await apply_migrations(canonical_collector.storage)
-    await async_register_proof_service(hass, site_identity_manager, entry)
-    await coordinator.async_config_entry_first_refresh()
+        await _await_setup_step(
+            "setup.canonical_source_migrations",
+            apply_migrations(canonical_collector.storage),
+        )
+    await _await_setup_step(
+        "setup.proof_service_register",
+        async_register_proof_service(hass, site_identity_manager, entry),
+    )
+    await _await_setup_step(
+        "setup.coordinator_first_refresh",
+        coordinator.async_config_entry_first_refresh(),
+    )
     if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):
         manager.async_start_refresh()
     solar_forecast_manager = SolarForecastManager(
         hass, manager.async_diagnostic, site_identity_manager.forecast_collection_targets
     )
-    await solar_forecast_manager.async_load()
+    await _await_setup_step("setup.solar_forecast_load", solar_forecast_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["solar_forecast_manager"] = solar_forecast_manager
     solar_weather_manager = SolarWeatherManager(hass)
-    await solar_weather_manager.async_load()
+    await _await_setup_step("setup.solar_weather_load", solar_weather_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["solar_weather_manager"] = solar_weather_manager
     solar_pvgis_manager = SolarPvgisManager(hass, power_manager)
-    await solar_pvgis_manager.async_load()
+    await _await_setup_step("setup.solar_pvgis_load", solar_pvgis_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["solar_pvgis_manager"] = solar_pvgis_manager
     solar_open_meteo_manager = SolarOpenMeteoManager(hass, power_manager)
     try:
-        await solar_open_meteo_manager.async_load()
+        await _await_setup_step("setup.solar_open_meteo_load", solar_open_meteo_manager.async_load())
     except Exception:
         # Optional external forecast data must never prevent panel setup.
         pass
@@ -897,21 +977,27 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, solar_forecast_manager, solar_weather_manager, power_manager,
         solar_pvgis_manager, solar_open_meteo_manager,
     )
-    await solar_shadow_manager.async_load()
+    await _await_setup_step("setup.solar_shadow_load", solar_shadow_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["solar_shadow_manager"] = solar_shadow_manager
     solar_evidence_manager = SolarEvidenceManager(
         hass, power_manager, solar_forecast_manager, site_identity_manager.collection_site_configs
     )
-    await solar_evidence_manager.async_load()
-    await site_identity_manager.async_prepare_solar_contexts({
-        "forecast": solar_forecast_manager,
-        "weather": solar_weather_manager,
-        "pvgis": solar_pvgis_manager,
-        "open_meteo": solar_open_meteo_manager,
-        "shadow": solar_shadow_manager,
-        "evidence": solar_evidence_manager,
-    })
-    await solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager)
+    await _await_setup_step("setup.solar_evidence_load", solar_evidence_manager.async_load())
+    await _await_setup_step(
+        "setup.solar_contexts_prepare",
+        site_identity_manager.async_prepare_solar_contexts({
+            "forecast": solar_forecast_manager,
+            "weather": solar_weather_manager,
+            "pvgis": solar_pvgis_manager,
+            "open_meteo": solar_open_meteo_manager,
+            "shadow": solar_shadow_manager,
+            "evidence": solar_evidence_manager,
+        }),
+    )
+    await _await_setup_step(
+        "setup.solar_open_meteo_migrate_locations",
+        solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager),
+    )
     greenely_economics = GreenelyInvoiceEconomicsProducer(hass, entry, site_identity_manager, canonical_collector.storage)
     hass.data.setdefault(DOMAIN, {})["greenely_invoice_economics"] = greenely_economics
     greenely_economics.async_schedule_capture()
@@ -920,7 +1006,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["greenely_economics_unsub"] = async_track_time_change(
         hass, lambda _now: greenely_economics.async_schedule_capture(), hour=0, minute=5, second=0
     )
-    await solar_forecast_manager.async_capture_collection_baselines()
+    await _await_setup_step(
+        "setup.solar_forecast_capture_baselines",
+        solar_forecast_manager.async_capture_collection_baselines(),
+    )
     load_forecast_owner = _get_load_forecast_task_owner(
         hass, site_identity_manager, canonical_collector
     )
@@ -946,7 +1035,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["weather_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_weather(trigger="startup")
     )
-    await canonical_collector.async_capture_forecast_solar(trigger="startup")
+    await _await_setup_step(
+        "setup.canonical_forecast_solar_capture",
+        canonical_collector.async_capture_forecast_solar(trigger="startup"),
+    )
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
     # Evidence catch-up is independent of panel readiness and may perform Recorder/HTTP work.
     # Keep it off the critical startup path so live state and history can hydrate immediately.
@@ -962,7 +1054,10 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_register_eon_handoff_views(hass)
     cached_import_recovery = getattr(getattr(grid_manager, "provider", None), "async_persist_cached_imports", None)
     if callable(cached_import_recovery):
-        await cached_import_recovery()
+        await _await_setup_step(
+            "setup.eon_cached_import_recovery",
+            cached_import_recovery(),
+        )
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
         grid_manager.async_start_refresh()
 
@@ -1264,6 +1359,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["replay_scheduler_closed"] = True
     entry_coordinator = getattr(entry, "runtime_data", None)
     frontend_data["runtime_status"] = "unavailable"
+    await _async_cancel_task(frontend_data.pop("event_loop_lag_heartbeat_task", None))
+    unload_started_at = runtime_checkpoint("unload_entry.start", phase="unload")
     if unsubscribe := frontend_data.pop("coordinator_unsub", None):
         unsubscribe()
     if unsubscribe := frontend_data.pop("electricity_provider_price_unsub", None):
@@ -1383,4 +1480,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await grid_manager.async_shutdown()
     if frontend.async_panel_exists(hass, PANEL_PATH):
         frontend.async_remove_panel(hass, PANEL_PATH)
+    runtime_checkpoint("unload_entry.complete", phase="unload", started_at=unload_started_at)
     return True

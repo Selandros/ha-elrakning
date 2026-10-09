@@ -52,6 +52,7 @@ from .ella_economic_policy import EllaEconomicPolicyStore
 from .power_forecast import build_power_forecast
 from .ella_execution import EllaExecutionStore
 from .price_only_planner import build_price_only_plan, enrich_plan_with_load
+from .runtime_diagnostics import runtime_checkpoint
 from .solar_forecast import SolarForecastManager
 from .solar_single_run import build_single_run_targets
 from .solar_weather import build_sun_context
@@ -391,31 +392,43 @@ def _sanitize_facility(facility: dict) -> dict:
 @websocket_api.async_response
 async def websocket_economic_optimizer(hass, connection, msg):
     """Return a read-only deterministic Step 8 plan or an explicit unavailable result."""
-    inputs = msg.get("inputs")
-    if not isinstance(inputs, dict):
-        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
-        site_id = msg.get("site_id") or (site_manager.state.get("active_site_id") if site_manager else None)
-        inputs = await _async_optimizer_runtime_inputs(hass, site_id)
-    facts_store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
-    if isinstance(inputs, dict) and isinstance(facts_store, EllaEssFactsStore):
-        inputs = facts_store.apply_to_optimizer_inputs(inputs)
-    if isinstance(inputs, dict) and "economics" not in inputs:
-        site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
-        grid_manager = hass.data.get(DOMAIN, {}).get("grid_manager")
-        binding = site_manager.active_binding("grid") if site_manager and hasattr(site_manager, "active_binding") else None
-        grid_state = grid_manager.public_state_for_binding(binding) if grid_manager and binding else None
-        normalized_economics = build_eon_economics(grid_state, binding, inputs.get("known_at")) if isinstance(grid_state, dict) else None
-        if normalized_economics is not None:
-            inputs["economics"] = normalized_economics
-    policy_store = hass.data.get(DOMAIN, {}).get("ella_economic_policy_store")
-    if isinstance(inputs, dict) and isinstance(policy_store, EllaEconomicPolicyStore):
-        economics = inputs.get("economics")
-        if isinstance(economics, dict) and isinstance(inputs.get("site_id"), str):
-            override = policy_store.resolve(inputs["site_id"], inputs.get("known_at"))
-            if override is not None and "planning_applicability_override" not in economics:
-                inputs["economics"] = {**economics, "planning_applicability_override": override}
-    result = build_economic_plan(inputs)
-    connection.send_result(msg["id"], result)
+    started_at = runtime_checkpoint("economic_optimizer.request.start", phase="optimizer")
+    result = None
+    try:
+        inputs = msg.get("inputs")
+        if not isinstance(inputs, dict):
+            site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+            site_id = msg.get("site_id") or (site_manager.state.get("active_site_id") if site_manager else None)
+            inputs = await _async_optimizer_runtime_inputs(hass, site_id)
+        facts_store = hass.data.get(DOMAIN, {}).get("ella_ess_facts_store")
+        if isinstance(inputs, dict) and isinstance(facts_store, EllaEssFactsStore):
+            inputs = facts_store.apply_to_optimizer_inputs(inputs)
+        if isinstance(inputs, dict) and "economics" not in inputs:
+            site_manager = hass.data.get(DOMAIN, {}).get("site_identity_manager")
+            grid_manager = hass.data.get(DOMAIN, {}).get("grid_manager")
+            binding = site_manager.active_binding("grid") if site_manager and hasattr(site_manager, "active_binding") else None
+            grid_state = grid_manager.public_state_for_binding(binding) if grid_manager and binding else None
+            normalized_economics = build_eon_economics(grid_state, binding, inputs.get("known_at")) if isinstance(grid_state, dict) else None
+            if normalized_economics is not None:
+                inputs["economics"] = normalized_economics
+        policy_store = hass.data.get(DOMAIN, {}).get("ella_economic_policy_store")
+        if isinstance(inputs, dict) and isinstance(policy_store, EllaEconomicPolicyStore):
+            economics = inputs.get("economics")
+            if isinstance(economics, dict) and isinstance(inputs.get("site_id"), str):
+                override = policy_store.resolve(inputs["site_id"], inputs.get("known_at"))
+                if override is not None and "planning_applicability_override" not in economics:
+                    inputs["economics"] = {**economics, "planning_applicability_override": override}
+        runtime_checkpoint("economic_optimizer.build.start", phase="optimizer")
+        result = build_economic_plan(inputs)
+        runtime_checkpoint("economic_optimizer.build.complete", phase="optimizer")
+        connection.send_result(msg["id"], result)
+    finally:
+        runtime_checkpoint(
+            "economic_optimizer.request.complete",
+            phase="optimizer",
+            started_at=started_at,
+            result_available=result.get("available") if isinstance(result, dict) else None,
+        )
 
 
 @websocket_api.websocket_command({vol.Required("type"): ESS_FACTS_LIST_COMMAND, vol.Required("site_id"): str})

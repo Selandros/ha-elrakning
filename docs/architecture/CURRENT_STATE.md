@@ -2,6 +2,22 @@
 
 Updated: 2026-10-09
 
+## 0.0.1094 diagnostic highspy-isolation checkpoint
+
+- IMPLEMENTED: setup/import checkpoints now record bounded UTC timestamp,
+  thread and duration for the integration lifecycle, including E.ON cached
+  import recovery and the main setup phases. A low-overhead event-loop
+  heartbeat reports only material lag and is cancelled/awaited on unload.
+- DIAGNOSTIC MODE: the Core optimizer does not import `highspy` during module
+  import or setup. Optimizer requests fail closed with an explicit unavailable
+  result while `websocket_economic_optimizer()` records bounded request/build
+  checkpoints. Existing Core source-of-truth and data semantics are unchanged.
+- TOOLING: a read-only external watcher samples Core/Supervisor state, jobs,
+  HTTP liveness, resource stats and relevant crash/error signals. It does not
+  restart, mutate configuration, or alter runtime state.
+- SCOPE: Elräkning remains disabled for the controlled activation test. No
+  shadow cutover, storage/provider migration, or physical control is enabled.
+
 ## 0.0.1093 OptionsFlow compatibility checkpoint
 
 - ROOT CAUSE VERIFIED: Home Assistant Core 2026.10 owns the read-only

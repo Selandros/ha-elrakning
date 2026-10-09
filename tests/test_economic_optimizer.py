@@ -1,5 +1,6 @@
 """Deterministic Step 8 optimizer contract tests."""
 
+import ast
 from datetime import datetime, timedelta, timezone
 import importlib.util
 from pathlib import Path
@@ -77,6 +78,36 @@ def test_missing_economics_or_ess_facts_fail_closed():
     inputs = _inputs()
     del inputs["ess"]["resource_identity"]
     assert build_economic_plan(inputs)["reason"] == "shared_ess_resource_identity_missing"
+
+
+def test_diagnostic_mode_never_loads_highspy_and_fails_closed():
+    assert MODULE.HIGHSPY_DIAGNOSTIC_MODE is True
+    assert MODULE.Highs is None
+    assert MODULE._HIGHS_IMPORT_ATTEMPTED is False
+    result = build_economic_plan(_inputs())
+    assert result["available"] is False
+    assert result["reason"] == "highspy_disabled_for_diagnostics"
+    assert MODULE._HIGHS_IMPORT_ATTEMPTED is False
+
+
+def test_core_import_chain_has_no_eager_highspy_import():
+    for relative_path in (
+        "custom_components/elrakning/__init__.py",
+        "custom_components/elrakning/replay_runtime.py",
+        "custom_components/elrakning/websocket.py",
+    ):
+        tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, ast.ImportFrom) and node.module == "highspy"
+            for node in ast.walk(tree)
+        )
+        assert not any(
+            isinstance(node, ast.Import) and any(alias.name == "highspy" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+    optimizer_source = (ROOT / "custom_components/elrakning/economic_optimizer.py").read_text(encoding="utf-8")
+    assert "def _load_highspy" in optimizer_source
+    assert "from highspy import Highs" in optimizer_source
 
 
 def test_known_at_and_15_minute_causal_gate():
