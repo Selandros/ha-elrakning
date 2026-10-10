@@ -58,16 +58,53 @@ class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ElrakningOptionsFlow()
 
     async def async_step_user(self, user_input: dict[str, str] | None = None):
-        """Handle the user step."""
+        """Create a clean-room entry without touching runtime stores."""
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
+        errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="Elräkning", data={})
+            if not user_input.get(CLEAN_INSTALL_CONFIRM_OPTION, False):
+                errors["base"] = "clean_install_confirmation_required"
+            elif user_input.get(DIAGNOSTIC_STAGE_OPTION, 0) != 0:
+                errors["base"] = "diagnostic_stage_zero_required"
+            else:
+                try:
+                    options = build_options(
+                        {},
+                        archive_reference=user_input.get(
+                            CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION, ""
+                        ),
+                        confirm=True,
+                        diagnostic_stage=0,
+                    )
+                except ValueError as error:
+                    errors["base"] = str(error)
+                else:
+                    return self.async_create_entry(
+                        title="Elräkning",
+                        data={},
+                        options=options,
+                    )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION,
+                    ): vol.All(str, vol.Length(max=256)),
+                    vol.Required(
+                        CLEAN_INSTALL_CONFIRM_OPTION,
+                        default=False,
+                    ): bool,
+                    vol.Required(
+                        DIAGNOSTIC_STAGE_OPTION,
+                        default=0,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=9)),
+                }
+            ),
+            errors=errors,
         )
 
 

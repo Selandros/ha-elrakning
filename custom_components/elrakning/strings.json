@@ -2,12 +2,37 @@
   "config": {
     "step": {
       "user": {
-        "title": "Elräkning",
-        "description": "Lägg till Elräkning."
+        "title": "Elräkning – ren installation",
+        "description": "Skapa en tom Elräkning-installation. Ange den verifierade arkivreferensen och lämna diagnostiksteget på 0.",
+        "data": {
+          "clean_install_archive_reference": "Arkivreferens",
+          "clean_install_confirm": "Bekräfta ren installation",
+          "diagnostic_stage": "Diagnostiksteg"
+        }
       }
+    },
+    "error": {
+      "clean_install_confirmation_required": "Bekräfta ren installation för att fortsätta.",
+      "diagnostic_stage_zero_required": "En ny ren installation måste börja på diagnostiksteg 0.",
+      "archive_reference_invalid": "Arkivreferensen är tom eller för lång."
     },
     "abort": {
       "already_configured": "Elräkning är redan konfigurerad."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Elräkning inställningar",
+        "data": {
+          "app_shadow_enabled": "Aktivera App shadow",
+          "app_shadow_url": "App URL",
+          "app_shadow_token": "App-token",
+          "clean_install_archive_reference": "Arkivreferens",
+          "clean_install_confirm": "Bekräfta ren installation",
+          "diagnostic_stage": "Diagnostiksteg"
+        }
+      }
     }
   }
 }

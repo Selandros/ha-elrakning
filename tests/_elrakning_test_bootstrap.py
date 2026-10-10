@@ -152,6 +152,7 @@ def install_optional_dependency_stubs() -> None:
         voluptuous.All = lambda *values, **kwargs: values[0] if values else None
         voluptuous.Coerce = lambda value, *args, **kwargs: value
         voluptuous.Range = lambda *args, **kwargs: lambda value: value
+        voluptuous.Length = lambda *args, **kwargs: lambda value: value
         voluptuous.Schema = lambda value, *args, **kwargs: value
     if "yarl" not in sys.modules:
         yarl = _module("yarl")

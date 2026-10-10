@@ -2,6 +2,21 @@
 
 Updated: 2026-10-10
 
+## 0.0.1100 clean-room Add-flow path
+
+- IMPLEMENTED: the new-entry ConfigFlow now collects a bounded archive
+  reference, explicit clean-install confirmation, and diagnostic stage 0
+  before creating the entry. It stores only config-entry options; no site
+  stores are touched by the flow.
+- SAFETY: a new clean installation cannot select a later diagnostic stage,
+  and setup still consumes the pending reset before legacy managers or heavy
+  subsystems. The existing disabled entry is not modified.
+- UI GATE: Home Assistant 2026.10 does not expose OptionsFlow on the disabled
+  entry detail page observed in runtime. The supported path is to delete only
+  that disabled entry in the UI, then add Elräkning again and complete the
+  clean-room form. Quarantined files and backups are outside this metadata
+  operation and remain untouched.
+
 ## 0.0.1099 deployment-layout gate
 
 - IMPLEMENTED: `scripts/check_custom_components_layout.py` and regression

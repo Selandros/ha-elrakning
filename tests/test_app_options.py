@@ -1,4 +1,5 @@
 import json
+import asyncio
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -40,6 +41,8 @@ from custom_components.elrakning.config_flow import (
 from custom_components.elrakning.const import (
     APP_SHADOW_ENABLED,
     APP_SHADOW_URL,
+    CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION,
+    CLEAN_INSTALL_CONFIRM_OPTION,
     CLEAN_INSTALL_PENDING_OPTION,
     DIAGNOSTIC_STAGE_OPTION,
 )
@@ -107,3 +110,82 @@ def test_options_flow_rejects_invalid_diagnostic_stage():
             assert str(error) == "diagnostic_stage_invalid"
         else:
             raise AssertionError(f"stage {stage!r} was accepted")
+
+
+def _new_config_flow():
+    flow = object.__new__(ElrakningConfigFlow)
+
+    async def _set_unique_id(*_args):
+        return None
+
+    def _abort_if_unique_id_configured(*_args):
+        return None
+
+    def _show_form(*_args, **kwargs):
+        return {"type": "form", **kwargs}
+
+    def _create_entry(*_args, **kwargs):
+        return {"type": "create_entry", **kwargs}
+
+    flow.async_set_unique_id = _set_unique_id
+    flow._abort_if_unique_id_configured = _abort_if_unique_id_configured
+    flow.async_show_form = _show_form
+    flow.async_create_entry = _create_entry
+    return flow
+
+
+def test_new_config_flow_exposes_clean_room_fields_and_stage_zero_default():
+    result = asyncio.run(ElrakningConfigFlow.async_step_user(_new_config_flow()))
+
+    assert result["type"] == "form"
+    assert CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION in result["data_schema"]
+    assert CLEAN_INSTALL_CONFIRM_OPTION in result["data_schema"]
+    assert DIAGNOSTIC_STAGE_OPTION in result["data_schema"]
+
+
+def test_new_config_flow_creates_pending_reset_options_without_setup():
+    flow = _new_config_flow()
+    result = asyncio.run(
+        ElrakningConfigFlow.async_step_user(
+            flow,
+            {
+                CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION: "/config/elrakning/legacy-bundles/test",
+                CLEAN_INSTALL_CONFIRM_OPTION: True,
+                DIAGNOSTIC_STAGE_OPTION: 0,
+            },
+        )
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"] == {}
+    assert result["options"][DIAGNOSTIC_STAGE_OPTION] == 0
+    assert result["options"][CLEAN_INSTALL_PENDING_OPTION] == {
+        "archive_reference": "/config/elrakning/legacy-bundles/test",
+        "confirm": True,
+    }
+
+
+def test_new_config_flow_rejects_unconfirmed_or_nonzero_stage():
+    unconfirmed = asyncio.run(
+        ElrakningConfigFlow.async_step_user(
+            _new_config_flow(),
+            {
+                CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION: "bundle",
+                CLEAN_INSTALL_CONFIRM_OPTION: False,
+                DIAGNOSTIC_STAGE_OPTION: 0,
+            },
+        )
+    )
+    assert unconfirmed["errors"]["base"] == "clean_install_confirmation_required"
+
+    nonzero = asyncio.run(
+        ElrakningConfigFlow.async_step_user(
+            _new_config_flow(),
+            {
+                CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION: "bundle",
+                CLEAN_INSTALL_CONFIRM_OPTION: True,
+                DIAGNOSTIC_STAGE_OPTION: 1,
+            },
+        )
+    )
+    assert nonzero["errors"]["base"] == "diagnostic_stage_zero_required"
