@@ -2,6 +2,18 @@
 
 Updated: 2026-10-10
 
+## 0.0.1114 App-shadow endpoint diagnostics
+
+- IMPLEMENTED: App-shadow diagnostics expose only the configured hostname,
+  effective hostname, and a bounded resolution-source label. URL paths,
+  credentials, bearer tokens, request headers, and payloads remain private.
+- VERIFIED IN THIS RUNTIME: the saved legacy alias `elrakning-app` resolved
+  from Supervisor's cached App slug to `092cd02c-elrakning-app`; after one
+  supported Elräkning reload, Core's own client reported `ready` with fresh
+  health-attempt and success timestamps. The App remained shadow-only/read-only.
+- SCOPE: diagnostics/client/tests/manifest only; App 0.0.1092 and all site,
+  history, and physical-control state are unchanged.
+
 ## 0.0.1113 App health contract correction
 
 - ROOT CAUSE VERIFIED: the App liveness endpoint returns `live: true` and

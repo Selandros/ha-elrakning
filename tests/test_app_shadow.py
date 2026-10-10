@@ -47,6 +47,10 @@ class _Client:
         self.ready = ready
         self.health_calls = 0
         self.snapshots = []
+        self.token = "never-expose-this"
+        self.configured_host = "elrakning-app"
+        self.effective_host = "092cd02c-elrakning-app"
+        self.resolution_source = "supervisor_discovery"
 
     async def async_health(self):
         self.health_calls += 1
@@ -184,6 +188,11 @@ def test_health_failure_is_fail_closed_and_unload_cleans_listeners():
         callback = hass.bus.listeners["elrakning_eon_grid_update"][0]
         await callback(SimpleNamespace(data={"site_id": "site-a"}))
         assert client.snapshots == []
+        public_state = manager.public_state()
+        assert public_state["configured_host"] == "elrakning-app"
+        assert public_state["effective_host"] == "092cd02c-elrakning-app"
+        assert public_state["resolution_source"] == "supervisor_discovery"
+        assert "never-expose-this" not in str(public_state)
         await manager.async_shutdown()
         assert all(not callbacks for callbacks in hass.bus.listeners.values())
         assert "token" not in str(manager.public_state()).lower()

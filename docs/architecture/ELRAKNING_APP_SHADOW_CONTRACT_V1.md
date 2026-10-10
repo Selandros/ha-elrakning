@@ -56,6 +56,11 @@ from the cached installed-App list and uses the Supervisor-generated
 does not hardcode an IP address or repository id. An explicit fully qualified
 URL remains supported for non-Supervisor deployments.
 
+Core diagnostics expose only the configured hostname, effective hostname,
+and resolution source (`configured`, `supervisor_discovery`,
+`legacy_alias_fallback`, or `unavailable`). They never expose credentials,
+tokens, URL paths, headers, or snapshot contents.
+
 The App uses no worker pool in Phase 1. Request headers/body and per-site
 snapshot retention are bounded. The process has no physical-write endpoint.
 

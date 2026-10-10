@@ -43,19 +43,38 @@ def _discover_app_url(hass: Any) -> str:
 
 def _resolve_app_url(hass: Any, configured_url: Any) -> str:
     """Resolve the default/legacy alias without hardcoding a repository id."""
-    if not isinstance(configured_url, str) or not configured_url.strip():
-        return _discover_app_url(hass)
-    parsed_url = urlsplit(configured_url)
-    if parsed_url.hostname == _AUTO_DISCOVERY_HOST:
+    return _resolve_app_url_details(hass, configured_url)[0]
+
+
+def _resolve_app_url_details(hass: Any, configured_url: Any) -> tuple[str, str, str]:
+    """Return the effective URL and non-secret resolution metadata."""
+    raw_url = configured_url.strip() if isinstance(configured_url, str) else ""
+    configured_host = (urlsplit(raw_url).hostname or "") if raw_url else ""
+    if not raw_url:
         discovered_url = _discover_app_url(hass)
-        return discovered_url or configured_url
-    return configured_url
+        source = "supervisor_discovery" if discovered_url else "unavailable"
+        return discovered_url, configured_host, source
+    if configured_host == _AUTO_DISCOVERY_HOST:
+        discovered_url = _discover_app_url(hass)
+        if discovered_url:
+            return discovered_url, configured_host, "supervisor_discovery"
+        return raw_url, configured_host, "legacy_alias_fallback"
+    return raw_url, configured_host, "configured"
 
 
 class AppShadowClient:
     """Use the App only when explicitly enabled; never block HA setup."""
 
-    def __init__(self, hass: Any, *, base_url: str, token: str, enabled: bool) -> None:
+    def __init__(
+        self,
+        hass: Any,
+        *,
+        base_url: str,
+        token: str,
+        enabled: bool,
+        configured_host: str = "",
+        resolution_source: str = "configured",
+    ) -> None:
         self.hass = hass
         parsed_url = urlsplit(base_url) if isinstance(base_url, str) else None
         self.base_url = (
@@ -66,15 +85,24 @@ class AppShadowClient:
         )
         self.token = token if isinstance(token, str) else ""
         self.enabled = enabled is True and bool(self.base_url) and bool(self.token)
+        self.configured_host = configured_host
+        self.effective_host = urlsplit(self.base_url).hostname if self.base_url else None
+        self.resolution_source = resolution_source
 
     @classmethod
     def from_config_entry(cls, hass: Any, entry: Any) -> "AppShadowClient":
         options = getattr(entry, "options", {}) or {}
+        configured_url = options.get(APP_SHADOW_URL, DEFAULT_APP_URL)
+        base_url, configured_host, resolution_source = _resolve_app_url_details(
+            hass, configured_url
+        )
         return cls(
             hass,
-            base_url=_resolve_app_url(hass, options.get(APP_SHADOW_URL, DEFAULT_APP_URL)),
+            base_url=base_url,
             token=options.get(APP_SHADOW_TOKEN, ""),
             enabled=options.get(APP_SHADOW_ENABLED, False) is True,
+            configured_host=configured_host,
+            resolution_source=resolution_source,
         )
 
     def _headers(self) -> dict[str, str]:

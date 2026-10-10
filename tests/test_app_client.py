@@ -121,6 +121,11 @@ def test_shadow_client_reads_only_explicit_config_entry_options():
         assert client.enabled is True
         assert client.base_url == "http://092cd02c-elrakning-app:8099"
         assert client.token == "configured-token"
+        assert client.configured_host == "elrakning-app"
+        assert client.effective_host == "092cd02c-elrakning-app"
+        assert client.resolution_source == "supervisor_discovery"
+        diagnostics = (client.configured_host, client.effective_host, client.resolution_source)
+        assert "configured-token" not in repr(diagnostics)
 
     previous = sys.modules.get("homeassistant.components.hassio")
     sys.modules["homeassistant.components.hassio"] = apps
@@ -150,6 +155,7 @@ def test_shadow_client_discovers_default_url_from_cached_supervisor_apps(monkeyp
     })()
     client = AppShadowClient.from_config_entry(object(), entry)
     assert client.base_url == "http://092cd02c-elrakning-app:8099"
+    assert client.resolution_source == "supervisor_discovery"
 
 
 def test_shadow_client_fails_closed_when_auto_discovery_is_ambiguous(monkeypatch):
