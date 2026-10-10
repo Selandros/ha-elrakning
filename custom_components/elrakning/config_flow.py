@@ -12,11 +12,18 @@ from .const import (
     CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION,
     CLEAN_INSTALL_CONFIRM_OPTION,
     CLEAN_INSTALL_PENDING_OPTION,
+    DIAGNOSTIC_STAGE_OPTION,
     DOMAIN,
 )
 
 
-def build_options(existing: dict, *, archive_reference: str, confirm: bool) -> dict:
+def build_options(
+    existing: dict,
+    *,
+    archive_reference: str,
+    confirm: bool,
+    diagnostic_stage: int | None = None,
+) -> dict:
     """Build bounded options without touching persistent site stores."""
     options = dict(existing or {})
     reference = archive_reference.strip() if isinstance(archive_reference, str) else ""
@@ -29,6 +36,14 @@ def build_options(existing: dict, *, archive_reference: str, confirm: bool) -> d
         }
     else:
         options.pop(CLEAN_INSTALL_PENDING_OPTION, None)
+    if diagnostic_stage is not None:
+        if (
+            isinstance(diagnostic_stage, bool)
+            or not isinstance(diagnostic_stage, int)
+            or not 0 <= diagnostic_stage <= 9
+        ):
+            raise ValueError("diagnostic_stage_invalid")
+        options[DIAGNOSTIC_STAGE_OPTION] = diagnostic_stage
     return options
 
 
@@ -65,10 +80,17 @@ class ElrakningOptionsFlow(config_entries.OptionsFlow):
                 self.config_entry.options,
                 archive_reference=user_input.get(CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION, ""),
                 confirm=user_input.get(CLEAN_INSTALL_CONFIRM_OPTION, False),
+                diagnostic_stage=user_input.get(DIAGNOSTIC_STAGE_OPTION),
             )
             for key in (APP_SHADOW_ENABLED, APP_SHADOW_URL, APP_SHADOW_TOKEN):
                 if key in user_input:
                     options[key] = user_input[key]
+            if DIAGNOSTIC_STAGE_OPTION in user_input:
+                stage = user_input[DIAGNOSTIC_STAGE_OPTION]
+                if stage is None:
+                    options.pop(DIAGNOSTIC_STAGE_OPTION, None)
+                else:
+                    options[DIAGNOSTIC_STAGE_OPTION] = stage
             return self.async_create_entry(title="", data=options)
 
         options = self.config_entry.options
@@ -98,5 +120,8 @@ class ElrakningOptionsFlow(config_entries.OptionsFlow):
                     CLEAN_INSTALL_CONFIRM_OPTION,
                     default=pending.get("confirm", False) is True,
                 ): bool,
+                vol.Optional(DIAGNOSTIC_STAGE_OPTION): vol.All(
+                    vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=0, max=9))),
+                ),
             }),
         )

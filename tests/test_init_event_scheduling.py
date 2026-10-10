@@ -68,6 +68,50 @@ def test_pending_clean_reset_precedes_frontend_and_heavy_setup():
     assert preflight < frontend < heavy
 
 
+def test_staged_start_boundaries_are_ordered_and_normal_setup_remains_default():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert 'DIAGNOSTIC_STAGE_OPTION = "diagnostic_stage"' in (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "const.py"
+    ).read_text(encoding="utf-8")
+    assert "diagnostic_stage = _diagnostic_stage(entry)" in source
+    assert 'if diagnostic_stage == 0:' in source
+    assert 'if _diagnostic_pause_at(hass, 1, stage_started_at)' in source
+    assert 'if _diagnostic_pause_at(hass, 2, stage_started_at)' in source
+    assert 'if _diagnostic_pause_at(hass, 3, stage_started_at)' in source
+    assert 'if _diagnostic_pause_at(hass, 4, stage_started_at)' in source
+    assert 'if diagnostic_stage == 5:' in source
+    assert 'if _diagnostic_pause_at(hass, 6, stage_started_at)' in source
+    assert 'if _diagnostic_pause_at(hass, 7, stage_started_at)' in source
+    assert 'if diagnostic_stage is None or diagnostic_stage >= 9' in source
+    assert 'highspy_diagnostic_mode=True' in source
+
+    setup_start = source.index("async def async_setup_entry")
+    preflight = source.index("await _async_apply_pending_clean_install(hass, entry)", setup_start)
+    stage_option = source.index("diagnostic_stage = _diagnostic_stage(entry)", setup_start)
+    stage_zero = source.index('if diagnostic_stage == 0:', setup_start)
+    heavy = source.index('await _await_setup_step("setup.manager_load"', setup_start)
+    assert preflight < stage_option < stage_zero < heavy
+
+
+def test_disabled_stages_do_not_create_shadow_client_or_highspy_path():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert 'frontend_data["app_shadow_client"] = None' in source
+    assert 'diagnostic_stage is None or diagnostic_stage >= 9' in source
+    assert "HIGHSPY_DIAGNOSTIC_MODE = True" in (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "economic_optimizer.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_stage_zero_requires_a_completed_clean_install_receipt():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert 'if diagnostic_stage == 0 and not _has_clean_install_receipt(entry):' in source
+    assert 'raise ValueError("diagnostic_stage_zero_requires_clean_install_receipt")' in source
+
+
 def test_load_forecast_cadence_uses_thread_safe_create_task_from_worker_thread():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))

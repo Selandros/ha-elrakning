@@ -39,6 +39,7 @@ from custom_components.elrakning.const import (
     APP_SHADOW_ENABLED,
     APP_SHADOW_URL,
     CLEAN_INSTALL_PENDING_OPTION,
+    DIAGNOSTIC_STAGE_OPTION,
 )
 
 
@@ -72,3 +73,24 @@ def test_options_flow_confirm_false_clears_pending_marker():
     )
 
     assert CLEAN_INSTALL_PENDING_OPTION not in options
+
+
+def test_options_flow_stores_bounded_diagnostic_stage_without_touching_site_state():
+    options = build_options(
+        {APP_SHADOW_ENABLED: False},
+        archive_reference="",
+        confirm=False,
+        diagnostic_stage=0,
+    )
+
+    assert options[DIAGNOSTIC_STAGE_OPTION] == 0
+
+
+def test_options_flow_rejects_invalid_diagnostic_stage():
+    for stage in (-1, 10, True, "2"):
+        try:
+            build_options({}, archive_reference="", confirm=False, diagnostic_stage=stage)
+        except ValueError as error:
+            assert str(error) == "diagnostic_stage_invalid"
+        else:
+            raise AssertionError(f"stage {stage!r} was accepted")

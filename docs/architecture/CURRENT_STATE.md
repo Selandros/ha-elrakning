@@ -2,6 +2,27 @@
 
 Updated: 2026-10-10
 
+## 0.0.1097 staged clean-install diagnostic checkpoint
+
+- IMPLEMENTED: an optional, bounded `diagnostic_stage` config-entry option
+  supports reversible staged bring-up from zero-site bootstrap through the
+  existing runtime boundaries. Missing option preserves normal production
+  setup unchanged.
+- STAGES: 0 bootstrap/diagnostics, 1 frontend/websocket, 2 identity shell,
+  3 runtime stores/services, 4 provider bindings, 5 canonical/provider
+  recovery, 6 forecast resources, 7 load/readiness, 8 replay/optimizer path,
+  and 9 App shadow boundary. Each paused stage records start/completion and
+  duration through the existing bounded runtime checkpoint path.
+- SAFETY: stages 0–8 do not create the App shadow client; malformed stage
+  options fail closed; highspy remains diagnostic-disabled and optimizer
+  requests remain unavailable. Physical control, storage ownership and
+  source-of-truth semantics are unchanged.
+- RUNTIME GATE: no deployment or activation was performed in this release;
+  active Supervisor recovery jobs and an unresponsive Core remain a runtime
+  blocker. The first manual step after a safe deployment is to set the
+  pending clean-install marker and `diagnostic_stage=0` through OptionsFlow
+  while the entry is disabled.
+
 ## 0.0.1096 clean-install preflight checkpoint
 
 - IMPLEMENTED: OptionsFlow stores a bounded pending clean-install marker in
