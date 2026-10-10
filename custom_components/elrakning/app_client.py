@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .app_contract import AppContractError, validate_state_snapshot
+from .app_contract import CONTRACT_VERSION, AppContractError, validate_state_snapshot
 from .const import APP_SHADOW_ENABLED, APP_SHADOW_TOKEN, APP_SHADOW_URL
 
 
@@ -106,10 +106,21 @@ class AppShadowClient:
     async def async_health(self) -> dict[str, Any]:
         """Check liveness and readiness with bounded, explicit requests."""
         live = await self._request("get", "/v1/health/live")
-        if not live.get("available", False) and live.get("reason") != "shadow_disabled":
-            return live
+        if live.get("reason") == "shadow_disabled":
+            ready = await self._request("get", "/v1/health/ready")
+            return {"available": False, "live": live, "ready": ready}
+        if live.get("live") is not True:
+            if live.get("reason"):
+                return live
+            return {"available": False, "reason": "app_live_check_failed", "live": live}
+        if live.get("contract_version") != CONTRACT_VERSION:
+            return {"available": False, "reason": "unsupported_contract_version", "live": live}
         ready = await self._request("get", "/v1/health/ready")
-        return {"available": bool(ready.get("ready")), "live": live, "ready": ready}
+        available = (
+            ready.get("ready") is True
+            and ready.get("contract_version") == CONTRACT_VERSION
+        )
+        return {"available": available, "live": live, "ready": ready}
 
     async def async_submit_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         """Submit one validated read-only snapshot; never wait for computation."""

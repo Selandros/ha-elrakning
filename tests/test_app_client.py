@@ -1,5 +1,7 @@
 import asyncio
 import sys
+import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from tests._elrakning_test_bootstrap import install_homeassistant_stubs, install_elrakning_package_stub
@@ -9,6 +11,85 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 
 from custom_components.elrakning.app_client import AppShadowClient
+
+
+class _HealthResponse:
+    status = 200
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def json(self, **_kwargs):
+        return self.payload
+
+
+class _HealthSession:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return _HealthResponse(next(self.responses))
+
+
+class TestAppShadowHealth(unittest.IsolatedAsyncioTestCase):
+    async def test_health_uses_live_and_ready_contract_responses(self):
+        import custom_components.elrakning.app_client as module
+
+        session = _HealthSession([
+            {"live": True, "contract_version": 1},
+            {
+                "ready": True,
+                "shadow_mode": True,
+                "writes_enabled": False,
+                "physical_control": False,
+                "contract_version": 1,
+            },
+        ])
+        client = AppShadowClient(
+            object(), base_url="http://app.invalid:8099", token="secret", enabled=True
+        )
+
+        with patch.object(module, "async_get_clientsession", return_value=session):
+            result = await client.async_health()
+
+        self.assertIs(result["available"], True)
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(
+            [call[0] for call in session.calls],
+            [
+                "http://app.invalid:8099/v1/health/live",
+                "http://app.invalid:8099/v1/health/ready",
+            ],
+        )
+        self.assertTrue(
+            all(
+                call[1]["headers"]["Authorization"] == "Bearer secret"
+                for call in session.calls
+            )
+        )
+
+    async def test_health_fails_closed_on_live_contract_mismatch(self):
+        import custom_components.elrakning.app_client as module
+
+        session = _HealthSession([{"live": True, "contract_version": 99}])
+        client = AppShadowClient(
+            object(), base_url="http://app.invalid:8099", token="secret", enabled=True
+        )
+
+        with patch.object(module, "async_get_clientsession", return_value=session):
+            result = await client.async_health()
+
+        self.assertIs(result["available"], False)
+        self.assertEqual(result["reason"], "unsupported_contract_version")
+        self.assertEqual(len(session.calls), 1)
 
 
 def test_shadow_client_is_disabled_without_explicit_enablement():

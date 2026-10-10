@@ -2,6 +2,19 @@
 
 Updated: 2026-10-10
 
+## 0.0.1113 App health contract correction
+
+- ROOT CAUSE VERIFIED: the App liveness endpoint returns `live: true` and
+  `contract_version: 1`, while the Core client incorrectly required
+  `available: true`. It therefore stopped before requesting readiness and
+  reported the healthy App as unavailable.
+- LOCAL FIX: Core now validates the documented live and ready fields against
+  the shared contract version. Failed liveness, incompatible versions, or
+  failed readiness continue to fail closed. Deployment/runtime verification is
+  pending.
+- SCOPE: Core client/tests/manifest only; App 0.0.1092, sites, canonical data,
+  physical control, and source-of-truth behavior are unchanged.
+
 ## 0.0.1112 Phase 2 App hostname discovery
 
 - FIXED: the Core shadow client no longer assumes the unqualified
