@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -197,6 +198,43 @@ class SolarEvidenceTests(unittest.TestCase):
             asyncio.run(manager.async_startup_catch_up())
 
         self.assertEqual(manager.public_state()["capture_tasks"]["startup"]["outcome"], "cancelled")
+
+    def test_clean_room_stage12_trace_has_no_site_workload(self):
+        events = []
+
+        def trace_event(key, label, **fields):
+            events.append(("event", key, label, fields))
+
+        def trace_start(key, label, **fields):
+            started = len(events)
+            events.append(("start", key, label, fields))
+            return started
+
+        def trace_complete(label, started_at, **fields):
+            events.append(("complete", label, started_at, fields))
+
+        async def exercise():
+            hass = SimpleNamespace()
+            hass.async_create_task = asyncio.create_task
+            manager = SolarEvidenceManager(
+                hass, SimpleNamespace(), SimpleNamespace(), lambda: {}
+            )
+            manager.set_diagnostic_trace(trace_event, trace_start, trace_complete)
+            await manager.async_startup_catch_up()
+            await manager.async_backfill(days=2)
+            if manager._quality_recovery_task is not None:
+                manager._quality_recovery_task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await manager._quality_recovery_task
+            return manager
+
+        manager = asyncio.run(exercise())
+        completed = [item for item in events if item[0] == "complete"]
+        self.assertEqual(manager.public_state()["capture_tasks"]["startup"]["target_site_ids"], [])
+        self.assertEqual(manager.public_state()["capture_tasks"]["backfill"]["target_site_ids"], [])
+        self.assertTrue(any(item[1].endswith("startup_catch_up.task") for item in completed))
+        self.assertTrue(any(item[1].endswith("backfill.task") for item in completed))
+        self.assertTrue(any(item[3].get("target_count") == 0 for item in completed))
 
     def test_stale_incomplete_record_is_reprocessed_once_for_current_semantics(self):
         self.assertTrue(should_reprocess_existing_day({

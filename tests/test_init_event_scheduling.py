@@ -363,6 +363,21 @@ def test_site_independent_forecast_and_evidence_providers_are_wired():
     assert "solar_evidence_manager.async_startup_catch_up()" in source
 
 
+def test_stage12_has_bounded_warning_tracing_for_each_recovery_path():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+
+    assert "def _stage12_trace_event" in source
+    assert "level=logging.WARNING" in source
+    assert '"diagnostic.stage_12.startup_catch_up.registration"' in source
+    assert '"diagnostic.stage_12.backfill.registration"' in source
+    assert '"diagnostic.stage_12.eon_handoff_registration"' in source
+    assert '"diagnostic.stage_12.eon_cached_import_recovery"' in source
+    assert '"diagnostic.stage_12.quality_recovery.registration"' in (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "solar_evidence.py"
+    ).read_text(encoding="utf-8")
+
+
 def test_replay_artifact_generation_is_background_work_outside_startup_barrier():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")

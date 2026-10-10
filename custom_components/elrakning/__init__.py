@@ -156,6 +156,58 @@ def _stage10_trace_complete(
         **fields,
     )
 
+
+def _stage12_trace_event(hass, key: str, label: str, **fields) -> None:
+    """Emit one bounded Stage 12 warning checkpoint when that stage is active."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if data.get("diagnostic_stage") != 12:
+        return
+    seen = data.setdefault("stage12_trace_seen", set())
+    if key in seen:
+        return
+    seen.add(key)
+    runtime_checkpoint(
+        label,
+        phase="diagnostic_stage",
+        stage=12,
+        level=logging.WARNING,
+        **fields,
+    )
+
+
+def _stage12_trace_start(hass, key: str, label: str, **fields) -> float | None:
+    """Start one bounded Stage 12 warning timing checkpoint."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if data.get("diagnostic_stage") != 12:
+        return None
+    seen = data.setdefault("stage12_trace_seen", set())
+    if key in seen:
+        return None
+    seen.add(key)
+    return runtime_checkpoint(
+        f"{label}.start",
+        phase="diagnostic_stage",
+        stage=12,
+        level=logging.WARNING,
+        **fields,
+    )
+
+
+def _stage12_trace_complete(
+    hass, label: str, started_at: float | None, **fields,
+) -> None:
+    """Complete one bounded Stage 12 warning timing checkpoint."""
+    if started_at is None:
+        return
+    runtime_checkpoint(
+        f"{label}.complete",
+        phase="diagnostic_stage",
+        stage=12,
+        level=logging.WARNING,
+        started_at=started_at,
+        **fields,
+    )
+
 runtime_checkpoint(
     "module_imports.complete",
     phase="import",
@@ -1050,6 +1102,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ValueError("diagnostic_stage_zero_requires_clean_install_receipt")
     frontend_data["diagnostic_stage"] = diagnostic_stage
     frontend_data.pop("stage10_trace_seen", None)
+    frontend_data.pop("stage12_trace_seen", None)
     frontend_data["runtime_status"] = "initializing"
     setup_started_at = runtime_checkpoint(
         "setup_entry.start", phase="setup", entry_id=entry.entry_id
@@ -1294,26 +1347,75 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if _diagnostic_pause_at(hass, 11, stage_started_at):
         return True
     stage_started_at = _diagnostic_stage_start(12, "provider_recovery")
+    stage12_started_at = _stage12_trace_start(
+        hass, "stage", "diagnostic.stage_12.provider_recovery"
+    )
+    set_diagnostic_trace = getattr(solar_evidence_manager, "set_diagnostic_trace", None)
+    if callable(set_diagnostic_trace):
+        set_diagnostic_trace(
+            lambda key, label, **fields: _stage12_trace_event(hass, key, label, **fields),
+            lambda key, label, **fields: _stage12_trace_start(hass, key, label, **fields),
+            lambda label, started_at, **fields: _stage12_trace_complete(hass, label, started_at, **fields),
+        )
     # Evidence catch-up is independent of panel readiness and may perform Recorder/HTTP work.
     # Keep it off the critical startup path so live state and history can hydrate immediately.
     mark_capture_scheduled = getattr(solar_evidence_manager, "mark_capture_scheduled", None)
     if callable(mark_capture_scheduled):
         mark_capture_scheduled("startup")
+    _stage12_trace_event(
+        hass,
+        "startup_catch_up.registration",
+        "diagnostic.stage_12.startup_catch_up.registration",
+    )
     frontend_data["solar_evidence_startup_task"] = hass.async_create_task(
         solar_evidence_manager.async_startup_catch_up()
     )
     if callable(mark_capture_scheduled):
         mark_capture_scheduled("backfill")
+    _stage12_trace_event(
+        hass,
+        "backfill.registration",
+        "diagnostic.stage_12.backfill.registration",
+    )
     solar_evidence_manager._task = hass.async_create_task(solar_evidence_manager.async_backfill())
+    handoff_started_at = _stage12_trace_start(
+        hass, "eon_handoff_registration", "diagnostic.stage_12.eon_handoff_registration"
+    )
     async_register_eon_handoff_views(hass)
+    _stage12_trace_complete(
+        hass, "diagnostic.stage_12.eon_handoff_registration", handoff_started_at,
+        outcome="complete",
+    )
     cached_import_recovery = getattr(getattr(grid_manager, "provider", None), "async_persist_cached_imports", None)
     if callable(cached_import_recovery):
-        await _await_setup_step(
-            "setup.eon_cached_import_recovery",
-            cached_import_recovery(),
+        recovery_started_at = _stage12_trace_start(
+            hass, "eon_cached_import_recovery", "diagnostic.stage_12.eon_cached_import_recovery"
+        )
+        try:
+            await _await_setup_step(
+                "setup.eon_cached_import_recovery",
+                cached_import_recovery(),
+            )
+        except BaseException as error:
+            _stage12_trace_complete(
+                hass, "diagnostic.stage_12.eon_cached_import_recovery", recovery_started_at,
+                outcome="error", error_type=type(error).__name__,
+            )
+            raise
+        _stage12_trace_complete(
+            hass, "diagnostic.stage_12.eon_cached_import_recovery", recovery_started_at,
+            outcome="complete",
         )
     if _diagnostic_pause_at(hass, 12, stage_started_at):
+        _stage12_trace_complete(
+            hass, "diagnostic.stage_12.provider_recovery", stage12_started_at,
+            outcome="paused",
+        )
         return True
+    _stage12_trace_complete(
+        hass, "diagnostic.stage_12.provider_recovery", stage12_started_at,
+        outcome="continued",
+    )
     stage_started_at = _diagnostic_stage_start(13, "runtime_bindings")
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
         grid_manager.async_start_refresh()
@@ -1685,6 +1787,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pass
     frontend_data.pop("config_entry", None)
     frontend_data.pop("stage10_trace_seen", None)
+    frontend_data.pop("stage12_trace_seen", None)
     frontend_data.pop("app_shadow_client", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()

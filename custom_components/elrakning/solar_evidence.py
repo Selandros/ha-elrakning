@@ -390,6 +390,29 @@ class SolarEvidenceManager:
             "attempted": [],
             "recovered": [],
         }
+        self._diagnostic_trace_event = None
+        self._diagnostic_trace_start = None
+        self._diagnostic_trace_complete = None
+
+    def set_diagnostic_trace(self, event_callback, start_callback, complete_callback) -> None:
+        """Attach bounded lifecycle tracing for the active diagnostic stage."""
+        self._diagnostic_trace_event = event_callback
+        self._diagnostic_trace_start = start_callback
+        self._diagnostic_trace_complete = complete_callback
+
+    def _trace_event(self, key: str, label: str, **fields) -> None:
+        callback = self._diagnostic_trace_event
+        if callable(callback):
+            callback(key, label, **fields)
+
+    def _trace_start(self, key: str, label: str, **fields):
+        callback = self._diagnostic_trace_start
+        return callback(key, label, **fields) if callable(callback) else None
+
+    def _trace_complete(self, label: str, started_at, **fields) -> None:
+        callback = self._diagnostic_trace_complete
+        if callable(callback):
+            callback(label, started_at, **fields)
 
     def mark_capture_scheduled(self, source: str, target_date: date | None = None) -> None:
         """Record only the latest bounded capture-task lifecycle marker."""
@@ -523,6 +546,7 @@ class SolarEvidenceManager:
             return
 
     async def async_backfill(self, days: int = 30) -> None:
+        trace_started_at = self._trace_start("backfill.task", "diagnostic.stage_12.backfill.task")
         self.mark_capture_scheduled("backfill")
         self._capture_started("backfill")
         target_site_ids: set[str] = set()
@@ -544,15 +568,32 @@ class SolarEvidenceManager:
                 list(target_site_ids),
                 RuntimeError("collection_failed") if failed_site_ids else None,
             )
+            self._trace_complete(
+                "diagnostic.stage_12.backfill.task", trace_started_at,
+                outcome="error" if failed_site_ids else "complete",
+                target_count=len(target_site_ids), failed_site_count=len(failed_site_ids),
+            )
         except asyncio.CancelledError:
             self._capture_finished("backfill", "cancelled", list(target_site_ids))
+            self._trace_complete(
+                "diagnostic.stage_12.backfill.task", trace_started_at,
+                outcome="cancelled", target_count=len(target_site_ids),
+            )
             raise
         except Exception as error:
             self._capture_finished("backfill", "error", list(target_site_ids), error)
+            self._trace_complete(
+                "diagnostic.stage_12.backfill.task", trace_started_at,
+                outcome="error", error_type=type(error).__name__,
+                target_count=len(target_site_ids),
+            )
             return
 
     async def async_startup_catch_up(self) -> None:
         """Finalize yesterday through the same site-explicit evidence path as 00:05."""
+        trace_started_at = self._trace_start(
+            "startup_catch_up.task", "diagnostic.stage_12.startup_catch_up.task"
+        )
         yesterday = dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
         self._capture_started("startup", yesterday)
         try:
@@ -565,27 +606,61 @@ class SolarEvidenceManager:
                 list(result),
                 RuntimeError("collection_failed") if failures else None,
             )
+            self._trace_complete(
+                "diagnostic.stage_12.startup_catch_up.task", trace_started_at,
+                outcome="error" if failures else "complete",
+                target_count=len(result), failed_site_count=len(failures),
+            )
         except asyncio.CancelledError:
             self._capture_finished("startup", "cancelled")
+            self._trace_complete(
+                "diagnostic.stage_12.startup_catch_up.task", trace_started_at,
+                outcome="cancelled",
+            )
             raise
         except Exception as error:
             self._capture_finished("startup", "error", error=error)
+            self._trace_complete(
+                "diagnostic.stage_12.startup_catch_up.task", trace_started_at,
+                outcome="error", error_type=type(error).__name__,
+            )
             return
 
     def _schedule_quality_recovery(self) -> None:
         """Schedule one delayed Recorder recovery after startup has settled."""
         create_task = getattr(self.hass, "async_create_task", None)
         if self._quality_recovery_task is None and callable(create_task):
+            self._trace_event(
+                "quality_recovery.registration",
+                "diagnostic.stage_12.quality_recovery.registration",
+            )
             self._quality_recovery_task = create_task(self._async_delayed_quality_recovery())
 
     async def _async_delayed_quality_recovery(self) -> None:
+        trace_started_at = self._trace_start(
+            "quality_recovery.task", "diagnostic.stage_12.quality_recovery.task"
+        )
         try:
             await asyncio.sleep(30)
             await self.async_recover_stale_quality_for_targets()
         except asyncio.CancelledError:
+            self._trace_complete(
+                "diagnostic.stage_12.quality_recovery.task", trace_started_at,
+                outcome="cancelled",
+            )
+            raise
+        except Exception as error:
+            self._trace_complete(
+                "diagnostic.stage_12.quality_recovery.task", trace_started_at,
+                outcome="error", error_type=type(error).__name__,
+            )
             raise
         finally:
             self._quality_recovery_task = None
+        self._trace_complete(
+            "diagnostic.stage_12.quality_recovery.task", trace_started_at,
+            outcome="complete",
+        )
 
     async def async_recover_stale_quality_for_targets(self) -> dict[str, list[str]]:
         """Rebuild only current audit fields from Recorder for bounded stale records."""
