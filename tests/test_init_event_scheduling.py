@@ -68,6 +68,48 @@ def test_pending_clean_reset_precedes_frontend_and_heavy_setup():
     assert preflight < frontend < heavy
 
 
+def _load_options_update_listener():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_async_options_update_listener"
+    )
+    namespace = {"DOMAIN": "elrakning"}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace["_async_options_update_listener"]
+
+
+def test_options_stage_change_reloads_once_and_data_updates_do_not_reload():
+    listener = _load_options_update_listener()
+
+    class ConfigEntries:
+        def __init__(self):
+            self.reloads = []
+
+        async def async_reload(self, entry_id):
+            self.reloads.append(entry_id)
+
+    hass = SimpleNamespace(
+        data={"elrakning": {"options_snapshot": {"diagnostic_stage": 11}}},
+        config_entries=ConfigEntries(),
+    )
+    entry = SimpleNamespace(entry_id="entry", options={"diagnostic_stage": 12})
+
+    asyncio.run(listener(hass, entry))
+    asyncio.run(listener(hass, entry))
+    assert hass.config_entries.reloads == ["entry"]
+
+
+def test_options_update_listener_is_registered_and_removed_with_entry_lifecycle():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert "add_update_listener(_async_options_update_listener)" in source
+    assert 'frontend_data["options_snapshot"]' in source
+    assert 'await hass.config_entries.async_reload(entry.entry_id)' in source
+    assert 'frontend_data.pop("options_update_unsub", None)' in source
+
+
 def test_staged_start_boundaries_are_ordered_and_normal_setup_remains_default():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")

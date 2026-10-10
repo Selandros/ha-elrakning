@@ -1093,10 +1093,26 @@ async def _async_apply_pending_clean_install(hass: HomeAssistant, entry: ConfigE
     hass.config_entries.async_update_entry(entry, options=options)
 
 
+async def _async_options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload only when config-entry options changed."""
+    frontend_data = hass.data.setdefault(DOMAIN, {})
+    current_options = dict(getattr(entry, "options", {}) or {})
+    if current_options == frontend_data.get("options_snapshot"):
+        return
+    frontend_data["options_snapshot"] = current_options
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning with the control plane available during startup."""
     await _async_apply_pending_clean_install(hass, entry)
     frontend_data = hass.data.setdefault(DOMAIN, {})
+    frontend_data["options_snapshot"] = dict(getattr(entry, "options", {}) or {})
+    add_update_listener = getattr(entry, "add_update_listener", None)
+    if callable(add_update_listener):
+        frontend_data["options_update_unsub"] = add_update_listener(
+            _async_options_update_listener
+        )
     diagnostic_stage = _diagnostic_stage(entry)
     if diagnostic_stage == 0 and not _has_clean_install_receipt(entry):
         raise ValueError("diagnostic_stage_zero_requires_clean_install_receipt")
@@ -1731,6 +1747,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["replay_scheduler_closed"] = True
     entry_coordinator = getattr(entry, "runtime_data", None)
     frontend_data["runtime_status"] = "unavailable"
+    if unsubscribe := frontend_data.pop("options_update_unsub", None):
+        unsubscribe()
+    frontend_data.pop("options_snapshot", None)
     await _async_cancel_task(frontend_data.pop("event_loop_lag_heartbeat_task", None))
     unload_started_at = runtime_checkpoint("unload_entry.start", phase="unload")
     if unsubscribe := frontend_data.pop("coordinator_unsub", None):
