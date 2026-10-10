@@ -2,6 +2,22 @@
 
 Updated: 2026-10-10
 
+## 0.0.1111 Phase 2 read-only App shadow transport
+
+- IMPLEMENTED: Stage 15 now performs a bounded authenticated App health gate
+  when the explicit shadow option is enabled. Missing or invalid configuration
+  remains fail-closed and creates no App traffic.
+- IMPLEMENTED: existing site-scoped immutable canonical frames may trigger a
+  coalesced read-only snapshot submission. The adapter rejects incomplete
+  observed-time, source-identity or sign-semantics rather than fabricating
+  values. Empty clean-room state produces zero snapshots.
+- PRESERVED: Core canonical storage remains the source of truth. App results
+  are never consumed by entities, optimizer, scheduler, commands or physical
+  control. The App remains version 0.0.1092 because its endpoint and contract
+  did not change.
+- OBSERVABILITY: bounded App-shadow state is exposed through the existing
+  diagnostics websocket without tokens, headers or payload secrets.
+
 ## 0.0.1100 clean-room Add-flow path
 
 ## 0.0.1103 clean-install reference normalization

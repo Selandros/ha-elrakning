@@ -1197,6 +1197,23 @@ async def websocket_diagnostics_state(hass, connection, msg):
     connection.send_result(msg["id"], {
         "logs": logs,
         "price_errors": price_errors,
+        "app_shadow": (
+            hass.data.get(DOMAIN, {}).get("app_shadow_manager").public_state()
+            if hass.data.get(DOMAIN, {}).get("app_shadow_manager") is not None
+            else {
+                "enabled": False,
+                "configured": False,
+                "health": "disabled",
+                "snapshot_attempts": 0,
+                "snapshot_accepted": 0,
+                "snapshot_rejected": 0,
+                "snapshot_skipped": 0,
+                "queue_depth": 0,
+                "inflight": 0,
+                "physical_control": False,
+                "source_of_truth": "core",
+            }
+        ),
         "site_identity": site_identity.public_state() if site_identity else {
             "site_id": None,
             "logical_roles": [],

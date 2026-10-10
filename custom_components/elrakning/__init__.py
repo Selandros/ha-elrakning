@@ -22,6 +22,7 @@ import voluptuous as vol
 
 from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
 from .app_client import AppShadowClient
+from .app_shadow import AppShadowManager
 from .canonical_collector import CanonicalCollector
 from .const import (
     CLEAN_INSTALL_PENDING_OPTION,
@@ -1718,7 +1719,13 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return True
     if frontend_data.get("diagnostic_stage") == 15:
         stage_started_at = _diagnostic_stage_start(15, "app_shadow")
-        frontend_data["app_shadow_client"] = AppShadowClient.from_config_entry(hass, entry)
+        app_shadow_client = AppShadowClient.from_config_entry(hass, entry)
+        frontend_data["app_shadow_client"] = app_shadow_client
+        app_shadow_manager = AppShadowManager(
+            hass, app_shadow_client, site_identity_manager, canonical_collector
+        )
+        frontend_data["app_shadow_manager"] = app_shadow_manager
+        await app_shadow_manager.async_start()
         _diagnostic_stage_complete(15, stage_started_at, outcome="paused")
         frontend_data["runtime_status"] = "diagnostic_paused"
         return True
@@ -1788,6 +1795,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data.pop("config_entry", None)
     frontend_data.pop("stage10_trace_seen", None)
     frontend_data.pop("stage12_trace_seen", None)
+    if app_shadow_manager := frontend_data.pop("app_shadow_manager", None):
+        await app_shadow_manager.async_shutdown()
     frontend_data.pop("app_shadow_client", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()
