@@ -172,6 +172,8 @@ class EonGridManager:
 
     async def async_persist_cached_imports(self) -> None:
         """Recover verified cached provider imports after canonical storage is ready."""
+        if not self._active_site_id():
+            return
         states = dict(self.facility_states) if isinstance(self.facility_states, dict) else {}
         cached_state = self.state if isinstance(self.state, dict) else {}
         cached_facility = cached_state.get("facility")
@@ -190,7 +192,7 @@ class EonGridManager:
 
     async def _async_capture_tariff_fact(self) -> None:
         timeline_store = getattr(self, "tariff_timeline_store", None)
-        if timeline_store is None:
+        if timeline_store is None or not self._active_site_id():
             return
         record = build_grid_tariff_record(
             site_id=self._active_site_id(),

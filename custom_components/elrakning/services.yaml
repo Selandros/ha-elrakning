@@ -54,3 +54,16 @@ greenely_proof_provision:
       required: true
       selector:
         object: {}
+
+clean_install_reset:
+  name: Prepare clean install
+  description: Archive reference and explicit admin confirmation are required. Legacy state is retained in archive only; no site or source binding is activated.
+  fields:
+    archive_reference:
+      required: true
+      selector:
+        text:
+    confirm:
+      required: true
+      selector:
+        boolean:

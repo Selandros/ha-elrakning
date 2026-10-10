@@ -21,6 +21,7 @@ from .power import POWER_FIELDS
 
 STORE_KEY = "elrakning.site_identity"
 STORE_VERSION = 1
+CLEAN_INSTALL_SCHEMA = "elrakning.clean_install.v1"
 SITE_BINDING_SERVICES = ("elhandel", "grid")
 GREENELY_PROOF_SCHEMA_VERSION = 1
 GREENELY_PROOF_FINGERPRINT_VERSION = "sha256-v1"
@@ -315,8 +316,29 @@ class SiteIdentityManager:
         self._coordinator = None
         self._solar_managers: dict[str, Any] = {}
 
+    @staticmethod
+    def _is_clean_install_state(state: dict[str, Any] | None) -> bool:
+        marker = state.get("clean_install") if isinstance(state, dict) else None
+        return isinstance(marker, dict) and marker.get("state") == "empty" and marker.get("schema") == CLEAN_INSTALL_SCHEMA
+
     async def async_load(self) -> None:
         cached = await self.store.async_load()
+        if self._is_clean_install_state(cached):
+            self.state = {
+                "site": None,
+                "sites": [],
+                "active_site_id": None,
+                "site_configs": {},
+                "global_bindings": {},
+                "ledger": [],
+                "migration_complete": True,
+                "clean_install": deepcopy(cached["clean_install"]),
+            }
+            if hasattr(self.power_manager, "async_restore_mapping"):
+                await self.power_manager.async_restore_mapping({})
+            if hasattr(self.meter_manager, "async_restore_mapping"):
+                await self.meter_manager.async_restore_mapping({})
+            return
         if isinstance(cached, dict) and isinstance(cached.get("site"), dict):
             site = dict(cached["site"])
             site.setdefault("name", "Nuvarande installation")
@@ -397,6 +419,14 @@ class SiteIdentityManager:
 
     def _normalize_sites(self) -> None:
         sites = self.state.get("sites")
+        if self._is_clean_install_state(self.state):
+            self.state["site"] = None
+            self.state["sites"] = []
+            self.state["active_site_id"] = None
+            self.state["site_configs"] = {}
+            self.state["global_bindings"] = {}
+            self.state["ledger"] = []
+            return
         if not isinstance(sites, list) or not sites:
             sites = [self.state["site"]]
         normalized = []
@@ -409,8 +439,19 @@ class SiteIdentityManager:
             item.setdefault("current", item["is_current"])
             normalized.append(item)
         if not normalized:
-            normalized = [self.state["site"]]
-        active_id = self.state.get("active_site_id") or self.state["site"].get("site_id")
+            self.state["site"] = None
+            self.state["sites"] = []
+            self.state["active_site_id"] = None
+            return
+        active_id = self.state.get("active_site_id")
+        if not active_id:
+            for site in normalized:
+                site["is_current"] = False
+                site["current"] = False
+            self.state["sites"] = normalized
+            self.state["site"] = None
+            self.state["active_site_id"] = None
+            return
         if not any(site.get("site_id") == active_id for site in normalized):
             active_id = normalized[0]["site_id"]
         for site in normalized:
@@ -437,6 +478,8 @@ class SiteIdentityManager:
         clean_name = name.strip() if isinstance(name, str) else ""
         if not clean_name:
             raise ValueError("invalid_site_name")
+        if self._is_clean_install_state(self.state):
+            self.state.pop("clean_install", None)
         self._normalize_sites()
         site = {
             "site_id": str(uuid.uuid4()),
@@ -450,6 +493,57 @@ class SiteIdentityManager:
         self.state.setdefault("site_configs", {})[site["site_id"]] = self._empty_site_config()
         await self.store.async_save(self.state)
         return self.public_state()
+
+    async def async_prepare_clean_install(
+        self, *, archive_reference: str, confirm: bool
+    ) -> dict[str, Any]:
+        """Archive the active identity logically and leave an empty fail-closed state."""
+        if confirm is not True:
+            raise ValueError("confirmation_required")
+        if not isinstance(archive_reference, str) or not archive_reference.strip() or len(archive_reference) > 256:
+            raise ValueError("archive_reference_invalid")
+        current_clean = self.state.get("clean_install")
+        if (
+            isinstance(current_clean, dict)
+            and current_clean.get("schema") == CLEAN_INSTALL_SCHEMA
+            and current_clean.get("state") == "empty"
+        ):
+            if current_clean.get("archive_reference") != archive_reference.strip():
+                raise ValueError("clean_install_archive_conflict")
+            return {"changed": False, **self.public_state(), "clean_install": deepcopy(current_clean)}
+        legacy_fingerprint = hashlib.sha256(
+            json.dumps(self.state, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
+        reset_at = _now()
+        self.state = {
+            "site": None,
+            "sites": [],
+            "active_site_id": None,
+            "site_configs": {},
+            "global_bindings": {},
+            "ledger": [],
+            "migration_complete": True,
+            "clean_install": {
+                "schema": CLEAN_INSTALL_SCHEMA,
+                "state": "empty",
+                "archive_reference": archive_reference.strip(),
+                "legacy_state_fingerprint": legacy_fingerprint,
+                "reset_at": reset_at,
+                "source_of_truth": "archived_legacy_state",
+            },
+        }
+        if hasattr(self.power_manager, "async_restore_mapping"):
+            await self.power_manager.async_restore_mapping({})
+        if hasattr(self.meter_manager, "async_restore_mapping"):
+            await self.meter_manager.async_restore_mapping({})
+        if self._provider_manager and hasattr(self._provider_manager, "async_apply_site_binding"):
+            await self._provider_manager.async_apply_site_binding(None)
+        if self._grid_manager and hasattr(self._grid_manager, "async_apply_site_binding"):
+            await self._grid_manager.async_apply_site_binding(None, None)
+        if self._coordinator and hasattr(self._coordinator, "set_site_binding"):
+            self._coordinator.set_site_binding(None)
+        await self.store.async_save(self.state)
+        return {"changed": True, **self.public_state(), "clean_install": deepcopy(self.state["clean_install"])}
 
     async def async_activate_site(self, site_id: str) -> dict[str, Any]:
         self._normalize_sites()
@@ -891,6 +985,9 @@ class SiteIdentityManager:
         self._provider_manager = provider_manager
         self._grid_manager = grid_manager
         self._coordinator = coordinator
+        if self.state.get("active_site_id") is None:
+            await self.async_apply_runtime_context(provider_manager, grid_manager, coordinator)
+            return
         config = self.state.setdefault("site_configs", {}).setdefault(
             self.state["active_site_id"], self._empty_site_config()
         )
@@ -1117,6 +1214,8 @@ class SiteIdentityManager:
         self._solar_managers = {name: manager for name, manager in managers.items() if manager is not None}
         managers = self._solar_managers
         self._normalize_sites()
+        if self.state.get("active_site_id") is None:
+            return
         config = self.state.setdefault("site_configs", {}).setdefault(
             self.state["active_site_id"], self._empty_site_config()
         )
@@ -1147,6 +1246,12 @@ class SiteIdentityManager:
         )
 
     async def _restore_active_config(self) -> None:
+        if self.state.get("active_site_id") is None:
+            if hasattr(self.power_manager, "async_restore_mapping"):
+                await self.power_manager.async_restore_mapping({})
+            if hasattr(self.meter_manager, "async_restore_mapping"):
+                await self.meter_manager.async_restore_mapping({})
+            return
         configs = self.state.setdefault("site_configs", {})
         config = configs.setdefault(self.state["active_site_id"], self._empty_site_config())
         if hasattr(self.power_manager, "async_restore_mapping"):
@@ -1169,6 +1274,8 @@ class SiteIdentityManager:
 
     async def async_sync_from_current(self) -> None:
         """Snapshot current mappings while leaving functional managers authoritative."""
+        if self.state.get("active_site_id") is None:
+            return
         current = self._current_sources()
         ledger = self.state.setdefault("ledger", [])
         for item in ledger:
@@ -1342,10 +1449,11 @@ class SiteIdentityManager:
         self._normalize_sites()
         ledger = self.state.get("ledger", [])
         active_site_id = self.state.get("active_site_id")
+        active_site = self.state.get("site") if isinstance(self.state.get("site"), dict) else None
         return {
-            "site": dict(self.state.get("site", {})),
+            "site": dict(active_site) if active_site else None,
             "site_id": active_site_id,
-            "current_site": dict(self.state.get("site", {})),
+            "current_site": dict(active_site) if active_site else None,
             "available_sites": [dict(site) for site in self.state.get("sites", [])],
             "site_configured": bool(
                 self.state.get("site_configs", {}).get(active_site_id, {}).get("power", {}).get("solar_entities")
@@ -1360,11 +1468,14 @@ class SiteIdentityManager:
                 item for item in ledger
                 if item.get("site_id") == active_site_id
             ],
+            "clean_install": deepcopy(self.state.get("clean_install")),
         }
 
     def active_site_is_configured(self) -> bool:
         """Return whether the active site has an explicit physical source mapping."""
         self._normalize_sites()
+        if not self.state.get("active_site_id"):
+            return False
         config = self.state.get("site_configs", {}).get(self.state.get("active_site_id"), {})
         power = config.get("power", {}) if isinstance(config, dict) else {}
         meter = config.get("meter", {}) if isinstance(config, dict) else {}

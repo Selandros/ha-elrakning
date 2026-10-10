@@ -1,6 +1,25 @@
 # Elräkning – Current State
 
-Updated: 2026-10-09
+Updated: 2026-10-10
+
+## 0.0.1095 clean-install reset checkpoint
+
+- IMPLEMENTED: an explicit admin-only `elrakning.clean_install_reset` service
+  creates an idempotent, fail-closed empty site state after an operator has
+  supplied a verified archive reference and explicit confirmation. It clears
+  active site identity, source ledger, global bindings and current power/meter
+  mappings without editing `.storage` by hand.
+- PRESERVED: legacy Ella/site/replay/canonical stores remain untouched and are
+  archive/quarantine data only. A new first site must be created and activated
+  explicitly; no legacy entity, provider, FusionSolar identity or source
+  generation is inferred or remapped.
+- SAFETY: empty-state startup skips E.ON cached-import recovery and tariff
+  persistence without an active site. The reset is single-reference,
+  idempotent and rejects a conflicting archive reference. No physical writes,
+  shadow cutover or App behavior is changed.
+- RUNTIME PREPARATION: full HA backup `25c57b4f` and a separate legacy bundle
+  were created on 2026-10-10 while Elräkning was disabled. SQLite integrity
+  inspection remains pending because the HA SSH namespace has no `sqlite3`.
 
 ## 0.0.1094 diagnostic highspy-isolation checkpoint
 

@@ -9,6 +9,7 @@ install_homeassistant_stubs()
 install_elrakning_package_stub()
 from custom_components.elrakning.site_identity import (  # noqa: E402
     CANONICAL_SOURCE_MIGRATIONS,
+    CLEAN_INSTALL_SCHEMA,
     SiteIdentityManager,
     classify_source,
     resolve_source_identity,
@@ -71,6 +72,84 @@ def _managers(mapping, meter_mapping=None):
 
 
 class SiteIdentityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_clean_install_reset_is_empty_idempotent_and_fail_closed(self):
+        hass = _hass({})
+        power, meter = _managers({"consumption_entity": "sensor.legacy"}, {"power_entity": "sensor.legacy"})
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store({
+            "site": {"site_id": "legacy-site", "name": "Legacy", "current": True},
+            "sites": [{"site_id": "legacy-site", "name": "Legacy", "current": True}],
+            "active_site_id": "legacy-site",
+            "site_configs": {"legacy-site": {"power": {}, "meter": {}, "bindings": {}}},
+            "global_bindings": {"nord_pool": {"entity_id": "sensor.nordpool"}},
+            "ledger": [{"site_id": "legacy-site", "generation_id": "legacy-generation"}],
+        })
+        await manager.async_load()
+
+        result = await manager.async_prepare_clean_install(
+            archive_reference="/config/elrakning/legacy-bundles/test",
+            confirm=True,
+        )
+        assert result["changed"] is True
+        assert manager.state["sites"] == []
+        assert manager.state["active_site_id"] is None
+        assert manager.state["site_configs"] == {}
+        assert manager.state["global_bindings"] == {}
+        assert manager.state["ledger"] == []
+        assert "sensor.legacy" not in power.mapping.values()
+        assert "sensor.legacy" not in meter.mapping.values()
+        assert manager.public_state()["available_sites"] == []
+        assert manager.public_state()["current_site"] is None
+
+        again = await manager.async_prepare_clean_install(
+            archive_reference="/config/elrakning/legacy-bundles/test",
+            confirm=True,
+        )
+        assert again["changed"] is False
+        with unittest.TestCase().assertRaises(ValueError):
+            await manager.async_prepare_clean_install(
+                archive_reference="/config/elrakning/legacy-bundles/other",
+                confirm=True,
+            )
+
+    async def test_clean_install_state_does_not_recreate_default_site_on_load(self):
+        hass = _hass({})
+        power, meter = _managers({"consumption_entity": "sensor.legacy"}, {"power_entity": "sensor.legacy"})
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store({
+            "clean_install": {
+                "schema": CLEAN_INSTALL_SCHEMA,
+                "state": "empty",
+                "archive_reference": "bundle",
+            },
+        })
+
+        await manager.async_load()
+
+        assert manager.state["sites"] == []
+        assert manager.state["active_site_id"] is None
+        assert manager.public_state()["site_id"] is None
+
+    async def test_first_site_can_be_created_then_explicitly_activated(self):
+        hass = _hass({})
+        power, meter = _managers({})
+        manager = SiteIdentityManager(hass, power, meter)
+        manager.store = _Store({
+            "clean_install": {
+                "schema": CLEAN_INSTALL_SCHEMA,
+                "state": "empty",
+                "archive_reference": "bundle",
+            },
+        })
+        await manager.async_load()
+
+        created = await manager.async_create_site("Fiskvik")
+        site_id = created["available_sites"][0]["site_id"]
+        assert created["site_id"] is None
+        activated = await manager.async_activate_site(site_id)
+        assert activated["site_id"] == site_id
+        assert activated["current_site"]["name"] == "Fiskvik"
+
     def test_forecast_collection_targets_are_enabled_site_explicit_and_active_site_independent(self):
         manager = SiteIdentityManager.__new__(SiteIdentityManager)
         manager.state = {

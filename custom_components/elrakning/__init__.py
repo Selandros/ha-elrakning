@@ -18,11 +18,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
+import voluptuous as vol
 
 from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
 from .app_client import AppShadowClient
 from .canonical_collector import CanonicalCollector
-from .const import DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
+from .const import CLEAN_INSTALL_RESET_SERVICE, DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .elnat.manager import GridManager
@@ -63,6 +64,11 @@ PANEL_CADENCE_AUDIT_PATH = f"/{DOMAIN}/elrakning-cadence-audit.js"
 PANEL_MANIFEST_PATH = f"/{DOMAIN}/manifest.json"
 REPLAY_RUN_TIMEOUT_SECONDS = 20 * 60
 _LOGGER = logging.getLogger(__name__)
+
+CLEAN_INSTALL_RESET_SCHEMA = vol.Schema({
+    vol.Required("archive_reference"): str,
+    vol.Required("confirm"): bool,
+})
 
 runtime_checkpoint(
     "module_imports.complete",
@@ -847,6 +853,31 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         )
 
 
+async def _async_register_clean_install_service(
+    hass: HomeAssistant, site_identity_manager: SiteIdentityManager
+) -> None:
+    """Register the explicit admin-only clean-install reset path."""
+    if hass.services.has_service(DOMAIN, CLEAN_INSTALL_RESET_SERVICE):
+        return
+
+    async def _handle(call) -> None:
+        user_id = getattr(call.context, "user_id", None)
+        if not user_id:
+            raise PermissionError("admin_user_required")
+        user = await hass.auth.async_get_user(user_id)
+        if user is None or user.is_admin is not True:
+            raise PermissionError("admin_user_required")
+        result = await site_identity_manager.async_prepare_clean_install(
+            archive_reference=call.data["archive_reference"],
+            confirm=call.data["confirm"],
+        )
+        hass.data.setdefault(DOMAIN, {})["clean_install_reset_result"] = result
+
+    hass.services.async_register(
+        DOMAIN, CLEAN_INSTALL_RESET_SERVICE, _handle, schema=CLEAN_INSTALL_RESET_SCHEMA
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning with the control plane available during startup."""
     frontend_data = hass.data.setdefault(DOMAIN, {})
@@ -896,6 +927,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
+    await _async_register_clean_install_service(hass, site_identity_manager)
     ella_load_registry = EllaLoadRegistry(hass, lambda: dt_util.now().isoformat())
     await _await_setup_step("setup.ella_load_registry_load", ella_load_registry.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_load_registry"] = ella_load_registry
@@ -1377,6 +1409,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "replay_artifact_publish")
     if hass.services.has_service(DOMAIN, "replay_artifact_generate"):
         hass.services.async_remove(DOMAIN, "replay_artifact_generate")
+    if hass.services.has_service(DOMAIN, CLEAN_INSTALL_RESET_SERVICE):
+        hass.services.async_remove(DOMAIN, CLEAN_INSTALL_RESET_SERVICE)
     for unsubscribe in frontend_data.pop("replay_benchmark_event_unsubs", []):
         unsubscribe()
     for unsubscribe in frontend_data.pop("monthly_forecast_event_unsubs", []):
