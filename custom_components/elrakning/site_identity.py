@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .const import CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION
 from .meter import METER_FIELDS
 from .power import POWER_FIELDS
 
@@ -1491,11 +1492,19 @@ class SiteIdentityManager:
 
 def clean_install_archive_metadata(hass, archive_reference: str) -> dict[str, str]:
     """Validate one bounded, operator-created archive bundle before setup."""
-    if not isinstance(archive_reference, str) or not archive_reference.strip() or len(archive_reference) > 256:
+    if not isinstance(archive_reference, str):
+        raise ValueError("archive_reference_invalid")
+    reference = archive_reference.strip()
+    if not reference or len(reference) > 256:
+        raise ValueError("archive_reference_invalid")
+    field_prefix = f"{CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION} "
+    if reference.startswith(field_prefix):
+        reference = reference[len(field_prefix):].strip()
+    if not reference or len(reference) > 256:
         raise ValueError("archive_reference_invalid")
     config_path = hass.config.path() if hasattr(hass.config, "path") else "/config"
     config_root = Path(config_path).resolve()
-    candidate = Path(archive_reference.strip()).resolve()
+    candidate = Path(reference).resolve()
     if candidate != config_root and config_root not in candidate.parents:
         raise ValueError("archive_reference_outside_config")
     manifest = candidate / "SHA256SUMS"

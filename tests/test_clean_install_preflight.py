@@ -91,6 +91,11 @@ class CleanInstallPreflightTests(unittest.TestCase):
             metadata = site_identity.clean_install_archive_metadata(hass, str(bundle))
 
             assert metadata["archive_reference"] == str(bundle.resolve())
+            prefixed = site_identity.clean_install_archive_metadata(
+                hass,
+                f"clean_install_archive_reference {bundle}",
+            )
+            assert prefixed["archive_reference"] == str(bundle.resolve())
             (bundle / "README.txt").unlink()
             metadata_without_readme = site_identity.clean_install_archive_metadata(
                 hass, str(bundle)

@@ -4,6 +4,16 @@ Updated: 2026-10-10
 
 ## 0.0.1100 clean-room Add-flow path
 
+## 0.0.1103 clean-install reference normalization
+
+- ROOT CAUSE VERIFIED: the submitted entry contained the UI field name plus
+  the path (`clean_install_archive_reference /config/...`) as one string.
+  The validator correctly rejected that non-existent path as incomplete.
+- CORRECTED: one exact, bounded field-name prefix is stripped before the
+  normal in-config path and `SHA256SUMS` validation. The canonical path and
+  manifest digest are what the reset receipt records; arbitrary prefixes or
+  invalid paths remain fail-closed.
+
 - IMPLEMENTED: the new-entry ConfigFlow now collects a bounded archive
   reference, explicit clean-install confirmation, and diagnostic stage 0
   before creating the entry. It stores only config-entry options; no site
