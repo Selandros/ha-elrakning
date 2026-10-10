@@ -27,7 +27,7 @@ def test_services_yaml_describes_the_registered_greenely_proof_service():
     service_path = ROOT / "custom_components" / "elrakning" / "services.yaml"
     document = yaml.safe_load(service_path.read_text(encoding="utf-8"))
 
-    assert set(document) == {SERVICE_NAME}
+    assert set(document) == {SERVICE_NAME, "clean_install_reset"}
     service = document[SERVICE_NAME]
     assert set(service["fields"]) == EXPECTED_FIELDS
     assert all(field["required"] is True for name, field in service["fields"].items() if name != "facility_meter_identity_state" and name != "facility_meter_id_fingerprint")

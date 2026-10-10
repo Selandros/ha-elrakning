@@ -103,7 +103,7 @@ def test_options_flow_stores_bounded_diagnostic_stage_without_touching_site_stat
 
 
 def test_options_flow_rejects_invalid_diagnostic_stage():
-    for stage in (-1, 10, True, "2"):
+    for stage in (-1, 16, True, "2"):
         try:
             build_options({}, archive_reference="", confirm=False, diagnostic_stage=stage)
         except ValueError as error:

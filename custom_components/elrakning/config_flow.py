@@ -12,6 +12,7 @@ from .const import (
     CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION,
     CLEAN_INSTALL_CONFIRM_OPTION,
     CLEAN_INSTALL_PENDING_OPTION,
+    DIAGNOSTIC_STAGE_MAX,
     DIAGNOSTIC_STAGE_OPTION,
     DOMAIN,
 )
@@ -40,7 +41,7 @@ def build_options(
         if (
             isinstance(diagnostic_stage, bool)
             or not isinstance(diagnostic_stage, int)
-            or not 0 <= diagnostic_stage <= 9
+            or not 0 <= diagnostic_stage <= DIAGNOSTIC_STAGE_MAX
         ):
             raise ValueError("diagnostic_stage_invalid")
         options[DIAGNOSTIC_STAGE_OPTION] = diagnostic_stage
@@ -101,7 +102,7 @@ class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         DIAGNOSTIC_STAGE_OPTION,
                         default=0,
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=9)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=DIAGNOSTIC_STAGE_MAX)),
                 }
             ),
             errors=errors,
@@ -158,7 +159,7 @@ class ElrakningOptionsFlow(config_entries.OptionsFlow):
                     default=pending.get("confirm", False) is True,
                 ): bool,
                 vol.Optional(DIAGNOSTIC_STAGE_OPTION): vol.All(
-                    vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=0, max=9))),
+                    vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=0, max=DIAGNOSTIC_STAGE_MAX))),
                 ),
             }),
         )

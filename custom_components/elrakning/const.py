@@ -22,6 +22,7 @@ APP_SHADOW_ENABLED = "app_shadow_enabled"
 APP_SHADOW_URL = "app_shadow_url"
 APP_SHADOW_TOKEN = "app_shadow_token"
 DIAGNOSTIC_STAGE_OPTION = "diagnostic_stage"
+DIAGNOSTIC_STAGE_MAX = 15
 CLEAN_INSTALL_RESET_SERVICE = "clean_install_reset"
 CLEAN_INSTALL_PENDING_OPTION = "pending_clean_install_reset"
 CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION = "clean_install_archive_reference"

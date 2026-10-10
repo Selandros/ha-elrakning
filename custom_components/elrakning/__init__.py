@@ -27,6 +27,7 @@ from .const import (
     CLEAN_INSTALL_PENDING_OPTION,
     CLEAN_INSTALL_RECEIPT_OPTION,
     CLEAN_INSTALL_RESET_SERVICE,
+    DIAGNOSTIC_STAGE_MAX,
     DIAGNOSTIC_STAGE_OPTION,
     DOMAIN,
     EON_GRID_UPDATE_EVENT,
@@ -87,7 +88,7 @@ def _diagnostic_stage(entry: ConfigEntry) -> int | None:
     if DIAGNOSTIC_STAGE_OPTION not in options:
         return None
     value = options.get(DIAGNOSTIC_STAGE_OPTION)
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 9:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= DIAGNOSTIC_STAGE_MAX:
         raise ValueError("diagnostic_stage_invalid")
     return value
 
@@ -977,11 +978,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return True
         stage_started_at = _diagnostic_stage_start(1, "frontend")
         await _await_setup_step("setup_entry.frontend_register", _async_register_frontend(hass))
+        if _diagnostic_pause_at(hass, 1, stage_started_at):
+            return True
+        stage_started_at = _diagnostic_stage_start(2, "websocket")
         runtime_checkpoint("setup_entry.websocket_register.start", phase="setup")
         async_register_websocket_commands(hass)
         async_register_cadence_audit_websocket(hass)
         runtime_checkpoint("setup_entry.websocket_register.complete", phase="setup")
-        if _diagnostic_pause_at(hass, 1, stage_started_at):
+        if _diagnostic_pause_at(hass, 2, stage_started_at):
             return True
         result = await _async_setup_entry(hass, entry)
         runtime_checkpoint("setup_entry.complete", phase="setup", started_at=setup_started_at)
@@ -1001,13 +1005,13 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data = hass.data.setdefault(DOMAIN, {})
     frontend_data["config_entry"] = entry
     diagnostic_stage = frontend_data.get("diagnostic_stage")
-    if diagnostic_stage is None or diagnostic_stage >= 9:
+    if diagnostic_stage is None:
         frontend_data["app_shadow_client"] = AppShadowClient.from_config_entry(hass, entry)
     else:
         frontend_data["app_shadow_client"] = None
     coordinator = ElrakningCoordinator(hass, entry)
     entry.runtime_data = coordinator
-    stage_started_at = _diagnostic_stage_start(2, "identity_shell")
+    stage_started_at = _diagnostic_stage_start(3, "identity_shell")
     manager = ElhandelManager(hass, entry)
     await _await_setup_step("setup.manager_load", manager.async_load())
     hass.data.setdefault(DOMAIN, {})["elhandel_manager"] = manager
@@ -1024,9 +1028,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
     await _async_register_clean_install_service(hass, entry)
-    if _diagnostic_pause_at(hass, 2, stage_started_at):
+    if _diagnostic_pause_at(hass, 3, stage_started_at):
         return True
-    stage_started_at = _diagnostic_stage_start(3, "runtime_shell")
+    stage_started_at = _diagnostic_stage_start(4, "runtime_shell")
     ella_load_registry = EllaLoadRegistry(hass, lambda: dt_util.now().isoformat())
     await _await_setup_step("setup.ella_load_registry_load", ella_load_registry.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_load_registry"] = ella_load_registry
@@ -1057,9 +1061,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cadence_audit_manager = CadenceAuditManager(hass, site_identity_manager)
     await _await_setup_step("setup.cadence_audit_load", cadence_audit_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["cadence_audit_manager"] = cadence_audit_manager
-    if _diagnostic_pause_at(hass, 3, stage_started_at):
+    if _diagnostic_pause_at(hass, 4, stage_started_at):
         return True
-    stage_started_at = _diagnostic_stage_start(4, "provider_bindings")
+    stage_started_at = _diagnostic_stage_start(5, "provider_bindings")
     grid_manager = GridManager(hass, entry)
     await _await_setup_step("setup.grid_manager_load", grid_manager.async_load())
     hass.data.setdefault(DOMAIN, {})["grid_manager"] = grid_manager
@@ -1067,21 +1071,15 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "setup.runtime_bindings_prepare",
         site_identity_manager.async_prepare_runtime_bindings(manager, grid_manager, coordinator),
     )
-    if _diagnostic_pause_at(hass, 4, stage_started_at):
+    if _diagnostic_pause_at(hass, 5, stage_started_at):
         return True
-    stage_started_at = _diagnostic_stage_start(5, "canonical_provider")
+    stage_started_at = _diagnostic_stage_start(6, "canonical_collector")
     canonical_collector = CanonicalCollector(hass, site_identity_manager)
     await _await_setup_step("setup.canonical_collector_start", canonical_collector.async_start())
     hass.data.setdefault(DOMAIN, {})["canonical_collector"] = canonical_collector
-    if diagnostic_stage == 5:
-        cached_import_recovery = getattr(getattr(grid_manager, "provider", None), "async_persist_cached_imports", None)
-        if callable(cached_import_recovery):
-            await _await_setup_step(
-                "setup.eon_cached_import_recovery",
-                cached_import_recovery(),
-            )
-        if _diagnostic_pause_at(hass, 5, stage_started_at):
-            return True
+    if _diagnostic_pause_at(hass, 6, stage_started_at):
+        return True
+    stage_started_at = _diagnostic_stage_start(7, "canonical_prepare")
     frontend_data["history_warmup_task"] = hass.async_create_task(
         _async_warm_history(power_manager, meter_manager)
     )
@@ -1101,7 +1099,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     if manager.state["configured"] and site_identity_manager.active_binding("elhandel"):
         manager.async_start_refresh()
-    stage_started_at = _diagnostic_stage_start(6, "forecast_resources")
+    if _diagnostic_pause_at(hass, 7, stage_started_at):
+        return True
+    stage_started_at = _diagnostic_stage_start(8, "forecast_resources")
     solar_forecast_manager = SolarForecastManager(
         hass, manager.async_diagnostic, site_identity_manager.forecast_collection_targets
     )
@@ -1145,6 +1145,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "setup.solar_open_meteo_migrate_locations",
         solar_open_meteo_manager.async_migrate_site_locations(site_identity_manager),
     )
+    if _diagnostic_pause_at(hass, 8, stage_started_at):
+        return True
+    stage_started_at = _diagnostic_stage_start(9, "forecast_baselines")
     greenely_economics = GreenelyInvoiceEconomicsProducer(hass, entry, site_identity_manager, canonical_collector.storage)
     hass.data.setdefault(DOMAIN, {})["greenely_invoice_economics"] = greenely_economics
     greenely_economics.async_schedule_capture()
@@ -1157,9 +1160,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "setup.solar_forecast_capture_baselines",
         solar_forecast_manager.async_capture_collection_baselines(),
     )
-    if _diagnostic_pause_at(hass, 6, stage_started_at):
+    if _diagnostic_pause_at(hass, 9, stage_started_at):
         return True
-    stage_started_at = _diagnostic_stage_start(7, "load_readiness")
+    stage_started_at = _diagnostic_stage_start(10, "load_forecast")
     load_forecast_owner = _get_load_forecast_task_owner(
         hass, site_identity_manager, canonical_collector
     )
@@ -1174,6 +1177,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend_data["monthly_forecast_cadence_unsub"] = async_track_time_change(
         hass, lambda _now: _schedule_monthly_forecast_capture(hass), hour=None, minute=5, second=0
     )
+    if _diagnostic_pause_at(hass, 10, stage_started_at):
+        return True
+    stage_started_at = _diagnostic_stage_start(11, "canonical_captures")
     frontend_data["open_meteo_startup_task"] = hass.async_create_task(
         canonical_collector.async_capture_open_meteo(trigger="startup")
     )
@@ -1190,6 +1196,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         canonical_collector.async_capture_forecast_solar(trigger="startup"),
     )
     hass.data.setdefault(DOMAIN, {})["solar_evidence_manager"] = solar_evidence_manager
+    if _diagnostic_pause_at(hass, 11, stage_started_at):
+        return True
+    stage_started_at = _diagnostic_stage_start(12, "provider_recovery")
     # Evidence catch-up is independent of panel readiness and may perform Recorder/HTTP work.
     # Keep it off the critical startup path so live state and history can hydrate immediately.
     mark_capture_scheduled = getattr(solar_evidence_manager, "mark_capture_scheduled", None)
@@ -1208,6 +1217,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "setup.eon_cached_import_recovery",
             cached_import_recovery(),
         )
+    if _diagnostic_pause_at(hass, 12, stage_started_at):
+        return True
+    stage_started_at = _diagnostic_stage_start(13, "runtime_bindings")
     if grid_manager.configured and site_identity_manager.active_binding("grid"):
         grid_manager.async_start_refresh()
 
@@ -1237,9 +1249,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         second=0,
     )
     frontend_data["runtime_status"] = "ready"
-    if _diagnostic_pause_at(hass, 7, stage_started_at):
+    if _diagnostic_pause_at(hass, 13, stage_started_at):
         return True
-    stage_started_at = _diagnostic_stage_start(8, "replay_optimizer")
+    stage_started_at = _diagnostic_stage_start(14, "replay")
     def _replay_site_ids(event_site_id=None):
         state = site_identity_manager.state
         registered: set[str] = set()
@@ -1503,10 +1515,16 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.bus.async_fire(INTEGRATION_READY_EVENT)
     owner = _get_monthly_forecast_task_owner(hass, entry)
     frontend_data["monthly_forecast_startup_task"] = owner.schedule()
-    _diagnostic_stage_complete(8, stage_started_at, outcome="active")
-    if frontend_data.get("diagnostic_stage") == 9:
-        stage_started_at = _diagnostic_stage_start(9, "app_shadow")
-        _diagnostic_stage_complete(9, stage_started_at, outcome="active")
+    _diagnostic_stage_complete(14, stage_started_at, outcome="active")
+    if frontend_data.get("diagnostic_stage") == 14:
+        frontend_data["runtime_status"] = "diagnostic_paused"
+        return True
+    if frontend_data.get("diagnostic_stage") == 15:
+        stage_started_at = _diagnostic_stage_start(15, "app_shadow")
+        frontend_data["app_shadow_client"] = AppShadowClient.from_config_entry(hass, entry)
+        _diagnostic_stage_complete(15, stage_started_at, outcome="paused")
+        frontend_data["runtime_status"] = "diagnostic_paused"
+        return True
     return True
 
 

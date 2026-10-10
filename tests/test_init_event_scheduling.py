@@ -77,14 +77,13 @@ def test_staged_start_boundaries_are_ordered_and_normal_setup_remains_default():
     ).read_text(encoding="utf-8")
     assert "diagnostic_stage = _diagnostic_stage(entry)" in source
     assert 'if diagnostic_stage == 0:' in source
-    assert 'if _diagnostic_pause_at(hass, 1, stage_started_at)' in source
-    assert 'if _diagnostic_pause_at(hass, 2, stage_started_at)' in source
-    assert 'if _diagnostic_pause_at(hass, 3, stage_started_at)' in source
-    assert 'if _diagnostic_pause_at(hass, 4, stage_started_at)' in source
-    assert 'if diagnostic_stage == 5:' in source
-    assert 'if _diagnostic_pause_at(hass, 6, stage_started_at)' in source
-    assert 'if _diagnostic_pause_at(hass, 7, stage_started_at)' in source
-    assert 'if diagnostic_stage is None or diagnostic_stage >= 9' in source
+    for stage in range(1, 14):
+        assert f'if _diagnostic_pause_at(hass, {stage}, stage_started_at)' in source
+    assert 'if _diagnostic_pause_at(hass, 14, stage_started_at)' not in source
+    assert 'DIAGNOSTIC_STAGE_MAX = 15' in (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "const.py"
+    ).read_text(encoding="utf-8")
+    assert 'diagnostic_stage is None' in source
     assert 'highspy_diagnostic_mode=True' in source
 
     setup_start = source.index("async def async_setup_entry")
@@ -99,10 +98,40 @@ def test_disabled_stages_do_not_create_shadow_client_or_highspy_path():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     source = source_path.read_text(encoding="utf-8")
     assert 'frontend_data["app_shadow_client"] = None' in source
-    assert 'diagnostic_stage is None or diagnostic_stage >= 9' in source
+    assert 'if diagnostic_stage is None:' in source
     assert "HIGHSPY_DIAGNOSTIC_MODE = True" in (
         Path(__file__).parents[1] / "custom_components" / "elrakning" / "economic_optimizer.py"
     ).read_text(encoding="utf-8")
+
+
+def test_staged_boundaries_keep_heavy_subsystems_separate():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    labels = [
+        "frontend",
+        "websocket",
+        "identity_shell",
+        "runtime_shell",
+        "provider_bindings",
+        "canonical_collector",
+        "canonical_prepare",
+        "forecast_resources",
+        "forecast_baselines",
+        "load_forecast",
+        "canonical_captures",
+        "provider_recovery",
+        "runtime_bindings",
+        "replay",
+        "app_shadow",
+    ]
+    positions = [source.index(f'_diagnostic_stage_start({index}, "{label}")') for index, label in enumerate(labels, start=1)]
+    assert positions == sorted(positions)
+    assert source.index('"setup.canonical_collector_start"') < source.index(
+        '"setup.eon_cached_import_recovery"'
+    )
+    assert source.index('"setup.eon_cached_import_recovery"') < source.index(
+        '"replay_scheduler_registered"'
+    )
 
 
 def test_stage_zero_requires_a_completed_clean_install_receipt():
