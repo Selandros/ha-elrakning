@@ -220,21 +220,29 @@ class SolarEvidenceTests(unittest.TestCase):
                 hass, SimpleNamespace(), SimpleNamespace(), lambda: {}
             )
             manager.set_diagnostic_trace(trace_event, trace_start, trace_complete)
-            await manager.async_startup_catch_up()
-            await manager.async_backfill(days=2)
-            if manager._quality_recovery_task is not None:
-                manager._quality_recovery_task.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await manager._quality_recovery_task
-            return manager
+            collection_calls = []
 
-        manager = asyncio.run(exercise())
+            async def fail_if_collection_is_started(_target_date):
+                collection_calls.append(_target_date)
+                raise AssertionError("clean-room collection must not start")
+
+            manager.async_collect_completed_day_for_targets = fail_if_collection_is_started
+            await manager.async_startup_catch_up()
+            await manager.async_backfill(days=30)
+            return manager, collection_calls
+
+        manager, collection_calls = asyncio.run(exercise())
         completed = [item for item in events if item[0] == "complete"]
+        self.assertEqual(collection_calls, [])
+        self.assertIsNone(manager._quality_recovery_task)
         self.assertEqual(manager.public_state()["capture_tasks"]["startup"]["target_site_ids"], [])
         self.assertEqual(manager.public_state()["capture_tasks"]["backfill"]["target_site_ids"], [])
-        self.assertTrue(any(item[1].endswith("startup_catch_up.task") for item in completed))
-        self.assertTrue(any(item[1].endswith("backfill.task") for item in completed))
-        self.assertTrue(any(item[3].get("target_count") == 0 for item in completed))
+        self.assertTrue(any(item[1].endswith("startup_catch_up.task") and item[3].get("outcome") == "no_targets" for item in completed))
+        self.assertTrue(any(item[1].endswith("backfill.task") and item[3].get("outcome") == "no_targets" for item in completed))
+        self.assertEqual(
+            [item[3].get("target_count") for item in completed if "target_scan" in item[1]],
+            [0, 0],
+        )
 
     def test_stale_incomplete_record_is_reprocessed_once_for_current_semantics(self):
         self.assertTrue(should_reprocess_existing_day({
@@ -621,8 +629,7 @@ class SolarEvidenceTests(unittest.TestCase):
         asyncio.run(manager._daily_update(None))
         asyncio.run(manager.async_startup_catch_up())
         asyncio.run(manager.async_backfill(days=2))
-        self.assertEqual(len(calls), 4)
-        self.assertEqual(calls[0], calls[1])
+        self.assertEqual(len(calls), 1)
 
     def test_frozen_forecast_baseline_reads_site_store_and_rejects_first_today_or_late_capture(self):
         class ForecastManager:

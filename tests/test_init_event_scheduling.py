@@ -370,7 +370,13 @@ def test_stage12_has_bounded_warning_tracing_for_each_recovery_path():
     assert "def _stage12_trace_event" in source
     assert "level=logging.WARNING" in source
     assert '"diagnostic.stage_12.startup_catch_up.registration"' in source
+    assert '"diagnostic.stage_12.startup_catch_up.target_scan"' in (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "solar_evidence.py"
+    ).read_text(encoding="utf-8")
     assert '"diagnostic.stage_12.backfill.registration"' in source
+    assert '"diagnostic.stage_12.backfill.target_scan"' in (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "solar_evidence.py"
+    ).read_text(encoding="utf-8")
     assert '"diagnostic.stage_12.eon_handoff_registration"' in source
     assert '"diagnostic.stage_12.eon_cached_import_recovery"' in source
     assert '"diagnostic.stage_12.quality_recovery.registration"' in (

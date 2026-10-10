@@ -552,6 +552,23 @@ class SolarEvidenceManager:
         target_site_ids: set[str] = set()
         failed_site_ids: set[str] = set()
         try:
+            target_scan_started_at = self._trace_start(
+                "backfill.target_scan", "diagnostic.stage_12.backfill.target_scan"
+            )
+            targets = self._collection_targets() if callable(self._collection_site_configs_getter) else None
+            self._trace_complete(
+                "diagnostic.stage_12.backfill.target_scan",
+                target_scan_started_at,
+                outcome="complete",
+                target_count=len(targets) if targets is not None else None,
+            )
+            if targets == []:
+                self._capture_finished("backfill", "success")
+                self._trace_complete(
+                    "diagnostic.stage_12.backfill.task", trace_started_at,
+                    outcome="no_targets", target_count=0,
+                )
+                return
             today = dt_util.as_local(dt_util.now()).date()
             for offset in range(1, days + 1):
                 try:
@@ -597,6 +614,23 @@ class SolarEvidenceManager:
         yesterday = dt_util.as_local(dt_util.now()).date() - timedelta(days=1)
         self._capture_started("startup", yesterday)
         try:
+            target_scan_started_at = self._trace_start(
+                "startup_catch_up.target_scan", "diagnostic.stage_12.startup_catch_up.target_scan"
+            )
+            targets = self._collection_targets() if callable(self._collection_site_configs_getter) else None
+            self._trace_complete(
+                "diagnostic.stage_12.startup_catch_up.target_scan",
+                target_scan_started_at,
+                outcome="complete",
+                target_count=len(targets) if targets is not None else None,
+            )
+            if targets == []:
+                self._capture_finished("startup", "success")
+                self._trace_complete(
+                    "diagnostic.stage_12.startup_catch_up.task", trace_started_at,
+                    outcome="no_targets", target_count=0,
+                )
+                return
             result = await self.async_collect_completed_day_for_targets(yesterday)
             self._schedule_quality_recovery()
             failures = _collection_failures(result)

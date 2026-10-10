@@ -59,6 +59,16 @@ def test_cached_provider_imports_are_recovered_after_canonical_storage_startup()
     assert init.index("cached_import_recovery") < init.index("grid_manager.async_start_refresh()")
 
 
+def test_cached_provider_imports_are_noop_without_active_site():
+    manager = manager_text()
+    method = manager.split("    async def async_persist_cached_imports", 1)[1].split(
+        "    def _active_site_id", 1
+    )[0]
+    assert method.index("if not self._active_site_id():") < method.index("states =")
+    guard = method[method.index("if not self._active_site_id():"):method.index("states =")]
+    assert "return" in guard
+
+
 def test_completed_backfill_without_retained_transfer_is_recoverable():
     source = manager_text()
     method = source.split("    async def _async_fetch_closed_day_backfill", 1)[1].split("    async def async_save_web_credentials", 1)[0]
