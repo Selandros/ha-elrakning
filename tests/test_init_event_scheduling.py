@@ -160,6 +160,8 @@ def test_load_forecast_cadence_uses_thread_safe_create_task_from_worker_thread()
         "concurrent": concurrent,
         "threading": threading,
         "DOMAIN": "elrakning",
+        "_stage10_trace_start": lambda *_args: None,
+        "_stage10_trace_complete": lambda *_args, **_kwargs: None,
         "_create_background_task_on_ha_loop": _load_background_task_helper(),
     }
 
@@ -207,6 +209,8 @@ def test_load_forecast_capture_uses_site_scoped_house_role_without_ella_binding(
         "timezone": __import__("datetime").timezone,
         "dt_util": type("Dt", (), {"now": staticmethod(lambda: __import__("datetime").datetime(2026, 9, 20))}),
         "build_site_load_forecast": lambda *args: calls.append(args),
+        "_stage10_trace_start": lambda *_args: None,
+        "_stage10_trace_complete": lambda *_args, **_kwargs: None,
     }
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
 
@@ -221,6 +225,56 @@ def test_load_forecast_capture_uses_site_scoped_house_role_without_ella_binding(
             return [{"site_id": "fiskvik", "logical_role": "house.consumption"}, {"site_id": "vik", "logical_role": "house.consumption"}]
     asyncio.run(namespace["_async_capture_load_forecasts"](Hass(), Manager(), type("Collector", (), {"storage": object()})()))
     assert [args[1] for args in calls] == ["fiskvik", "vik"]
+
+
+def test_clean_room_load_forecast_callback_does_no_executor_work():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_async_capture_load_forecasts"
+    )
+    executor_calls = []
+    namespace = {
+        "timezone": __import__("datetime").timezone,
+        "dt_util": type("Dt", (), {"now": staticmethod(lambda: __import__("datetime").datetime(2026, 9, 20))}),
+        "build_site_load_forecast": lambda *_args: None,
+        "_stage10_trace_start": lambda *_args: None,
+        "_stage10_trace_complete": lambda *_args, **_kwargs: None,
+    }
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
+
+    class Hass:
+        data = {"elrakning": {}}
+
+        async def async_add_executor_job(self, fn, *args):
+            executor_calls.append((fn, args))
+            raise AssertionError("clean-room forecast callback must not use the executor")
+
+    class EmptyManager:
+        def collection_site_configs(self):
+            return {}
+
+        def collection_targets(self):
+            return []
+
+    asyncio.run(
+        namespace["_async_capture_load_forecasts"](
+            Hass(), EmptyManager(), type("Collector", (), {"storage": object()})()
+        )
+    )
+    assert executor_calls == []
+
+
+def test_stage10_trace_separates_registration_schedule_and_callback():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    assert '"cadence_registration"' in source
+    assert '"load_forecast_schedule"' in source
+    assert '"load_forecast_callback_targets"' in source
+    assert '"load_forecast_callback"' in source
+    assert '"monthly_forecast_schedule"' in source
+    assert '"monthly_forecast_callback_targets"' in source
 
 
 def _load_midnight_refresh():
@@ -658,6 +712,8 @@ def test_monthly_forecast_startup_reuses_owner_created_by_early_event():
     namespace = {
         "asyncio": asyncio,
         "DOMAIN": "elrakning",
+        "_stage10_trace_start": lambda *_args: None,
+        "_stage10_trace_complete": lambda *_args, **_kwargs: None,
         "_async_capture_monthly_forecast": lambda _hass: _capture(),
         "_create_background_task_on_ha_loop": lambda hass, factory, name: hass.async_create_background_task(factory(), name=name),
     }
@@ -688,6 +744,8 @@ def _load_monthly_forecast_task_owner(capture, task_helper=None):
     namespace = {
         "asyncio": asyncio,
         "DOMAIN": "elrakning",
+        "_stage10_trace_start": lambda *_args: None,
+        "_stage10_trace_complete": lambda *_args, **_kwargs: None,
         "_async_capture_monthly_forecast": capture,
         "_create_background_task_on_ha_loop": task_helper or (
             lambda hass, factory, name: hass.async_create_background_task(factory(), name=name)
@@ -733,6 +791,8 @@ def _load_load_forecast_task_owner(capture):
         "concurrent": concurrent,
         "threading": threading,
         "DOMAIN": "elrakning",
+        "_stage10_trace_start": lambda *_args: None,
+        "_stage10_trace_complete": lambda *_args, **_kwargs: None,
         "_async_capture_load_forecasts": capture,
         "_create_background_task_on_ha_loop": _load_background_task_helper(),
     }

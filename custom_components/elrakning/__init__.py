@@ -125,6 +125,37 @@ def _diagnostic_pause_at(hass: HomeAssistant, stage: int, started_at: float) -> 
     data["runtime_status"] = "diagnostic_paused"
     return True
 
+
+def _stage10_trace_start(hass, key: str, label: str) -> float | None:
+    """Record one bounded Stage 10 timing start when diagnostics are active."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if data.get("diagnostic_stage") != 10:
+        return None
+    seen = data.setdefault("stage10_trace_seen", set())
+    if key in seen:
+        return None
+    seen.add(key)
+    return runtime_checkpoint(
+        f"diagnostic.stage_10.{label}.start",
+        phase="diagnostic_stage",
+        stage=10,
+    )
+
+
+def _stage10_trace_complete(
+    hass, label: str, started_at: float | None, **fields,
+) -> None:
+    """Record one bounded Stage 10 timing completion when diagnostics are active."""
+    if started_at is None:
+        return
+    runtime_checkpoint(
+        f"diagnostic.stage_10.{label}.complete",
+        phase="diagnostic_stage",
+        stage=10,
+        started_at=started_at,
+        **fields,
+    )
+
 runtime_checkpoint(
     "module_imports.complete",
     phase="import",
@@ -289,12 +320,22 @@ async def _async_midnight_refresh(coordinator: ElrakningCoordinator, _now) -> No
 
 async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_collector) -> None:
     """Persist truthful load-profile forecasts for every eligible site."""
+    trace_started_at = _stage10_trace_start(
+        hass, "load_forecast_callback", "load_forecast_callback"
+    )
     stage6_store = getattr(hass, "data", {}).get("elrakning", {}).get("ella_stage6_store")
     configs = site_identity_manager.collection_site_configs()
     target_getter = getattr(site_identity_manager, "collection_targets", None)
     targets = target_getter() if callable(target_getter) else []
     site_ids = {target["site_id"] for target in targets
                 if isinstance(target, dict) and target.get("logical_role") == "house.consumption"}
+    _stage10_trace_complete(
+        hass,
+        "load_forecast_callback_targets",
+        trace_started_at,
+        target_count=len(targets),
+        site_count=len(site_ids),
+    )
     now = dt_util.now().astimezone(timezone.utc)
     for site_id in sorted(site_ids):
         config = configs.get(site_id, {}) if isinstance(configs, dict) else {}
@@ -368,16 +409,35 @@ async def _async_capture_load_forecasts(hass, site_identity_manager, canonical_c
         except Exception:
             # Forecast availability is fail-closed and must not prevent startup.
             continue
+    _stage10_trace_complete(
+        hass,
+        "load_forecast_callback",
+        trace_started_at,
+        target_count=len(targets),
+        site_count=len(site_ids),
+    )
 
 
 async def _async_capture_monthly_forecast(hass) -> None:
     """Run the producer and persist a fail-closed state if input assembly aborts."""
+    trace_started_at = _stage10_trace_start(
+        hass, "monthly_forecast_callback", "monthly_forecast_callback"
+    )
     data = hass.data.get(DOMAIN, {})
     identity = data.get("site_identity_manager")
     manager = data.get("monthly_forecast_manager")
     if not identity or not manager:
+        _stage10_trace_complete(
+            hass, "monthly_forecast_callback", trace_started_at, site_count=0,
+        )
         return
     site_ids = _monthly_forecast_site_ids(identity)
+    _stage10_trace_complete(
+        hass,
+        "monthly_forecast_callback_targets",
+        trace_started_at,
+        site_count=len(site_ids),
+    )
     for site_id in site_ids:
         try:
             await _async_capture_monthly_forecast_impl(hass, requested_site_id=site_id)
@@ -392,6 +452,12 @@ async def _async_capture_monthly_forecast(hass) -> None:
                 target_month=target_month,
                 reason="monthly_forecast_input_builder_failed",
             )
+    _stage10_trace_complete(
+        hass,
+        "monthly_forecast_callback",
+        trace_started_at,
+        site_count=len(site_ids),
+    )
 
 
 def _monthly_forecast_site_ids(identity) -> list[str]:
@@ -635,9 +701,18 @@ class _LoadForecastTaskOwner:
             self.pending = True
             return self.task
         self.pending = False
+        trace_started_at = _stage10_trace_start(
+            self.hass, "load_forecast_schedule", "load_forecast_schedule"
+        )
         self.task = self._create_task()
         self.task.add_done_callback(self._task_done)
         self.hass.data.setdefault(DOMAIN, {})["load_forecast_capture_task"] = self.task
+        _stage10_trace_complete(
+            self.hass,
+            "load_forecast_schedule",
+            trace_started_at,
+            task_created=self.task is not None,
+        )
         return self.task
 
     def _task_done(self, task):
@@ -708,9 +783,18 @@ class _MonthlyForecastTaskOwner:
             self.pending = True
             return self.task
         self.pending = False
+        trace_started_at = _stage10_trace_start(
+            self.hass, "monthly_forecast_schedule", "monthly_forecast_schedule"
+        )
         self.task = self._create_task()
         self.task.add_done_callback(self._task_done)
         self.hass.data.setdefault(DOMAIN, {})["monthly_forecast_capture_task"] = self.task
+        _stage10_trace_complete(
+            self.hass,
+            "monthly_forecast_schedule",
+            trace_started_at,
+            task_created=self.task is not None,
+        )
         return self.task
 
     def _task_done(self, task):
@@ -965,6 +1049,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if diagnostic_stage == 0 and not _has_clean_install_receipt(entry):
         raise ValueError("diagnostic_stage_zero_requires_clean_install_receipt")
     frontend_data["diagnostic_stage"] = diagnostic_stage
+    frontend_data.pop("stage10_trace_seen", None)
     frontend_data["runtime_status"] = "initializing"
     setup_started_at = runtime_checkpoint(
         "setup_entry.start", phase="setup", entry_id=entry.entry_id
@@ -1163,6 +1248,9 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if _diagnostic_pause_at(hass, 9, stage_started_at):
         return True
     stage_started_at = _diagnostic_stage_start(10, "load_forecast")
+    cadence_registration_started_at = _stage10_trace_start(
+        hass, "cadence_registration", "cadence_registration"
+    )
     load_forecast_owner = _get_load_forecast_task_owner(
         hass, site_identity_manager, canonical_collector
     )
@@ -1176,6 +1264,13 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     frontend_data["monthly_forecast_cadence_unsub"] = async_track_time_change(
         hass, lambda _now: _schedule_monthly_forecast_capture(hass), hour=None, minute=5, second=0
+    )
+    _stage10_trace_complete(
+        hass,
+        "cadence_registration",
+        cadence_registration_started_at,
+        load_forecast_cadence=True,
+        monthly_forecast_cadence=True,
     )
     if _diagnostic_pause_at(hass, 10, stage_started_at):
         return True
@@ -1589,6 +1684,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except asyncio.CancelledError:
             pass
     frontend_data.pop("config_entry", None)
+    frontend_data.pop("stage10_trace_seen", None)
     frontend_data.pop("app_shadow_client", None)
     if startup_task := frontend_data.pop("open_meteo_startup_task", None):
         startup_task.cancel()
