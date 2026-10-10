@@ -66,10 +66,10 @@ Updated: 2026-10-10
   managers, providers, canonical storage, replay or forecast setup.
 - IMPLEMENTED: the admin-only `elrakning.clean_install_reset` service now sets
   the same next-start marker instead of mutating site stores immediately.
-- VALIDATION: setup requires an in-config archive bundle with `README.md` or
-  `README.txt` and bounded `SHA256SUMS` metadata, then records its manifest
-  digest and a completed reset receipt in config-entry options. Both readme
-  names are accepted because the verified runtime bundle uses `README.txt`.
+- VALIDATION: setup requires an in-config archive directory with bounded,
+  non-empty `SHA256SUMS` metadata, then records its manifest digest and a
+  completed reset receipt in config-entry options. README files remain
+  optional documentation and are not used as provenance.
 - PRESERVED: legacy Ella/site/replay/canonical stores remain untouched and are
   archive/quarantine data only. A new first site must be created and activated
   explicitly; no legacy entity, provider, FusionSolar identity or source

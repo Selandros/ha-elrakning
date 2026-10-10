@@ -80,7 +80,7 @@ class CleanInstallPreflightTests(unittest.TestCase):
             finally:
                 site_identity.Store = original_store
 
-    def test_archive_metadata_accepts_readme_txt_and_stays_fail_closed(self):
+    def test_archive_metadata_uses_manifest_provenance_and_stays_fail_closed(self):
         with tempfile.TemporaryDirectory() as root:
             bundle = Path(root) / "elrakning" / "legacy-bundles" / "text-readme"
             bundle.mkdir(parents=True)
@@ -92,6 +92,11 @@ class CleanInstallPreflightTests(unittest.TestCase):
 
             assert metadata["archive_reference"] == str(bundle.resolve())
             (bundle / "README.txt").unlink()
+            metadata_without_readme = site_identity.clean_install_archive_metadata(
+                hass, str(bundle)
+            )
+            assert metadata_without_readme["archive_manifest_sha256"]
+            (bundle / "SHA256SUMS").unlink()
             with self.assertRaises(ValueError) as error:
                 site_identity.clean_install_archive_metadata(hass, str(bundle))
             assert str(error.exception) == "archive_bundle_incomplete"

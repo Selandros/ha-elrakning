@@ -1499,15 +1499,7 @@ def clean_install_archive_metadata(hass, archive_reference: str) -> dict[str, st
     if candidate != config_root and config_root not in candidate.parents:
         raise ValueError("archive_reference_outside_config")
     manifest = candidate / "SHA256SUMS"
-    readme = next(
-        (
-            candidate / name
-            for name in ("README.md", "README.txt")
-            if (candidate / name).is_file()
-        ),
-        None,
-    )
-    if not candidate.is_dir() or not manifest.is_file() or readme is None:
+    if not candidate.is_dir() or not manifest.is_file():
         raise ValueError("archive_bundle_incomplete")
     manifest_bytes = manifest.read_bytes()
     if not manifest_bytes or len(manifest_bytes) > 1024 * 1024:
