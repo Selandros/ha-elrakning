@@ -1530,7 +1530,11 @@ async def async_prepare_pending_clean_install(hass, pending: dict[str, Any]) -> 
     """Apply a validated pending reset before any normal setup manager loads."""
     if not isinstance(pending, dict) or pending.get("confirm") is not True:
         raise ValueError("clean_install_confirmation_required")
-    metadata = clean_install_archive_metadata(hass, pending.get("archive_reference"))
+    metadata = await hass.async_add_executor_job(
+        clean_install_archive_metadata,
+        hass,
+        pending.get("archive_reference"),
+    )
     manager = SiteIdentityManager(
         hass, _CleanInstallNoopManager(), _CleanInstallNoopManager()
     )

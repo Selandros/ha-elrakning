@@ -6,6 +6,13 @@ Updated: 2026-10-10
 
 ## 0.0.1103 clean-install reference normalization
 
+## 0.0.1104 clean-install manifest read isolation
+
+- CORRECTED: the bounded `SHA256SUMS` read used for reset provenance now runs
+  through Home Assistant's executor. Reset orchestration remains awaited and
+  fail-closed, but the setup event loop no longer performs synchronous file
+  I/O for the archive manifest.
+
 - ROOT CAUSE VERIFIED: the submitted entry contained the UI field name plus
   the path (`clean_install_archive_reference /config/...`) as one string.
   The validator correctly rejected that non-existent path as incomplete.

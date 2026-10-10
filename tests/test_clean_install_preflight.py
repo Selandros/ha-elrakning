@@ -36,13 +36,20 @@ class _MemoryStore:
 
 
 class CleanInstallPreflightTests(unittest.TestCase):
+    @staticmethod
+    async def _async_add_executor_job(function, *args):
+        return function(*args)
+
     def test_archive_metadata_is_bounded_and_provenance_fingerprinted(self):
         with tempfile.TemporaryDirectory() as root:
             bundle = Path(root) / "elrakning" / "legacy-bundles" / "test"
             bundle.mkdir(parents=True)
             (bundle / "README.md").write_text("archive\n", encoding="utf-8")
             (bundle / "SHA256SUMS").write_text("file hash\n", encoding="utf-8")
-            hass = SimpleNamespace(config=SimpleNamespace(path=lambda: root))
+            hass = SimpleNamespace(
+                config=SimpleNamespace(path=lambda: root),
+                async_add_executor_job=self._async_add_executor_job,
+            )
 
             metadata = site_identity.clean_install_archive_metadata(hass, str(bundle))
 
@@ -57,7 +64,10 @@ class CleanInstallPreflightTests(unittest.TestCase):
             bundle.mkdir(parents=True)
             (bundle / "README.md").write_text("archive\n", encoding="utf-8")
             (bundle / "SHA256SUMS").write_text("file hash\n", encoding="utf-8")
-            hass = SimpleNamespace(config=SimpleNamespace(path=lambda: root))
+            hass = SimpleNamespace(
+                config=SimpleNamespace(path=lambda: root),
+                async_add_executor_job=self._async_add_executor_job,
+            )
             original_store = site_identity.Store
             site_identity.Store = _MemoryStore
             try:
