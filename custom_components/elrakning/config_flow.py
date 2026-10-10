@@ -109,7 +109,7 @@ class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class ElrakningOptionsFlow(config_entries.OptionsFlow):
+class ElrakningOptionsFlow(config_entries.OptionsFlowWithReload):
     """Configure the optional, read-only shadow App boundary."""
 
     async def async_step_init(self, user_input: dict | None = None):

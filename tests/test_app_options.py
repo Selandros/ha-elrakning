@@ -28,10 +28,18 @@ config_entries.ConfigFlow = _ConfigFlow
 class _ReadOnlyOptionsFlow:
     @property
     def config_entry(self):
-        return None
+        return getattr(self, "_config_entry", None)
+
+    def async_create_entry(self, *, title, data):
+        return {"type": "create_entry", "title": title, "data": data}
+
+
+class _ReadOnlyOptionsFlowWithReload(_ReadOnlyOptionsFlow):
+    pass
 
 
 config_entries.OptionsFlow = _ReadOnlyOptionsFlow
+config_entries.OptionsFlowWithReload = _ReadOnlyOptionsFlowWithReload
 
 from custom_components.elrakning.config_flow import (
     ElrakningConfigFlow,
@@ -64,6 +72,46 @@ def test_options_flow_is_the_supported_shadow_configuration_path():
     flow = ElrakningConfigFlow.async_get_options_flow(entry)
     assert isinstance(flow, ElrakningOptionsFlow)
     assert flow.config_entry is None
+
+
+def test_options_flow_uses_home_assistant_reload_base():
+    assert issubclass(ElrakningOptionsFlow, _ReadOnlyOptionsFlowWithReload)
+    assert ElrakningOptionsFlow.__mro__[1] is _ReadOnlyOptionsFlowWithReload
+
+
+def test_options_flow_submit_stage_change_returns_one_reloadable_entry_result():
+    entry = SimpleNamespace(options={DIAGNOSTIC_STAGE_OPTION: 12})
+    flow = ElrakningConfigFlow.async_get_options_flow(entry)
+    flow._config_entry = entry
+    result = asyncio.run(
+        flow.async_step_init({
+            CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION: "",
+            CLEAN_INSTALL_CONFIRM_OPTION: False,
+            DIAGNOSTIC_STAGE_OPTION: 13,
+        })
+    )
+    assert result["type"] == "create_entry"
+    assert result["data"][DIAGNOSTIC_STAGE_OPTION] == 13
+
+
+def test_options_flow_has_no_custom_reload_listener_or_snapshot():
+    source = (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    ).read_text(encoding="utf-8")
+    assert "_async_options_update_listener" not in source
+    assert "options_update_unsub" not in source
+    assert "options_snapshot" not in source
+
+
+def test_all_diagnostic_stages_use_official_flow_reload_without_runtime_listener():
+    source = (
+        Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    ).read_text(encoding="utf-8")
+    assert "if diagnostic_stage == 0:" in source
+    for stage in (11, 12, 13):
+        assert f"_diagnostic_pause_at(hass, {stage}" in source
+    assert "add_update_listener" not in source
+    assert "async_reload(entry.entry_id)" not in source
 
 
 def test_options_flow_builds_bounded_pending_reset_without_mutating_site_state():

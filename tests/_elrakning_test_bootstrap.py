@@ -54,6 +54,19 @@ def install_homeassistant_stubs() -> None:
 
     config_entries = sys.modules.get("homeassistant.config_entries") or _module("homeassistant.config_entries")
     config_entries.ConfigEntry = object
+    class OptionsFlow:
+        @property
+        def config_entry(self):
+            return getattr(self, "_config_entry", None)
+
+        def async_create_entry(self, *, title, data):
+            return {"type": "create_entry", "title": title, "data": data}
+
+    class OptionsFlowWithReload(OptionsFlow):
+        pass
+
+    config_entries.OptionsFlow = OptionsFlow
+    config_entries.OptionsFlowWithReload = OptionsFlowWithReload
     exceptions = sys.modules.get("homeassistant.exceptions") or _module("homeassistant.exceptions")
     exceptions.HomeAssistantError = RuntimeError
 
