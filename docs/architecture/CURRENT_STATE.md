@@ -2,6 +2,12 @@
 
 Updated: 2026-10-10
 
+## 0.0.1099 deployment-layout gate
+
+- IMPLEMENTED: `scripts/check_custom_components_layout.py` and regression
+  tests reject rollback, hidden backup, and loose Python entries below the
+  Home Assistant `custom_components` importer root.
+
 ## 0.0.1098 config-flow deployment-layout correction
 
 - VERIFIED: the `Invalid handler specified` report was caused by a rollback
@@ -11,6 +17,10 @@ Updated: 2026-10-10
 - The Elräkning manifest and `ConfigFlow`/`OptionsFlow` registration were
   valid. The fix moves only the misplaced rollback directory out of the
   discovery root; it does not change options, sites, or source-of-truth.
+- Deployment invariant: rollback/staging paths belong under the Elräkning
+  rollback or quarantine area, never below `custom_components`. The layout
+  gate rejects hidden backup directories, rollback directories, and loose
+  Python files at that importer root.
 
 ## 0.0.1097 staged clean-install diagnostic checkpoint
 
