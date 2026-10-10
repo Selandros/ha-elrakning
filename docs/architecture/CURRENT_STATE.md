@@ -2,6 +2,16 @@
 
 Updated: 2026-10-10
 
+## 0.0.1098 config-flow deployment-layout correction
+
+- VERIFIED: the `Invalid handler specified` report was caused by a rollback
+  directory left directly below Home Assistant's `custom_components` root.
+  HA attempted to import that directory as a component and failed with
+  `No module named 'custom_components.'`.
+- The Elräkning manifest and `ConfigFlow`/`OptionsFlow` registration were
+  valid. The fix moves only the misplaced rollback directory out of the
+  discovery root; it does not change options, sites, or source-of-truth.
+
 ## 0.0.1097 staged clean-install diagnostic checkpoint
 
 - IMPLEMENTED: an optional, bounded `diagnostic_stage` config-entry option

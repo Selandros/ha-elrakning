@@ -1,4 +1,6 @@
+import json
 from types import SimpleNamespace
+from pathlib import Path
 
 from tests._elrakning_test_bootstrap import (
     install_elrakning_package_stub,
@@ -41,6 +43,17 @@ from custom_components.elrakning.const import (
     CLEAN_INSTALL_PENDING_OPTION,
     DIAGNOSTIC_STAGE_OPTION,
 )
+
+
+def test_config_flow_handler_contract_supports_add_and_options_routes():
+    manifest_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["config_flow"] is True
+    assert ElrakningConfigFlow.VERSION == 1
+    assert hasattr(ElrakningConfigFlow, "async_step_user")
+    flow = ElrakningConfigFlow.async_get_options_flow(SimpleNamespace(options={}))
+    assert isinstance(flow, ElrakningOptionsFlow)
 
 
 def test_options_flow_is_the_supported_shadow_configuration_path():
