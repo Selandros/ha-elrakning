@@ -12,8 +12,44 @@ from .app_contract import AppContractError, validate_state_snapshot
 from .const import APP_SHADOW_ENABLED, APP_SHADOW_TOKEN, APP_SHADOW_URL
 
 
-DEFAULT_APP_URL = "http://elrakning-app:8099"
+DEFAULT_APP_URL = ""
+_APP_PORT = 8099
+_AUTO_DISCOVERY_HOST = "elrakning-app"
+_APP_SLUG_SUFFIX = "_elrakning_app"
 _REQUEST_TIMEOUT_SECONDS = 1.0
+
+
+def _discover_app_url(hass: Any) -> str:
+    """Resolve the installed App from Home Assistant's cached Supervisor data."""
+    try:
+        from homeassistant.components.hassio import get_apps_list
+
+        apps = get_apps_list(hass)
+    except Exception:
+        return ""
+
+    slugs = {
+        app.get("slug")
+        for app in apps
+        if isinstance(app, dict)
+        and isinstance(app.get("slug"), str)
+        and app["slug"].endswith(_APP_SLUG_SUFFIX)
+    }
+    if len(slugs) != 1:
+        return ""
+    hostname = next(iter(slugs)).replace("_", "-")
+    return f"http://{hostname}:{_APP_PORT}"
+
+
+def _resolve_app_url(hass: Any, configured_url: Any) -> str:
+    """Resolve the default/legacy alias without hardcoding a repository id."""
+    if not isinstance(configured_url, str) or not configured_url.strip():
+        return _discover_app_url(hass)
+    parsed_url = urlsplit(configured_url)
+    if parsed_url.hostname == _AUTO_DISCOVERY_HOST:
+        discovered_url = _discover_app_url(hass)
+        return discovered_url or configured_url
+    return configured_url
 
 
 class AppShadowClient:
@@ -36,7 +72,7 @@ class AppShadowClient:
         options = getattr(entry, "options", {}) or {}
         return cls(
             hass,
-            base_url=options.get(APP_SHADOW_URL, DEFAULT_APP_URL),
+            base_url=_resolve_app_url(hass, options.get(APP_SHADOW_URL, DEFAULT_APP_URL)),
             token=options.get(APP_SHADOW_TOKEN, ""),
             enabled=options.get(APP_SHADOW_ENABLED, False) is True,
         )

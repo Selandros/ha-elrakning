@@ -2,6 +2,20 @@
 
 Updated: 2026-10-10
 
+## 0.0.1112 Phase 2 App hostname discovery
+
+- FIXED: the Core shadow client no longer assumes the unqualified
+  `elrakning-app` hostname. Blank/default configuration and that legacy alias
+  are resolved from Home Assistant's cached Supervisor App list using the
+  generated `{repository-id}_{slug}` hostname, with underscores replaced by
+  hyphens.
+- SAFETY: discovery is in-memory and bounded; no Supervisor network request,
+  token, IP address or repository id is hardcoded. Ambiguous or unavailable
+  discovery fails closed. Explicit fully qualified URLs remain supported.
+- PRESERVED: the App remains version 0.0.1092, shadow-only, read-only and
+  separate from the Core source of truth; no physical control or writes were
+  added.
+
 ## 0.0.1111 Phase 2 read-only App shadow transport
 
 - IMPLEMENTED: Stage 15 now performs a bounded authenticated App health gate

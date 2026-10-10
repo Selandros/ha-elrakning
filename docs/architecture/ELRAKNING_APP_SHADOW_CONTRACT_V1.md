@@ -49,6 +49,13 @@ failures return an unavailable result without raising into HA setup or the
 event loop. There is no polling task. The App token is separate from any HA
 token and is not persisted in the repository.
 
+The App URL may be left blank or use the legacy `elrakning-app` alias. On a
+Home Assistant Supervisor installation the Core adapter resolves that alias
+from the cached installed-App list and uses the Supervisor-generated
+`{repository-id}_{slug}` hostname with underscores replaced by hyphens. It
+does not hardcode an IP address or repository id. An explicit fully qualified
+URL remains supported for non-Supervisor deployments.
+
 The App uses no worker pool in Phase 1. Request headers/body and per-site
 snapshot retention are bounded. The process has no physical-write endpoint.
 
