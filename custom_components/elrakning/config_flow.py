@@ -5,7 +5,31 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 
 from .app_client import DEFAULT_APP_URL
-from .const import APP_SHADOW_ENABLED, APP_SHADOW_TOKEN, APP_SHADOW_URL, DOMAIN
+from .const import (
+    APP_SHADOW_ENABLED,
+    APP_SHADOW_TOKEN,
+    APP_SHADOW_URL,
+    CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION,
+    CLEAN_INSTALL_CONFIRM_OPTION,
+    CLEAN_INSTALL_PENDING_OPTION,
+    DOMAIN,
+)
+
+
+def build_options(existing: dict, *, archive_reference: str, confirm: bool) -> dict:
+    """Build bounded options without touching persistent site stores."""
+    options = dict(existing or {})
+    reference = archive_reference.strip() if isinstance(archive_reference, str) else ""
+    if confirm:
+        if not reference or len(reference) > 256:
+            raise ValueError("archive_reference_invalid")
+        options[CLEAN_INSTALL_PENDING_OPTION] = {
+            "archive_reference": reference,
+            "confirm": True,
+        }
+    else:
+        options.pop(CLEAN_INSTALL_PENDING_OPTION, None)
+    return options
 
 
 class ElrakningConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -37,9 +61,20 @@ class ElrakningOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict | None = None):
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = build_options(
+                self.config_entry.options,
+                archive_reference=user_input.get(CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION, ""),
+                confirm=user_input.get(CLEAN_INSTALL_CONFIRM_OPTION, False),
+            )
+            for key in (APP_SHADOW_ENABLED, APP_SHADOW_URL, APP_SHADOW_TOKEN):
+                if key in user_input:
+                    options[key] = user_input[key]
+            return self.async_create_entry(title="", data=options)
 
         options = self.config_entry.options
+        pending = options.get(CLEAN_INSTALL_PENDING_OPTION, {})
+        if not isinstance(pending, dict):
+            pending = {}
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
@@ -55,5 +90,13 @@ class ElrakningOptionsFlow(config_entries.OptionsFlow):
                     APP_SHADOW_TOKEN,
                     default=options.get(APP_SHADOW_TOKEN, ""),
                 ): vol.All(str, vol.Length(max=512)),
+                vol.Optional(
+                    CLEAN_INSTALL_ARCHIVE_REFERENCE_OPTION,
+                    default=pending.get("archive_reference", ""),
+                ): vol.All(str, vol.Length(max=256)),
+                vol.Optional(
+                    CLEAN_INSTALL_CONFIRM_OPTION,
+                    default=pending.get("confirm", False) is True,
+                ): bool,
             }),
         )

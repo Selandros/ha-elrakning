@@ -58,6 +58,16 @@ def test_price_update_is_scheduled_once_on_home_assistant_loop():
     assert hass.bus.events == ["elrakning_price_update"]
 
 
+def test_pending_clean_reset_precedes_frontend_and_heavy_setup():
+    source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
+    source = source_path.read_text(encoding="utf-8")
+    setup_start = source.index("async def async_setup_entry")
+    preflight = source.index("await _async_apply_pending_clean_install(hass, entry)", setup_start)
+    frontend = source.index("await _await_setup_step(\"setup_entry.frontend_register\"", setup_start)
+    heavy = source.index("await _await_setup_step(\"setup.manager_load\"", setup_start)
+    assert preflight < frontend < heavy
+
+
 def test_load_forecast_cadence_uses_thread_safe_create_task_from_worker_thread():
     source_path = Path(__file__).parents[1] / "custom_components" / "elrakning" / "__init__.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))

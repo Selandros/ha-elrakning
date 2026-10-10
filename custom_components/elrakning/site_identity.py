@@ -8,6 +8,7 @@ import math
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -495,7 +496,8 @@ class SiteIdentityManager:
         return self.public_state()
 
     async def async_prepare_clean_install(
-        self, *, archive_reference: str, confirm: bool
+        self, *, archive_reference: str, confirm: bool,
+        archive_manifest_sha256: str | None = None,
     ) -> dict[str, Any]:
         """Archive the active identity logically and leave an empty fail-closed state."""
         if confirm is not True:
@@ -527,6 +529,7 @@ class SiteIdentityManager:
                 "schema": CLEAN_INSTALL_SCHEMA,
                 "state": "empty",
                 "archive_reference": archive_reference.strip(),
+                "archive_manifest_sha256": archive_manifest_sha256,
                 "legacy_state_fingerprint": legacy_fingerprint,
                 "reset_at": reset_at,
                 "source_of_truth": "archived_legacy_state",
@@ -1484,3 +1487,48 @@ class SiteIdentityManager:
             or any(power.get(field) for field in POWER_FIELDS)
             or any(meter.get(field) for field in METER_FIELDS)
         )
+
+
+def clean_install_archive_metadata(hass, archive_reference: str) -> dict[str, str]:
+    """Validate one bounded, operator-created archive bundle before setup."""
+    if not isinstance(archive_reference, str) or not archive_reference.strip() or len(archive_reference) > 256:
+        raise ValueError("archive_reference_invalid")
+    config_path = hass.config.path() if hasattr(hass.config, "path") else "/config"
+    config_root = Path(config_path).resolve()
+    candidate = Path(archive_reference.strip()).resolve()
+    if candidate != config_root and config_root not in candidate.parents:
+        raise ValueError("archive_reference_outside_config")
+    manifest = candidate / "SHA256SUMS"
+    readme = candidate / "README.md"
+    if not candidate.is_dir() or not manifest.is_file() or not readme.is_file():
+        raise ValueError("archive_bundle_incomplete")
+    manifest_bytes = manifest.read_bytes()
+    if not manifest_bytes or len(manifest_bytes) > 1024 * 1024:
+        raise ValueError("archive_manifest_invalid")
+    return {
+        "archive_reference": str(candidate),
+        "archive_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+    }
+
+
+class _CleanInstallNoopManager:
+    """Keep preflight reset free of power/meter manager side effects."""
+
+    async def async_restore_mapping(self, _mapping):
+        return None
+
+
+async def async_prepare_pending_clean_install(hass, pending: dict[str, Any]) -> dict[str, Any]:
+    """Apply a validated pending reset before any normal setup manager loads."""
+    if not isinstance(pending, dict) or pending.get("confirm") is not True:
+        raise ValueError("clean_install_confirmation_required")
+    metadata = clean_install_archive_metadata(hass, pending.get("archive_reference"))
+    manager = SiteIdentityManager(
+        hass, _CleanInstallNoopManager(), _CleanInstallNoopManager()
+    )
+    await manager.async_load()
+    return await manager.async_prepare_clean_install(
+        archive_reference=metadata["archive_reference"],
+        confirm=True,
+        archive_manifest_sha256=metadata["archive_manifest_sha256"],
+    )

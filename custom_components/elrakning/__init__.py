@@ -23,7 +23,16 @@ import voluptuous as vol
 from .cadence_audit import CadenceAuditManager, async_register_cadence_audit_websocket
 from .app_client import AppShadowClient
 from .canonical_collector import CanonicalCollector
-from .const import CLEAN_INSTALL_RESET_SERVICE, DOMAIN, EON_GRID_UPDATE_EVENT, ELECTRICITY_PROVIDER_UPDATE_EVENT, INTEGRATION_READY_EVENT, SOLAR_WEATHER_UPDATE_EVENT
+from .const import (
+    CLEAN_INSTALL_PENDING_OPTION,
+    CLEAN_INSTALL_RECEIPT_OPTION,
+    CLEAN_INSTALL_RESET_SERVICE,
+    DOMAIN,
+    EON_GRID_UPDATE_EVENT,
+    ELECTRICITY_PROVIDER_UPDATE_EVENT,
+    INTEGRATION_READY_EVENT,
+    SOLAR_WEATHER_UPDATE_EVENT,
+)
 from .coordinator import ElrakningCoordinator
 from .elhandel.manager import ElhandelManager
 from .elnat.manager import GridManager
@@ -50,7 +59,7 @@ from .replay_runtime import async_generate_artifact
 from .runtime_diagnostics import async_event_loop_lag_heartbeat, runtime_checkpoint
 from .site_economic_frames import schedule_eon_grid_economic_capture
 from .grid_tariff_timeline import resolve_grid_tariff
-from .site_identity import SiteIdentityManager
+from .site_identity import SiteIdentityManager, async_prepare_pending_clean_install
 from .energy_history import _power_to_kw
 from .websocket import async_register_websocket_commands, clear_forecast_view_caches
 from .elhandel.providers.greenely_invoice_economics import GreenelyInvoiceEconomicsProducer, async_register_proof_service
@@ -854,9 +863,9 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 
 
 async def _async_register_clean_install_service(
-    hass: HomeAssistant, site_identity_manager: SiteIdentityManager
+    hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
-    """Register the explicit admin-only clean-install reset path."""
+    """Register an admin-only next-start reset marker without mutating stores."""
     if hass.services.has_service(DOMAIN, CLEAN_INSTALL_RESET_SERVICE):
         return
 
@@ -867,19 +876,44 @@ async def _async_register_clean_install_service(
         user = await hass.auth.async_get_user(user_id)
         if user is None or user.is_admin is not True:
             raise PermissionError("admin_user_required")
-        result = await site_identity_manager.async_prepare_clean_install(
-            archive_reference=call.data["archive_reference"],
-            confirm=call.data["confirm"],
-        )
-        hass.data.setdefault(DOMAIN, {})["clean_install_reset_result"] = result
+        options = dict(getattr(entry, "options", {}) or {})
+        if call.data["confirm"] is True:
+            options[CLEAN_INSTALL_PENDING_OPTION] = {
+                "archive_reference": call.data["archive_reference"].strip(),
+                "confirm": True,
+            }
+        else:
+            options.pop(CLEAN_INSTALL_PENDING_OPTION, None)
+        hass.config_entries.async_update_entry(entry, options=options)
 
     hass.services.async_register(
         DOMAIN, CLEAN_INSTALL_RESET_SERVICE, _handle, schema=CLEAN_INSTALL_RESET_SCHEMA
     )
 
 
+async def _async_apply_pending_clean_install(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Consume a validated reset marker before any normal integration setup."""
+    options = dict(getattr(entry, "options", {}) or {})
+    pending = options.get(CLEAN_INSTALL_PENDING_OPTION)
+    if pending is None:
+        return
+    result = await async_prepare_pending_clean_install(hass, pending)
+    marker = result.get("clean_install", {})
+    receipt = {
+        "schema": "elrakning.clean_install.receipt.v1",
+        "archive_reference": marker.get("archive_reference"),
+        "archive_manifest_sha256": marker.get("archive_manifest_sha256"),
+        "legacy_state_fingerprint": marker.get("legacy_state_fingerprint"),
+        "reset_at": marker.get("reset_at"),
+    }
+    options.pop(CLEAN_INSTALL_PENDING_OPTION, None)
+    options[CLEAN_INSTALL_RECEIPT_OPTION] = receipt
+    hass.config_entries.async_update_entry(entry, options=options)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elräkning with the control plane available during startup."""
+    await _async_apply_pending_clean_install(hass, entry)
     frontend_data = hass.data.setdefault(DOMAIN, {})
     frontend_data["runtime_status"] = "initializing"
     setup_started_at = runtime_checkpoint(
@@ -927,7 +961,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     meter_manager.set_mapping_changed_callback(site_identity_manager.async_sync_from_current)
     hass.data.setdefault(DOMAIN, {})["site_identity_manager"] = site_identity_manager
-    await _async_register_clean_install_service(hass, site_identity_manager)
+    await _async_register_clean_install_service(hass, entry)
     ella_load_registry = EllaLoadRegistry(hass, lambda: dt_util.now().isoformat())
     await _await_setup_step("setup.ella_load_registry_load", ella_load_registry.async_load())
     hass.data.setdefault(DOMAIN, {})["ella_load_registry"] = ella_load_registry

@@ -2,21 +2,26 @@
 
 Updated: 2026-10-10
 
-## 0.0.1095 clean-install reset checkpoint
+## 0.0.1096 clean-install preflight checkpoint
 
-- IMPLEMENTED: an explicit admin-only `elrakning.clean_install_reset` service
-  creates an idempotent, fail-closed empty site state after an operator has
-  supplied a verified archive reference and explicit confirmation. It clears
-  active site identity, source ledger, global bindings and current power/meter
-  mappings without editing `.storage` by hand.
+- IMPLEMENTED: OptionsFlow stores a bounded pending clean-install marker in
+  config-entry options while the entry may remain disabled. The marker is
+  consumed as the first stateful setup step, before frontend registration,
+  managers, providers, canonical storage, replay or forecast setup.
+- IMPLEMENTED: the admin-only `elrakning.clean_install_reset` service now sets
+  the same next-start marker instead of mutating site stores immediately.
+- VALIDATION: setup requires an in-config archive bundle with `README.md` and
+  bounded `SHA256SUMS` metadata, then records its manifest digest and a
+  completed reset receipt in config-entry options.
 - PRESERVED: legacy Ella/site/replay/canonical stores remain untouched and are
   archive/quarantine data only. A new first site must be created and activated
   explicitly; no legacy entity, provider, FusionSolar identity or source
   generation is inferred or remapped.
-- SAFETY: empty-state startup skips E.ON cached-import recovery and tariff
-  persistence without an active site. The reset is single-reference,
-  idempotent and rejects a conflicting archive reference. No physical writes,
-  shadow cutover or App behavior is changed.
+- SAFETY: invalid markers fail closed before normal setup. Empty-state startup
+  skips E.ON cached-import recovery and tariff persistence without an active
+  site. The reset is single-reference, idempotent and rejects a conflicting
+  archive reference. No physical writes, shadow cutover or App behavior is
+  changed.
 - RUNTIME PREPARATION: full HA backup `25c57b4f` and a separate legacy bundle
   were created on 2026-10-10 while Elräkning was disabled. SQLite integrity
   inspection remains pending because the HA SSH namespace has no `sqlite3`.
